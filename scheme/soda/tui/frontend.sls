@@ -144,7 +144,7 @@
                   value active view #f
                   (or (input-stack-pending-sequence
                         (input-context-stack context)) '())
-                  (input-stack-pending-argument (input-context-stack context))
+                  (input-stack-prefix-argument (input-context-stack context))
                   active)
                 context)))))))
 
@@ -164,6 +164,21 @@
         (append (or (input-stack-pending-sequence (input-context-stack context)) '())
                 (list (key-event->key-stroke event)))
         '()))
+
+  (define (frontend-install-command-transient! value active view)
+    (let* ([runtime (host-state-command-runtime (frontend-host-state value))]
+           [state
+            (command-runtime-take-transient-state!
+              runtime (active-context-surface-id active))])
+      (when state
+        (let ([view-state (view-state view)])
+          (host-frontend-dispatch-view!
+            (frontend-host-state value)
+            (make-view-transaction-spec
+              (view-id view) (view-state-generation view-state)
+              #f #f
+              (input-stack-push (view-state-input-state view-state) state)
+              '() '() #f))))))
 
   ;; A layout is command input only while it still describes the same document,
   ;; viewport, and View configuration.  Selection and InputState may change
@@ -276,6 +291,8 @@
       (and current
            (let* ([active (car current)]
                   [view (cdr current)]
+                  [_transient
+                   (frontend-install-command-transient! value active view)]
                   [context ((frontend-resolve-input-context value) active view)]
                   [_context-valid (validate-input-context! context active view)]
                   [sequence (event-key-sequence context event)]
@@ -293,7 +310,7 @@
                (let ([command-context
                     (make-active-command-context
                       value active view event sequence
-                      (input-stack-pending-argument (input-context-stack context))
+                      (input-stack-prefix-argument (input-context-stack context))
                       (if route (caddr route) active))])
                (case (input-disposition-kind disposition)
                  [(command)

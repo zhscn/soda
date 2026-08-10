@@ -79,6 +79,10 @@
              (make-command-runtime owner commands dispatch runtime conditions)]
            [analyses
             (make-analysis-service buffers runtime conditions dispatch)])
+      (surface-service-set-remove-handler!
+        surfaces
+        (lambda (surface)
+          (command-runtime-forget-surface! command-runtime (surface-id surface))))
       (view-service-set-plugin-error-handler!
         views
         (lambda (view phase condition)

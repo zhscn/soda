@@ -1,9 +1,12 @@
 (library (soda host command-runtime-execution)
-  (export make-command-runtime command-runtime? define-command
+  (export make-command-runtime command-runtime?
           command-runtime-start! command-runtime-start-interactive!
           command-runtime-resume! command-runtime-cancel!
           command-runtime-invocation command-runtime-loop-state
           command-runtime-execution-history command-runtime-repeat-last!
+          command-runtime-take-transient-state!
+          command-runtime-forget-surface!
+          command-runtime-set-repeat-state!
           command-runtime-set-interaction-handler!
           command-runtime-register-effect-handler! command-runtime-add-hook!
           command-runtime-add-advice! make-command-invoke-message

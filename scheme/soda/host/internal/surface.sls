@@ -29,6 +29,7 @@
           surface-service-ref
           surface-service-surfaces
           surface-service-view-placed?
+          surface-service-set-remove-handler!
           surface-service-remove!
           surface-service-prune-view!
           make-surface-input-message
@@ -352,10 +353,19 @@
   ;; package or command.
   (define-record-type
     (surface-service %make-surface-service surface-service?)
-    (fields table))
+    (fields table
+            (mutable remove-handler surface-service-remove-handler
+                     surface-service-remove-handler-set!)))
 
   (define (make-surface-service)
-    (%make-surface-service (make-eqv-hashtable)))
+    (%make-surface-service (make-eqv-hashtable) (lambda (surface) #f)))
+
+  (define (surface-service-set-remove-handler! service handler)
+    (unless (and (surface-service? service) (procedure? handler))
+      (assertion-violation 'surface-service-set-remove-handler!
+                           "expected a SurfaceService and procedure"))
+    (surface-service-remove-handler-set! service handler)
+    #t)
 
   (define (surface-service-register! service surface)
     (unless (and (surface-service? service) (surface? surface))
@@ -404,6 +414,7 @@
       (and surface
            (begin
              (hashtable-delete! (surface-service-table service) id)
+             ((surface-service-remove-handler service) surface)
              surface))))
 
   (define (surface-service-prune-view! service view-id)

@@ -9,6 +9,9 @@
           command-runtime-cancel! command-runtime-invocation
           command-runtime-loop-state command-runtime-execution-history
           command-runtime-repeat-last!
+          command-runtime-take-transient-state!
+          command-runtime-forget-surface!
+          command-runtime-set-repeat-state!
           command-runtime-set-interaction-handler!
           command-runtime-register-effect-handler! command-runtime-add-hook!
           command-runtime-add-advice! make-command-invoke-message
@@ -21,4 +24,5 @@
           command-cancel-message? command-cancel-message-invocation-id
           command-runtime-enqueue! command-runtime-handle-message!)
   (import (soda host command-runtime-registry)
-          (soda host command-runtime-execution)))
+          (soda host command-runtime-execution)
+          (soda host command-declaration)))

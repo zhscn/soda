@@ -25,6 +25,17 @@
           input-stack-pending-sequence
           input-stack-pending-argument
           input-stack-feedback
+          make-prefix-argument-state
+          prefix-argument-state?
+          prefix-argument-state-universal-count
+          prefix-argument-state-sign
+          prefix-argument-state-digits
+          prefix-argument-state-append-universal
+          prefix-argument-state-append-digit
+          prefix-argument-state-toggle-negative
+          prefix-argument-state-value
+          prefix-argument->state
+          input-stack-prefix-argument
           input-stack-with-pending-sequence
           input-stack-with-pending-argument
           input-stack-with-feedback
@@ -54,6 +65,7 @@
           input-consume
           input-dispatch)
   (import (rnrs)
+          (soda host command)
           (soda host input-event)
           (soda host value))
 
@@ -241,6 +253,92 @@
       (immutable pending-argument input-stack-pending-argument)
       (immutable feedback input-stack-feedback)))
 
+  ;; PrefixArgumentState is unfinished input syntax owned by a View.  Commands
+  ;; receive only the resolved PrefixArgument value, so command behavior does
+  ;; not depend on how a frontend collected universal or numeric input.
+  (define-record-type
+    (prefix-argument-state %make-prefix-argument-state prefix-argument-state?)
+    (fields
+      (immutable universal-count prefix-argument-state-universal-count)
+      (immutable sign prefix-argument-state-sign)
+      (immutable digits prefix-argument-state-digits)))
+
+  (define (make-prefix-argument-state)
+    (%make-prefix-argument-state 0 1 '()))
+
+  (define (require-prefix-state who value)
+    (unless (prefix-argument-state? value)
+      (assertion-violation who "expected PrefixArgumentState" value)))
+
+  (define (prefix-argument-state-append-universal value)
+    (require-prefix-state 'prefix-argument-state-append-universal value)
+    (%make-prefix-argument-state
+      (+ 1 (prefix-argument-state-universal-count value))
+      (prefix-argument-state-sign value)
+      (prefix-argument-state-digits value)))
+
+  (define (prefix-argument-state-append-digit value digit)
+    (require-prefix-state 'prefix-argument-state-append-digit value)
+    (unless (and (integer? digit) (exact? digit) (<= 0 digit 9))
+      (assertion-violation 'prefix-argument-state-append-digit
+                           "digit must be an exact integer from zero through nine" digit))
+    (%make-prefix-argument-state
+      (prefix-argument-state-universal-count value)
+      (prefix-argument-state-sign value)
+      (append (prefix-argument-state-digits value) (list digit))))
+
+  (define (prefix-argument-state-toggle-negative value)
+    (require-prefix-state 'prefix-argument-state-toggle-negative value)
+    (%make-prefix-argument-state
+      (prefix-argument-state-universal-count value)
+      (- (prefix-argument-state-sign value))
+      (prefix-argument-state-digits value)))
+
+  (define (digits-value digits)
+    (fold-left (lambda (value digit) (+ (* value 10) digit)) 0 digits))
+
+  (define (prefix-argument-state-value value)
+    (require-prefix-state 'prefix-argument-state-value value)
+    (let* ([digits (prefix-argument-state-digits value)]
+           [universal-count (prefix-argument-state-universal-count value)]
+           [numeric
+            (* (prefix-argument-state-sign value)
+               (if (null? digits)
+                   (expt 4 universal-count)
+                   (digits-value digits)))]
+           [raw
+            (list 'prefix
+                  universal-count
+                  (prefix-argument-state-sign value)
+                  (list-copy digits))])
+      (make-prefix-argument raw numeric)))
+
+  (define (prefix-argument->state value)
+    (unless (prefix-argument? value)
+      (assertion-violation 'prefix-argument->state "expected PrefixArgument" value))
+    (let ([raw (prefix-argument-raw-value value)])
+      (if (and (list? raw) (= (length raw) 4) (eq? (car raw) 'prefix)
+               (integer? (cadr raw)) (>= (cadr raw) 0)
+               (memv (caddr raw) '(-1 1))
+               (list? (cadddr raw))
+               (for-all (lambda (digit)
+                          (and (integer? digit) (<= 0 digit 9)))
+                        (cadddr raw)))
+          (%make-prefix-argument-state
+            (cadr raw) (caddr raw) (list-copy (cadddr raw)))
+          (make-prefix-argument-state))))
+
+  (define (input-stack-prefix-argument stack)
+    (unless (input-stack? stack)
+      (assertion-violation 'input-stack-prefix-argument "expected InputStack" stack))
+    (let ([pending (input-stack-pending-argument stack)])
+      (cond [(prefix-argument-state? pending) (prefix-argument-state-value pending)]
+            [(prefix-argument? pending) pending]
+            [(not pending) (make-prefix-argument)]
+            [else
+             (assertion-violation 'input-stack-prefix-argument
+                                  "invalid pending prefix argument" pending)])))
+
   (define (make-input-stack durable)
     (unless (input-state? durable)
       (assertion-violation 'make-input-stack "durable state is required" durable))
@@ -410,8 +508,7 @@
   (define (input-reset context)
     (unless (input-context? context)
       (assertion-violation 'input-reset "expected an input context" context))
-    (let ([stack (input-context-stack context)])
-      (%make-input-stack (input-stack-sessions stack) #f #f #f)))
+    (input-stack-reset (input-context-stack context)))
 
   (define (input-cancel context)
     (unless (input-context? context)

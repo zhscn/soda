@@ -54,6 +54,7 @@
           (soda packages comment)
           (soda packages keyboard-macro)
           (soda packages repeat)
+          (soda packages prefix-argument)
           (soda packages interaction)
           (soda packages buffer-item)
           (soda packages buffer-mode)
@@ -149,6 +150,9 @@
                                (host-state-dispatch state) owner)]
                [_repeat
                 (make-repeat-command! (host-state-command-runtime state) owner)]
+               [_prefix-arguments
+                (make-prefix-argument-commands!
+                  (host-state-command-runtime state) owner)]
                [files
                 (make-file-service! host owner history)]
                [scheme-mode
@@ -216,6 +220,21 @@
                     (list (make-key-stroke 'character (char->integer #\x) 4)
                           (make-key-stroke 'character (char->integer #\z) 0))
                     'command.repeat)
+      (keymap-bind! keymap
+                    (list (make-key-stroke 'character (char->integer #\x) 4)
+                          (make-key-stroke 'character (char->integer #\u) 0))
+                    'argument.universal)
+      (for-each
+        (lambda (character)
+          (keymap-bind!
+            keymap
+            (list (make-key-stroke 'character (char->integer character) 2))
+            'argument.digit))
+        '(#\0 #\1 #\2 #\3 #\4 #\5 #\6 #\7 #\8 #\9))
+      (keymap-bind!
+        keymap
+        (list (make-key-stroke 'character (char->integer #\-) 2))
+        'argument.negative)
       (keymap-bind! keymap
                     (list (make-key-stroke 'character (char->integer #\x) 2))
                     'command.execute-extended)

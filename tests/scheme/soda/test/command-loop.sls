@@ -22,11 +22,25 @@
   (define (test-prefix-argument)
     (let ([absent (make-prefix-argument)]
           [universal (make-prefix-argument 'universal)]
-          [negative (make-prefix-argument -3)])
+          [negative (make-prefix-argument -3)]
+          [state
+           (prefix-argument-state-append-digit
+             (prefix-argument-state-toggle-negative
+               (prefix-argument-state-append-universal
+                 (prefix-argument-state-append-universal
+                   (make-prefix-argument-state))))
+             3)])
       (check (and (not (prefix-argument-present? absent))
                   (= (prefix-argument-numeric-value absent) 1)
                   (= (prefix-argument-numeric-value universal) 4)
-                  (= (prefix-argument-numeric-value negative) -3))
+                  (= (prefix-argument-numeric-value negative) -3)
+                  (= (prefix-argument-state-universal-count state) 2)
+                  (= (prefix-argument-state-sign state) -1)
+                  (= (prefix-argument-numeric-value
+                       (prefix-argument-state-value state)) -3)
+                  (= (prefix-argument-state-universal-count
+                       (prefix-argument->state
+                         (prefix-argument-state-value state))) 2))
              "PrefixArgument did not preserve raw and numeric semantics")))
 
   (define (test-command-policy-override)
@@ -72,6 +86,36 @@
                        'command.requested))
              "input remapping discarded requested command identity")))
 
+  (define (test-transient-input-exits-after-command)
+    (let* ([durable-map (make-keymap 'durable)]
+           [transient-map (make-keymap 'transient)]
+           [_binding
+            (keymap-bind! transient-map
+                          (list (make-key-stroke
+                                  'character (char->integer #\z) 0))
+                          'command.repeat)]
+           [durable (make-input-state 'durable (list durable-map) 'accept)]
+           [transient (make-input-state 'transient (list transient-map) 'ignore)]
+           [stack (input-stack-push (make-input-stack durable) transient)]
+           [context
+            (make-input-context
+              #f #f
+              (list (make-input-layer 'transient transient-map #f 'ignore))
+              stack)]
+           [result
+            (input-dispatch
+              context
+              (make-key-event 'character (char->integer #\z) #f #f 0
+                              'press (make-bytevector 0)))]
+           [next (input-disposition-input-state result)])
+      (check (and (eq? (input-disposition-kind result) 'command)
+                  (= (length (input-stack-sessions next)) 1)
+                  (eq? (input-session-state (car (input-stack-sessions next)))
+                       durable)
+                  (not (input-session-transient?
+                         (car (input-stack-sessions next)))))
+             "command dispatch retained a one-shot transient InputState")))
+
   (define (test-runtime-state-record-and-repeat)
     (let* ([host (make-host-state)]
            [runtime (host-state-command-runtime host)]
@@ -80,6 +124,8 @@
            [context
             (make-command-context
               #f 9 #f #f #f #f #f #f '() prefix #f 'test #f)]
+           [repeat-map (make-keymap 'test-repeat-map)]
+           [repeat-state (make-input-state 'test-repeat (list repeat-map) 'ignore)]
            [calls '()]
            [records '()])
       (dynamic-wind
@@ -99,6 +145,7 @@
           (command-runtime-add-hook!
             runtime 'execution-record owner 'capture-record
             (lambda (record) (set! records (cons record records))))
+          (command-runtime-set-repeat-state! runtime owner repeat-state)
           (command-runtime-enqueue!
             runtime
             (make-command-invoke-message
@@ -129,10 +176,20 @@
                         (eq? (command-loop-transition-undo-policy transition)
                              'amalgamate))
                    "runtime did not resolve command policy into the execution record"))
+          (check (and (eq? (command-runtime-take-transient-state! runtime 9)
+                           repeat-state)
+                      (not (command-runtime-take-transient-state! runtime 9)))
+                 "repeat transient state was not consumed exactly once")
           (command-runtime-repeat-last! runtime context)
           (host-state-run! host)
-          (check (equal? calls '((argument repeat) (argument test)))
-                 "repeat did not replay the execution record" calls))
+          (check (and (equal? calls '((argument repeat) (argument test)))
+                      (eq? (command-runtime-take-transient-state! runtime 9)
+                           repeat-state))
+                 "repeat did not replay and reinstall its transient map" calls)
+          (command-runtime-forget-surface! runtime 9)
+          (check (not (command-loop-state-last
+                        (command-runtime-loop-state runtime context)))
+                 "retired Surface retained command-loop state"))
         (lambda ()
           (owner-close! owner)
           (host-state-close! host)))))
@@ -176,6 +233,7 @@
     (test-prefix-argument)
     (test-command-policy-override)
     (test-remapped-identity)
+    (test-transient-input-exits-after-command)
     (test-runtime-state-record-and-repeat)
     (test-undo-amalgamation))
 )

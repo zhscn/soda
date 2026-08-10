@@ -3,6 +3,8 @@
   (import (rnrs)
           (soda host command)
           (soda host command-runtime)
+          (soda host input)
+          (soda host input-event)
           (soda host value))
 
   ;; Repeat replays the last record explicitly marked repeatable.  The runtime
@@ -12,6 +14,13 @@
     (unless (and (command-runtime? runtime) (owner? owner))
       (assertion-violation 'make-repeat-command!
                            "expected a command runtime and owner"))
+    (let* ([keymap (make-keymap 'command-repeat)]
+           [state (make-input-state 'command-repeat (list keymap) 'ignore)])
+      (keymap-bind!
+        keymap
+        (list (make-key-stroke 'character (char->integer #\z) 0))
+        'command.repeat)
+      (command-runtime-set-repeat-state! runtime owner state))
     (define-command
       runtime owner 'command.repeat (context)
       (documentation "Repeat the last repeatable command.")

@@ -1,7 +1,6 @@
 (library (soda host command-runtime internal)
   (export make-command-runtime
           command-runtime?
-          define-command
           command-runtime-register-command!
           command-runtime-command-definition
           command-runtime-command-names
@@ -18,6 +17,9 @@
           command-runtime-loop-state
           command-runtime-execution-history
           command-runtime-repeat-last!
+          command-runtime-take-transient-state!
+          command-runtime-forget-surface!
+          command-runtime-set-repeat-state!
           command-runtime-set-interaction-handler!
           command-runtime-register-effect-handler!
           command-runtime-add-hook!
@@ -44,6 +46,7 @@
           (soda kernel state)
           (soda kernel view-state)
           (soda host command)
+          (soda host input)
           (soda host condition)
           (soda host dispatch-transaction)
           (soda host dispatch-core)
@@ -68,6 +71,11 @@
       (immutable hooks command-runtime-hooks)
       (immutable effects command-runtime-effects)
       (immutable loop-states command-runtime-loop-states)
+      (immutable pending-transients command-runtime-pending-transients)
+      (mutable repeat-state command-runtime-repeat-state
+               command-runtime-repeat-state-set!)
+      (mutable repeat-registration command-runtime-repeat-registration
+               command-runtime-repeat-registration-set!)
       (mutable execution-history command-runtime-execution-history-table
                command-runtime-execution-history-table-set!)
       (mutable interaction-handler command-runtime-interaction-handler
@@ -84,7 +92,8 @@
     (%make-command-runtime
       owner registry dispatcher queue conditions
       (make-eqv-hashtable) (make-eq-hashtable) (make-eq-hashtable)
-      (make-eq-hashtable) (make-hashtable equal-hash equal?) '()
+      (make-eq-hashtable) (make-hashtable equal-hash equal?)
+      (make-hashtable equal-hash equal?) #f #f '()
       #f #f 0))
 
   ;; Command definitions are registered through their runtime, so a package
@@ -95,156 +104,6 @@
                            "expected a command runtime and definition"
                            service definition))
     (command-register! (command-runtime-registry service) definition))
-
-  ;; Named clauses are parsed independently of their order.  Adding another
-  ;; declaration property requires one parser rule instead of duplicating all
-  ;; combinations in define-command.
-  (define-syntax define-command-options
-    (syntax-rules (documentation class scope interactive semantic repeatable
-                                 undo preserve-prefix transient-state)
-      [(_ fixed (doc cls command-scope interaction semantic-name repeat?
-                      undo-policy preserve? transient)
-          (documentation value) rest ...)
-       (define-command-options fixed
-         (value cls command-scope interaction semantic-name repeat?
-                undo-policy preserve? transient) rest ...)]
-      [(_ fixed (doc cls command-scope interaction semantic-name repeat?
-                      undo-policy preserve? transient)
-          (class value) rest ...)
-       (define-command-options fixed
-         (doc value command-scope interaction semantic-name repeat?
-              undo-policy preserve? transient) rest ...)]
-      [(_ fixed (doc cls command-scope interaction semantic-name repeat?
-                      undo-policy preserve? transient)
-          (scope value) rest ...)
-       (define-command-options fixed
-         (doc cls value interaction semantic-name repeat?
-              undo-policy preserve? transient) rest ...)]
-      [(_ fixed (doc cls command-scope interaction semantic-name repeat?
-                      undo-policy preserve? transient)
-          (interactive value) rest ...)
-       (define-command-options fixed
-         (doc cls command-scope value semantic-name repeat?
-              undo-policy preserve? transient) rest ...)]
-      [(_ fixed (doc cls command-scope interaction semantic-name repeat?
-                      undo-policy preserve? transient)
-          (semantic value) rest ...)
-       (define-command-options fixed
-         (doc cls command-scope interaction value repeat?
-              undo-policy preserve? transient) rest ...)]
-      [(_ fixed (doc cls command-scope interaction semantic-name repeat?
-                      undo-policy preserve? transient)
-          (repeatable value) rest ...)
-       (define-command-options fixed
-         (doc cls command-scope interaction semantic-name value
-              undo-policy preserve? transient) rest ...)]
-      [(_ fixed (doc cls command-scope interaction semantic-name repeat?
-                      undo-policy preserve? transient)
-          (undo value) rest ...)
-       (define-command-options fixed
-         (doc cls command-scope interaction semantic-name repeat?
-              value preserve? transient) rest ...)]
-      [(_ fixed (doc cls command-scope interaction semantic-name repeat?
-                      undo-policy preserve? transient)
-          (preserve-prefix value) rest ...)
-       (define-command-options fixed
-         (doc cls command-scope interaction semantic-name repeat?
-              undo-policy value transient) rest ...)]
-      [(_ fixed (doc cls command-scope interaction semantic-name repeat?
-                      undo-policy preserve? transient)
-          (transient-state value) rest ...)
-       (define-command-options fixed
-         (doc cls command-scope interaction semantic-name repeat?
-              undo-policy preserve? value) rest ...)]
-      [(_ (runtime owner name (context . arguments))
-          (doc cls command-scope interaction semantic-name repeat?
-               undo-policy preserve? transient)
-          body ...)
-       (command-runtime-register-command!
-         runtime
-         (make-command-definition
-           name (lambda (context . arguments) body ...) owner
-           doc cls interaction command-scope
-           (make-command-policy semantic-name repeat? undo-policy
-                                preserve? transient)))]))
-
-  (define-syntax define-command
-    (syntax-rules (documentation class scope interactive semantic repeatable
-                                 undo preserve-prefix transient-state)
-      ;; Any named clause selects the extensible declaration grammar.
-      [(_ runtime owner name arguments (documentation value) rest ...)
-       (define-command-options
-         (runtime owner name arguments)
-         (#f #f 'global #f #f #f 'boundary #f #f)
-         (documentation value) rest ...)]
-      [(_ runtime owner name arguments (class value) rest ...)
-       (define-command-options
-         (runtime owner name arguments)
-         (#f #f 'global #f #f #f 'boundary #f #f)
-         (class value) rest ...)]
-      [(_ runtime owner name arguments (scope value) rest ...)
-       (define-command-options
-         (runtime owner name arguments)
-         (#f #f 'global #f #f #f 'boundary #f #f)
-         (scope value) rest ...)]
-      [(_ runtime owner name arguments (interactive value) rest ...)
-       (define-command-options
-         (runtime owner name arguments)
-         (#f #f 'global #f #f #f 'boundary #f #f)
-         (interactive value) rest ...)]
-      [(_ runtime owner name arguments (semantic value) rest ...)
-       (define-command-options
-         (runtime owner name arguments)
-         (#f #f 'global #f #f #f 'boundary #f #f)
-         (semantic value) rest ...)]
-      [(_ runtime owner name arguments (repeatable value) rest ...)
-       (define-command-options
-         (runtime owner name arguments)
-         (#f #f 'global #f #f #f 'boundary #f #f)
-         (repeatable value) rest ...)]
-      [(_ runtime owner name arguments (undo value) rest ...)
-       (define-command-options
-         (runtime owner name arguments)
-         (#f #f 'global #f #f #f 'boundary #f #f)
-         (undo value) rest ...)]
-      [(_ runtime owner name arguments (preserve-prefix value) rest ...)
-       (define-command-options
-         (runtime owner name arguments)
-         (#f #f 'global #f #f #f 'boundary #f #f)
-         (preserve-prefix value) rest ...)]
-      [(_ runtime owner name arguments (transient-state value) rest ...)
-       (define-command-options
-         (runtime owner name arguments)
-         (#f #f 'global #f #f #f 'boundary #f #f)
-         (transient-state value) rest ...)]
-      ;; Positional forms remain source compatible for existing packages.
-      [(_ runtime owner name (context . arguments) documentation-value class-value
-          (scope command-scope) (interactive interaction-spec) body ...)
-       (command-runtime-register-command!
-         runtime
-         (make-command-definition
-           name (lambda (context . arguments) body ...) owner
-           documentation-value class-value interaction-spec command-scope))]
-      [(_ runtime owner name (context . arguments) documentation-value class-value
-          (scope command-scope) body ...)
-       (command-runtime-register-command!
-         runtime
-         (make-command-definition
-           name (lambda (context . arguments) body ...) owner
-           documentation-value class-value #f command-scope))]
-      [(_ runtime owner name (context . arguments) documentation-value class-value
-          (interactive interaction-spec) body ...)
-       (command-runtime-register-command!
-         runtime
-         (make-command-definition
-           name (lambda (context . arguments) body ...) owner
-           documentation-value class-value interaction-spec))]
-      [(_ runtime owner name (context . arguments) documentation-value class-value body ...)
-       (command-runtime-register-command!
-         runtime
-         (make-command-definition
-           name (lambda (context . arguments) body ...) owner
-           documentation-value class-value #f))]))
 
   (define command-runtime-command-definition
     (case-lambda
@@ -487,6 +346,46 @@
                            "expected a command runtime" service))
     (list-copy (command-runtime-execution-history-table service)))
 
+  (define (command-runtime-take-transient-state! service surface-id)
+    (unless (and (command-runtime? service)
+                 (or (not surface-id)
+                     (and (integer? surface-id) (exact? surface-id)
+                          (>= surface-id 0))))
+      (assertion-violation 'command-runtime-take-transient-state!
+                           "expected a runtime and Surface id or #f"))
+    (let* ([key (or surface-id '(source #f))]
+           [value (hashtable-ref (command-runtime-pending-transients service) key #f)])
+      (when value
+        (hashtable-delete! (command-runtime-pending-transients service) key))
+      value))
+
+  (define (command-runtime-forget-surface! service surface-id)
+    (unless (and (command-runtime? service)
+                 (integer? surface-id) (exact? surface-id) (>= surface-id 0))
+      (assertion-violation 'command-runtime-forget-surface!
+                           "expected a runtime and Surface id"))
+    (hashtable-delete! (command-runtime-loop-states service) surface-id)
+    (hashtable-delete! (command-runtime-pending-transients service) surface-id)
+    #t)
+
+  (define (command-runtime-set-repeat-state! service owner state)
+    (unless (and (command-runtime? service) (owner? owner) (input-state? state))
+      (assertion-violation 'command-runtime-set-repeat-state!
+                           "expected a runtime, Owner, and InputState"))
+    (owner-assert-active 'command-runtime-set-repeat-state! owner)
+    (let ([current (command-runtime-repeat-registration service)])
+      (when current (registration-close! current)))
+    (let ([registration
+           (make-registration
+             owner
+             (lambda ()
+               (when (eq? (command-runtime-repeat-state service) state)
+                 (command-runtime-repeat-state-set! service #f)
+                 (command-runtime-repeat-registration-set! service #f))))])
+      (command-runtime-repeat-state-set! service state)
+      (command-runtime-repeat-registration-set! service registration)
+      registration))
+
   (define (take-records items count)
     (if (or (zero? count) (null? items))
         '()
@@ -635,6 +534,17 @@
             (if (and completed?
                      (command-loop-transition-preserve-prefix? transition))
                 prefix (make-prefix-argument))])
+      (let ([transient
+             (or (command-loop-transition-transient-state transition)
+                 (and (command-loop-transition-repeatable? transition)
+                      (command-runtime-repeat-state service)))])
+        (when (and completed? transient)
+          (unless (input-state? transient)
+            (assertion-violation 'command-runtime
+                                 "command transient state must be an InputState"
+                                 transient))
+          (hashtable-set!
+            (command-runtime-pending-transients service) key transient)))
       (command-invocation-set-identity! invocation final-identity)
       (hashtable-set!
         (command-runtime-loop-states service) key
