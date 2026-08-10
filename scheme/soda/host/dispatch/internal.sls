@@ -39,6 +39,7 @@
           (soda host internal context)
           (soda host internal operation)
           (soda host internal surface)
+          (soda host dispatch gate)
           (soda host dispatch update)
           (soda host value)
           (soda view plugin))
@@ -55,9 +56,7 @@
       (mutable listeners dispatcher-listeners dispatcher-listeners-set!)
       (mutable host-listeners dispatcher-host-listeners dispatcher-host-listeners-set!)
       (immutable global-handlers dispatcher-global-handlers)
-      (mutable phase dispatcher-phase dispatcher-phase-set!)
-      (mutable deferred dispatcher-deferred dispatcher-deferred-set!)
-      (mutable draining? dispatcher-draining? dispatcher-draining?-set!)))
+      (immutable gate dispatcher-gate)))
 
   (define-record-type
     (dispatcher-observer %make-dispatcher-observer dispatcher-observer?)
@@ -84,46 +83,13 @@
       (assertion-violation 'make-dispatcher "expected a listener or #f" listener))
     (%make-dispatcher
       buffers views surfaces (lambda (source condition) #f) listener #f '() '()
-      (make-eq-hashtable) 'idle '() #f)]))
+      (make-eq-hashtable) (make-dispatch-gate))]))
 
-  (define (dispatcher-drain-deferred! dispatcher)
-    (when (and (eq? (dispatcher-phase dispatcher) 'idle)
-               (pair? (dispatcher-deferred dispatcher))
-               (not (dispatcher-draining? dispatcher)))
-      (dynamic-wind
-        (lambda () (dispatcher-draining?-set! dispatcher #t))
-        (lambda ()
-          (let loop ()
-            (when (pair? (dispatcher-deferred dispatcher))
-              (let ([queued (dispatcher-deferred dispatcher)])
-                (dispatcher-deferred-set! dispatcher '())
-                (for-each (lambda (thunk) (dispatcher-run! dispatcher thunk)) queued)
-                (loop)))))
-        (lambda () (dispatcher-draining?-set! dispatcher #f)))))
-
-  ;; Publication is non-reentrant.  Work requested from a plugin or listener
-  ;; observes the completed update only after this notification boundary.
   (define (dispatcher-run! dispatcher thunk)
-    (if (eq? (dispatcher-phase dispatcher) 'idle)
-        (let ([result
-               (dynamic-wind
-                 (lambda () (dispatcher-phase-set! dispatcher 'publishing))
-                 thunk
-                 (lambda () (dispatcher-phase-set! dispatcher 'idle)))])
-          (unless (dispatcher-draining? dispatcher)
-            (dispatcher-drain-deferred! dispatcher))
-          result)
-        (begin
-          (dispatcher-deferred-set!
-            dispatcher (append (dispatcher-deferred dispatcher) (list thunk)))
-          #f)))
+    (dispatch-gate-run! (dispatcher-gate dispatcher) thunk))
 
   (define (dispatcher-notify! dispatcher thunk)
-    (let ([phase (dispatcher-phase dispatcher)])
-      (dynamic-wind
-        (lambda () (dispatcher-phase-set! dispatcher 'notifying))
-        thunk
-        (lambda () (dispatcher-phase-set! dispatcher phase)))))
+    (dispatch-gate-notify! (dispatcher-gate dispatcher) thunk))
 
   (define (dispatcher-set-listener! dispatcher listener)
     (unless (or (not listener) (procedure? listener))

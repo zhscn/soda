@@ -4,6 +4,7 @@
           (soda bootstrap)
           (soda host condition)
           (soda host dispatch)
+          (soda host dispatch gate)
           (soda host internal operation)
           (soda host internal state)
           (soda host internal surface)
@@ -49,6 +50,26 @@
       (owner-close! owner)
       (soda-application-close! application)))
 
+  (define (run-dispatch-gate-test!)
+    (let ([gate (make-dispatch-gate)]
+          [events '()])
+      (define (record! event)
+        (set! events (append events (list event))))
+      (dispatch-gate-run!
+        gate
+        (lambda ()
+          (record! 'publish-start)
+          (dispatch-gate-notify!
+            gate
+            (lambda ()
+              (record! 'notify)
+              (dispatch-gate-run! gate (lambda () (record! 'deferred)))))
+          (record! 'publish-end)))
+      (unless (equal? events '(publish-start notify publish-end deferred))
+        (error 'host-integration-tests
+               "dispatch gate did not defer reentrant work" events))))
+
   (define (run-host-integration-tests!)
     (run-cleanup-test!)
-    (run-dispatcher-observer-test!)))
+    (run-dispatcher-observer-test!)
+    (run-dispatch-gate-test!)))
