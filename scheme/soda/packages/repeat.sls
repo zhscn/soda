@@ -12,13 +12,13 @@
     (unless (and (command-runtime? runtime) (owner? owner))
       (assertion-violation 'make-repeat-command!
                            "expected a command runtime and owner"))
-    (command-runtime-register-command!
-      runtime
-      (make-command-definition
-        'command.repeat
-        (lambda (context)
-          (command-runtime-repeat-last! runtime context)
-          (command-result-with-transition
-            (command-handled)
-            (make-command-loop-transition #f #f 'ignore)))
-        owner "Repeat the last repeatable command." 'command #f))))
+    (define-command
+      runtime owner 'command.repeat (context)
+      (documentation "Repeat the last repeatable command.")
+      (class 'command)
+      (semantic 'command.repeat)
+      (repeatable #f)
+      (undo 'ignore)
+      (command-runtime-repeat-last! runtime context)
+      (command-handled)))
+)

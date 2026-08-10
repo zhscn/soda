@@ -29,6 +29,29 @@
                   (= (prefix-argument-numeric-value negative) -3))
              "PrefixArgument did not preserve raw and numeric semantics")))
 
+  (define (test-command-policy-override)
+    (let* ([policy (make-command-policy 'declared #t 'amalgamate #t 'repeat-map)]
+           [inherited
+            (command-loop-transition-resolve
+              (make-command-loop-transition) policy 'effective)]
+           [overridden
+            (command-loop-transition-resolve
+              (make-command-loop-transition #f #f 'ignore #f #f)
+              policy 'effective)])
+      (check (and (eq? (command-loop-transition-semantic-command inherited)
+                       'declared)
+                  (command-loop-transition-repeatable? inherited)
+                  (command-loop-transition-preserve-prefix? inherited)
+                  (eq? (command-loop-transition-transient-state inherited)
+                       'repeat-map)
+                  (eq? (command-loop-transition-semantic-command overridden)
+                       'effective)
+                  (not (command-loop-transition-repeatable? overridden))
+                  (eq? (command-loop-transition-undo-policy overridden) 'ignore)
+                  (not (command-loop-transition-preserve-prefix? overridden))
+                  (not (command-loop-transition-transient-state overridden)))
+             "CommandLoopTransition did not override CommandPolicy")))
+
   (define (test-remapped-identity)
     (let* ([map (make-keymap 'remap-test)]
            [stroke (make-key-stroke 'character (char->integer #\a) 4)]
@@ -62,17 +85,17 @@
       (dynamic-wind
         (lambda () #f)
         (lambda ()
-          (command-runtime-register-command!
-            runtime
-            (make-command-definition
-              'command.effective
-              (lambda (context value)
-                (set! calls (cons (list value (command-context-source context)) calls))
-                (command-result-with-transition
-                  (command-handled)
-                  (make-command-loop-transition
-                    'command.semantic #t 'amalgamate)))
-              owner))
+          (define-command
+            runtime owner 'command.effective (context value)
+            (repeatable #t)
+            (undo 'amalgamate)
+            (documentation "Exercise named command declaration clauses.")
+            (semantic 'command.semantic)
+            (preserve-prefix #t)
+            (class 'test)
+            (scope 'global)
+            (set! calls (cons (list value (command-context-source context)) calls))
+            (command-handled))
           (command-runtime-add-hook!
             runtime 'execution-record owner 'capture-record
             (lambda (record) (set! records (cons record records))))
@@ -83,7 +106,11 @@
           (host-state-run! host)
           (let* ([state (command-runtime-loop-state runtime context)]
                  [record (command-loop-state-last-record state)]
-                 [identity (command-execution-record-identity record)])
+                 [identity (command-execution-record-identity record)]
+                 [definition
+                  (command-runtime-command-definition runtime 'command.effective)]
+                 [policy (command-definition-policy definition)]
+                 [transition (command-execution-record-transition record)])
             (check (and (eq? (command-identity-requested identity) 'command.requested)
                         (eq? (command-identity-effective identity) 'command.effective)
                         (eq? (command-identity-semantic identity) 'command.semantic)
@@ -91,8 +118,17 @@
                              (command-execution-record-prefix-argument record)) 16)
                         (eq? record (command-loop-state-repeat-record state))
                         (eq? record (car (command-runtime-execution-history runtime)))
-                        (eq? record (car records)))
-                   "runtime did not commit command identity and execution record"))
+                        (eq? record (car records))
+                        (eq? (command-policy-semantic-command policy) 'command.semantic)
+                        (command-policy-repeatable? policy)
+                        (eq? (command-policy-undo-policy policy) 'amalgamate)
+                        (command-policy-preserve-prefix? policy)
+                        (eq? (command-loop-transition-semantic-command transition)
+                             'command.semantic)
+                        (command-loop-transition-repeatable? transition)
+                        (eq? (command-loop-transition-undo-policy transition)
+                             'amalgamate))
+                   "runtime did not resolve command policy into the execution record"))
           (command-runtime-repeat-last! runtime context)
           (host-state-run! host)
           (check (equal? calls '((argument repeat) (argument test)))
@@ -138,6 +174,7 @@
 
   (define (run-command-loop-tests!)
     (test-prefix-argument)
+    (test-command-policy-override)
     (test-remapped-identity)
     (test-runtime-state-record-and-repeat)
     (test-undo-amalgamation))

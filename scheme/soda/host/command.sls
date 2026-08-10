@@ -7,6 +7,7 @@
           command-definition-class
           command-definition-scope
           command-definition-interaction-spec
+          command-definition-policy
           command-definition-interactive?
           command-definition-owner
           make-command-registry
@@ -30,6 +31,13 @@
           command-context-target
           command-context-source
           command-context-layout
+          make-command-policy
+          command-policy?
+          command-policy-semantic-command
+          command-policy-repeatable?
+          command-policy-undo-policy
+          command-policy-preserve-prefix?
+          command-policy-transient-state
           make-prefix-argument
           prefix-argument?
           prefix-argument-raw-value
@@ -55,6 +63,7 @@
           command-loop-transition-undo-policy
           command-loop-transition-preserve-prefix?
           command-loop-transition-transient-state
+          command-loop-transition-resolve
           make-command-execution-record
           command-execution-record?
           command-execution-record-invocation-id
@@ -129,6 +138,7 @@
       (immutable class command-definition-class)
       (immutable scope command-definition-scope)
       (immutable interaction-spec command-definition-interaction-spec)
+      (immutable policy command-definition-policy)
       (immutable owner command-definition-owner)))
 
   ;; The short forms preserve the original public constructor.  The complete
@@ -144,15 +154,20 @@
        (make-command-definition
          name invoke owner documentation class interaction-spec 'global)]
       [(name invoke owner documentation class interaction-spec scope)
+       (make-command-definition
+         name invoke owner documentation class interaction-spec scope
+         (make-command-policy))]
+      [(name invoke owner documentation class interaction-spec scope policy)
        (owner-assert-active 'make-command-definition owner)
        (unless (and (symbol? name) (procedure? invoke)
                     (or (not documentation) (string? documentation))
                     (or (not class) (symbol? class))
-                    (memq scope '(global mode)))
+                    (memq scope '(global mode))
+                    (command-policy? policy))
          (assertion-violation 'make-command-definition "invalid command definition"
                               name invoke documentation class scope))
        (%make-command-definition
-         name invoke documentation class scope interaction-spec owner)]))
+         name invoke documentation class scope interaction-spec policy owner)]))
 
   (define (command-definition-interactive? definition)
     (unless (command-definition? definition)
@@ -261,6 +276,28 @@
   (define (prefix-argument-present? value)
     (and (prefix-argument? value) (prefix-argument-raw-value value) #t))
 
+  ;; CommandPolicy is declaration-time behavior shared by every invocation.
+  ;; A semantic command of #f means that the effective command name is used.
+  (define-record-type
+    (command-policy %make-command-policy command-policy?)
+    (fields
+      (immutable semantic-command command-policy-semantic-command)
+      (immutable repeatable? command-policy-repeatable?)
+      (immutable undo-policy command-policy-undo-policy)
+      (immutable preserve-prefix? command-policy-preserve-prefix?)
+      (immutable transient-state command-policy-transient-state)))
+
+  (define make-command-policy
+    (case-lambda
+      [() (%make-command-policy #f #f 'boundary #f #f)]
+      [(semantic repeatable? undo-policy preserve-prefix? transient-state)
+       (unless (and (or (not semantic) (symbol? semantic))
+                    (memq undo-policy '(boundary amalgamate ignore)))
+         (assertion-violation 'make-command-policy "invalid command policy"
+                              semantic repeatable? undo-policy))
+       (%make-command-policy semantic (and repeatable? #t) undo-policy
+                             (and preserve-prefix? #t) transient-state)]))
+
   (define-record-type
     (command-identity %make-command-identity command-identity?)
     (fields
@@ -304,10 +341,9 @@
        (%make-command-loop-state current last current-prefix last-prefix
                                  last-record repeat-record)]))
 
-  ;; A command returns policy for the command-loop transition alongside its
-  ;; ordinary editor outcomes.  'boundary starts a new undo unit,
-  ;; 'amalgamate joins a compatible preceding semantic command, and 'ignore
-  ;; keeps the command out of edit history.
+  ;; CommandLoopTransition contains per-execution overrides.  The zero-argument
+  ;; form inherits every field from CommandPolicy; the established complete
+  ;; constructors remain explicit overrides.
   (define-record-type
     (command-loop-transition %make-command-loop-transition command-loop-transition?)
     (fields
@@ -319,7 +355,7 @@
 
   (define make-command-loop-transition
     (case-lambda
-      [() (%make-command-loop-transition #f #f 'boundary #f #f)]
+      [() (%make-command-loop-transition 'inherit 'inherit 'inherit 'inherit 'inherit)]
       [(semantic repeatable? undo-policy)
        (make-command-loop-transition semantic repeatable? undo-policy #f #f)]
       [(semantic repeatable? undo-policy preserve-prefix? transient-state)
@@ -330,6 +366,27 @@
                               semantic repeatable? undo-policy))
        (%make-command-loop-transition semantic (and repeatable? #t) undo-policy
                                       (and preserve-prefix? #t) transient-state)]))
+
+  (define (command-loop-transition-resolve transition policy effective-command)
+    (unless (and (command-loop-transition? transition) (command-policy? policy)
+                 (symbol? effective-command))
+      (assertion-violation 'command-loop-transition-resolve
+                           "invalid transition resolution input"))
+    (let ([resolved (lambda (value fallback)
+                      (if (eq? value 'inherit) fallback value))])
+      (%make-command-loop-transition
+        (let ([semantic
+               (resolved (command-loop-transition-semantic-command transition)
+                         (command-policy-semantic-command policy))])
+          (or semantic effective-command))
+        (resolved (command-loop-transition-repeatable? transition)
+                  (command-policy-repeatable? policy))
+        (resolved (command-loop-transition-undo-policy transition)
+                  (command-policy-undo-policy policy))
+        (resolved (command-loop-transition-preserve-prefix? transition)
+                  (command-policy-preserve-prefix? policy))
+        (resolved (command-loop-transition-transient-state transition)
+                  (command-policy-transient-state policy)))))
 
   (define-record-type
     (command-execution-record %make-command-execution-record command-execution-record?)

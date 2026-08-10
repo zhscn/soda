@@ -52,15 +52,16 @@
   (define-syntax install-command!
     (syntax-rules ()
       [(_ runtime owner name (context . arguments) documentation class body ...)
-       (define-command
-         runtime owner name (context . arguments) documentation class
-         (scope 'mode)
-         (command-result-with-transition
-           (begin body ...)
-           (make-command-loop-transition
+       (command-runtime-register-command!
+         runtime
+         (make-command-definition
+           name (lambda (context . arguments) body ...) owner
+           documentation class #f 'mode
+           (make-command-policy
              name
-             (memq class '(editing motion selection kill yank viewport))
-             (if (memq class '(editing kill yank)) 'amalgamate 'ignore))))]))
+             (and (memq class '(editing motion selection kill yank viewport)) #t)
+             (if (memq class '(editing kill yank)) 'amalgamate 'ignore)
+             #f #f)))]))
 
   (define (make-fundamental-editing! runtime owner)
     (unless (and (command-runtime? runtime) (owner? owner))
@@ -148,9 +149,13 @@
         (move-buffer-boundary context #t))
       (define-command
         runtime owner 'fundamental.goto-line (context line column)
-        "Move every selection to one-based LINE and optional COLUMN." 'motion
+        (documentation "Move every selection to one-based LINE and optional COLUMN.")
+        (class 'motion)
         (scope 'mode)
         (interactive (make-interactive-plan (list (make-goto-reader))))
+        (semantic 'fundamental.goto-line)
+        (repeatable #t)
+        (undo 'ignore)
         (goto-line-column context line column))
       (install-command!
         runtime owner 'fundamental.indent-lines (context)
