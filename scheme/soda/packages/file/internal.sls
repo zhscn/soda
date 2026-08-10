@@ -54,6 +54,7 @@
           (soda packages file-mode-registry)
           (soda packages file-path)
           (soda packages file-policy)
+          (soda packages file-resource-binding)
           (soda packages file-service-value)
           (soda packages file-operation)
           (soda packages file-state)
@@ -192,94 +193,6 @@
                     (list (overwrite-decision value) version)))))
             (make-interactive-ready (list 'overwrite #f))))))
 
-  (define (file-service-binding service buffer-id . default)
-    (unless (and (file-service? service) (buffer-id? buffer-id))
-      (assertion-violation 'file-service-binding "expected a file service and Buffer id"
-                           service buffer-id))
-    (file-state-binding
-      (file-service-state service) buffer-id
-      (if (null? default) #f (car default))))
-
-  (define (file-service-resource service buffer-id . default)
-    (let ([binding (file-service-binding service buffer-id #f)])
-      (if binding
-          (file-binding-resource binding)
-          (if (null? default) #f (car default)))))
-
-  (define (file-service-format service buffer-id . default)
-    (let ([binding (file-service-binding service buffer-id #f)])
-      (if binding
-          (file-binding-format binding)
-          (if (null? default) #f (car default)))))
-
-  (define (file-service-binding-at-path service path)
-    (file-state-binding-at-path (file-service-state service) path))
-
-  ;; Directory packages delegate file mutations here so Buffer identity,
-  ;; locks, watches, and resource keys change as one host-owned operation.
-  (define (file-service-rename-resource! service source destination expected)
-    (unless (file-service? service)
-      (assertion-violation 'file-service-rename-resource!
-                           "expected a FileService" service))
-    (let ([target (canonical-file-resource destination)])
-      (let-values ([(buffer-id binding)
-                    (file-service-binding-at-path service source)])
-        (if (not binding)
-            (vfs-rename-path-if-matches! source destination expected)
-            (let* ([host (file-service-host service)]
-                   [buffer (package-host-buffer-ref host buffer-id #f)]
-                   [existing
-                    (package-host-find-buffer-key
-                      host (file-buffer-key target) #f)])
-              (unless buffer
-                (assertion-violation 'file-service-rename-resource!
-                                     "visited file Buffer is no longer live" source))
-              (when (and existing (not (= (buffer-id existing) buffer-id)))
-                (assertion-violation 'file-service-rename-resource!
-                                     "destination is already visited" destination))
-              (let ([new-lock (acquire-file-lock target)]
-                    [renamed? #f]
-                    [committed? #f])
-                (unless new-lock
-                  (assertion-violation 'file-service-rename-resource!
-                                       "destination is locked" destination))
-                (dynamic-wind
-                  (lambda () #f)
-                  (lambda ()
-                    (vfs-rename-path-if-matches! source destination expected)
-                    (set! renamed? #t)
-                    (package-host-rebind-buffer-key!
-                      host (file-buffer-key target) buffer)
-                    (set-resource!
-                      service buffer-id target (vfs-stat-path destination)
-                      new-lock (file-binding-format binding) #t)
-                    (release-file-lock! (file-binding-lock binding))
-                    (clear-conflict! service buffer-id)
-                    (set! committed? #t)
-                    destination)
-                  (lambda ()
-                    (unless committed?
-                      (when renamed? (vfs-rename-path! destination source))
-                      (release-file-lock! new-lock))))))))))
-
-  (define (file-service-delete-resource! service path expected)
-    (unless (file-service? service)
-      (assertion-violation 'file-service-delete-resource!
-                           "expected a FileService" service))
-    (let-values ([(buffer-id binding)
-                  (file-service-binding-at-path service path)])
-      (vfs-delete-path-if-matches! path expected)
-      (when binding
-        (release-file-lock! (file-binding-lock binding))
-        (set-resource!
-          service buffer-id (file-binding-resource binding) #f #f
-          (file-binding-format binding) #t)
-        (file-state-set-conflict!
-          (file-service-state service) buffer-id
-          (make-file-conflict
-            buffer-id (file-binding-resource binding) #f 'deleted 'pending)))
-      #t))
-
   (define (file-service-conflict service buffer-id . default)
     (unless (and (file-service? service) (buffer-id? buffer-id))
       (assertion-violation 'file-service-conflict
@@ -329,35 +242,6 @@
               (make-interaction-request
                 'file-name "Write file: " #f file-name-completion-source 'free)
               (lambda (value) (make-interactive-ready (list value))))))))
-
-  (define set-resource!
-    (case-lambda
-      [(service buffer-id resource version)
-       (set-resource! service buffer-id resource version #f
-                      (make-default-file-format) #f)]
-      [(service buffer-id resource version lock)
-       (set-resource! service buffer-id resource version lock
-                      (make-default-file-format) #f)]
-      [(service buffer-id resource version lock format)
-       (set-resource! service buffer-id resource version lock format #f)]
-      [(service buffer-id resource version lock format local?)
-       (unless (file-format? format)
-         (assertion-violation 'set-resource!
-                              "expected file format metadata" format))
-       (let ([binding (make-file-binding resource version lock format)])
-         (file-state-set-binding! (file-service-state service) buffer-id binding)
-         (file-watch-service-update!
-           (file-service-watch-service service) buffer-id
-           (resource-locator resource) version local?)
-         binding)]))
-
-  (define (file-service-attach-runtime! service runtime)
-    (unless (file-service? service)
-      (assertion-violation 'file-service-attach-runtime!
-                           "expected a FileService" service))
-    (file-watch-service-attach-runtime!
-      (file-service-watch-service service) runtime)
-    service)
 
   (define (file-version=? left right)
     (or (and (not left) (not right))
@@ -476,9 +360,6 @@
                         (make-buffer-read-only-extension #t)
                         '())))))))
 
-  (define (file-buffer-key resource)
-    (make-buffer-key 'file (resource-locator resource)))
-
   (define (empty-bytes)
     (make-bytevector 0))
 
@@ -514,7 +395,7 @@
                              (make-document contents)
                              (file-buffer-configuration
                                service resource context (not lock)))])
-                      (set-resource!
+                      (set-file-resource!
                         service (buffer-id created) resource version lock format)
                       (when (file-service-history service)
                         (history-mark-saved! (file-service-history service)
@@ -738,9 +619,6 @@
                              "external file conflict is stale" request))
       conflict))
 
-  (define (clear-conflict! service buffer-id)
-    (file-state-clear-conflict! (file-service-state service) buffer-id))
-
   (define (clear-recovery! service buffer-id)
     (let ([recovery (file-service-recovery service)])
       (when recovery (recovery-service-clear-buffer! recovery buffer-id))))
@@ -755,7 +633,7 @@
           (make-change-set length (list (make-text-change 0 length contents)))))
       (let* ([binding (file-service-binding service (buffer-id buffer))]
              [resource (file-binding-resource binding)])
-        (set-resource! service (buffer-id buffer) resource version
+        (set-file-resource! service (buffer-id buffer) resource version
                        (file-binding-lock binding) format #f))
       (when (file-service-history service)
         (history-discard-buffer! (file-service-history service) (buffer-id buffer))
@@ -787,7 +665,7 @@
                 (assertion-violation 'file.resolve-external-change
                                      "conflicted Buffer is no longer live" conflict))
               (replace-live-buffer-contents! service buffer contents after format)
-              (clear-conflict! service (buffer-id buffer))))))))
+              (clear-file-conflict! service (buffer-id buffer))))))))
 
   (define (write-current-buffer! service conflict)
     (let* ([resource (file-conflict-resource conflict)]
@@ -811,13 +689,13 @@
             (vfs-write-file path contents)
             (let* ([binding (file-service-binding service (buffer-id buffer))]
                    [version (vfs-stat-path path)])
-              (set-resource! service (buffer-id buffer) resource version
+              (set-file-resource! service (buffer-id buffer) resource version
                              (file-binding-lock binding) format #t)
               (when (file-service-history service)
                 (history-mark-saved!
                   (file-service-history service) (buffer-id buffer)))
               (clear-recovery! service (buffer-id buffer))
-              (clear-conflict! service (buffer-id buffer))))))))
+              (clear-file-conflict! service (buffer-id buffer))))))))
 
   (define (save-conflicted-buffer-as! service conflict destination expected-destination)
     (let* ([source (file-conflict-resource conflict)]
@@ -862,7 +740,7 @@
                 (vfs-write-file (resource-locator destination) contents)
                 (package-host-rebind-buffer-key!
                   host (file-buffer-key destination) buffer)
-                (set-resource!
+                (set-file-resource!
                   service (buffer-id buffer) destination
                   (vfs-stat-path (resource-locator destination))
                   (if same-resource? (file-binding-lock old-binding) new-lock)
@@ -873,7 +751,7 @@
             (when (file-service-history service)
               (history-mark-saved! (file-service-history service) (buffer-id buffer)))
             (clear-recovery! service (buffer-id buffer))
-            (clear-conflict! service (buffer-id buffer)))
+            (clear-file-conflict! service (buffer-id buffer)))
           (lambda ()
             (when (and new-lock (not written?)) (release-file-lock! new-lock)))))))
 
@@ -1062,11 +940,11 @@
             (unless (file-load? request)
               (assertion-violation 'file.load "invalid file load request" request))
             (let ([binding (file-service-binding service (file-load-buffer-id request) #f)])
-              (set-resource! service (file-load-buffer-id request)
+              (set-file-resource! service (file-load-buffer-id request)
                              (file-load-resource request) (file-load-version request)
                              (and binding (file-binding-lock binding))
                              (file-load-format request)))
-            (clear-conflict! service (file-load-buffer-id request))
+            (clear-file-conflict! service (file-load-buffer-id request))
             (when (and (file-load-discard-history? request) history)
               (history-discard-buffer! history (file-load-buffer-id request)))
             (clear-recovery! service (file-load-buffer-id request)))))
@@ -1115,13 +993,13 @@
                       (vfs-write-file (file-backup-path path) (vfs-read-file path)))
                     (vfs-write-file path (file-write-contents request))
                     (package-host-rebind-buffer-key! host (file-buffer-key resource) target)
-                    (set-resource! service (file-write-buffer-id request)
+                    (set-file-resource! service (file-write-buffer-id request)
                                    resource (vfs-stat-path path)
                                    (if transfer-lock?
                                        new-lock
                                        (and binding (file-binding-lock binding)))
                                    (file-write-format request) #t)
-                    (clear-conflict! service (file-write-buffer-id request))
+                    (clear-file-conflict! service (file-write-buffer-id request))
                     (set! written? #t)
                     (when transfer-lock?
                       (release-file-lock! (and binding (file-binding-lock binding)))))
