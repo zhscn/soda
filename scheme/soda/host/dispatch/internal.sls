@@ -36,11 +36,11 @@
           (soda kernel viewport)
           (soda host internal buffer)
           (soda host internal view)
-          (soda host internal context)
           (soda host internal operation)
           (soda host internal surface)
           (soda host dispatch gate)
           (soda host dispatch global-operation)
+          (soda host dispatch surface-operation)
           (soda host dispatch update)
           (soda host value)
           (soda view plugin))
@@ -171,95 +171,23 @@
           (dispatcher-host-listeners dispatcher))))
     update)
 
-  (define (dispatch-global-operation! dispatcher operation)
-    (let ([update
-           (global-operation-dispatch
-             (dispatcher-global-handlers dispatcher) operation)])
-      (and update (notify-host-update! dispatcher update))))
-
   (define (dispatcher-dispatch-host-now! dispatcher operation)
     (unless (and (dispatcher? dispatcher) (host-operation? operation))
-      (assertion-violation 'dispatcher-dispatch-host!
-                           "expected a Dispatcher and HostOperation"
-                           dispatcher operation))
-    (if (not (host-operation-surface-id operation))
-        (dispatch-global-operation! dispatcher operation)
-        (let ([surfaces (dispatcher-surfaces dispatcher)])
-      (unless surfaces
-        (assertion-violation 'dispatcher-dispatch-host!
-                             "Dispatcher has no SurfaceService" dispatcher))
-      (let ([surface
-             (surface-service-ref surfaces (host-operation-surface-id operation) #f)])
-        (and surface
-             (let* ([start-generation (surface-generation surface)]
-                    [old-context (surface-active-context surface (dispatcher-views dispatcher))]
-                    [resolution
-                     (case (host-operation-kind operation)
-                       [(focus-view)
-                        (surface-select-view! surface (dispatcher-views dispatcher)
-                                              (host-operation-value operation))]
-                       [(focus-window)
-                        (surface-select-window!
-                          surface (dispatcher-views dispatcher)
-                          (host-operation-value operation))]
-                       [(replace-window-view)
-                        (let ([value (host-operation-value operation)])
-                          (surface-replace-window-view-context!
-                            surface (dispatcher-views dispatcher)
-                            (car value) (cadr value)))]
-                       [(split-view)
-                        (let ([value (host-operation-value operation)])
-                          (surface-split-view! surface (dispatcher-views dispatcher)
-                                               (car value) (cadr value) (caddr value)))]
-                       [(remove-window)
-                        (surface-remove-view-window! surface (dispatcher-views dispatcher)
-                                                     (host-operation-value operation))]
-                       [(push-interaction)
-                        (let ([value (host-operation-value operation)])
-                          (surface-push-interaction-view!
-                            surface (dispatcher-views dispatcher) (car value) (cadr value)))]
-                       [(pop-interaction)
-                        (surface-pop-interaction-view! surface (dispatcher-views dispatcher))]
-                       [(display-request)
-                        (surface-route-display-request!
-                          surface (dispatcher-views dispatcher)
-                          (host-operation-value operation))]
-                       [(resize-surface)
-                        (and (surface-resize! surface (host-operation-value operation))
-                             (surface-active-context surface (dispatcher-views dispatcher)))]
-                       [(invalidate-surface)
-                        (and (surface-invalidate! surface) #t)]
-                       [(set-surface-message)
-                        (and (surface-set-status-message!
-                               surface (host-operation-value operation))
-                             #t)]
-                       [(set-surface-shortcut-hints)
-                        (and (surface-set-shortcut-hints!
-                               surface (host-operation-value operation))
-                             #t)]
-                       [else
-                        (assertion-violation 'dispatcher-dispatch-host!
-                                             "unsupported HostOperation" operation)])]
-                    [_retired
-                     (when (and old-context
-                                (eq? (host-operation-kind operation) 'replace-window-view)
-                                (not (surface-service-view-placed?
-                                       surfaces (active-context-view-id old-context))))
-                       (view-service-close-view!
-                         (dispatcher-views dispatcher)
-                         (active-context-view-id old-context)))]
-                    [new-context (surface-active-context surface (dispatcher-views dispatcher))])
-               (and resolution
-                    (let ([update
-                           (make-host-update
-                             operation (surface-id surface) old-context new-context resolution
-                             (if (= start-generation (surface-generation surface))
-                                 '()
-                                 (case (host-operation-kind operation)
-                                   [(resize-surface) '(resize layout)]
-                                   [(invalidate-surface) '(redraw)]
-                                   [else '(chrome)])))])
-                      (notify-host-update! dispatcher update)))))))))
+      (assertion-violation
+        'dispatcher-dispatch-host! "expected a Dispatcher and HostOperation"
+        dispatcher operation))
+    (let ([update
+           (if (host-operation-surface-id operation)
+               (let ([surfaces (dispatcher-surfaces dispatcher)])
+                 (unless surfaces
+                   (assertion-violation
+                     'dispatcher-dispatch-host!
+                     "Dispatcher has no SurfaceService" dispatcher))
+                 (dispatch-surface-operation!
+                   surfaces (dispatcher-views dispatcher) operation))
+               (global-operation-dispatch
+                 (dispatcher-global-handlers dispatcher) operation))])
+      (and update (notify-host-update! dispatcher update))))
 
   (define (dispatcher-dispatch-host! dispatcher operation)
     (unless (and (dispatcher? dispatcher) (host-operation? operation))
