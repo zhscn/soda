@@ -3,7 +3,7 @@
           input-scheduler?
           input-scheduler-enqueue!
           input-scheduler-begin-cycle!
-          input-scheduler-handle-message!
+          input-scheduler-completed-generation
           input-scheduler-presentation-ready?)
   (import (rnrs)
           (soda host frontend)
@@ -19,14 +19,12 @@
     (fields
       (immutable state input-scheduler-state)
       (mutable open-cycles input-scheduler-open-cycles
-                           input-scheduler-open-cycles-set!)))
-
-  (define-record-type
-    (input-cycle-boundary make-input-cycle-boundary input-cycle-boundary?)
-    (fields (immutable scheduler input-cycle-boundary-scheduler)))
+                           input-scheduler-open-cycles-set!)
+      (mutable completed-generation input-scheduler-completed-generation
+                                    input-scheduler-completed-generation-set!)))
 
   (define (make-input-scheduler state)
-    (%make-input-scheduler state 0))
+    (%make-input-scheduler state 0 0))
 
   (define (same-physical-key? left right)
     (and (key-event? left) (key-event? right)
@@ -67,19 +65,15 @@
       scheduler (+ 1 (input-scheduler-open-cycles scheduler)))
     (host-frontend-enqueue-priority!
       (input-scheduler-state scheduler)
-      (make-input-cycle-boundary scheduler)))
-
-  (define (input-scheduler-handle-message! scheduler message)
-    (and (input-cycle-boundary? message)
-         (eq? scheduler (input-cycle-boundary-scheduler message))
-         (begin
-           (when (zero? (input-scheduler-open-cycles scheduler))
-             (assertion-violation
-               'input-scheduler-handle-message!
-               "input cycle boundary has no matching open cycle" message))
-           (input-scheduler-open-cycles-set!
-             scheduler (- (input-scheduler-open-cycles scheduler) 1))
-           #t)))
+      (lambda ()
+        (when (zero? (input-scheduler-open-cycles scheduler))
+          (assertion-violation
+            'input-scheduler-begin-cycle!
+            "input cycle boundary has no matching open cycle" scheduler))
+        (input-scheduler-open-cycles-set!
+          scheduler (- (input-scheduler-open-cycles scheduler) 1))
+        (input-scheduler-completed-generation-set!
+          scheduler (+ 1 (input-scheduler-completed-generation scheduler))))))
 
   (define (input-scheduler-presentation-ready? scheduler)
     (unless (input-scheduler? scheduler)

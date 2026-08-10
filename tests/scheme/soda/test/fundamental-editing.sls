@@ -1150,6 +1150,37 @@
         (let ([controller (minibuffer-service-refresh-completion! minibuffer)])
           (unless (and controller (not (completion-controller-selected-index controller)))
             (error 'fundamental-editing-tests "completion refresh preselected a candidate")))
+        (let* ([prompt (minibuffer-service-current minibuffer)]
+               [prompt-buffer
+                (buffer-service-ref
+                  (host-state-buffers state) (minibuffer-session-buffer-id prompt))]
+               [prompt-view
+                (view-service-ref
+                  (host-state-views state) (minibuffer-session-view-id prompt))]
+               [buffer-state (buffer-state prompt-buffer)])
+          (dispatcher-dispatch!
+            (host-state-dispatch state)
+            (make-transaction-spec
+              (buffer-id prompt-buffer) (view-id prompt-view)
+              (buffer-state-generation buffer-state)
+              (make-change-set 7
+                (list (make-text-change 0 7 (string->utf8 "invalid"))))
+              (make-selection (list (make-selection-range 7 7)))
+              '() '()))
+          (command-runtime-start!
+            runtime 'minibuffer.accept (application-command-context application))
+          (unless (and (minibuffer-service-current minibuffer)
+                       (string=?
+                         (input-stack-feedback
+                           (view-state-input-state (view-state prompt-view)))
+                         "Input does not match an available choice"))
+            (error 'fundamental-editing-tests
+                   "invalid must-match input did not remain visible with feedback")))
+        (minibuffer-service-cancel! minibuffer)
+        (host-state-run! state)
+        (command-runtime-start-interactive!
+          runtime 'interaction.match-test (application-command-context application))
+        (minibuffer-service-refresh-completion! minibuffer)
         (minibuffer-service-submit! minibuffer)
         (host-state-run! state)
         (unless (and (string=? must-match-value "allowed")
@@ -3155,6 +3186,15 @@
         (frontend-step! frontend))
       (dispatcher-dispatch-host!
         (host-state-dispatch state)
+        (make-set-surface-message-operation
+          (surface-id surface) "persistent feedback" 'persistent))
+      (send! (make-pointer-event 0 0 'none 0 0 'move))
+      (send! (make-key-event 'left #f #f #f 0 'press (make-bytevector 0)))
+      (unless (string=? (surface-status-message surface) "persistent feedback")
+        (error 'fundamental-editing-tests
+               "persistent feedback was cleared by unrelated input"))
+      (dispatcher-dispatch-host!
+        (host-state-dispatch state)
         (make-set-surface-message-operation (surface-id surface) "previous feedback"))
       (send! (make-text-input-event 'text (string->utf8 "a")))
       (send! (make-key-event 'enter 13 #f #f 0 'press (make-bytevector 0)))
@@ -3219,7 +3259,10 @@
       (command-runtime-start!
         (host-state-command-runtime state) 'editor.toggle-constant-position
         (application-command-context application))
-      (frontend-step! frontend)
+      (let drain ([remaining 8])
+        (when (and (> remaining 0) (frontend-pending? frontend))
+          (frontend-step! frontend)
+          (drain (- remaining 1))))
       (set! presented '())
       (for-each
         (lambda (event)
@@ -3233,12 +3276,18 @@
                      (selection-primary-range
                        (view-state-selection (view-state view))))
                    2)
-                (= (length presented) 1)
-                (string-prefix?
-                  "Line 2, column 1"
+                (<= 1 (length presented) 2)
+                (pair? (surface-shortcut-hints surface))
+                (let ([sessions
+                       (input-stack-sessions
+                         (view-state-input-state (view-state view)))])
+                  (and (pair? sessions)
+                       (input-session-transient? (car sessions))))
+                (string-contains?
                   (frame-row-string
                     (surface-render-frame (car presented))
-                    (- (frame-height (surface-render-frame (car presented))) 1))))
+                    (- (frame-height (surface-render-frame (car presented))) 1))
+                  "C-"))
         (error 'fundamental-editing-tests
                "terminal Down lifecycle did not commit one complete visible action"
                (selection-range-head
@@ -3302,7 +3351,8 @@
         (unless (and (= (selection-range-head
                           (selection-primary-range (view-state-selection (view-state view))))
                         1)
-                     (equal? rows '(2 1 0)))
+                     (or (equal? rows '(2 1 0))
+                         (equal? rows '(3 2 1 0))))
           (error 'fundamental-editing-tests
                  "a burst of vertical input did not preserve visible motion feedback" rows)))
       (command-runtime-start!

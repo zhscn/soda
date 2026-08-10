@@ -113,17 +113,21 @@
       (and (pair? readers) (interactive-reader-name (car readers)))))
 
   (define (open-session! service invocation request)
-    (let ([session
+    (let ([previous
+            (interaction-service-session-for-id
+              service (command-invocation-id invocation))])
+      (when previous (remove-session! service previous 'accepted))
+      (let ([session
             (%make-interaction-session
               (command-invocation-id invocation)
               (command-definition-name (command-invocation-definition invocation))
               (reader-name invocation)
               'open request
               (command-invocation-context invocation))])
-      (interaction-service-sessions-set!
-        service (cons session (interaction-service-sessions service)))
-      (notify! service 'opened session)
-      session))
+        (interaction-service-sessions-set!
+          service (cons session (interaction-service-sessions service)))
+        (notify! service 'opened session)
+        session)))
 
   ;; Requests are immutable UI contracts.  A completion source is intentionally
   ;; opaque: the interaction frontend, not CommandRuntime, owns candidate
@@ -212,7 +216,7 @@
                (interaction-service-runtime service)
                (make-command-resume-message
                  (interaction-session-invocation-id session) value))
-             (remove-session! service session 'accepted)
+             (interaction-session-status-set! session 'submitting)
              session))))
 
   (define (interaction-service-cancel! service)
@@ -268,6 +272,22 @@
           runtime owner
           (lambda (ignored invocation request)
             (open-session! service invocation request))))
+      (command-runtime-add-hook!
+        runtime 'post-command owner 'accept-interaction-session
+        (lambda (invocation result)
+          (let ([session
+                 (interaction-service-session-for-id
+                   service (command-invocation-id invocation))])
+            (when (and session
+                       (eq? (interaction-session-status session) 'submitting))
+              (remove-session! service session 'accepted)))))
+      (command-runtime-add-hook!
+        runtime 'command-error owner 'reject-interaction-session
+        (lambda (invocation condition)
+          (let ([session
+                 (interaction-service-session-for-id
+                   service (command-invocation-id invocation))])
+            (when session (remove-session! service session 'cancelled)))))
       (command-runtime-add-hook!
         runtime 'command-cancel owner 'close-interaction-session
         (lambda (invocation)

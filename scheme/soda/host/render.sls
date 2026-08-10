@@ -237,6 +237,7 @@
             (and (pair? sessions)
                  (input-session-transient? (car sessions)))])
       (cond
+        [(input-stack-feedback stack) (input-stack-feedback stack)]
         [argument
          (string-append
            "Arg: "

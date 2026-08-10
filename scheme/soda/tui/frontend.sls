@@ -6,10 +6,6 @@
           frontend-dirty?
           frontend-enqueue!
           frontend-pending?
-          frontend-dispatch-input!
-          frontend-handle-message!
-          frontend-drain!
-          frontend-render!
           frontend-step!
           frontend-resize!
           frontend-cancel-pointer-capture!
@@ -43,6 +39,7 @@
   (define-record-type
     (frontend %make-frontend frontend?)
     (fields
+      (immutable owner frontend-owner)
       (immutable host-state frontend-host-state)
       (immutable surface frontend-surface)
       (immutable resolve-input-context frontend-resolve-input-context)
@@ -52,7 +49,11 @@
       (immutable input-scheduler frontend-input-scheduler)
       (mutable theme frontend-theme frontend-theme-set!)
       (mutable dirty? frontend-dirty? frontend-dirty?-set!)
+      (mutable refreshing-presentation? frontend-refreshing-presentation?
+                                        frontend-refreshing-presentation?-set!)
       (mutable pending-scroll frontend-pending-scroll frontend-pending-scroll-set!)
+      (mutable routing-registration frontend-routing-registration
+                                    frontend-routing-registration-set!)
       (mutable update-registration frontend-update-registration
                                    frontend-update-registration-set!)
       (mutable host-update-registration frontend-host-update-registration
@@ -80,16 +81,23 @@
                  (render-service? render-service)
                  (theme? theme))
       (assertion-violation 'make-frontend "invalid frontend dependencies"))
-    (let ([value
-            (%make-frontend state surface resolve-input-context handle-disposition
+    (let* ([owner (make-owner 'frontend)]
+           [value
+            (%make-frontend owner state surface resolve-input-context handle-disposition
                             present! render-service (make-input-scheduler state)
-                            theme #t #f #f #f #f #f)])
+                            theme #t #f #f #f #f #f #f #f)])
+      (frontend-routing-registration-set!
+        value
+        (host-frontend-register-handler!
+          state (surface-id surface) owner
+          (lambda (message) (frontend-handle-queued-message! value message))))
       (frontend-update-registration-set!
         value
         (host-frontend-add-update-listener!
           state
           (lambda (update)
             (frontend-dirty?-set! value #t)
+            (frontend-update-presentation! value)
             (frontend-reconcile-pointer-capture! value)
             (let ([request (editor-update-scroll-request update)])
               (when (scroll-request? request)
@@ -101,7 +109,18 @@
           state
           (lambda (update)
             (frontend-dirty?-set! value #t)
+            (frontend-update-presentation! value)
             (frontend-reconcile-pointer-capture! value))))
+      (command-runtime-add-hook!
+        (host-state-command-runtime state)
+        'execution-record owner
+        (string->symbol
+          (string-append "frontend-activate-transient-"
+                         (number->string (surface-id surface))))
+        (lambda (record)
+          (frontend-install-pending-transient! value)
+          (frontend-update-presentation! value)))
+      (frontend-update-presentation! value)
       value))
 
   (define (frontend-cancel-pointer-capture! value)
@@ -151,6 +170,13 @@
                   active)
                 context)))))))
 
+  (define (frontend-update-presentation! value)
+    (unless (frontend-refreshing-presentation? value)
+      (dynamic-wind
+        (lambda () (frontend-refreshing-presentation?-set! value #t))
+        (lambda () (frontend-refresh-shortcut-hints! value))
+        (lambda () (frontend-refreshing-presentation?-set! value #f)))))
+
   (define (validate-input-context! context active view)
     (unless (and (input-context? context)
                  (= (input-context-view-id context) (active-context-view-id active))
@@ -182,6 +208,11 @@
               #f #f
               (input-stack-push (view-state-input-state view-state) state)
               '() '() #f))))))
+
+  (define (frontend-install-pending-transient! value)
+    (let ([current (active-view value)])
+      (when current
+        (frontend-install-command-transient! value (car current) (cdr current)))))
 
   ;; A layout is command input only while it still describes the same document,
   ;; viewport, and View configuration.  Selection and InputState may change
@@ -273,6 +304,12 @@
       (command-runtime-enqueue!
         (host-state-command-runtime (frontend-host-state value)) result)))
 
+  (define (feedback-clearing-event? event)
+    (or (text-input-event? event)
+        (and (key-event? event) (not (eq? (key-event-type event) 'release)))
+        (and (pointer-event? event)
+             (memq (pointer-event-phase event) '(press wheel)))))
+
   (define (frontend-dispatch-input! value event)
     (require-open 'frontend-dispatch-input! value)
     (unless (input-event? event)
@@ -281,12 +318,9 @@
     ;; Surface messages are echo-area feedback.  The next user input clears a
     ;; previous message before dispatching its command, while a command that
     ;; emits a new message publishes it again at the same boundary.
-    (when (host-frontend-surface-message
-            (frontend-host-state value) (frontend-surface value))
-      (host-frontend-dispatch-host!
-        (frontend-host-state value)
-        (make-set-surface-message-operation
-          (surface-id (frontend-surface value)) #f)))
+    (when (feedback-clearing-event? event)
+      (host-frontend-clear-input-feedback!
+        (frontend-host-state value) (frontend-surface value)))
     (let* ([route (and (pointer-event? event) (pointer-route value event))]
            [current
             (if route
@@ -295,8 +329,6 @@
       (and current
            (let* ([active (car current)]
                   [view (cdr current)]
-                  [_transient
-                   (frontend-install-command-transient! value active view)]
                   [context ((frontend-resolve-input-context value) active view)]
                   [_context-valid (validate-input-context! context active view)]
                   [sequence (event-key-sequence context event)]
@@ -364,7 +396,15 @@
            ;; second frame for one physical key cycle.
            (if (and (key-event? event) (eq? (key-event-type event) 'release))
                #t
-               (frontend-dispatch-input! value event)))))
+               (begin
+                 ;; Input coordinates and visual-row motion are interpreted
+                 ;; against a committed Frame.  Publish preceding host damage
+                 ;; before starting the next input transaction.
+                 (when (and (frontend-dirty? value)
+                            (input-scheduler-presentation-ready?
+                              (frontend-input-scheduler value)))
+                   (%frontend-render! value))
+                 (frontend-dispatch-input! value event))))))
 
   (define (frontend-handle-queued-message! value message)
     (guard
@@ -373,9 +413,7 @@
          (host-frontend-capture-condition!
            (frontend-host-state value) (list 'tui-frontend message condition))
          #t])
-      (or (input-scheduler-handle-message!
-            (frontend-input-scheduler value) message)
-          (frontend-handle-message! value message))))
+      (frontend-handle-message! value message)))
 
   (define frontend-drain!
     (case-lambda
@@ -384,20 +422,14 @@
       [(value limit)
        (require-open 'frontend-drain! value)
        (if limit
-           (host-frontend-run!
-             (frontend-host-state value)
-             (lambda (message) (frontend-handle-queued-message! value message))
-             limit)
-           (host-frontend-run!
-             (frontend-host-state value)
-             (lambda (message) (frontend-handle-queued-message! value message))))]))
+           (host-frontend-run! (frontend-host-state value) limit)
+           (host-frontend-run! (frontend-host-state value)))]))
 
-  (define (frontend-render! value)
+  (define (%frontend-render! value)
     (require-open 'frontend-render! value)
     (if (not (frontend-dirty? value))
         #f
         (begin
-          (frontend-refresh-shortcut-hints! value)
           ;; A scroll intent resolved from this render may publish a newer
           ;; viewport and set dirty again.  Clear the old damage first so that
           ;; notification is retained for the follow-up render.
@@ -413,10 +445,16 @@
           (frontend-resolve-scroll-request! value)
           render))))
 
+  ;; Public callers cannot present a partially dispatched input action.
+  (define (frontend-render! value)
+    (and (input-scheduler-presentation-ready?
+           (frontend-input-scheduler value))
+         (%frontend-render! value)))
+
   (define (frontend-render-if-ready! value)
     (and (input-scheduler-presentation-ready?
            (frontend-input-scheduler value))
-         (frontend-render! value)))
+         (%frontend-render! value)))
 
   (define frontend-step!
     (case-lambda
@@ -429,14 +467,23 @@
        ;; Each input action carries an explicit completion boundary.  Runtime
        ;; messages remain sequential, while presentation waits for the action's
        ;; command and any priority work it schedules to finish.
-       (let loop ([processed 0])
+       (let loop ([processed 0]
+                  [completed
+                   (input-scheduler-completed-generation
+                     (frontend-input-scheduler value))]
+                  [presented? #f])
          (if (or (>= processed limit) (not (frontend-pending? value)))
              (begin
-               (frontend-render-if-ready! value)
+               (unless presented? (frontend-render-if-ready! value))
                processed)
-             (let ([count (frontend-drain! value 1)])
-               (frontend-render-if-ready! value)
-               (loop (+ processed count)))))]))
+             (let* ([count (frontend-drain! value 1)]
+                    [next-completed
+                     (input-scheduler-completed-generation
+                       (frontend-input-scheduler value))]
+                    [cycle-completed? (> next-completed completed)])
+               (when cycle-completed? (frontend-render-if-ready! value))
+               (loop (+ processed count) next-completed
+                     (or presented? cycle-completed?)))))]))
 
   (define (frontend-resize! value size)
     (require-open 'frontend-resize! value)
@@ -461,11 +508,15 @@
         (begin
           (frontend-closed?-set! value #t)
           (frontend-pointer-capture-set! value #f)
-          (let ([update (frontend-update-registration value)]
+          (let ([routing (frontend-routing-registration value)]
+                [update (frontend-update-registration value)]
                 [host-update (frontend-host-update-registration value)])
+            (when routing (registration-close! routing))
             (when update (registration-close! update))
             (when host-update (registration-close! host-update))
+            (frontend-routing-registration-set! value #f)
             (frontend-update-registration-set! value #f)
             (frontend-host-update-registration-set! value #f))
+          (owner-close! (frontend-owner value))
           #t)))
 )

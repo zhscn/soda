@@ -263,11 +263,25 @@
           (minibuffer-service-host service) (minibuffer-session-surface-id session))
         (package-host-close-buffer! (minibuffer-service-host service)
                                     (minibuffer-session-buffer-id session)))))
-  (define (minibuffer-service-submit! service)
-    (let ([session (minibuffer-service-current service)])
-      (and session
-           (let* ([buffer (package-host-buffer-ref (minibuffer-service-host service)
-                                                    (minibuffer-session-buffer-id session) #f)]
+  (define (invalid-input-feedback context)
+    (let ([state (command-context-view-state context)])
+      (make-view-transaction-spec
+        (command-context-view-id context) (view-state-generation state)
+        #f #f
+        (input-stack-with-feedback
+          (view-state-input-state state) "Input does not match an available choice")
+        '() '() #f)))
+
+  (define minibuffer-service-submit!
+    (case-lambda
+      [(service) (minibuffer-service-submit! service #f)]
+      [(service context)
+       (let ([session (minibuffer-service-current service)])
+         (and session
+           (let* ([buffer
+                   (package-host-buffer-ref
+                     (minibuffer-service-host service)
+                     (minibuffer-session-buffer-id session) #f)]
                   [raw (and buffer (snapshot-string (buffer-state-document (buffer-state buffer))))]
                   [controller (minibuffer-session-completion session)]
                   [candidate (and controller (completion-controller-selected controller))]
@@ -276,16 +290,19 @@
                   [policy (interaction-request-selection-policy
                             request)]
                   [value (if candidate (completion-candidate-insert-text candidate) raw)])
-             (and value
-                  (or (eq? policy 'free) candidate
-                      (let ([validator (interaction-request-validator request)])
-                        (or (and validator (validator value snapshot))
-                            (and controller
-                                 (completion-controller-valid-input? controller value snapshot)))))
-                  (begin
-                    (when controller (completion-controller-accept! controller
-                                                                      snapshot))
-                    (interaction-service-submit! (minibuffer-service-interactions service) value)))))))
+             (if (and value
+                      (or (eq? policy 'free) candidate
+                          (let ([validator (interaction-request-validator request)])
+                            (or (and validator (validator value snapshot))
+                                (and controller
+                                     (completion-controller-valid-input?
+                                       controller value snapshot))))))
+                 (begin
+                   (when controller
+                     (completion-controller-accept! controller snapshot))
+                   (interaction-service-submit!
+                     (minibuffer-service-interactions service) value))
+                 (and context (invalid-input-feedback context))))))]))
   (define (minibuffer-service-refresh-completion! service)
     (let ([session (minibuffer-service-current service)])
       (and session
@@ -398,8 +415,8 @@
         (documentation "Accept the current minibuffer input.")
         (class 'minibuffer)
         (undo 'ignore)
-        (minibuffer-service-submit! service)
-        (command-handled))
+        (or (minibuffer-service-submit! service context)
+            (command-handled)))
       (define-command
         (package-host-command-runtime host) owner 'minibuffer.complete (context)
         (documentation "Apply the current prompt completion without accepting the prompt.")

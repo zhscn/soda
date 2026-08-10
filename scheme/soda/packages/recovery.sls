@@ -436,7 +436,7 @@
              (flush-pending! service (command-effect-payload effect))))
          (define-command
            runtime owner 'recovery.restore (context artifact decision)
-           (documentation "Recover, discard, or defer a startup recovery artifact.")
+           (documentation "Recover, discard, or defer a recovery artifact.")
            (class 'recovery)
            (interactive
              (make-interactive-plan

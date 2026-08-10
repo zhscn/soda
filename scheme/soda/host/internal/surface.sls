@@ -5,6 +5,7 @@
           surface-frontend
           surface-capabilities
           surface-status-message
+          surface-status-message-lifetime
           surface-shortcut-hints
           surface-size
           surface-root-window
@@ -63,6 +64,8 @@
       (immutable frontend surface-frontend)
       (immutable capabilities surface-capabilities)
       (mutable status-message surface-status-message surface-status-message-set!)
+      (mutable status-message-lifetime surface-status-message-lifetime
+                                       surface-status-message-lifetime-set!)
       (mutable shortcut-hints surface-shortcut-hints surface-shortcut-hints-set!)
       (mutable size surface-size surface-size-set!)
       (mutable root-window surface-root-window surface-root-window-set!)
@@ -89,7 +92,7 @@
        (let ([selected (car (window-leaves root-window))])
          (window-set-selected! selected #t)
          (%make-surface (identity-source-next! surface-identities)
-                        frontend (list-copy capabilities) #f '()
+                        frontend (list-copy capabilities) #f #f '()
                         size root-window selected '() 0))]))
 
   (define (surface-set-shortcut-hints! surface hints)
@@ -111,23 +114,31 @@
             (surface-generation-set! surface (+ 1 (surface-generation surface)))
             #t))))
 
-  (define (surface-set-status-message! surface message)
-    (unless (and (surface? surface)
-                 (or (not message)
-                     (and (string? message)
-                          (not (exists (lambda (character)
-                                         (or (char=? character #\newline)
-                                             (char=? character #\return)))
-                                       (string->list message))))))
-      (assertion-violation 'surface-set-status-message!
-                           "expected a Surface and a single-line message or false"
-                           surface message))
-    (if (equal? message (surface-status-message surface))
-        #f
-        (begin
-          (surface-status-message-set! surface (and message (string-copy message)))
-          (surface-generation-set! surface (+ 1 (surface-generation surface)))
-          #t)))
+  (define surface-set-status-message!
+    (case-lambda
+      [(surface message)
+       (surface-set-status-message! surface message 'until-command)]
+      [(surface message lifetime)
+       (unless (and (surface? surface)
+                    (memq lifetime '(until-command persistent))
+                    (or (not message)
+                        (and (string? message)
+                             (not (exists (lambda (character)
+                                            (or (char=? character #\newline)
+                                                (char=? character #\return)))
+                                          (string->list message))))))
+         (assertion-violation 'surface-set-status-message!
+                              "expected a Surface and a single-line message or false"
+                              surface message lifetime))
+       (if (and (equal? message (surface-status-message surface))
+                (eq? (and message lifetime)
+                     (surface-status-message-lifetime surface)))
+           #f
+           (begin
+             (surface-status-message-set! surface (and message (string-copy message)))
+             (surface-status-message-lifetime-set! surface (and message lifetime))
+             (surface-generation-set! surface (+ 1 (surface-generation surface)))
+             #t))]))
 
   (define (surface-active-window surface)
     (unless (surface? surface)

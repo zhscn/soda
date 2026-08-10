@@ -28,6 +28,7 @@
           (soda kernel extension)
           (soda host command)
           (soda host command-runtime)
+          (soda host dispatch)
           (soda host input)
           (soda host input-event)
           (soda host internal buffer)
@@ -37,6 +38,7 @@
           (soda host internal view)
           (soda host internal window)
           (soda host package)
+          (soda host operation)
           (soda host value)
           (soda packages base fundamental-editing)
           (soda packages base history)
@@ -54,6 +56,7 @@
           (soda packages comment)
           (soda packages keyboard-macro)
           (soda packages repeat)
+          (soda packages recovery)
           (soda packages prefix-argument)
           (soda packages interaction)
           (soda packages buffer-item)
@@ -524,6 +527,25 @@
                     (process-service-handle-runtime-event!
                       (soda-application-processes application) event)))))
             (soda-application-effect-registration-set! application registration)
+            (let* ([recovery
+                    (file-service-recovery
+                      (soda-application-files application))]
+                   [count
+                    (if recovery
+                        (length (recovery-service-pending-artifacts recovery))
+                        0)])
+              (when (and (> count 0)
+                         (not (surface-status-message
+                                (soda-application-surface application))))
+                (dispatcher-dispatch-host!
+                  (host-state-dispatch (soda-application-state application))
+                  (make-set-surface-message-operation
+                    (surface-id (soda-application-surface application))
+                    (string-append
+                      (number->string count)
+                      " recovery snapshot"
+                      (if (= count 1) "" "s")
+                      " available (M-x recovery.restore)")))))
             (dynamic-wind
               (lambda () #f)
               (lambda () (terminal-frontend-run! terminal))

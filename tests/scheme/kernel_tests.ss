@@ -4453,9 +4453,15 @@
        [event
         (make-key-event
           'character (char->integer #\f) #f #f 4 'press (make-bytevector 0))])
+  (define (dispatch-input! event)
+    (frontend-enqueue!
+      frontend (make-surface-input-message (surface-id surface) event))
+    (frontend-step! frontend 100000))
+  (unless (hashtable-contains?
+            (host-state-frontend-handlers host) (surface-id surface))
+    (error 'kernel-tests "frontend did not register its Surface input route"))
   (frontend-step! frontend)
-  (frontend-dispatch-input!
-    frontend (make-pointer-event 0 1 'left 0 1 'press))
+  (dispatch-input! (make-pointer-event 0 1 'left 0 1 'press))
   (unless (and pointer-observed
                (surface-hit? (command-context-target pointer-observed))
                (= (surface-hit-window-id
@@ -4466,9 +4472,12 @@
                   1)
                (frontend-cancel-pointer-capture! frontend))
     (error 'kernel-tests
-           "frontend pointer hit did not target its rendered Window"))
-  (frontend-dispatch-input!
-    frontend (make-pointer-event 0 1 'left 0 1 'press))
+           "frontend pointer hit did not target its rendered Window"
+           pointer-observed
+           renders
+           (map editor-condition-value
+                (condition-service-entries (host-state-conditions host)))))
+  (dispatch-input! (make-pointer-event 0 1 'left 0 1 'press))
   (let ([state-before-frame (view-state view)])
     (dispatcher-dispatch-view!
       (host-state-dispatch host)
@@ -4476,9 +4485,8 @@
         (view-id view) (view-state-generation state-before-frame)
         (make-selection (list (make-selection-range 3 3)))
         #f #f '() '() #f)))
-  (frontend-render! frontend)
-  (frontend-dispatch-input!
-    frontend (make-pointer-event 0 2 'left 0 0 'move))
+  (frontend-step! frontend)
+  (dispatch-input! (make-pointer-event 0 2 'left 0 0 'move))
   (unless (and (= (surface-hit-document-offset
                     (command-context-target pointer-observed))
                   2)
@@ -4486,13 +4494,17 @@
                     (command-context-target pointer-observed))
                   (window-id leaf)))
     (error 'kernel-tests
-           "pointer capture did not route motion through the captured Window"))
-  (frontend-dispatch-input!
-    frontend (make-pointer-event 0 200 'left 0 1 'release))
+           "pointer capture did not route motion through the captured Window"
+           (and pointer-observed
+                (surface-hit-document-offset
+                  (command-context-target pointer-observed)))
+           (and pointer-observed
+                (surface-hit-window-id
+                  (command-context-target pointer-observed)))))
+  (dispatch-input! (make-pointer-event 0 200 'left 0 1 'release))
   (unless (not (frontend-cancel-pointer-capture! frontend))
     (error 'kernel-tests "pointer release retained capture"))
-  (frontend-dispatch-input!
-    frontend (make-pointer-event 0 1 'left 0 1 'press))
+  (dispatch-input! (make-pointer-event 0 1 'left 0 1 'press))
   (frontend-enqueue!
     frontend
     (make-surface-input-message (surface-id surface) event))
@@ -4502,7 +4514,7 @@
     (error 'kernel-tests "Surface resize retained stale pointer capture"))
   (frontend-step! frontend)
   (frontend-set-theme! frontend alternate-theme)
-  (frontend-render! frontend)
+  (frontend-step! frontend)
   (unless (and observed
                (let ([context (car observed)])
                  (and (= (command-context-surface-id context) (surface-id surface))
@@ -4515,6 +4527,43 @@
                (eq? presented-theme alternate-theme)
                (>= renders 3))
     (error 'kernel-tests "frontend orchestration did not route input and rendering"))
+  ;; HostState owns routing for its shared runtime.  Advancing one frontend
+  ;; may execute another Surface's action, but must deliver it to that
+  ;; Surface's input handler and completion cycle.
+  (let* ([second-leaf (make-leaf-window (view-id view) #f)]
+         [second-surface (make-surface 'terminal '() second-leaf '(40 . 10))]
+         [_registered
+          (surface-service-register! (host-state-surfaces host) second-surface)]
+         [second-renders 0]
+         [second-frontend
+          (make-frontend
+            host second-surface
+            (lambda (active active-view)
+              (make-input-context
+                (active-context-view-id active)
+                (active-context-buffer-id active)
+                (list (make-input-layer 'global keymap #f 'ignore))
+                (view-state-input-state (view-state active-view))))
+            (lambda (context disposition) #f)
+            (lambda (render theme)
+              (set! second-renders (+ second-renders 1)))
+            (make-render-service) default-theme)])
+    (frontend-step! second-frontend)
+    (set! observed #f)
+    (frontend-enqueue!
+      second-frontend
+      (make-surface-input-message (surface-id second-surface) event))
+    (frontend-step! frontend)
+    (frontend-step! second-frontend)
+    (unless (and observed
+                 (= (command-context-surface-id (car observed))
+                    (surface-id second-surface))
+                 (> second-renders 0))
+      (error 'kernel-tests
+             "shared runtime did not route input to its owning Surface"))
+    (frontend-close! second-frontend)
+    (surface-service-remove!
+      (host-state-surfaces host) (surface-id second-surface)))
   (frontend-close! frontend)
   (owner-close! package-owner))
 

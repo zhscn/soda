@@ -16,6 +16,7 @@
           host-state-command-runtime
           host-state-conditions
           host-state-dispatch
+          host-state-frontend-handlers
           host-state-closed?
           host-state-run!
           host-state-close!)
@@ -55,6 +56,7 @@
       (immutable command-runtime host-state-command-runtime)
       (immutable conditions host-state-conditions)
       (immutable dispatch host-state-dispatch)
+      (immutable frontend-handlers host-state-frontend-handlers)
       (mutable closed? host-state-closed? host-state-closed?-set!)))
 
   (define (make-host-state)
@@ -138,7 +140,7 @@
                (buffer-attachment-service-destroy-buffer! buffer-attachments buffer))))
       (%make-host-state
         owner runtime buffers buffer-attachments analyses modes locations navigation settings views surfaces commands
-        command-runtime conditions dispatch #f)))
+        command-runtime conditions dispatch (make-eqv-hashtable) #f)))
 
   (define (host-state-close! state)
     (unless (host-state? state)

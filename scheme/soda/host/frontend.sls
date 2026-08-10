@@ -2,6 +2,7 @@
   (export host-frontend-surface-registered?
           host-frontend-active-view
           host-frontend-surface-message
+          host-frontend-clear-input-feedback!
           host-frontend-surface-hit-current?
           host-frontend-pointer-capture-current?
           host-frontend-pointer-target
@@ -10,6 +11,7 @@
           host-frontend-enqueue!
           host-frontend-enqueue-priority!
           host-frontend-discard!
+          host-frontend-register-handler!
           host-frontend-pending?
           host-frontend-run!
           host-frontend-dispatch-view!
@@ -35,6 +37,7 @@
           (soda host internal surface)
           (soda host internal view)
           (soda host internal window)
+          (soda host operation)
           (soda host render)
           (soda host render-service)
           (soda host runtime)
@@ -113,7 +116,16 @@
 
   (define (host-frontend-surface-message state surface)
     (and (host-frontend-surface-registered? state surface)
-         (surface-status-message surface)))
+      (surface-status-message surface)))
+
+  (define (host-frontend-clear-input-feedback! state surface)
+    (unless (and (host-state? state) (surface? surface))
+      (assertion-violation
+        'host-frontend-clear-input-feedback! "expected HostState and Surface" state surface))
+    (and (eq? (surface-status-message-lifetime surface) 'until-command)
+         (dispatcher-dispatch-host!
+           (host-state-dispatch state)
+           (make-set-surface-message-operation (surface-id surface) #f))))
 
   (define (host-frontend-surface-hit-current? state surface hit)
     (and (host-state? state) (surface? surface) (surface-hit? hit)
@@ -358,13 +370,48 @@
   (define (host-frontend-discard! state predicate)
     (runtime-discard! (host-state-runtime state) predicate))
 
+  ;; Surface input is routed by HostState so any frontend may advance the
+  ;; shared runtime without consuming another Surface's events.
+  (define (host-frontend-register-handler! state surface-id owner handler)
+    (unless (and (host-state? state) (integer? surface-id) (exact? surface-id)
+                 (>= surface-id 0)
+                 (owner? owner) (procedure? handler))
+      (assertion-violation
+        'host-frontend-register-handler!
+        "expected HostState, Surface identity, Owner, and handler"
+        state surface-id owner handler))
+    (owner-assert-active 'host-frontend-register-handler! owner)
+    (let ([handlers (host-state-frontend-handlers state)])
+      (when (hashtable-contains? handlers surface-id)
+        (assertion-violation
+          'host-frontend-register-handler! "Surface already has a frontend" surface-id))
+      (hashtable-set! handlers surface-id handler)
+      (make-registration
+        owner
+        (lambda ()
+          (when (eq? (hashtable-ref handlers surface-id #f) handler)
+            (hashtable-delete! handlers surface-id))))))
+
   (define (host-frontend-pending? state)
     (runtime-pending? (host-state-runtime state)))
 
-  (define (host-frontend-run! state handler . limit)
+  (define (route-frontend-message! state message)
+    (cond
+      [(surface-input-message? message)
+       (let ([handler
+              (hashtable-ref
+                (host-state-frontend-handlers state)
+                (surface-input-message-surface-id message) #f)])
+         (and handler (handler message)))]
+      [(procedure? message) (message) #t]
+      [else #f]))
+
+  (define (host-frontend-run! state . limit)
     (if (null? limit)
-        (host-state-run! state handler)
-        (host-state-run! state handler (car limit))))
+        (host-state-run! state (lambda (message) (route-frontend-message! state message)))
+        (host-state-run!
+          state (lambda (message) (route-frontend-message! state message))
+          (car limit))))
 
   (define (host-frontend-dispatch-view! state specification)
     (dispatcher-dispatch-view! (host-state-dispatch state) specification))

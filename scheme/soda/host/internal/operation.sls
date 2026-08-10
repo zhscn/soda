@@ -114,19 +114,25 @@
   ;; A Surface message is chrome, not document content.  It is immutable
   ;; operation data so a package can request feedback without receiving a
   ;; mutable Surface or frontend handle.
-  (define (make-set-surface-message-operation surface-id message)
-    (unless (and (identity? surface-id)
-                 (or (not message)
-                     (and (string? message)
-                          (not (exists (lambda (character)
-                                         (or (char=? character #\newline)
-                                             (char=? character #\return)))
-                                       (string->list message))))))
-      (assertion-violation 'make-set-surface-message-operation
-                           "invalid Surface identity or single-line message"
-                           surface-id message))
-    (%make-host-operation 'set-surface-message surface-id
-                          (and message (string-copy message))))
+  (define make-set-surface-message-operation
+    (case-lambda
+      [(surface-id message)
+       (make-set-surface-message-operation surface-id message 'until-command)]
+      [(surface-id message lifetime)
+       (unless (and (identity? surface-id)
+                    (memq lifetime '(until-command persistent))
+                    (or (not message)
+                        (and (string? message)
+                             (not (exists (lambda (character)
+                                            (or (char=? character #\newline)
+                                                (char=? character #\return)))
+                                          (string->list message))))))
+         (assertion-violation 'make-set-surface-message-operation
+                              "invalid Surface identity or single-line message"
+                              surface-id message lifetime))
+       (%make-host-operation
+         'set-surface-message surface-id
+         (list (and message (string-copy message)) lifetime))]))
 
   (define (make-set-surface-shortcut-hints-operation surface-id hints)
     (unless (and (identity? surface-id) (list? hints)

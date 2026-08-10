@@ -46,9 +46,10 @@
       [(invalidate-surface)
        (and (surface-invalidate! surface) #t)]
       [(set-surface-message)
-       (and (surface-set-status-message!
-              surface (host-operation-value operation))
-            #t)]
+       (let ([value (host-operation-value operation)])
+         (and (surface-set-status-message!
+                surface (car value) (cadr value))
+              #t))]
       [(set-surface-shortcut-hints)
        (and (surface-set-shortcut-hints!
               surface (host-operation-value operation))
