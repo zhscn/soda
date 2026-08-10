@@ -52,6 +52,7 @@
           (soda packages edit-policy)
           (soda packages completion)
           (soda packages file-keymap)
+          (soda packages file-state)
           (soda packages file-watch)
           (soda packages file-format)
           (soda packages interaction)
@@ -66,13 +67,12 @@
   (define-record-type
     (file-service %make-file-service file-service?)
     (fields
-      (immutable resources file-service-resources)
+      (immutable state file-service-state)
       (immutable host file-service-host)
       (immutable owner file-service-owner)
       (immutable history file-service-history)
       (immutable keymap file-keymap)
       (immutable watch-service file-service-watch-service)
-      (immutable conflicts file-service-conflicts)
       (mutable recovery file-service-recovery file-service-recovery-set!)
       (mutable mode-associations file-service-mode-associations
                                  file-service-mode-associations-set!)))
@@ -123,14 +123,6 @@
                               (string-length (file-mode-association-suffix best)))))
                   association
                   best))))))
-
-  (define-record-type file-binding
-    (fields resource version lock format))
-
-  (define-record-type
-    (file-conflict %make-file-conflict file-conflict?)
-    (fields buffer-id resource version kind
-            (mutable status file-conflict-status file-conflict-status-set!)))
 
   (define-record-type file-lock
     (fields path token))
@@ -456,8 +448,9 @@
     (unless (and (file-service? service) (buffer-id? buffer-id))
       (assertion-violation 'file-service-binding "expected a file service and Buffer id"
                            service buffer-id))
-    (hashtable-ref (file-service-resources service) buffer-id
-                   (if (null? default) #f (car default))))
+    (file-state-binding
+      (file-service-state service) buffer-id
+      (if (null? default) #f (car default))))
 
   (define (file-service-resource service buffer-id . default)
     (let ([binding (file-service-binding service buffer-id #f)])
@@ -472,16 +465,7 @@
           (if (null? default) #f (car default)))))
 
   (define (file-service-binding-at-path service path)
-    (let-values ([(ids bindings)
-                  (hashtable-entries (file-service-resources service))])
-      (let loop ([index 0])
-        (if (= index (vector-length ids))
-            (values #f #f)
-            (let ([binding (vector-ref bindings index)])
-              (if (string=? path
-                            (resource-locator (file-binding-resource binding)))
-                  (values (vector-ref ids index) binding)
-                  (loop (+ index 1))))))))
+    (file-state-binding-at-path (file-service-state service) path))
 
   ;; Directory packages delegate file mutations here so Buffer identity,
   ;; locks, watches, and resource keys change as one host-owned operation.
@@ -542,9 +526,9 @@
         (set-resource!
           service buffer-id (file-binding-resource binding) #f #f
           (file-binding-format binding) #t)
-        (hashtable-set!
-          (file-service-conflicts service) buffer-id
-          (%make-file-conflict
+        (file-state-set-conflict!
+          (file-service-state service) buffer-id
+          (make-file-conflict
             buffer-id (file-binding-resource binding) #f 'deleted 'pending)))
       #t))
 
@@ -553,8 +537,8 @@
       (assertion-violation 'file-service-conflict
                            "expected a FileService and Buffer id"
                            service buffer-id))
-    (hashtable-ref
-      (file-service-conflicts service) buffer-id
+    (file-state-conflict
+      (file-service-state service) buffer-id
       (if (null? default) #f (car default))))
 
   ;; A visited Buffer has no preceding path argument and writes its own
@@ -613,7 +597,7 @@
          (assertion-violation 'set-resource!
                               "expected file format metadata" format))
        (let ([binding (make-file-binding resource version lock format)])
-         (hashtable-set! (file-service-resources service) buffer-id binding)
+         (file-state-set-binding! (file-service-state service) buffer-id binding)
          (file-watch-service-update!
            (file-service-watch-service service) buffer-id
            (resource-locator resource) version local?)
@@ -665,13 +649,14 @@
                              '(modified replaced))
                        (file-state-event-version event))]
                  [conflict
-                  (%make-file-conflict
+                  (make-file-conflict
                     buffer-id
                     (file-binding-resource binding)
                     (file-state-event-version event)
                     (file-state-event-kind event)
                     (if automatic? 'reloading 'pending))])
-            (hashtable-set! (file-service-conflicts service) buffer-id conflict)
+            (file-state-set-conflict!
+              (file-service-state service) buffer-id conflict)
             (command-runtime-enqueue!
               (package-host-command-runtime (file-service-host service))
               (make-command-invoke-message
@@ -1006,7 +991,7 @@
       conflict))
 
   (define (clear-conflict! service buffer-id)
-    (hashtable-delete! (file-service-conflicts service) buffer-id))
+    (file-state-clear-conflict! (file-service-state service) buffer-id))
 
   (define (clear-recovery! service buffer-id)
     (let ([recovery (file-service-recovery service)])
@@ -1179,11 +1164,11 @@
                      (not (history-modified?
                             (file-service-history service) buffer-id)))]
                [next
-                (%make-file-conflict
+                (make-file-conflict
                   buffer-id (file-conflict-resource old) version
                   (if version 'replaced 'deleted)
                   (if automatic? 'reloading 'pending))])
-          (hashtable-set! (file-service-conflicts service) buffer-id next)
+          (file-state-set-conflict! (file-service-state service) buffer-id next)
           (command-runtime-enqueue!
             (package-host-command-runtime (file-service-host service))
             (make-command-invoke-message
@@ -1227,8 +1212,7 @@
            [watch-service (make-file-watch-service owner)]
            [service
             (%make-file-service
-              (make-eqv-hashtable) host owner history keymap watch-service
-              (make-eqv-hashtable) #f '())])
+              (make-file-state) host owner history keymap watch-service #f '())])
       (file-service-recovery-set!
         service
         (and history
@@ -1525,8 +1509,8 @@
             (when binding (release-file-lock! (file-binding-lock binding))))
           (file-watch-service-unregister!
             (file-service-watch-service service) (buffer-id buffer))
-          (hashtable-delete! (file-service-resources service) (buffer-id buffer))
-          (clear-conflict! service (buffer-id buffer))
+          (file-state-delete-buffer!
+            (file-service-state service) (buffer-id buffer))
           (clear-recovery! service (buffer-id buffer))
           (when history (history-discard-buffer! history (buffer-id buffer)))))
       service))
