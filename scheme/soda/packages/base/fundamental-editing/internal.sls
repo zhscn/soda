@@ -18,6 +18,8 @@
           (soda packages base text-format)
           (soda packages base fundamental-keymap)
           (soda packages base fundamental-motion)
+          (soda packages base fundamental-edit)
+          (soda packages base fundamental-kill)
           (soda packages base fundamental-interface)
           (soda packages base fundamental-selection)
           (soda packages base editing-options)
@@ -45,36 +47,7 @@
     (fundamental-editing %make-fundamental-editing fundamental-editing?)
     (fields (immutable keymap fundamental-editing-keymap)
             (immutable mode fundamental-mode)
-            (mutable kill-ring fundamental-editing-kill-ring
-                     fundamental-editing-kill-ring-set!)))
-
-  (define (replace-selection context inserted)
-    (unless (bytevector? inserted)
-      (assertion-violation 'fundamental.insert-text "expected committed UTF-8 bytes" inserted))
-    (let* ([selection (context-selection context)]
-           [length (context-document-length context)]
-           [changes
-            (map
-              (lambda (range)
-                (make-text-change
-                  (selection-range-from range) (selection-range-to range) inserted))
-              (selection-ranges selection))]
-           [change-set (make-change-set length changes)]
-           [next-selection
-            (make-selection
-              (map
-                (lambda (range)
-                  (let ([position
-                         (change-set-map-offset
-                           change-set (selection-range-to range) 'after)])
-                    (collapse-range range position)))
-                (selection-ranges selection))
-              (selection-primary selection))])
-      (make-transaction-spec
-        (command-context-buffer-id context)
-        (command-context-view-id context)
-        (buffer-state-generation (command-context-buffer-state context))
-        change-set next-selection '() '())))
+            (immutable kill-ring fundamental-editing-kill-ring)))
 
   (define (auto-fill-insert context inserted)
     (let* ([options
@@ -417,135 +390,6 @@
                               (buffer-state-generation (command-context-buffer-state context))
                               changes selection '() '())))))))))))
 
-  (define (replace-primary-selection selection range)
-    (let ([primary (selection-primary selection)])
-      (make-selection
-        (let loop ([remaining (selection-ranges selection)]
-                   [index 0] [result '()])
-          (if (null? remaining)
-              (reverse result)
-              (loop
-                (cdr remaining) (+ index 1)
-                (cons (if (= index primary) range (car remaining)) result))))
-        primary)))
-
-  (define (primary-region-bytes context)
-    (let ([range (selection-primary-range (context-selection context))])
-      (and (not (selection-range-empty? range))
-           (with-context-text
-             context
-             (lambda (text)
-               (text-subbytevector text
-                                   (selection-range-from range)
-                                   (selection-range-to range)))))))
-
-  (define (record-kill! editing bytes)
-    (unless (bytevector? bytes)
-      (assertion-violation 'fundamental.record-kill "expected UTF-8 bytes" bytes))
-    (let ([entries (cons (bytevector-copy bytes) (fundamental-editing-kill-ring editing))])
-      (fundamental-editing-kill-ring-set!
-        editing
-        (let loop ([items entries] [remaining 60])
-          (if (or (zero? remaining) (null? items))
-              '()
-              (cons (car items) (loop (cdr items) (- remaining 1)))))))
-    bytes)
-
-  (define (copy-region context)
-    (let ([bytes (primary-region-bytes context)])
-      (if (not bytes)
-          (command-handled)
-          (make-command-result
-            (list
-              (fundamental-deactivate-mark context)
-              (make-command-effect 'fundamental.record-kill bytes)
-              (make-command-effect 'clipboard.write bytes))))))
-
-  (define (kill-range context range start end)
-    (if (= start end)
-        (command-handled)
-        (let ([bytes
-               (with-context-text
-                 context
-                 (lambda (text) (text-subbytevector text start end)))])
-          (let* ([length (context-document-length context)]
-                 [changes (make-change-set
-                            length
-                            (list (make-text-change start end (make-bytevector 0))))]
-                 [selection (make-selection (list (collapse-range range start)) 0)])
-            (make-command-result
-              (list
-                (make-transaction-spec
-                  (command-context-buffer-id context)
-                  (command-context-view-id context)
-                  (buffer-state-generation (command-context-buffer-state context))
-                  changes selection '() '())
-                (make-command-effect 'fundamental.record-kill bytes)
-                (make-command-effect 'clipboard.write bytes)))))))
-
-  (define (kill-region context)
-    (let ([range (selection-primary-range (context-selection context))])
-      (kill-range context range (selection-range-from range) (selection-range-to range))))
-
-  (define (kill-word context direction)
-    (let ([range (selection-primary-range (context-selection context))])
-      (if (not (selection-range-empty? range))
-          (kill-region context)
-          (with-context-text
-            context
-            (lambda (text)
-              (let* ([point (selection-range-head range)]
-                     [other ((if (eq? direction 'backward)
-                                 text-backward-word-offset
-                                 text-forward-word-offset)
-                             text point)])
-                (kill-range context range (min point other) (max point other))))))))
-
-  (define (kill-line context)
-    (let ([range (selection-primary-range (context-selection context))])
-      (if (not (selection-range-empty? range))
-          (kill-region context)
-          (with-context-text
-            context
-            (lambda (text)
-              (let* ([point (selection-range-head range)]
-                     [line (car (text-position text point))]
-                     [end (text-line-content-end text line)]
-                     [to (if (< point end)
-                             end
-                             (text-next-grapheme-offset text point))])
-                (kill-range context range point to)))))))
-
-  ;; Nano's Cut Text command operates on the whole logical line when there is
-  ;; no active region.  Keep it separate from `kill-line`: packages that want
-  ;; Emacs-style kill-to-end-of-line retain that reusable primitive.
-  (define (cut-text context)
-    (let ([range (selection-primary-range (context-selection context))])
-      (if (not (selection-range-empty? range))
-          (kill-region context)
-          (with-context-text
-            context
-            (lambda (text)
-              (let* ([point (selection-range-head range)]
-                     [line (car (text-position text point))]
-                     [from (text-line-start text line)]
-                     [content-end (text-line-content-end text line)]
-                     [size (text-size text)]
-                     ;; Include the line terminator when one exists.  This
-                     ;; makes cutting a middle line leave its neighbours
-                     ;; adjacent, while a final unterminated line remains a
-                     ;; valid empty Buffer.
-                     [to (if (< content-end size)
-                             (text-next-grapheme-offset text content-end)
-                             content-end)])
-                (kill-range context range from to)))))))
-
-  (define (yank context editing)
-    (let ([ring (fundamental-editing-kill-ring editing)])
-      (if (null? ring)
-          (command-handled)
-          (replace-selection context (bytevector-copy (car ring))))))
-
   (define-syntax install-command!
     (syntax-rules ()
       [(_ runtime owner name (context . arguments) documentation class body ...)
@@ -567,11 +411,12 @@
                   (list (make-input-layer 'major keymap #f 'accept))))
               '(editing motion selection kill yank viewport interface)
               "Fund")]
-           [editing (%make-fundamental-editing keymap mode '())])
+           [editing (%make-fundamental-editing keymap mode (make-kill-ring))])
       (command-runtime-register-effect-handler!
         runtime 'fundamental.record-kill owner 'fundamental-kill-ring
         (lambda (service invocation effect)
-          (record-kill! editing (command-effect-payload effect))))
+          (record-kill! (fundamental-editing-kill-ring editing)
+                        (command-effect-payload effect))))
       (install-command!
         runtime owner 'fundamental.insert-text (context inserted)
         "Insert committed text at every selection." 'editing
@@ -760,7 +605,7 @@
       (install-command!
         runtime owner 'fundamental.yank (context)
         "Insert the newest kill-ring entry at every selection." 'yank
-        (yank context editing))
+        (yank context (fundamental-editing-kill-ring editing)))
       (install-fundamental-keymap! keymap)
       editing))
 
