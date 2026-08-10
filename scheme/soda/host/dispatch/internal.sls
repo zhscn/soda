@@ -39,12 +39,11 @@
           (soda host internal operation)
           (soda host internal surface)
           (soda host dispatch buffer-transaction)
-          (soda host dispatch gate)
           (soda host dispatch global-operation)
+          (soda host dispatch publication)
           (soda host dispatch surface-operation)
           (soda host dispatch update)
           (soda host dispatch view-transaction)
-          (soda host value)
           (soda view plugin))
 
   (define-record-type
@@ -53,17 +52,8 @@
       (immutable buffers dispatcher-buffers)
       (immutable views dispatcher-views)
       (immutable surfaces dispatcher-surfaces)
-      (mutable report-error! dispatcher-report-error! dispatcher-report-error!-set!)
-      (mutable listener dispatcher-listener dispatcher-listener-set!)
-      (mutable host-listener dispatcher-host-listener dispatcher-host-listener-set!)
-      (mutable listeners dispatcher-listeners dispatcher-listeners-set!)
-      (mutable host-listeners dispatcher-host-listeners dispatcher-host-listeners-set!)
-      (immutable global-handlers dispatcher-global-handlers)
-      (immutable gate dispatcher-gate)))
-
-  (define-record-type
-    (dispatcher-observer %make-dispatcher-observer dispatcher-observer?)
-    (fields (immutable procedure dispatcher-observer-procedure)))
+      (immutable publication dispatcher-publication)
+      (immutable global-handlers dispatcher-global-handlers)))
 
   (define make-dispatcher
     (case-lambda
@@ -81,72 +71,43 @@
     (unless (or (not listener) (procedure? listener))
       (assertion-violation 'make-dispatcher "expected a listener or #f" listener))
     (%make-dispatcher
-      buffers views surfaces (lambda (source condition) #f) listener #f '() '()
-      (make-global-operation-registry) (make-dispatch-gate))]))
+      buffers views surfaces (make-dispatch-publication listener)
+      (make-global-operation-registry))]))
 
   (define (dispatcher-run! dispatcher thunk)
-    (dispatch-gate-run! (dispatcher-gate dispatcher) thunk))
-
-  (define (dispatcher-notify! dispatcher thunk)
-    (dispatch-gate-notify! (dispatcher-gate dispatcher) thunk))
+    (dispatch-publication-run! (dispatcher-publication dispatcher) thunk))
 
   (define (dispatcher-set-listener! dispatcher listener)
-    (unless (or (not listener) (procedure? listener))
-      (assertion-violation 'dispatcher-set-listener! "listener must be a procedure" listener))
-    (dispatcher-listener-set! dispatcher listener)
-    listener)
+    (dispatch-publication-set-editor-listener!
+      (dispatcher-publication dispatcher) listener))
 
   (define (dispatcher-set-error-reporter! dispatcher reporter)
-    (unless (and (dispatcher? dispatcher) (procedure? reporter))
+    (unless (dispatcher? dispatcher)
       (assertion-violation 'dispatcher-set-error-reporter!
-                           "expected a dispatcher and error reporter" dispatcher reporter))
-    (dispatcher-report-error!-set! dispatcher reporter)
-    reporter)
-
-  (define (dispatcher-report! dispatcher source condition)
-    (guard (ignored [else #f])
-      ((dispatcher-report-error! dispatcher) source condition)))
-
-  (define (dispatcher-notify-one! dispatcher source listener value)
-    (guard
-      (condition
-        [else
-         (dispatcher-report! dispatcher source condition)
-         #f])
-      (listener value)))
+                           "expected a dispatcher" dispatcher))
+    (dispatch-publication-set-error-reporter!
+      (dispatcher-publication dispatcher) reporter))
 
   (define (dispatcher-set-host-listener! dispatcher listener)
-    (unless (or (not listener) (procedure? listener))
+    (unless (dispatcher? dispatcher)
       (assertion-violation 'dispatcher-set-host-listener!
-                           "expected a listener or #f" listener))
-    (dispatcher-host-listener-set! dispatcher listener)
-    listener)
-
-  ;; Host-owned observers supplement the compatibility listener slots.  The
-  ;; registration is tied to an Owner, so a frontend or package can observe
-  ;; publication without replacing another observer or leaking after close.
-  (define (add-observer! who dispatcher owner listener access set-access!)
-    (unless (and (dispatcher? dispatcher) (owner? owner) (procedure? listener))
-      (assertion-violation who "expected a dispatcher, owner, and listener"
-                           dispatcher owner listener))
-    (owner-assert-active who owner)
-    (let ([entry (%make-dispatcher-observer listener)])
-      (set-access! dispatcher (append (access dispatcher) (list entry)))
-      (make-registration
-        owner
-        (lambda ()
-          (set-access!
-            dispatcher
-            (filter (lambda (item) (not (eq? item entry)))
-                    (access dispatcher)))))))
+                           "expected a dispatcher" dispatcher))
+    (dispatch-publication-set-host-listener!
+      (dispatcher-publication dispatcher) listener))
 
   (define (dispatcher-add-listener! dispatcher owner listener)
-    (add-observer! 'dispatcher-add-listener! dispatcher owner listener
-                   dispatcher-listeners dispatcher-listeners-set!))
+    (unless (dispatcher? dispatcher)
+      (assertion-violation 'dispatcher-add-listener!
+                           "expected a dispatcher" dispatcher))
+    (dispatch-publication-add-editor-listener!
+      (dispatcher-publication dispatcher) owner listener))
 
   (define (dispatcher-add-host-listener! dispatcher owner listener)
-    (add-observer! 'dispatcher-add-host-listener! dispatcher owner listener
-                   dispatcher-host-listeners dispatcher-host-listeners-set!))
+    (unless (dispatcher? dispatcher)
+      (assertion-violation 'dispatcher-add-host-listener!
+                           "expected a dispatcher" dispatcher))
+    (dispatch-publication-add-host-listener!
+      (dispatcher-publication dispatcher) owner listener))
 
   (define (dispatcher-register-global-operation-handler!
            dispatcher owner kind damage procedure)
@@ -158,20 +119,8 @@
       (dispatcher-global-handlers dispatcher) owner kind damage procedure))
 
   (define (notify-host-update! dispatcher update)
-    (dispatcher-notify!
-      dispatcher
-      (lambda ()
-        (let ([listener (dispatcher-host-listener dispatcher)])
-          (when listener
-            (dispatcher-notify-one!
-              dispatcher '(host listener) listener update)))
-        (for-each
-          (lambda (entry)
-            (dispatcher-notify-one!
-              dispatcher '(host observer)
-              (dispatcher-observer-procedure entry) update))
-          (dispatcher-host-listeners dispatcher))))
-    update)
+    (dispatch-publication-publish-host!
+      (dispatcher-publication dispatcher) update))
 
   (define (dispatcher-dispatch-host-now! dispatcher operation)
     (unless (and (dispatcher? dispatcher) (host-operation? operation))
@@ -220,23 +169,10 @@
     update)
 
   (define (dispatcher-notify-editor-update! dispatcher update configuration)
-    (dispatcher-notify!
-      dispatcher
-      (lambda ()
-        (notify-view-plugins! dispatcher update)
-        (let ([listener (dispatcher-listener dispatcher)])
-          (when listener
-            (dispatcher-notify-one! dispatcher '(editor listener) listener update)))
-        (for-each
-          (lambda (entry)
-            (dispatcher-notify-one!
-              dispatcher '(editor observer) (dispatcher-observer-procedure entry) update))
-          (dispatcher-listeners dispatcher))
-        (for-each
-          (lambda (listener)
-            (dispatcher-notify-one! dispatcher '(editor update-listener) listener update))
-          (configuration-facet configuration update-listeners-facet 'buffer))))
-    update)
+    (dispatch-publication-publish-editor!
+      (dispatcher-publication dispatcher) update configuration
+      (lambda (published-update)
+        (notify-view-plugins! dispatcher published-update))))
 
   ;; Publish non-document state owned by a Host service through the same
   ;; observer and ViewPlugin boundary as an editor transaction.  Buffer and
