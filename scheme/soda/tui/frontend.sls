@@ -34,6 +34,7 @@
           (soda host surface)
           (soda host value)
           (soda host view)
+          (soda tui input-scheduler)
           (soda view theme))
 
   ;; Frontend owns the control-flow boundary between a Surface's normalized
@@ -48,10 +49,9 @@
       (immutable handle-disposition frontend-handle-disposition)
       (immutable present! frontend-present!)
       (immutable render-service frontend-render-service)
+      (immutable input-scheduler frontend-input-scheduler)
       (mutable theme frontend-theme frontend-theme-set!)
       (mutable dirty? frontend-dirty? frontend-dirty?-set!)
-      (mutable render-deferred? frontend-render-deferred?
-               frontend-render-deferred?-set!)
       (mutable pending-scroll frontend-pending-scroll frontend-pending-scroll-set!)
       (mutable update-registration frontend-update-registration
                                    frontend-update-registration-set!)
@@ -82,7 +82,8 @@
       (assertion-violation 'make-frontend "invalid frontend dependencies"))
     (let ([value
             (%make-frontend state surface resolve-input-context handle-disposition
-                            present! render-service theme #t #f #f #f #f #f #f)])
+                            present! render-service (make-input-scheduler state)
+                            theme #t #f #f #f #f #f)])
       (frontend-update-registration-set!
         value
         (host-frontend-add-update-listener!
@@ -119,7 +120,7 @@
 
   (define (frontend-enqueue! value message)
     (require-open 'frontend-enqueue! value)
-    (host-frontend-enqueue! (frontend-host-state value) message))
+    (input-scheduler-enqueue! (frontend-input-scheduler value) message))
 
   (define (frontend-pending? value)
     (require-open 'frontend-pending? value)
@@ -270,14 +271,13 @@
           "input disposition handler returned an unsupported runtime message"
           result))
       (command-runtime-enqueue!
-        (host-state-command-runtime (frontend-host-state value)) result)
-      (when (command-invoke-message? result)
-        (frontend-render-deferred?-set! value #t))))
+        (host-state-command-runtime (frontend-host-state value)) result)))
 
   (define (frontend-dispatch-input! value event)
     (require-open 'frontend-dispatch-input! value)
     (unless (input-event? event)
       (assertion-violation 'frontend-dispatch-input! "expected an input event" event))
+    (input-scheduler-begin-cycle! (frontend-input-scheduler value))
     ;; Surface messages are echo-area feedback.  The next user input clears a
     ;; previous message before dispatching its command, while a command that
     ;; emits a new message publishes it again at the same boundary.
@@ -335,8 +335,7 @@
                           (host-state-command-runtime (frontend-host-state value))
                           name)
                         (or (input-disposition-requested-command disposition)
-                            name)))
-                    (frontend-render-deferred?-set! value #t))]
+                            name))))]
                  [else
                   (let ([result
                          ((frontend-handle-disposition value)
@@ -374,7 +373,9 @@
          (host-frontend-capture-condition!
            (frontend-host-state value) (list 'tui-frontend message condition))
          #t])
-      (frontend-handle-message! value message)))
+      (or (input-scheduler-handle-message!
+            (frontend-input-scheduler value) message)
+          (frontend-handle-message! value message))))
 
   (define frontend-drain!
     (case-lambda
@@ -413,7 +414,8 @@
           render))))
 
   (define (frontend-render-if-ready! value)
-    (and (not (frontend-render-deferred? value))
+    (and (input-scheduler-presentation-ready?
+           (frontend-input-scheduler value))
          (frontend-render! value)))
 
   (define frontend-step!
@@ -424,25 +426,15 @@
        (require-open 'frontend-step! value)
        (unless (and (integer? limit) (exact? limit) (> limit 0))
          (assertion-violation 'frontend-step! "limit must be a positive exact integer" limit))
-       ;; An input message and the command it enqueues form one presentation
-       ;; unit. State changes remain sequential, while the intermediate input
-       ;; reset does not trigger its own layout and terminal transaction.
+       ;; Each input action carries an explicit completion boundary.  Runtime
+       ;; messages remain sequential, while presentation waits for the action's
+       ;; command and any priority work it schedules to finish.
        (let loop ([processed 0])
          (if (or (>= processed limit) (not (frontend-pending? value)))
              (begin
                (frontend-render-if-ready! value)
                processed)
-             (let* ([awaiting? (frontend-render-deferred? value)]
-                    [first (frontend-drain! value 1)]
-                    [paired?
-                     (and (not awaiting?)
-                          (frontend-render-deferred? value)
-                          (< (+ processed first) limit)
-                          (frontend-pending? value))]
-                    [second (if paired? (frontend-drain! value 1) 0)]
-                    [count (+ first second)])
-               (when (or awaiting? paired?)
-                 (frontend-render-deferred?-set! value #f))
+             (let ([count (frontend-drain! value 1)])
                (frontend-render-if-ready! value)
                (loop (+ processed count)))))]))
 

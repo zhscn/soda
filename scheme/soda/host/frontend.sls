@@ -8,6 +8,8 @@
           host-frontend-make-command-context
           host-frontend-resolve-scroll-request!
           host-frontend-enqueue!
+          host-frontend-enqueue-priority!
+          host-frontend-discard!
           host-frontend-pending?
           host-frontend-run!
           host-frontend-dispatch-view!
@@ -28,7 +30,6 @@
           (soda host command)
           (soda host context)
           (soda host dispatch)
-          (soda host input-event)
           (soda host internal buffer)
           (soda host internal state)
           (soda host internal surface)
@@ -348,34 +349,14 @@
                        #f '() '() #f)))
                  #t)))))
 
-  (define (same-physical-key? left right)
-    (and (key-event? left) (key-event? right)
-         (key-stroke=? (key-event->key-stroke left)
-                       (key-event->key-stroke right))))
-
-  (define (pending-repeat-for? message surface-id event)
-    (and (surface-input-message? message)
-         (= (surface-input-message-surface-id message) surface-id)
-         (let ([candidate (surface-input-message-event message)])
-           (and (key-event? candidate)
-                (eq? (key-event-type candidate) 'repeat)
-                (same-physical-key? candidate event)))))
-
-  ;; Repeats describe the current held-key state, not durable commands.  At
-  ;; most one unhandled repeat per physical key remains queued; release drops
-  ;; that pending repeat before it can become motion after the key is up.
   (define (host-frontend-enqueue! state message)
-    (let ([runtime (host-state-runtime state)])
-      (when (surface-input-message? message)
-        (let ([event (surface-input-message-event message)])
-          (when (and (key-event? event)
-                     (memq (key-event-type event) '(repeat release)))
-            (runtime-discard!
-              runtime
-              (lambda (candidate)
-                (pending-repeat-for?
-                  candidate (surface-input-message-surface-id message) event))))))
-      (runtime-enqueue! runtime message)))
+    (runtime-enqueue! (host-state-runtime state) message))
+
+  (define (host-frontend-enqueue-priority! state message)
+    (runtime-enqueue-priority! (host-state-runtime state) message))
+
+  (define (host-frontend-discard! state predicate)
+    (runtime-discard! (host-state-runtime state) predicate))
 
   (define (host-frontend-pending? state)
     (runtime-pending? (host-state-runtime state)))

@@ -59,6 +59,7 @@
           (soda packages resource)
           (soda support vfs)
           (soda tui frontend)
+          (soda tui terminal-input)
           (soda view decoration)
           (soda view display)
           (soda view frame)
@@ -3182,6 +3183,75 @@
       (frontend-close! frontend)
       (soda-application-close! application))
 
+    ;; Terminal protocol reports, scheduling, command execution, and Frame
+    ;; presentation form one input contract.  A Kitty Down press followed by
+    ;; release produces one motion and exposes no intermediate chrome frame.
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [surface (soda-application-surface application)]
+           [view (soda-application-view application)]
+           [buffer (soda-application-buffer application)]
+           [editing (soda-application-editing application)]
+           [decoder (make-terminal-input-decoder)]
+           [presented '()]
+           [frontend
+            (make-frontend
+              state surface
+              (lambda (active current-view)
+                (buffer-input-context
+                  active current-view
+                  (list (fundamental-fallback-input-layer editing))))
+              (lambda (context disposition)
+                (fundamental-input-disposition context disposition))
+              (lambda (render theme) (set! presented (cons render presented)))
+              (make-render-service) default-theme)])
+      (frontend-resize! frontend '(20 . 5))
+      (frontend-step! frontend)
+      (frontend-enqueue!
+        frontend
+        (make-surface-input-message
+          (surface-id surface)
+          (make-text-input-event 'text (string->utf8 "a\nb\nc"))))
+      (frontend-step! frontend)
+      (command-runtime-start!
+        (host-state-command-runtime state) 'fundamental.beginning-of-buffer
+        (application-command-context application))
+      (command-runtime-start!
+        (host-state-command-runtime state) 'editor.toggle-constant-position
+        (application-command-context application))
+      (frontend-step! frontend)
+      (set! presented '())
+      (for-each
+        (lambda (event)
+          (frontend-enqueue!
+            frontend (make-surface-input-message (surface-id surface) event)))
+        (terminal-input-decoder-feed!
+          decoder (string->utf8 "\x1b;[1;1:1B\x1b;[1;1:3B")))
+      (frontend-step! frontend)
+      (unless (and
+                (= (selection-range-head
+                     (selection-primary-range
+                       (view-state-selection (view-state view))))
+                   2)
+                (= (length presented) 1)
+                (string-prefix?
+                  "Line 2, column 1"
+                  (frame-row-string
+                    (surface-render-frame (car presented))
+                    (- (frame-height (surface-render-frame (car presented))) 1))))
+        (error 'fundamental-editing-tests
+               "terminal Down lifecycle did not commit one complete visible action"
+               (selection-range-head
+                 (selection-primary-range
+                   (view-state-selection (view-state view))))
+               (length presented)
+               (and (pair? presented)
+                    (frame-row-string
+                      (surface-render-frame (car presented))
+                      (- (frame-height (surface-render-frame (car presented))) 1)))))
+      (frontend-close! frontend)
+      (soda-application-close! application))
+
     ;; A terminal read may enqueue several key events before the frontend gets
     ;; a chance to drain.  Each resulting command must run before the following
     ;; input snapshots its ViewState.
@@ -3249,9 +3319,9 @@
       (frontend-step! frontend)
       (unless (= (selection-range-head
                    (selection-primary-range (view-state-selection (view-state view))))
-                 5)
+                 1)
         (error 'fundamental-editing-tests
-               "queued key repeats were not compacted to current input state"))
+               "queued key repeats did not each produce one motion"))
       (command-runtime-start!
         (host-state-command-runtime state) 'fundamental.end-of-buffer
         (application-command-context application))
