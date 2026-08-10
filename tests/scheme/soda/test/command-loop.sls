@@ -8,13 +8,15 @@
           (soda host internal surface)
           (soda host internal view)
           (soda host command)
+          (soda host command-argument)
           (soda host command-runtime)
           (soda host context)
           (soda host input)
           (soda host input-event)
           (soda host internal state)
           (soda host runtime)
-          (soda host value))
+          (soda host value)
+          (soda packages prefix-argument))
 
   (define (check condition message . irritants)
     (unless condition (apply error 'command-loop-tests message irritants)))
@@ -115,6 +117,55 @@
                   (not (input-session-transient?
                          (car (input-stack-sessions next)))))
              "command dispatch retained a one-shot transient InputState")))
+
+  (define (test-standard-context-argument-reader)
+    (let* ([event
+            (make-key-event 'character (char->integer #\3) #f #f 2
+                            'press (make-bytevector 0))]
+           [context
+            (make-command-context
+              #f 1 #f #f #f #f #f event '() (make-prefix-argument -4)
+              #f 'test #f)]
+           [digit-result
+            ((interactive-reader-resolver command-event-digit-reader)
+             context '())]
+           [prefix-result
+            ((interactive-reader-resolver command-numeric-prefix-reader)
+             context (interactive-ready-values digit-result))])
+      (check (and (interactive-ready? digit-result)
+                  (equal? (interactive-ready-values digit-result) '(3))
+                  (interactive-ready? prefix-result)
+                  (equal? (interactive-ready-values prefix-result) '(-4)))
+             "standard context readers did not resolve typed command arguments")))
+
+  (define (test-prefix-argument-transient-map)
+    (let* ([host (make-host-state)]
+           [runtime (host-state-command-runtime host)]
+           [owner (make-owner 'prefix-argument-test)])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let* ([state (make-prefix-argument-commands! runtime owner)]
+                 [map (car (input-state-keymaps state))]
+                 [definition
+                  (command-runtime-command-definition runtime 'argument.digit)]
+                 [policy (command-definition-policy definition)])
+            (check
+              (and (eq? (keymap-lookup
+                          map
+                          (list (make-key-stroke
+                                  'character (char->integer #\7) 0))
+                          #f)
+                        'argument.digit)
+                   (eq? (command-policy-transient-state policy) state)
+                   (= (length
+                        (interactive-plan-readers
+                          (command-definition-interaction-spec definition)))
+                      2))
+              "prefix argument commands did not declare a reentrant input map")))
+        (lambda ()
+          (owner-close! owner)
+          (host-state-close! host)))))
 
   (define (test-runtime-state-record-and-repeat)
     (let* ([host (make-host-state)]
@@ -234,6 +285,8 @@
     (test-command-policy-override)
     (test-remapped-identity)
     (test-transient-input-exits-after-command)
+    (test-standard-context-argument-reader)
+    (test-prefix-argument-transient-map)
     (test-runtime-state-record-and-repeat)
     (test-undo-amalgamation))
 )

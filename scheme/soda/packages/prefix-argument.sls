@@ -3,13 +3,11 @@
   (import (rnrs)
           (soda kernel view-state)
           (soda host command)
+          (soda host command-argument)
           (soda host command-runtime)
           (soda host input)
           (soda host input-event)
           (soda host value))
-
-  (define (context-prefix-state context)
-    (prefix-argument->state (command-context-prefix-argument context)))
 
   (define (update-prefix context next)
     (let* ([view-state (command-context-view-state context)]
@@ -19,45 +17,65 @@
         (view-state-generation view-state)
         #f #f (input-stack-with-pending-argument stack next) '() '() #f)))
 
-  (define (event-digit context)
-    (let* ([event (command-context-event context)]
-           [codepoint
-            (and (key-event? event)
-                 (or (key-event-codepoint event)
-                     (key-event-shifted-codepoint event)))])
-      (and codepoint
-           (<= (char->integer #\0) codepoint (char->integer #\9))
-           (- codepoint (char->integer #\0)))))
-
   (define (make-prefix-argument-commands! runtime owner)
     (unless (and (command-runtime? runtime) (owner? owner))
       (assertion-violation 'make-prefix-argument-commands!
                            "expected a command runtime and owner"))
-    (define-command
-      runtime owner 'argument.universal (context)
-      (documentation "Begin or multiply the pending universal argument by four.")
-      (class 'argument) (preserve-prefix #t) (undo 'ignore)
-      (update-prefix
-        context
-        (prefix-argument-state-append-universal (context-prefix-state context))))
-    (define-command
-      runtime owner 'argument.digit (context)
-      (documentation "Append the invoking digit to the pending numeric argument.")
-      (class 'argument) (preserve-prefix #t) (undo 'ignore)
-      (let ([digit (event-digit context)])
-        (unless digit
-          (assertion-violation 'argument.digit
-                               "command was not invoked by a digit key"))
+    (let* ([keymap (make-keymap 'prefix-argument)]
+           [state (make-input-state 'prefix-argument (list keymap) 'ignore)]
+           [prefix-plan
+            (make-interactive-plan (list command-prefix-argument-reader))]
+           [digit-plan
+            (make-interactive-plan
+              (list command-prefix-argument-reader command-event-digit-reader))])
+      (for-each
+        (lambda (digit)
+          (keymap-bind!
+            keymap
+            (list (make-key-stroke
+                    'character (+ (char->integer #\0) digit) 0))
+            'argument.digit)
+          (keymap-bind!
+            keymap
+            (list (make-key-stroke
+                    'character (+ (char->integer #\0) digit) 2))
+            'argument.digit))
+        '(0 1 2 3 4 5 6 7 8 9))
+      (keymap-bind!
+        keymap (list (make-key-stroke 'character (char->integer #\-) 0))
+        'argument.negative)
+      (keymap-bind!
+        keymap (list (make-key-stroke 'character (char->integer #\-) 2))
+        'argument.negative)
+      (keymap-bind!
+        keymap (list (make-key-stroke 'character (char->integer #\u) 4))
+        'argument.universal)
+      (define-command
+        runtime owner 'argument.universal (context prefix)
+        (documentation "Begin or multiply the pending universal argument by four.")
+        (class 'argument) (interactive prefix-plan)
+        (preserve-prefix #t) (transient-state state) (undo 'ignore)
+        (update-prefix
+          context
+          (prefix-argument-state-append-universal
+            (prefix-argument->state prefix))))
+      (define-command
+        runtime owner 'argument.digit (context prefix digit)
+        (documentation "Append the invoking digit to the pending numeric argument.")
+        (class 'argument) (interactive digit-plan)
+        (preserve-prefix #t) (transient-state state) (undo 'ignore)
         (update-prefix
           context
           (prefix-argument-state-append-digit
-            (context-prefix-state context) digit))))
-    (define-command
-      runtime owner 'argument.negative (context)
-      (documentation "Toggle the sign of the pending numeric argument.")
-      (class 'argument) (preserve-prefix #t) (undo 'ignore)
-      (update-prefix
-        context
-        (prefix-argument-state-toggle-negative (context-prefix-state context))))
-    #t)
+            (prefix-argument->state prefix) digit)))
+      (define-command
+        runtime owner 'argument.negative (context prefix)
+        (documentation "Toggle the sign of the pending numeric argument.")
+        (class 'argument) (interactive prefix-plan)
+        (preserve-prefix #t) (transient-state state) (undo 'ignore)
+        (update-prefix
+          context
+          (prefix-argument-state-toggle-negative
+            (prefix-argument->state prefix))))
+      state))
 )
