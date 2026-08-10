@@ -39,19 +39,35 @@
                 (eq? (key-event-type candidate) 'repeat)
                 (same-physical-key? candidate event)))))
 
+  (define (pending-repeat-on-surface? message surface-id)
+    (and (surface-input-message? message)
+         (= (surface-input-message-surface-id message) surface-id)
+         (let ([candidate (surface-input-message-event message)])
+           (and (key-event? candidate)
+                (eq? (key-event-type candidate) 'repeat)))))
+
   (define (input-scheduler-enqueue! scheduler message)
     (unless (input-scheduler? scheduler)
       (assertion-violation
         'input-scheduler-enqueue! "expected an InputScheduler" scheduler))
     (when (surface-input-message? message)
-      (let ([event (surface-input-message-event message)])
-        (when (and (key-event? event)
-                   (eq? (key-event-type event) 'release))
-          (host-frontend-discard!
-            (input-scheduler-state scheduler)
-            (lambda (candidate)
-              (pending-repeat-for?
-                candidate (surface-input-message-surface-id message) event))))))
+      (let ([event (surface-input-message-event message)]
+            [surface-id (surface-input-message-surface-id message)])
+        (when (key-event? event)
+          (case (key-event-type event)
+            ;; A fresh physical press supersedes repeat debt already queued for
+            ;; this Surface.  Direction changes therefore take effect at the
+            ;; next action instead of waiting behind stale repeats.
+            [(press)
+             (host-frontend-discard!
+               (input-scheduler-state scheduler)
+               (lambda (candidate)
+                 (pending-repeat-on-surface? candidate surface-id)))]
+            [(release)
+             (host-frontend-discard!
+               (input-scheduler-state scheduler)
+               (lambda (candidate)
+                 (pending-repeat-for? candidate surface-id event)))]))))
     (host-frontend-enqueue! (input-scheduler-state scheduler) message))
 
   ;; The boundary is queued before command dispatch.  Command messages use the

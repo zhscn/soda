@@ -3253,6 +3253,29 @@
           (surface-id surface)
           (make-text-input-event 'text (string->utf8 "a\nb\nc"))))
       (frontend-step! frontend)
+      (dispatcher-dispatch-view!
+        (host-state-dispatch state)
+        (make-view-transaction-spec
+          (view-id view) (view-state-generation (view-state view))
+          (make-selection (list (make-selection-range 0 0)))
+          #f #f '() '() #f))
+      (frontend-step! frontend)
+      ;; A command whose dispatch leaves InputState unchanged must still run.
+      ;; This is the normal clean-state path for a directly entered C-n.
+      (let ([bytes (make-bytevector 1 14)])
+        (for-each
+          (lambda (event)
+            (frontend-enqueue!
+              frontend
+              (make-surface-input-message (surface-id surface) event)))
+          (terminal-input-decoder-feed! decoder bytes)))
+      (frontend-step! frontend)
+      (unless (= (selection-range-head
+                   (selection-primary-range
+                     (view-state-selection (view-state view))))
+                 2)
+        (error 'fundamental-editing-tests
+               "clean-state C-n input did not dispatch its command"))
       (command-runtime-start!
         (host-state-command-runtime state) 'fundamental.beginning-of-buffer
         (application-command-context application))
@@ -3394,6 +3417,31 @@
                  7)
         (error 'fundamental-editing-tests
                "released vertical input executed queued repeat debt"))
+      (dispatcher-dispatch-view!
+        (host-state-dispatch state)
+        (make-view-transaction-spec
+          (view-id view) (view-state-generation (view-state view))
+          (make-selection (list (make-selection-range 2 2)))
+          #f #f '() '() #f))
+      (frontend-step! frontend)
+      (do ([index 0 (+ index 1)])
+          ((= index 3))
+        (frontend-enqueue!
+          frontend
+          (make-surface-input-message
+            (surface-id surface)
+            (make-key-event 'down #f #f #f 0 'repeat (make-bytevector 0)))))
+      (frontend-enqueue!
+        frontend
+        (make-surface-input-message
+          (surface-id surface)
+          (make-key-event 'up #f #f #f 0 'press (make-bytevector 0))))
+      (frontend-step! frontend)
+      (unless (= (selection-range-head
+                   (selection-primary-range (view-state-selection (view-state view))))
+                 0)
+        (error 'fundamental-editing-tests
+               "opposite key press did not supersede queued repeat debt"))
       (frontend-close! frontend)
       (soda-application-close! application))
 
