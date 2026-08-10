@@ -28,7 +28,6 @@
           file-final-newline-policy
           file-keymap)
   (import (rnrs)
-          (only (chezscheme) current-directory get-process-id)
           (soda kernel change)
           (soda kernel document)
           (soda kernel extension)
@@ -52,6 +51,8 @@
           (soda packages edit-policy)
           (soda packages completion)
           (soda packages file-keymap)
+          (soda packages file-path)
+          (soda packages file-policy)
           (soda packages file-operation)
           (soda packages file-state)
           (soda packages file-watch)
@@ -124,192 +125,6 @@
                               (string-length (file-mode-association-suffix best)))))
                   association
                   best))))))
-
-  (define-record-type file-lock
-    (fields path token))
-
-  ;; Backups are a Buffer policy: visiting the same file through another View
-  ;; observes the same save behavior, while an unrelated Buffer retains its
-  ;; own choice.  The VFS remains unaware of backup naming or retention.
-  (define (first-value values default)
-    (if (null? values) default (car values)))
-
-  (define file-backup-facet
-    (make-facet 'file-backup 'buffer #f
-                (lambda (values) (first-value values #f)) eq? eq?))
-
-  (define file-backup-compartment (make-compartment 'file-backup 'buffer))
-
-  (define file-newline-facet
-    (make-facet 'file-newline 'buffer 'preserve
-                (lambda (values) (first-value values 'preserve)) eq? eq?))
-  (define file-bom-facet
-    (make-facet 'file-bom 'buffer 'preserve
-                (lambda (values) (first-value values 'preserve)) eq? eq?))
-  (define file-final-newline-facet
-    (make-facet 'file-final-newline 'buffer 'preserve
-                (lambda (values) (first-value values 'preserve)) eq? eq?))
-
-  ;; A lock conflict is Buffer-local.  The compartment prevents this safety
-  ;; policy from leaking into the next file visited from a read-only Buffer.
-  (define file-lock-read-only-compartment
-    (make-compartment 'file-lock-read-only 'buffer))
-
-  (define (file-backup-enabled? configuration)
-    (configuration-facet configuration file-backup-facet 'buffer))
-
-  (define (file-newline-policy configuration)
-    (configuration-facet configuration file-newline-facet 'buffer))
-
-  (define (file-bom-policy configuration)
-    (configuration-facet configuration file-bom-facet 'buffer))
-
-  (define (file-final-newline-policy configuration)
-    (configuration-facet configuration file-final-newline-facet 'buffer))
-
-  (define (make-file-backup-extension enabled?)
-    (unless (boolean? enabled?)
-      (assertion-violation 'make-file-backup-extension
-                           "expected a backup policy boolean" enabled?))
-    (make-facet-provider file-backup-facet enabled? 'highest))
-
-  (define (parse-backup-policy input)
-    (cond
-      [(boolean? input) input]
-      [(and (string? input)
-            (member (string-downcase input) '("true" "yes" "on" "1"))) #t]
-      [(and (string? input)
-            (member (string-downcase input) '("false" "no" "off" "0"))) #f]
-      [else 'invalid]))
-
-  (define (parse-symbol-policy input allowed)
-    (let ([value
-           (cond [(symbol? input) input]
-                 [(string? input) (string->symbol (string-downcase input))]
-                 [else 'invalid])])
-      (if (memq value allowed) value 'invalid)))
-
-  (define (register-file-settings! host owner)
-    (package-host-register-setting-schema!
-      host owner
-      (make-setting-schema
-        'file.backup 'boolean #f '(buffer) parse-backup-policy #f
-        (lambda (enabled? scope)
-          (make-facet-provider file-backup-facet enabled?))))
-    (package-host-register-setting-schema!
-      host owner
-      (make-setting-schema
-        'file.newline 'symbol 'preserve '(buffer)
-        (lambda (input) (parse-symbol-policy input '(preserve lf crlf))) #f
-        (lambda (value scope) (make-facet-provider file-newline-facet value))))
-    (package-host-register-setting-schema!
-      host owner
-      (make-setting-schema
-        'file.bom 'symbol 'preserve '(buffer)
-        (lambda (input) (parse-symbol-policy input '(preserve yes no))) #f
-        (lambda (value scope) (make-facet-provider file-bom-facet value))))
-    (package-host-register-setting-schema!
-      host owner
-      (make-setting-schema
-        'file.final-newline 'symbol 'preserve '(buffer)
-        (lambda (input) (parse-symbol-policy input '(preserve yes no))) #f
-        (lambda (value scope)
-          (make-facet-provider file-final-newline-facet value)))))
-
-  (define (buffer-id? value)
-    (and (integer? value) (exact? value) (>= value 0)))
-
-  (define (require-path who path)
-    (unless (and (string? path) (positive? (string-length path)))
-      (assertion-violation who "expected a non-empty file name" path)))
-
-  (define (canonical-file-resource path)
-    (require-path 'canonical-file-resource path)
-    (make-resource 'file
-      (vfs-resolve-path (vfs-directory-path (current-directory)) path)))
-
-  (define (file-backup-path path) (string-append path "~"))
-
-  (define (file-lock-file-path resource)
-    (string-append (resource-locator resource) ".soda-lock"))
-
-  (define file-lock-serial 0)
-
-  (define (next-file-lock-token)
-    (set! file-lock-serial (+ file-lock-serial 1))
-    (string->utf8
-      (string-append "soda " (number->string (get-process-id)) " "
-                     (number->string file-lock-serial) "\n")))
-
-  (define (acquire-file-lock resource)
-    (let* ([path (file-lock-file-path resource)]
-           [token (next-file-lock-token)])
-      (and (vfs-create-exclusive-file! path token)
-           (make-file-lock path token))))
-
-  (define (release-file-lock! lock)
-    (and lock
-         (vfs-delete-file-if-matches!
-           (file-lock-path lock) (file-lock-token lock))))
-
-  (define (string-prefix? prefix value)
-    (let ([length (string-length prefix)])
-      (and (<= length (string-length value))
-           (string=? prefix (substring value 0 length)))))
-
-  (define (path-field-start value point)
-    (let loop ([index (- point 1)])
-      (cond [(negative? index) 0]
-            [(vfs-path-separator? (string-ref value index)) (+ index 1)]
-            [else (loop (- index 1))])))
-
-  ;; File-name completion has no project ownership.  It resolves the path
-  ;; field under point against the process directory, preserving the spelling
-  ;; already typed in the prompt for the candidate insertion text.
-  (define (file-name-candidates snapshot)
-    (let* ([input (prompt-snapshot-input snapshot)]
-           [point (prompt-snapshot-point snapshot)]
-           [length (string-length input)])
-      ;; Completion replacement currently addresses one whole prompt value.
-      ;; Do not offer a candidate if text after point would be overwritten.
-      (if (not (= point length))
-          '()
-          (let* ([start (path-field-start input point)]
-                 [directory-prefix (substring input 0 start)]
-                 [name-prefix (substring input start point)]
-                 [directory
-                  (if (zero? (string-length directory-prefix))
-                      (vfs-directory-path (current-directory))
-                      (vfs-resolve-path
-                        (vfs-directory-path (current-directory)) directory-prefix))])
-            (guard (condition [else '()])
-              (map
-                (lambda (entry)
-                  (let* ([name (vfs-entry-name entry)]
-                         [directory? (eq? (vfs-entry-kind entry) 'directory)]
-                         [label (if directory? (vfs-directory-path name) name)]
-                         [insert-text (string-append directory-prefix label)])
-                    (make-completion-candidate
-                      (vfs-path-join directory name) insert-text label
-                      (if directory? "directory" "file") "file" entry)))
-                (filter
-                  (lambda (entry)
-                    (and (not (string=? (vfs-entry-name entry) "."))
-                         (not (string=? (vfs-entry-name entry) ".."))
-                         (string-prefix? name-prefix (vfs-entry-name entry))))
-                  (vfs-list-directory directory))))))))
-
-  (define file-name-completion-source
-    (make-completion-source file-name-candidates #f #f #f))
-
-  (define (make-file-name-reader prompt)
-    (make-interactive-reader
-      'file-name
-      (lambda (context arguments)
-        (make-interactive-suspend
-          (make-interaction-request
-            'file-name prompt #f file-name-completion-source 'free)
-          (lambda (value) (make-interactive-ready (list value)))))))
 
   (define (overwrite-decision value)
     (cond
