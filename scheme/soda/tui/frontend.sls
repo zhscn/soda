@@ -180,12 +180,6 @@
               (input-stack-push (view-state-input-state view-state) state)
               '() '() #f))))))
 
-  (define (frontend-install-pending-transient! value)
-    (let ([current (active-view value)])
-      (and current
-           (frontend-install-command-transient!
-             value (car current) (cdr current)))))
-
   ;; A layout is command input only while it still describes the same document,
   ;; viewport, and View configuration.  Selection and InputState may change
   ;; between consecutive key events without invalidating DisplayMap geometry.
@@ -391,9 +385,6 @@
     (if (not (frontend-dirty? value))
         #f
         (begin
-          ;; Publish a command-declared transient before producing chrome so
-          ;; its bindings are visible before the first key is pressed.
-          (frontend-install-pending-transient! value)
           (frontend-refresh-shortcut-hints! value)
           ;; A scroll intent resolved from this render may publish a newer
           ;; viewport and set dirty again.  Clear the old damage first so that

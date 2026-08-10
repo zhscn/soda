@@ -3167,6 +3167,17 @@
                       3))
         (error 'fundamental-editing-tests
                "fundamental frontend input did not insert a tab or advance its caret"))
+      (send! (make-text-input-event 'text (string->utf8 "x\ny\nz")))
+      (command-runtime-start!
+        (host-state-command-runtime state) 'fundamental.beginning-of-buffer
+        (application-command-context application))
+      (send! (make-key-event 'down #f #f #f 0 'press (make-bytevector 0)))
+      (unless (= (selection-range-head
+                   (selection-primary-range
+                     (view-state-selection (view-state view))))
+                 2)
+        (error 'fundamental-editing-tests
+               "one Down input did not produce exactly one line motion"))
       (frontend-close! frontend)
       (soda-application-close! application))
 
