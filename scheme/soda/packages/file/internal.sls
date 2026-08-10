@@ -42,8 +42,6 @@
           (soda host command-runtime)
           (soda host buffer)
           (soda host package)
-          (soda host input)
-          (soda host input-event)
           (soda host location)
           (soda host operation)
           (soda host setting)
@@ -53,6 +51,7 @@
           (soda packages buffer-mode)
           (soda packages edit-policy)
           (soda packages completion)
+          (soda packages file-keymap)
           (soda packages file-watch)
           (soda packages file-format)
           (soda packages interaction)
@@ -1224,7 +1223,7 @@
       (assertion-violation 'make-file-service! "invalid file service dependencies"
                            host owner history))
     (let* ([runtime (package-host-command-runtime host)]
-           [keymap (make-keymap 'file)]
+           [keymap (make-file-keymap)]
            [watch-service (make-file-watch-service owner)]
            [service
             (%make-file-service
@@ -1519,34 +1518,6 @@
                        (make-command-effect 'file.close (make-file-close target-id)))))]
             [else
              (make-command-effect 'file.close (make-file-close target-id))])))
-      (keymap-bind! keymap
-                    (list (make-key-stroke 'character (char->integer #\x) 4)
-                          (make-key-stroke 'character (char->integer #\f) 4))
-                    'file.visit)
-      (keymap-bind! keymap
-                    (list (make-key-stroke 'character (char->integer #\x) 4)
-                          (make-key-stroke 'character (char->integer #\s) 4))
-                    'file.save)
-      (keymap-bind! keymap
-                    (list (make-key-stroke 'character (char->integer #\x) 4)
-                          (make-key-stroke 'character (char->integer #\w) 4))
-                    'file.save-as)
-      (keymap-bind! keymap
-                    (list (make-key-stroke 'character (char->integer #\x) 4)
-                          (make-key-stroke 'character (char->integer #\k) 4))
-                    'file.close)
-      (keymap-bind! keymap
-                    (list (make-key-stroke 'character (char->integer #\r) 4))
-                    'file.insert)
-      (keymap-bind! keymap
-                    (list (make-key-stroke 'character (char->integer #\o) 4))
-                    'file.save)
-      (keymap-bind! keymap
-                    (list (make-key-stroke 'character (char->integer #\r) 2))
-                    'file.revert)
-      (keymap-bind! keymap
-                    (list (make-key-stroke 'character (char->integer #\B) 2))
-                    'file.toggle-backup)
       (package-host-add-buffer-close-listener!
         host owner
         (lambda (buffer)
