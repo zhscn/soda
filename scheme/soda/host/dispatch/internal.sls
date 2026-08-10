@@ -39,33 +39,9 @@
           (soda host internal context)
           (soda host internal operation)
           (soda host internal surface)
+          (soda host dispatch update)
           (soda host value)
           (soda view plugin))
-
-  (define-record-type
-    (view-state-update %make-view-state-update view-state-update?)
-    (fields
-      (immutable view-id view-state-update-view-id)
-      (immutable old-state view-state-update-old-state)
-      (immutable new-state view-state-update-new-state)))
-
-  (define-record-type
-    (editor-update %make-editor-update editor-update?)
-    (fields
-      (immutable buffer-id editor-update-buffer-id)
-      (immutable old-buffer-state editor-update-old-buffer-state)
-      (immutable new-buffer-state editor-update-new-buffer-state)
-      (immutable views editor-update-views)
-      (immutable changes editor-update-changes)
-      (immutable annotations editor-update-annotations)
-      (immutable scroll-request editor-update-scroll-request)
-      (immutable damage editor-update-damage)))
-
-  (define (make-editor-update buffer-id old-state new-state views changes annotations
-                              scroll-request damage)
-    (%make-editor-update
-      buffer-id old-state new-state (list-copy views) changes
-      (list-copy annotations) scroll-request (list-copy damage)))
 
   (define-record-type
     (dispatcher %make-dispatcher dispatcher?)
@@ -416,7 +392,7 @@
                      buffer-id state state
                      (map
                        (lambda (view)
-                         (%make-view-state-update
+                         (make-view-state-update
                            (view-id view) (view-state view) (view-state view)))
                        (views-for-buffer (dispatcher-views dispatcher) buffer-id))
                      (make-change-set length '()) annotations #f damage)])
@@ -597,7 +573,7 @@
                     (buffer-id buffer) old-state new-buffer-state
                     (map
                       (lambda (entry)
-                        (%make-view-state-update
+                        (make-view-state-update
                           (view-id (car entry))
                           (cadr entry)
                           (caddr entry)))
@@ -781,7 +757,7 @@
                [update
                 (make-editor-update
                   (buffer-id buffer) buffer-state buffer-state
-                  (list (%make-view-state-update
+                  (list (make-view-state-update
                           (view-id view) old-state new-state))
                   (make-change-set document-length '())
                   (view-transaction-spec-annotations spec)
