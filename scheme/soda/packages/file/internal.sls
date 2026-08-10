@@ -54,6 +54,7 @@
           (soda packages file-mode-registry)
           (soda packages file-path)
           (soda packages file-policy)
+          (soda packages file-service-value)
           (soda packages file-operation)
           (soda packages file-state)
           (soda packages file-watch)
@@ -67,18 +68,6 @@
   ;; A file Buffer is catalogued by its canonical resource.  Visiting a file
   ;; therefore creates or reuses shared Buffer state, then creates a View for
   ;; the requesting Window; it never replaces unrelated Buffer contents.
-  (define-record-type
-    (file-service %make-file-service file-service?)
-    (fields
-      (immutable state file-service-state)
-      (immutable host file-service-host)
-      (immutable owner file-service-owner)
-      (immutable history file-service-history)
-      (immutable keymap file-keymap)
-      (immutable watch-service file-service-watch-service)
-      (mutable recovery file-service-recovery file-service-recovery-set!)
-      (immutable mode-registry file-service-mode-registry)))
-
   (define (file-service-register-mode! service owner suffix mode)
     (unless (file-service? service)
       (assertion-violation 'file-service-register-mode!
@@ -970,7 +959,7 @@
            [keymap (make-file-keymap)]
            [watch-service (make-file-watch-service owner)]
            [service
-            (%make-file-service
+            (make-file-service-value
               (make-file-state) host owner history keymap watch-service #f
               (make-file-mode-registry))])
       (file-service-recovery-set!
