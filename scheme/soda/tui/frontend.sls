@@ -50,6 +50,8 @@
       (immutable render-service frontend-render-service)
       (mutable theme frontend-theme frontend-theme-set!)
       (mutable dirty? frontend-dirty? frontend-dirty?-set!)
+      (mutable render-deferred? frontend-render-deferred?
+               frontend-render-deferred?-set!)
       (mutable pending-scroll frontend-pending-scroll frontend-pending-scroll-set!)
       (mutable update-registration frontend-update-registration
                                    frontend-update-registration-set!)
@@ -80,7 +82,7 @@
       (assertion-violation 'make-frontend "invalid frontend dependencies"))
     (let ([value
             (%make-frontend state surface resolve-input-context handle-disposition
-                            present! render-service theme #t #f #f #f #f #f)])
+                            present! render-service theme #t #f #f #f #f #f #f)])
       (frontend-update-registration-set!
         value
         (host-frontend-add-update-listener!
@@ -268,7 +270,9 @@
           "input disposition handler returned an unsupported runtime message"
           result))
       (command-runtime-enqueue!
-        (host-state-command-runtime (frontend-host-state value)) result)))
+        (host-state-command-runtime (frontend-host-state value)) result)
+      (when (command-invoke-message? result)
+        (frontend-render-deferred?-set! value #t))))
 
   (define (frontend-dispatch-input! value event)
     (require-open 'frontend-dispatch-input! value)
@@ -331,7 +335,8 @@
                           (host-state-command-runtime (frontend-host-state value))
                           name)
                         (or (input-disposition-requested-command disposition)
-                            name))))]
+                            name)))
+                    (frontend-render-deferred?-set! value #t))]
                  [else
                   (let ([result
                          ((frontend-handle-disposition value)
@@ -407,6 +412,10 @@
           (frontend-resolve-scroll-request! value)
           render))))
 
+  (define (frontend-render-if-ready! value)
+    (and (not (frontend-render-deferred? value))
+         (frontend-render! value)))
+
   (define frontend-step!
     (case-lambda
       [(value)
@@ -415,18 +424,26 @@
        (require-open 'frontend-step! value)
        (unless (and (integer? limit) (exact? limit) (> limit 0))
          (assertion-violation 'frontend-step! "limit must be a positive exact integer" limit))
-       ;; One queued message is the smallest causal scheduling unit.  Input
-       ;; messages enqueue their command at priority, so rendering after every
-       ;; unit gives that command a presentation opportunity before the next
-       ;; repeated input is interpreted.  Clean units are cheap because
-       ;; frontend-render! returns without constructing a Frame.
+       ;; An input message and the command it enqueues form one presentation
+       ;; unit. State changes remain sequential, while the intermediate input
+       ;; reset does not trigger its own layout and terminal transaction.
        (let loop ([processed 0])
          (if (or (>= processed limit) (not (frontend-pending? value)))
              (begin
-               (frontend-render! value)
+               (frontend-render-if-ready! value)
                processed)
-             (let ([count (frontend-drain! value 1)])
-               (frontend-render! value)
+             (let* ([awaiting? (frontend-render-deferred? value)]
+                    [first (frontend-drain! value 1)]
+                    [paired?
+                     (and (not awaiting?)
+                          (frontend-render-deferred? value)
+                          (< (+ processed first) limit)
+                          (frontend-pending? value))]
+                    [second (if paired? (frontend-drain! value 1) 0)]
+                    [count (+ first second)])
+               (when (or awaiting? paired?)
+                 (frontend-render-deferred?-set! value #f))
+               (frontend-render-if-ready! value)
                (loop (+ processed count)))))]))
 
   (define (frontend-resize! value size)

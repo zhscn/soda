@@ -3232,7 +3232,7 @@
         (unless (and (= (selection-range-head
                           (selection-primary-range (view-state-selection (view-state view))))
                         1)
-                     (equal? rows '(3 2 1 0)))
+                     (equal? rows '(2 1 0)))
           (error 'fundamental-editing-tests
                  "a burst of vertical input did not preserve visible motion feedback" rows)))
       (command-runtime-start!
