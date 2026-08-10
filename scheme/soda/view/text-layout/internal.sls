@@ -62,53 +62,10 @@
           (soda view decoration)
           (soda view display)
           (soda view frame)
+          (soda view text-layout-result)
           (soda view text-layout-options))
 
-  ;; TextLayout is a pure projection of an immutable snapshot.  It owns no
-  ;; View or terminal state and therefore remains usable by headless clients.
-  (define-record-type
-    (text-layout %make-text-layout text-layout?)
-    (fields frame display-map cursor-row cursor-column complete?))
-
-  (define make-text-layout
-    (case-lambda
-      [(frame display-map cursor-row cursor-column)
-       (make-text-layout frame display-map cursor-row cursor-column #t)]
-      [(frame display-map cursor-row cursor-column complete?)
-       (unless (and (frame? frame) (display-map? display-map)
-                    (or (not cursor-row) (offset? cursor-row))
-                    (or (not cursor-column) (offset? cursor-column))
-                    (boolean? complete?))
-         (assertion-violation 'make-text-layout "invalid text layout result"))
-       (%make-text-layout frame display-map cursor-row cursor-column complete?)]))
-
   (define offset? nonnegative-exact-integer?)
-
-  (define (text-layout-visible-ranges layout)
-    (unless (text-layout? layout)
-      (assertion-violation 'text-layout-visible-ranges "expected a TextLayout" layout))
-    (display-map-visible-ranges (text-layout-display-map layout)))
-
-  (define (text-layout-content-height layout)
-    (unless (text-layout? layout)
-      (assertion-violation 'text-layout-content-height "expected a TextLayout" layout))
-    (let* ([frame (text-layout-frame layout)]
-           [width (frame-width frame)])
-      (if (zero? width)
-          0
-          (let ([last-cell
-                 (fold-left
-                   (lambda (current entry)
-                     (let ([from (display-map-entry-cell-from entry)]
-                           [to (display-map-entry-cell-to entry)])
-                       (max current (if (> to from) (- to 1) from))))
-                   0
-                   (display-map-entries (text-layout-display-map layout)))])
-            (max 1
-                 (+ 1 (div last-cell width))
-                 (if (text-layout-cursor-row layout)
-                     (+ 1 (text-layout-cursor-row layout))
-                     0))))))
 
   ;; VisualPosition identifies a raw-document visual row under the same
   ;; grapheme, tab, and wrapping policy used by TextLayout.  It deliberately
