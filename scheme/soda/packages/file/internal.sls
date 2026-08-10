@@ -52,6 +52,7 @@
           (soda packages edit-policy)
           (soda packages completion)
           (soda packages file-keymap)
+          (soda packages file-operation)
           (soda packages file-state)
           (soda packages file-watch)
           (soda packages file-format)
@@ -126,27 +127,6 @@
 
   (define-record-type file-lock
     (fields path token))
-
-  (define-record-type file-load
-    (fields buffer-id resource version format discard-history?))
-
-  (define-record-type file-write
-    (fields buffer-id resource contents format expected-version rebind?))
-
-  (define-record-type file-visit
-    (fields context resource))
-
-  (define-record-type file-location-open
-    (fields location))
-
-  (define-record-type file-close
-    (fields buffer-id))
-
-  (define-record-type file-insert
-    (fields context resource))
-
-  (define-record-type file-external-resolution
-    (fields buffer-id version action destination destination-version))
 
   ;; Backups are a Buffer policy: visiting the same file through another View
   ;; observes the same save behavior, while an unrelated Buffer retains its
