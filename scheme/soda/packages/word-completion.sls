@@ -189,13 +189,14 @@
           'completion.related-buffers 'boolean #t '(buffer) parse-boolean #f
           (lambda (value scope)
             (make-facet-provider related-buffers-facet value))))
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'word.complete complete-word owner
-          "Complete the word before point from words in editor Buffers."
-          'completion
-          (make-interactive-plan (list (make-word-reader service)))))
+      (define-command
+        runtime owner 'word.complete (context prefix)
+        (documentation "Complete the word before point from words in editor Buffers.")
+        (class 'completion)
+        (interactive (make-interactive-plan (list (make-word-reader service))))
+        (repeatable #t)
+        (undo 'amalgamate)
+        (complete-word context prefix))
       (keymap-bind! keymap (list (make-key-stroke 'tab #f 2)) 'word.complete)
       service))
 )

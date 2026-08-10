@@ -393,25 +393,26 @@
              [service
               (%make-minibuffer-service
                 host interactions owner keymap mode '() '() '() #f)])
-      (command-runtime-register-command!
-        (package-host-command-runtime host)
-        (make-command-definition
-          'minibuffer.accept
-          (lambda (context) (minibuffer-service-submit! service) (command-handled))
-          owner "Accept the current minibuffer input." 'minibuffer #f))
-      (command-runtime-register-command!
-        (package-host-command-runtime host)
-        (make-command-definition
-          'minibuffer.complete
-          (lambda (context) (minibuffer-service-complete! service context))
-          owner "Apply the current prompt completion without accepting the prompt."
-          'minibuffer #f))
-      (command-runtime-register-command!
-        (package-host-command-runtime host)
-        (make-command-definition
-          'minibuffer.cancel
-          (lambda (context) (minibuffer-service-cancel! service) (command-handled))
-          owner "Cancel the current minibuffer input." 'minibuffer #f))
+      (define-command
+        (package-host-command-runtime host) owner 'minibuffer.accept (context)
+        (documentation "Accept the current minibuffer input.")
+        (class 'minibuffer)
+        (undo 'ignore)
+        (minibuffer-service-submit! service)
+        (command-handled))
+      (define-command
+        (package-host-command-runtime host) owner 'minibuffer.complete (context)
+        (documentation "Apply the current prompt completion without accepting the prompt.")
+        (class 'minibuffer)
+        (undo 'ignore)
+        (minibuffer-service-complete! service context))
+      (define-command
+        (package-host-command-runtime host) owner 'minibuffer.cancel (context)
+        (documentation "Cancel the current minibuffer input.")
+        (class 'minibuffer)
+        (undo 'ignore)
+        (minibuffer-service-cancel! service)
+        (command-handled))
       (minibuffer-service-registration-set!
         service
         (interaction-service-add-listener!

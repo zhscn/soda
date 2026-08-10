@@ -282,7 +282,9 @@
         host owner (make-scheme-highlight-provider host))
       (define-command
         runtime owner 'scheme-mode.activate (context)
-        "Select Scheme major mode for the active Buffer." 'mode
+        (documentation "Select Scheme major mode for the active Buffer.")
+        (class 'mode)
+        (undo 'ignore)
         (activate-scheme-mode context spec))
       (for-each
         (lambda (suffix) (file-service-register-mode! files owner suffix spec))

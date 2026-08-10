@@ -165,18 +165,20 @@
     (owner-assert-active 'make-comment-service! owner)
     (let ([keymap (make-keymap 'comment)]
           [runtime (package-host-command-runtime host)])
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'comment.add (lambda (context) (comment-transaction context #f)) owner
-          "Comment every logical line covered by the active selections."
-          'editing #f))
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'comment.remove (lambda (context) (comment-transaction context #t)) owner
-          "Remove mode-defined comments from the selected logical lines."
-          'editing #f))
+      (define-command
+        runtime owner 'comment.add (context)
+        (documentation "Comment every logical line covered by the active selections.")
+        (class 'editing)
+        (repeatable #t)
+        (undo 'amalgamate)
+        (comment-transaction context #f))
+      (define-command
+        runtime owner 'comment.remove (context)
+        (documentation "Remove mode-defined comments from the selected logical lines.")
+        (class 'editing)
+        (repeatable #t)
+        (undo 'amalgamate)
+        (comment-transaction context #t))
       (keymap-bind!
         keymap (list (make-key-stroke 'character (char->integer #\;) 2))
         'comment.add)

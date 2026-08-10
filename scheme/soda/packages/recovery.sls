@@ -424,30 +424,27 @@
                  (make-eqv-hashtable) (make-eqv-hashtable)
                  (make-eqv-hashtable) (discover-artifacts resolved) #f)]
               [runtime (package-host-command-runtime host)])
-         (command-runtime-register-command!
-           runtime
-           (make-command-definition
-             'recovery.flush
-             (lambda (context buffer-id)
-               (make-command-effect 'recovery.flush buffer-id))
-             owner "Persist the latest coalesced recovery snapshot."
-             'recovery #f))
+         (define-command
+           runtime owner 'recovery.flush (context buffer-id)
+           (documentation "Persist the latest coalesced recovery snapshot.")
+           (class 'recovery)
+           (undo 'ignore)
+           (make-command-effect 'recovery.flush buffer-id))
          (command-runtime-register-effect-handler!
            runtime 'recovery.flush owner 'write-recovery-snapshot
            (lambda (ignored invocation effect)
              (flush-pending! service (command-effect-payload effect))))
-         (command-runtime-register-command!
-           runtime
-           (make-command-definition
-             'recovery.restore
-             (lambda (context artifact decision)
-               (make-command-effect
-                 'recovery.restore (list artifact decision context)))
-             owner "Recover, discard, or defer a startup recovery artifact."
-             'recovery
+         (define-command
+           runtime owner 'recovery.restore (context artifact decision)
+           (documentation "Recover, discard, or defer a startup recovery artifact.")
+           (class 'recovery)
+           (interactive
              (make-interactive-plan
                (list (make-recovery-target-reader service)
-                     (make-recovery-decision-reader)))))
+                     (make-recovery-decision-reader))))
+           (undo 'ignore)
+           (make-command-effect
+             'recovery.restore (list artifact decision context)))
          (command-runtime-register-effect-handler!
            runtime 'recovery.restore owner 'restore-recovery-artifact
            (lambda (ignored invocation effect)

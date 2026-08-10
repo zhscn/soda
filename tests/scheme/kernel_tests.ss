@@ -4063,7 +4063,8 @@
        [registration
         (define-command
           runtime command-owner 'command.introspection-test (context value)
-          "Inspect this command." 'inspection
+          (documentation "Inspect this command.")
+          (class 'inspection)
           (interactive
             (make-interactive-plan
               (list
@@ -4071,6 +4072,7 @@
                   'value
                   (lambda (context arguments)
                     (make-interactive-ready (list 'ready)))))))
+          (undo 'ignore)
           (if (eq? value 'ready) (command-handled) (command-handled)))]
        [definition
         (command-runtime-command-definition runtime 'command.introspection-test)]

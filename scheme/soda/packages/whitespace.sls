@@ -191,12 +191,12 @@
         (make-setting-schema
           'editor.whitespace 'symbol 'none '(view) parse-policy #f
           (lambda (value scope) (policy-extension value))))
-      (command-runtime-register-command!
-        (package-host-command-runtime host)
-        (make-command-definition
-          'whitespace.toggle toggle-whitespace owner
-          "Cycle tab, trailing-whitespace, and space visualization."
-          'display #f))
+      (define-command
+        (package-host-command-runtime host) owner 'whitespace.toggle (context)
+        (documentation "Cycle tab, trailing-whitespace, and space visualization.")
+        (class 'display)
+        (undo 'ignore)
+        (toggle-whitespace context))
       (keymap-bind!
         keymap
         (list (make-key-stroke 'character (char->integer #\P) 2))

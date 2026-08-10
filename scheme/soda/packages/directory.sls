@@ -400,85 +400,80 @@
         runtime 'directory.mutate owner 'mutate-directory
         (lambda (ignored invocation effect)
           (mutate-directory! service (command-effect-payload effect))))
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'directory.browse
-          (lambda (context . requested)
-            (let ([path
-                   (cond [(null? requested) (context-directory service context)]
-                         [(and (null? (cdr requested)) (string? (car requested))) (car requested)]
-                         [else
-                          (assertion-violation 'directory.browse
-                                               "expected zero arguments or one directory name"
-                                               requested)])])
-              (make-command-effect 'directory.open
-                (make-directory-open-request context path))))
-          owner "Browse a directory in a generated read-only Buffer." 'directory #f))
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'directory.refresh
-          (lambda (context)
-            (make-command-effect 'directory.refresh (make-directory-refresh-request context)))
-          owner "Refresh the directory entries in the current Directory Buffer." 'directory #f))
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'directory.create-directory
-          (lambda (context name)
-            (let ([base
-                   (directory-service-path
-                     service (command-context-buffer-id context) #f)])
-              (unless base
-                (assertion-violation 'directory.create-directory
-                                     "current Buffer is not a directory browser"))
-              (make-command-effect
-                'directory.mutate
-                (make-directory-mutation-request
-                  'create context (vfs-resolve-path base name) #f))))
-          owner "Create a directory and refresh the current browser."
-          'directory
+      (define-command
+        runtime owner 'directory.browse (context . requested)
+        (documentation "Browse a directory in a generated read-only Buffer.")
+        (class 'directory)
+        (undo 'ignore)
+        (let ([path
+               (cond [(null? requested) (context-directory service context)]
+                     [(and (null? (cdr requested)) (string? (car requested))) (car requested)]
+                     [else
+                      (assertion-violation 'directory.browse
+                                           "expected zero arguments or one directory name"
+                                           requested)])])
+          (make-command-effect 'directory.open
+            (make-directory-open-request context path))))
+      (define-command
+        runtime owner 'directory.refresh (context)
+        (documentation "Refresh the directory entries in the current Directory Buffer.")
+        (class 'directory)
+        (undo 'ignore)
+        (make-command-effect 'directory.refresh (make-directory-refresh-request context)))
+      (define-command
+        runtime owner 'directory.create-directory (context name)
+        (documentation "Create a directory and refresh the current browser.")
+        (class 'directory)
+        (interactive
           (make-interactive-plan
             (list (make-interaction-string-reader
-                    'directory-name "Create directory: ")))))
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'directory.rename
-          (lambda (context source destination)
-            (let ([base
-                   (directory-service-path
-                     service (command-context-buffer-id context) #f)])
-              (unless base
-                (assertion-violation 'directory.rename
-                                     "current Buffer is not a directory browser"))
-              (make-command-effect
-                'directory.mutate
-                (make-directory-mutation-request
-                  'rename context (capture-directory-target 'directory.rename source)
-                  (vfs-resolve-path base destination)))))
-          owner "Rename the entry at point without replacing an existing path."
-          'directory
+                    'directory-name "Create directory: "))))
+        (undo 'ignore)
+        (let ([base
+               (directory-service-path
+                 service (command-context-buffer-id context) #f)])
+          (unless base
+            (assertion-violation 'directory.create-directory
+                                 "current Buffer is not a directory browser"))
+          (make-command-effect
+            'directory.mutate
+            (make-directory-mutation-request
+              'create context (vfs-resolve-path base name) #f))))
+      (define-command
+        runtime owner 'directory.rename (context source destination)
+        (documentation "Rename the entry at point without replacing an existing path.")
+        (class 'directory)
+        (interactive
           (make-interactive-plan
             (list (make-selected-path-reader 'directory.rename)
-                  (make-rename-destination-reader)))))
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'directory.delete
-          (lambda (context path confirmed?)
-            (if confirmed?
-                (make-command-effect
-                  'directory.mutate
-                  (make-directory-mutation-request
-                    'delete context (capture-directory-target 'directory.delete path) #f))
-                (command-handled)))
-          owner "Delete the entry at point after confirmation."
-          'directory
+                  (make-rename-destination-reader))))
+        (undo 'ignore)
+        (let ([base
+               (directory-service-path
+                 service (command-context-buffer-id context) #f)])
+          (unless base
+            (assertion-violation 'directory.rename
+                                 "current Buffer is not a directory browser"))
+          (make-command-effect
+            'directory.mutate
+            (make-directory-mutation-request
+              'rename context (capture-directory-target 'directory.rename source)
+              (vfs-resolve-path base destination)))))
+      (define-command
+        runtime owner 'directory.delete (context path confirmed?)
+        (documentation "Delete the entry at point after confirmation.")
+        (class 'directory)
+        (interactive
           (make-interactive-plan
             (list (make-selected-path-reader 'directory.delete)
-                  (make-delete-reader)))))
+                  (make-delete-reader))))
+        (undo 'ignore)
+        (if confirmed?
+            (make-command-effect
+              'directory.mutate
+              (make-directory-mutation-request
+                'delete context (capture-directory-target 'directory.delete path) #f))
+            (command-handled)))
       (package-host-add-buffer-close-listener!
         host owner
         (lambda (buffer)

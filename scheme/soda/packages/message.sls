@@ -119,24 +119,20 @@
         runtime 'message.show owner 'show-surface-message
         (lambda (ignored invocation effect)
           (show-message! service (command-effect-payload effect))))
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'message.show-position
-          (lambda (context)
-            (make-command-effect
-              'message.show (make-message-request context (position-message context))))
-          owner "Show the active selection's one-based line and grapheme column."
-          'message #f))
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'message.count-words
-          (lambda (context)
-            (make-command-effect
-              'message.show (make-message-request context (count-range-message context))))
-          owner "Show line, Unicode word, and grapheme counts for the region or Buffer."
-          'message #f))
+      (define-command
+        runtime owner 'message.show-position (context)
+        (documentation "Show the active selection's one-based line and grapheme column.")
+        (class 'message)
+        (undo 'ignore)
+        (make-command-effect
+          'message.show (make-message-request context (position-message context))))
+      (define-command
+        runtime owner 'message.count-words (context)
+        (documentation "Show line, Unicode word, and grapheme counts for the region or Buffer.")
+        (class 'message)
+        (undo 'ignore)
+        (make-command-effect
+          'message.show (make-message-request context (count-range-message context))))
       (keymap-bind! keymap (list (control-stroke #\c)) 'message.show-position)
       (keymap-bind! keymap
                     (list (make-key-stroke 'character (char->integer #\d) 3))

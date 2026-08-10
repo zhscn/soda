@@ -249,23 +249,21 @@
                            "expected a command runtime and owner" runtime owner))
     (owner-assert-active 'make-interaction-service! owner)
     (let ([service (%make-interaction-service runtime '() '() #f)])
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'interaction.submit-key
-          (lambda (context)
-            (let* ([session (interaction-service-current service)]
-                   [event (command-context-event context)]
-                   [codepoint
-                    (and session (key-event? event)
-                         (or (key-event-codepoint event)
-                             (key-event-shifted-codepoint event)))])
-              (when codepoint
-                (interaction-service-submit! service
-                                             (string (integer->char codepoint))))
-              (command-handled)))
-          owner "Submit a discrete answer accepted by the active interaction."
-          'interaction #f))
+      (define-command
+        runtime owner 'interaction.submit-key (context)
+        (documentation "Submit a discrete answer accepted by the active interaction.")
+        (class 'interaction)
+        (undo 'ignore)
+        (let* ([session (interaction-service-current service)]
+               [event (command-context-event context)]
+               [codepoint
+                (and session (key-event? event)
+                     (or (key-event-codepoint event)
+                         (key-event-shifted-codepoint event)))])
+          (when codepoint
+            (interaction-service-submit! service
+                                         (string (integer->char codepoint))))
+          (command-handled)))
       (interaction-service-registration-set!
         service
         (command-runtime-set-interaction-handler!

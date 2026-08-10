@@ -57,10 +57,11 @@
                   (make-buffer-edit-policy-extension
                     (make-buffer-edit-policy 'reject)))
                 '(help) "Help")))
-      (command-runtime-register-command!
-        (package-host-command-runtime host)
-        (make-command-definition
-          'help.show (lambda (context) (open-help! service context))
-          owner "Show the Nano-oriented Soda help Buffer." 'help #f))
+      (define-command
+        (package-host-command-runtime host) owner 'help.show (context)
+        (documentation "Show the Nano-oriented Soda help Buffer.")
+        (class 'help)
+        (undo 'ignore)
+        (open-help! service context))
       service))
 )

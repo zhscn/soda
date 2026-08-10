@@ -387,49 +387,45 @@
       (buffer-item-action-register!
         actions owner 'spell 'correct
         (lambda (item context generation) (queue-correction! service item context generation)))
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'spell.correct-item
-          (lambda (context)
-            (let ([item (buffer-item-at-point
-                          (command-context-buffer-state context)
-                          (selection-range-head
-                            (selection-primary-range
-                              (view-state-selection (command-context-view-state context)))))])
-              (if item
-                  (or (buffer-item-action-invoke actions 'correct item context) (command-handled))
-                  (command-handled))))
-          owner "Prompt for a replacement of the spelling finding at point." 'tool #f))
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'spell.correct
-          (lambda (context finding replacement)
-            (apply-correction service context finding replacement))
-          owner "Replace a spelling finding after choosing a correction." 'tool
-          (make-interactive-plan (list (make-spell-replacement-reader)))))
+      (define-command
+        runtime owner 'spell.correct-item (context)
+        (documentation "Prompt for a replacement of the spelling finding at point.")
+        (class 'tool)
+        (undo 'ignore)
+        (let ([item (buffer-item-at-point
+                      (command-context-buffer-state context)
+                      (selection-range-head
+                        (selection-primary-range
+                          (view-state-selection (command-context-view-state context)))))])
+          (if item
+              (or (buffer-item-action-invoke actions 'correct item context) (command-handled))
+              (command-handled))))
+      (define-command
+        runtime owner 'spell.correct (context finding replacement)
+        (documentation "Replace a spelling finding after choosing a correction.")
+        (class 'tool)
+        (interactive (make-interactive-plan (list (make-spell-replacement-reader))))
+        (undo 'boundary)
+        (apply-correction service context finding replacement))
       (command-runtime-register-effect-handler!
         runtime 'spell.check owner 'hunspell-check
         (lambda (ignored invocation effect)
           (start-spell-check! service (command-effect-payload effect))))
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'spell.check
-          (lambda (context)
-            (let ([buffer-state (command-context-buffer-state context)])
-              (make-command-effect
-                'spell.check
-                (make-spell-request
-                  context
-                  (command-context-buffer-id context)
-                  (buffer-name
-                    (package-host-buffer-ref host (command-context-buffer-id context)))
-                  (buffer-state-generation buffer-state)
-                  (snapshot-string (buffer-state-document buffer-state))
-                  (snapshot-bytevector (buffer-state-document buffer-state))))))
-          owner "Check the active Buffer with Hunspell and show reported words."
-          'tool #f))
+      (define-command
+        runtime owner 'spell.check (context)
+        (documentation "Check the active Buffer with Hunspell and show reported words.")
+        (class 'tool)
+        (undo 'ignore)
+        (let ([buffer-state (command-context-buffer-state context)])
+          (make-command-effect
+            'spell.check
+            (make-spell-request
+              context
+              (command-context-buffer-id context)
+              (buffer-name
+                (package-host-buffer-ref host (command-context-buffer-id context)))
+              (buffer-state-generation buffer-state)
+              (snapshot-string (buffer-state-document buffer-state))
+              (snapshot-bytevector (buffer-state-document buffer-state))))))
       (keymap-bind! keymap (list (control-stroke #\t)) 'spell.check)
       service)))

@@ -159,15 +159,14 @@
         runtime 'command-cancel owner 'keyboard-macro-command-cancel
         (lambda (invocation)
           (when (keyboard-macro-playing? service) (stop-playback! service))))
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'macro.step
-          (lambda (context step)
-            (if (keyboard-macro-playing? service)
-                (make-command-effect 'macro.invoke-step (cons step context))
-                (command-handled)))
-          owner "Run one cancellable keyboard macro step." 'macro #f))
+      (define-command
+        runtime owner 'macro.step (context step)
+        (documentation "Run one cancellable keyboard macro step.")
+        (class 'macro)
+        (undo 'ignore)
+        (if (keyboard-macro-playing? service)
+            (make-command-effect 'macro.invoke-step (cons step context))
+            (command-handled)))
       (command-runtime-register-effect-handler!
         runtime 'macro.invoke-step owner 'keyboard-macro-invoke-step
         (lambda (runtime invocation effect)
@@ -185,34 +184,34 @@
                   (make-command-invoke-message
                     name context
                     (copy-value (macro-step-arguments step)) #f)))))))
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'macro.start (lambda (context) (start-recording! service)) owner
-          "Start recording resolved command invocations." 'macro #f))
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'macro.end (lambda (context) (end-recording! service)) owner
-          "Finish the current keyboard macro." 'macro #f))
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'macro.play
-          (lambda (context . counts)
-            (play! service context (if (null? counts) 1 (car counts))))
-          owner "Queue playback of the last keyboard macro." 'macro #f))
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'macro.cancel
-          (lambda (context)
-            (when (keyboard-macro-recording? service)
-              (keyboard-macro-recording?-set! service #f)
-              (keyboard-macro-recorded-set! service '()))
-            (when (keyboard-macro-playing? service) (stop-playback! service))
-            (command-handled))
-          owner "Cancel recording or queued macro playback." 'macro #f))
+      (define-command
+        runtime owner 'macro.start (context)
+        (documentation "Start recording resolved command invocations.")
+        (class 'macro)
+        (undo 'ignore)
+        (start-recording! service))
+      (define-command
+        runtime owner 'macro.end (context)
+        (documentation "Finish the current keyboard macro.")
+        (class 'macro)
+        (undo 'ignore)
+        (end-recording! service))
+      (define-command
+        runtime owner 'macro.play (context . counts)
+        (documentation "Queue playback of the last keyboard macro.")
+        (class 'macro)
+        (undo 'ignore)
+        (play! service context (if (null? counts) 1 (car counts))))
+      (define-command
+        runtime owner 'macro.cancel (context)
+        (documentation "Cancel recording or queued macro playback.")
+        (class 'macro)
+        (undo 'ignore)
+        (when (keyboard-macro-recording? service)
+          (keyboard-macro-recording?-set! service #f)
+          (keyboard-macro-recorded-set! service '()))
+        (when (keyboard-macro-playing? service) (stop-playback! service))
+        (command-handled))
       (let ([control-x
              (make-key-stroke 'character (char->integer #\x) 4)])
         (keymap-bind!

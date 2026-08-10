@@ -216,15 +216,14 @@
         runtime 'process.spawn owner 'native-process-spawn
         (lambda (ignored invocation effect)
           (start-process! service (command-effect-payload effect))))
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'process.execute
-          (lambda (context command)
-            (make-command-effect
-              'process.spawn (make-process-request context command)))
-          owner "Execute a shell command and display its output in a Buffer."
-          'process (make-interactive-plan (list (make-process-request-reader)))))
+      (define-command
+        runtime owner 'process.execute (context command)
+        (documentation "Execute a shell command and display its output in a Buffer.")
+        (class 'process)
+        (interactive (make-interactive-plan (list (make-process-request-reader))))
+        (undo 'ignore)
+        (make-command-effect
+          'process.spawn (make-process-request context command)))
       (keymap-bind!
         keymap
         (list (make-key-stroke 'character (char->integer #\!) 2))

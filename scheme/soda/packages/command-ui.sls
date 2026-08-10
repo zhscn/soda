@@ -125,21 +125,27 @@
           [where-reader (make-command-reader runtime 'where-is "Where is command: ")])
       (define-command
         runtime owner 'command.execute-extended (context name)
-        "Read and enqueue an available command for interactive execution." 'command
+        (documentation "Read and enqueue an available command for interactive execution.")
+        (class 'command)
         (interactive (make-interactive-plan (list execute-reader)))
+        (undo 'ignore)
         (command-runtime-enqueue!
           runtime (make-command-invoke-message name context '() #t))
         (command-handled))
       (define-command
         runtime owner 'command.describe (context name)
-        "Describe an available command." 'command
+        (documentation "Describe an available command.")
+        (class 'command)
         (interactive (make-interactive-plan (list describe-reader)))
+        (undo 'ignore)
         (make-command-effect
           'message.show (make-message-request context (description runtime name))))
       (define-command
         runtime owner 'command.where-is (context name)
-        "Show active key sequences bound to an available command." 'command
+        (documentation "Show active key sequences bound to an available command.")
+        (class 'command)
         (interactive (make-interactive-plan (list where-reader)))
+        (undo 'ignore)
         (let ([sequences
                (keymap-where-is (context-keymaps context fallback-keymaps) name)])
           (make-command-effect

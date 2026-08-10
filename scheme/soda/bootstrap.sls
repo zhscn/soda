@@ -262,20 +262,18 @@
                   (make-interactive-ready (list (shutdown-decision value))))))))))
 
   (define (install-application-quit-command! runtime owner files)
-    (command-runtime-register-command!
-      runtime
-      (make-command-definition
-        'application.quit
-        (lambda (context decision)
-          (case decision
-            [(cancel) (command-handled)]
-            [else
-             (append
-               (file-service-shutdown-effects files decision)
-               (list (make-command-effect 'application.quit #f)))]))
-        owner "Request application shutdown after resolving modified files."
-        'application
-        (make-interactive-plan (list (make-application-quit-reader files))))))
+    (define-command
+      runtime owner 'application.quit (context decision)
+      (documentation "Request application shutdown after resolving modified files.")
+      (class 'application)
+      (interactive (make-interactive-plan (list (make-application-quit-reader files))))
+      (undo 'ignore)
+      (case decision
+        [(cancel) (command-handled)]
+        [else
+         (append
+           (file-service-shutdown-effects files decision)
+           (list (make-command-effect 'application.quit #f)))])))
 
   (define (require-open who application)
     (unless (and (soda-application? application)

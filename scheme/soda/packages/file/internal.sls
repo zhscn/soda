@@ -240,46 +240,40 @@
                        service request (command-invocation-context invocation))
                      (raise condition)])
                   (resolve-external-file! service request))))))
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'file.external-auto-reload
-          (lambda (context buffer-id version)
-            (make-command-effect
-              'file.external-resolution
-              (make-file-external-resolution
-                buffer-id version 'reload #f #f)))
-          owner "Reload an unmodified Buffer after a stable external change."
-          'file #f))
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'file.resolve-external-change
-          (lambda (context buffer-id version action . arguments)
-            (cond
-              [(and (eq? action 'save-as)
-                    (or (< (length arguments) 3)
-                        (eq? (cadr arguments) 'cancel)))
-               (command-handled)]
-              [else
-               (let* ([destination
-                        (and (eq? action 'save-as)
-                             (canonical-file-resource (car arguments)))]
-                      [destination-version
-                       (and destination (caddr arguments))])
-                 (make-command-effect
-                   'file.external-resolution
-                   (make-file-external-resolution
-                     buffer-id version action destination
-                     destination-version)))]))
-          owner
-          "Resolve a changed-on-disk conflict without applying a stale decision."
-          'file
+      (define-command
+        runtime owner 'file.external-auto-reload (context buffer-id version)
+        (documentation "Reload an unmodified Buffer after a stable external change.")
+        (class 'file)
+        (undo 'ignore)
+        (make-command-effect
+          'file.external-resolution
+          (make-file-external-resolution buffer-id version 'reload #f #f)))
+      (define-command
+        runtime owner 'file.resolve-external-change
+        (context buffer-id version action . arguments)
+        (documentation "Resolve a changed-on-disk conflict without applying a stale decision.")
+        (class 'file)
+        (interactive
           (make-interactive-plan
             (list (make-conflict-target-reader service)
                   (make-external-change-reader service)
                   (make-conflict-save-as-reader)
-                  (make-conflict-overwrite-reader)))))
+                  (make-conflict-overwrite-reader))))
+        (undo 'ignore)
+        (cond
+          [(and (eq? action 'save-as)
+                (or (< (length arguments) 3)
+                    (eq? (cadr arguments) 'cancel)))
+           (command-handled)]
+          [else
+           (let* ([destination
+                    (and (eq? action 'save-as)
+                         (canonical-file-resource (car arguments)))]
+                  [destination-version (and destination (caddr arguments))])
+             (make-command-effect
+               'file.external-resolution
+               (make-file-external-resolution
+                 buffer-id version action destination destination-version)))]))
       (command-runtime-register-effect-handler!
         runtime 'file.visit owner 'open-file-buffer
         (lambda (ignored invocation effect)

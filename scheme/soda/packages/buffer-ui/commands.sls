@@ -90,66 +90,68 @@
                  (buffer-item-action-service? actions) (package-host? host))
       (assertion-violation 'install-buffer-item-commands!
                            "invalid BufferItem command dependencies" runtime owner actions))
-    (for-each
-      (lambda (definition) (command-runtime-register-command! runtime definition))
-      (list
-        (make-command-definition
-          'buffer.next-line
-          (lambda (context) (move-line context 1))
-          owner "Move to the next logical line in a special Buffer." 'buffer-item #f)
-        (make-command-definition
-          'buffer.previous-line
-          (lambda (context) (move-line context -1))
-          owner "Move to the previous logical line in a special Buffer." 'buffer-item #f)
-        (make-command-definition
-          'buffer.page-up
-          (lambda (context) (scroll-page context -1))
-          owner "Scroll a special Buffer toward its beginning." 'buffer-item #f)
-        (make-command-definition
-          'buffer.page-down
-          (lambda (context) (scroll-page context 1))
-          owner "Scroll a special Buffer toward its end." 'buffer-item #f)
-        (make-command-definition
-          'buffer.next-item
-          (lambda (context)
-            (let ([range (next-item-range (command-context-buffer-state context)
-                                          (context-point context))])
-              (if range (move-to-item context range) (command-handled))))
-          owner "Move to the next semantic Buffer item." 'buffer-item #f)
-        (make-command-definition
-          'buffer.previous-item
-          (lambda (context)
-            (let ([range (previous-item-range (command-context-buffer-state context)
-                                              (context-point context))])
-              (if range (move-to-item context range) (command-handled))))
-          owner "Move to the previous semantic Buffer item." 'buffer-item #f)
-        (make-command-definition
-          'buffer.first-item
-          (lambda (context)
-            (let ([range (edge-item-range (command-context-buffer-state context) #t)])
-              (if range (move-to-item context range) (command-handled))))
-          owner "Move to the first semantic Buffer item." 'buffer-item #f)
-        (make-command-definition
-          'buffer.last-item
-          (lambda (context)
-            (let ([range (edge-item-range (command-context-buffer-state context) #f)])
-              (if range (move-to-item context range) (command-handled))))
-          owner "Move to the last semantic Buffer item." 'buffer-item #f)
-        (make-command-definition
-          'buffer.activate-item
-          (lambda (context)
-            (let ([item (buffer-item-at-point (command-context-buffer-state context)
-                                              (context-point context))])
-              (if (and item (buffer-item-primary-action item))
-                  (or (buffer-item-action-invoke actions (buffer-item-primary-action item) item context)
-                      (command-handled))
-                  (command-handled))))
-          owner "Run the primary action for the semantic item at point." 'buffer-item #f)
-        (make-command-definition
-          'buffer.close
-          (lambda (context)
-            (package-host-close-buffer-with-fallback!
-              host owner (command-context-buffer-id context))
-            (command-handled))
-          owner "Close the active special Buffer." 'buffer-item #f))))
+    (define-command
+      runtime owner 'buffer.next-line (context)
+      (documentation "Move to the next logical line in a special Buffer.")
+      (class 'buffer-item) (repeatable #t) (undo 'ignore)
+      (move-line context 1))
+    (define-command
+      runtime owner 'buffer.previous-line (context)
+      (documentation "Move to the previous logical line in a special Buffer.")
+      (class 'buffer-item) (repeatable #t) (undo 'ignore)
+      (move-line context -1))
+    (define-command
+      runtime owner 'buffer.page-up (context)
+      (documentation "Scroll a special Buffer toward its beginning.")
+      (class 'buffer-item) (repeatable #t) (undo 'ignore)
+      (scroll-page context -1))
+    (define-command
+      runtime owner 'buffer.page-down (context)
+      (documentation "Scroll a special Buffer toward its end.")
+      (class 'buffer-item) (repeatable #t) (undo 'ignore)
+      (scroll-page context 1))
+    (define-command
+      runtime owner 'buffer.next-item (context)
+      (documentation "Move to the next semantic Buffer item.")
+      (class 'buffer-item) (repeatable #t) (undo 'ignore)
+      (let ([range (next-item-range (command-context-buffer-state context)
+                                    (context-point context))])
+        (if range (move-to-item context range) (command-handled))))
+    (define-command
+      runtime owner 'buffer.previous-item (context)
+      (documentation "Move to the previous semantic Buffer item.")
+      (class 'buffer-item) (repeatable #t) (undo 'ignore)
+      (let ([range (previous-item-range (command-context-buffer-state context)
+                                        (context-point context))])
+        (if range (move-to-item context range) (command-handled))))
+    (define-command
+      runtime owner 'buffer.first-item (context)
+      (documentation "Move to the first semantic Buffer item.")
+      (class 'buffer-item) (repeatable #t) (undo 'ignore)
+      (let ([range (edge-item-range (command-context-buffer-state context) #t)])
+        (if range (move-to-item context range) (command-handled))))
+    (define-command
+      runtime owner 'buffer.last-item (context)
+      (documentation "Move to the last semantic Buffer item.")
+      (class 'buffer-item) (repeatable #t) (undo 'ignore)
+      (let ([range (edge-item-range (command-context-buffer-state context) #f)])
+        (if range (move-to-item context range) (command-handled))))
+    (define-command
+      runtime owner 'buffer.activate-item (context)
+      (documentation "Run the primary action for the semantic item at point.")
+      (class 'buffer-item) (undo 'ignore)
+      (let ([item (buffer-item-at-point (command-context-buffer-state context)
+                                        (context-point context))])
+        (if (and item (buffer-item-primary-action item))
+            (or (buffer-item-action-invoke
+                  actions (buffer-item-primary-action item) item context)
+                (command-handled))
+            (command-handled))))
+    (define-command
+      runtime owner 'buffer.close (context)
+      (documentation "Close the active special Buffer.")
+      (class 'buffer-item) (undo 'ignore)
+      (package-host-close-buffer-with-fallback!
+        host owner (command-context-buffer-id context))
+      (command-handled)))
 )

@@ -242,27 +242,25 @@
         runtime 'buffer-list.refresh owner 'refresh-buffer-list
         (lambda (ignored invocation effect)
           (refresh-buffer-list! service (command-effect-payload effect))))
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'buffer.list
-          (lambda (context)
-            (make-command-effect 'buffer-list.open (make-buffer-list-open-request context)))
-          owner "Show live Buffers in a generated Buffer List." 'buffer #f))
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'buffer-list.refresh
-          (lambda (context)
-            (make-command-effect
-              'buffer-list.refresh (make-buffer-list-refresh-request context)))
-          owner "Refresh the generated Buffer List." 'buffer #f))
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'buffer-list.close-item
-          (lambda (context) (close-item-at-point! service context))
-          owner "Close the Buffer item at point." 'buffer #f))
+      (define-command
+        runtime owner 'buffer.list (context)
+        (documentation "Show live Buffers in a generated Buffer List.")
+        (class 'buffer)
+        (undo 'ignore)
+        (make-command-effect 'buffer-list.open (make-buffer-list-open-request context)))
+      (define-command
+        runtime owner 'buffer-list.refresh (context)
+        (documentation "Refresh the generated Buffer List.")
+        (class 'buffer)
+        (undo 'ignore)
+        (make-command-effect
+          'buffer-list.refresh (make-buffer-list-refresh-request context)))
+      (define-command
+        runtime owner 'buffer-list.close-item (context)
+        (documentation "Close the Buffer item at point.")
+        (class 'buffer)
+        (undo 'ignore)
+        (close-item-at-point! service context))
       (package-host-add-buffer-close-listener!
         host owner
         (lambda (buffer)
