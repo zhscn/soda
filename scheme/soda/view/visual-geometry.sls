@@ -10,4 +10,6 @@
           text-layout-visual-step text-layout-scroll-start
           text-layout-page-start text-layout-recenter-start
           text-layout-viewport-row-position text-layout-reveal-viewport)
-  (import (soda view text-layout internal)))
+  (import (soda view text-layout-coordinates)
+          (soda view text-layout-result)
+          (soda view visual-measurement)))
