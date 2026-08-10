@@ -30,6 +30,43 @@
           command-context-target
           command-context-source
           command-context-layout
+          make-prefix-argument
+          prefix-argument?
+          prefix-argument-raw-value
+          prefix-argument-numeric-value
+          prefix-argument-present?
+          make-command-identity
+          command-identity?
+          command-identity-requested
+          command-identity-effective
+          command-identity-semantic
+          make-command-loop-state
+          command-loop-state?
+          command-loop-state-current
+          command-loop-state-last
+          command-loop-state-current-prefix
+          command-loop-state-last-prefix
+          command-loop-state-last-record
+          command-loop-state-repeat-record
+          make-command-loop-transition
+          command-loop-transition?
+          command-loop-transition-semantic-command
+          command-loop-transition-repeatable?
+          command-loop-transition-undo-policy
+          command-loop-transition-preserve-prefix?
+          command-loop-transition-transient-state
+          make-command-execution-record
+          command-execution-record?
+          command-execution-record-invocation-id
+          command-execution-record-identity
+          command-execution-record-context
+          command-execution-record-arguments
+          command-execution-record-prefix-argument
+          command-execution-record-source
+          command-execution-record-key-sequence
+          command-execution-record-outcome
+          command-execution-record-result
+          command-execution-record-transition
           make-interactive-reader
           interactive-reader?
           interactive-reader-name
@@ -47,6 +84,8 @@
           make-command-result
           command-result?
           command-result-outcomes
+          command-result-transition
+          command-result-with-transition
           command-handled
           command-handled?
           make-command-effect
@@ -58,6 +97,8 @@
           command-invocation?
           command-invocation-id
           command-invocation-definition
+          command-invocation-identity
+          command-invocation-set-identity!
           command-invocation-context
           command-invocation-remaining-readers
           command-invocation-arguments
@@ -191,6 +232,131 @@
          (if (list? key-sequence) (list-copy key-sequence) '())
          prefix-argument target source layout)]))
 
+  ;; PrefixArgument retains the raw input form while giving commands one
+  ;; stable numeric interpretation.  #f at old API boundaries is normalized
+  ;; by the runtime to prefix-argument-absent.
+  (define-record-type
+    (prefix-argument %make-prefix-argument prefix-argument?)
+    (fields
+      (immutable raw-value prefix-argument-raw-value)
+      (immutable numeric-value prefix-argument-numeric-value)))
+
+  (define make-prefix-argument
+    (case-lambda
+      [() (%make-prefix-argument #f 1)]
+      [(raw)
+       (%make-prefix-argument raw
+         (cond [(and (integer? raw) (exact? raw)) raw]
+               [(eq? raw 'universal) 4]
+               [(not raw) 1]
+               [else
+                (assertion-violation 'make-prefix-argument
+                                     "raw prefix has no numeric interpretation" raw)]))]
+      [(raw numeric)
+       (unless (and (integer? numeric) (exact? numeric))
+         (assertion-violation 'make-prefix-argument
+                              "numeric prefix must be an exact integer" numeric))
+       (%make-prefix-argument raw numeric)]))
+
+  (define (prefix-argument-present? value)
+    (and (prefix-argument? value) (prefix-argument-raw-value value) #t))
+
+  (define-record-type
+    (command-identity %make-command-identity command-identity?)
+    (fields
+      (immutable requested command-identity-requested)
+      (immutable effective command-identity-effective)
+      (immutable semantic command-identity-semantic)))
+
+  (define make-command-identity
+    (case-lambda
+      [(name) (make-command-identity name name name)]
+      [(requested effective) (make-command-identity requested effective effective)]
+      [(requested effective semantic)
+       (unless (and (symbol? requested) (symbol? effective) (symbol? semantic))
+         (assertion-violation 'make-command-identity
+                              "command identities must be symbols"
+                              requested effective semantic))
+       (%make-command-identity requested effective semantic)]))
+
+  (define-record-type
+    (command-loop-state %make-command-loop-state command-loop-state?)
+    (fields
+      (immutable current command-loop-state-current)
+      (immutable last command-loop-state-last)
+      (immutable current-prefix command-loop-state-current-prefix)
+      (immutable last-prefix command-loop-state-last-prefix)
+      (immutable last-record command-loop-state-last-record)
+      (immutable repeat-record command-loop-state-repeat-record)))
+
+  (define make-command-loop-state
+    (case-lambda
+      [() (%make-command-loop-state #f #f (make-prefix-argument)
+                                   (make-prefix-argument) #f #f)]
+      [(current last current-prefix last-prefix last-record repeat-record)
+       (unless (and (or (not current) (command-identity? current))
+                    (or (not last) (command-identity? last))
+                    (prefix-argument? current-prefix)
+                    (prefix-argument? last-prefix)
+                    (or (not last-record) (command-execution-record? last-record))
+                    (or (not repeat-record) (command-execution-record? repeat-record)))
+         (assertion-violation 'make-command-loop-state "invalid command loop state"))
+       (%make-command-loop-state current last current-prefix last-prefix
+                                 last-record repeat-record)]))
+
+  ;; A command returns policy for the command-loop transition alongside its
+  ;; ordinary editor outcomes.  'boundary starts a new undo unit,
+  ;; 'amalgamate joins a compatible preceding semantic command, and 'ignore
+  ;; keeps the command out of edit history.
+  (define-record-type
+    (command-loop-transition %make-command-loop-transition command-loop-transition?)
+    (fields
+      (immutable semantic-command command-loop-transition-semantic-command)
+      (immutable repeatable? command-loop-transition-repeatable?)
+      (immutable undo-policy command-loop-transition-undo-policy)
+      (immutable preserve-prefix? command-loop-transition-preserve-prefix?)
+      (immutable transient-state command-loop-transition-transient-state)))
+
+  (define make-command-loop-transition
+    (case-lambda
+      [() (%make-command-loop-transition #f #f 'boundary #f #f)]
+      [(semantic repeatable? undo-policy)
+       (make-command-loop-transition semantic repeatable? undo-policy #f #f)]
+      [(semantic repeatable? undo-policy preserve-prefix? transient-state)
+       (unless (and (or (not semantic) (symbol? semantic))
+                    (memq undo-policy '(boundary amalgamate ignore)))
+         (assertion-violation 'make-command-loop-transition
+                              "invalid command loop transition"
+                              semantic repeatable? undo-policy))
+       (%make-command-loop-transition semantic (and repeatable? #t) undo-policy
+                                      (and preserve-prefix? #t) transient-state)]))
+
+  (define-record-type
+    (command-execution-record %make-command-execution-record command-execution-record?)
+    (fields
+      (immutable invocation-id command-execution-record-invocation-id)
+      (immutable identity command-execution-record-identity)
+      (immutable context command-execution-record-context)
+      (immutable arguments command-execution-record-arguments)
+      (immutable prefix-argument command-execution-record-prefix-argument)
+      (immutable source command-execution-record-source)
+      (immutable key-sequence command-execution-record-key-sequence)
+      (immutable outcome command-execution-record-outcome)
+      (immutable result command-execution-record-result)
+      (immutable transition command-execution-record-transition)))
+
+  (define (make-command-execution-record invocation-id identity context arguments prefix
+                                         source keys outcome result transition)
+    (unless (and (integer? invocation-id) (exact? invocation-id) (>= invocation-id 0)
+                 (command-identity? identity) (command-context? context) (list? arguments)
+                 (prefix-argument? prefix) (symbol? outcome)
+                 (command-loop-transition? transition))
+      (assertion-violation 'make-command-execution-record
+                           "invalid command execution record"))
+    (%make-command-execution-record invocation-id identity context (list-copy arguments)
+                                    prefix source (if (list? keys) (list-copy keys) '())
+                                    outcome result transition))
+
   ;; Interactive readers are the only suspension protocol CommandRuntime
   ;; understands.  A reader returns ready values synchronously, or a request
   ;; and decoder.  The interaction package owns presentation and resumes the
@@ -240,12 +406,28 @@
   ;; travels as CommandEffect and is handled through an explicit registration.
   (define-record-type
     (command-result %make-command-result command-result?)
-    (fields (immutable outcomes command-result-outcomes)))
+    (fields (immutable outcomes command-result-outcomes)
+            (immutable transition command-result-transition)))
 
-  (define (make-command-result outcomes)
-    (unless (list? outcomes)
-      (assertion-violation 'make-command-result "outcomes must be a list" outcomes))
-    (%make-command-result (list-copy outcomes)))
+  (define make-command-result
+    (case-lambda
+      [(outcomes) (make-command-result outcomes (make-command-loop-transition))]
+      [(outcomes transition)
+       (unless (and (list? outcomes) (command-loop-transition? transition))
+         (assertion-violation 'make-command-result
+                              "expected outcomes and a command loop transition"
+                              outcomes transition))
+       (%make-command-result (list-copy outcomes) transition)]))
+
+  (define (command-result-with-transition value transition)
+    (unless (command-loop-transition? transition)
+      (assertion-violation 'command-result-with-transition
+                           "expected a command loop transition" transition))
+    (make-command-result
+      (cond [(command-result? value) (command-result-outcomes value)]
+            [(list? value) value]
+            [else (list value)])
+      transition))
 
   (define-record-type (handled-outcome %make-command-handled command-handled?) (fields))
   (define (command-handled) (%make-command-handled))
@@ -268,6 +450,7 @@
     (fields
       (immutable id command-invocation-id)
       (immutable definition command-invocation-definition)
+      (mutable identity command-invocation-identity command-invocation-identity-set!)
       (immutable context command-invocation-context)
       (mutable remaining-readers command-invocation-remaining-readers
                                  command-invocation-remaining-readers-set!)
@@ -282,7 +465,15 @@
       (assertion-violation 'make-command-invocation "invalid command invocation"))
     (%make-command-invocation
       (identity-source-next! invocation-identities)
-      definition context '() (list-copy arguments) 'resolving #f #f #f))
+      definition (make-command-identity (command-definition-name definition))
+      context '() (list-copy arguments) 'resolving #f #f #f))
+
+  (define (command-invocation-set-identity! invocation identity)
+    (unless (and (command-invocation? invocation) (command-identity? identity))
+      (assertion-violation 'command-invocation-set-identity!
+                           "expected an invocation and command identity"))
+    (command-invocation-identity-set! invocation identity)
+    identity)
 
   ;; An interactive invocation may carry explicit leading arguments.  This
   ;; lets a command started from a semantic BufferItem retain its immutable
@@ -300,7 +491,7 @@
                               definition))
        (%make-command-invocation
          (identity-source-next! invocation-identities)
-         definition context
+         definition (make-command-identity (command-definition-name definition)) context
          (interactive-plan-readers (command-definition-interaction-spec definition))
          (list-copy arguments) 'resolving #f #f #f)]))
 

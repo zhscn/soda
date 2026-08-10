@@ -53,6 +53,7 @@
           (soda packages whitespace)
           (soda packages comment)
           (soda packages keyboard-macro)
+          (soda packages repeat)
           (soda packages interaction)
           (soda packages buffer-item)
           (soda packages buffer-mode)
@@ -146,6 +147,8 @@
                [history
                 (make-history! (host-state-command-runtime state)
                                (host-state-dispatch state) owner)]
+               [_repeat
+                (make-repeat-command! (host-state-command-runtime state) owner)]
                [files
                 (make-file-service! host owner history)]
                [scheme-mode
@@ -209,6 +212,10 @@
                     'history.undo)
       (keymap-bind! keymap (list (make-key-stroke 'character (char->integer #\e) 2))
                     'history.redo)
+      (keymap-bind! keymap
+                    (list (make-key-stroke 'character (char->integer #\x) 4)
+                          (make-key-stroke 'character (char->integer #\z) 0))
+                    'command.repeat)
       (keymap-bind! keymap
                     (list (make-key-stroke 'character (char->integer #\x) 2))
                     'command.execute-extended)

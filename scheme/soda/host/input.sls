@@ -48,6 +48,7 @@
           input-disposition?
           input-disposition-kind
           input-disposition-value
+          input-disposition-requested-command
           input-disposition-input-state
           input-pass
           input-consume
@@ -394,16 +395,17 @@
     (input-disposition %make-input-disposition input-disposition?)
     (fields (immutable kind input-disposition-kind)
             (immutable value input-disposition-value)
+            (immutable requested-command input-disposition-requested-command)
             (immutable input-state input-disposition-input-state)))
 
   (define input-pass
     (case-lambda
-      [() (%make-input-disposition 'pass #f #f)]
-      [(input-state) (%make-input-disposition 'pass #f input-state)]))
+      [() (%make-input-disposition 'pass #f #f #f)]
+      [(input-state) (%make-input-disposition 'pass #f #f input-state)]))
   (define input-consume
     (case-lambda
-      [() (%make-input-disposition 'consume #f #f)]
-      [(input-state) (%make-input-disposition 'consume #f input-state)]))
+      [() (%make-input-disposition 'consume #f #f #f)]
+      [(input-state) (%make-input-disposition 'consume #f #f input-state)]))
 
   (define (input-reset context)
     (unless (input-context? context)
@@ -423,13 +425,13 @@
               [source (caddr result)])
           (let loop ([items layers])
             (if (null? items)
-                (list 'command binding source (cadddr result))
+                (list 'command binding source (cadddr result) binding)
                 (let ([replacement (keymap-remap
                                      (input-layer-keymap (car items))
                                      binding
                                      #f)])
                   (if replacement
-                      (list 'command replacement source (cadddr result))
+                      (list 'command replacement source (cadddr result) binding)
                       (loop (cdr items)))))))))
 
   (define (input-dispatch context event)
@@ -446,6 +448,7 @@
            (%make-input-disposition
              (input-disposition-kind result)
              (input-disposition-value result)
+             (input-disposition-requested-command result)
              reset))]
         [(eq? (key-event-type event) 'release)
          (input-pass stack)]
@@ -464,12 +467,13 @@
               (input-consume
                 (input-stack-with-pending-sequence stack sequence))]
              [(command)
-              (%make-input-disposition 'command (cadr result) (input-reset context))]
+              (%make-input-disposition 'command (cadr result) (list-ref result 4)
+                                       (input-reset context))]
              [else
               (if (and (positive? (bytevector-length (key-event-text event)))
                        (accepting-text-layer? (input-context-layers context)))
-                  (%make-input-disposition 'text (key-event-text event) (input-reset context))
-                  (%make-input-disposition 'undefined sequence (input-reset context)))]))])))
+                  (%make-input-disposition 'text (key-event-text event) #f (input-reset context))
+                  (%make-input-disposition 'undefined sequence #f (input-reset context)))]))])))
 
   (define (accepting-text-layer? layers)
     (and (pair? layers)
@@ -487,6 +491,7 @@
               (%make-input-disposition
                 (text-input-event-kind event)
                 (text-input-event-text event)
+                #f
                 (input-context-stack context))
               (input-pass (input-context-stack context))))
         (if (key-event? event)
@@ -496,7 +501,8 @@
               (case (car result)
                 [(command)
                  (%make-input-disposition
-                   'command (cadr result) (input-context-stack context))]
+                   'command (cadr result) (cadr result)
+                   (input-context-stack context))]
                 [(prefix) (input-consume (input-context-stack context))]
                 [else (input-pass (input-context-stack context))]))
             (input-pass (input-context-stack context)))))

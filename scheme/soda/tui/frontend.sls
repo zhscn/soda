@@ -312,7 +312,9 @@
                         name command-context '()
                         (command-runtime-command-interactive?
                           (host-state-command-runtime (frontend-host-state value))
-                          name))))]
+                          name)
+                        (or (input-disposition-requested-command disposition)
+                            name))))]
                  [else
                   (enqueue-disposition-result!
                     value

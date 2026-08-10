@@ -15,6 +15,9 @@
           command-runtime-resume!
           command-runtime-cancel!
           command-runtime-invocation
+          command-runtime-loop-state
+          command-runtime-execution-history
+          command-runtime-repeat-last!
           command-runtime-set-interaction-handler!
           command-runtime-register-effect-handler!
           command-runtime-add-hook!
@@ -25,6 +28,7 @@
           command-invoke-message-context
           command-invoke-message-arguments
           command-invoke-message-interactive?
+          command-invoke-message-requested-name
           make-command-resume-message
           command-resume-message?
           command-resume-message-invocation-id
@@ -63,6 +67,9 @@
       (immutable advice command-runtime-advice)
       (immutable hooks command-runtime-hooks)
       (immutable effects command-runtime-effects)
+      (immutable loop-states command-runtime-loop-states)
+      (mutable execution-history command-runtime-execution-history-table
+               command-runtime-execution-history-table-set!)
       (mutable interaction-handler command-runtime-interaction-handler
                                    command-runtime-interaction-handler-set!)
       (mutable interaction-registration command-runtime-interaction-registration
@@ -77,7 +84,8 @@
     (%make-command-runtime
       owner registry dispatcher queue conditions
       (make-eqv-hashtable) (make-eq-hashtable) (make-eq-hashtable)
-      (make-eq-hashtable) #f #f 0))
+      (make-eq-hashtable) (make-hashtable equal-hash equal?) '()
+      #f #f 0))
 
   ;; Command definitions are registered through their runtime, so a package
   ;; never needs access to the mutable CommandRegistry implementation.
@@ -299,7 +307,8 @@
 
   (define (command-runtime-add-hook! service phase owner name procedure)
     (unless (and (command-runtime? service)
-                 (memq phase '(pre-command post-command command-error command-cancel)))
+                 (memq phase '(pre-command post-command execution-record
+                               command-error command-cancel)))
       (assertion-violation 'command-runtime-add-hook! "invalid runtime or hook phase" service phase))
     (register-named-entry!
       'command-runtime-add-hook! service (command-runtime-hooks service)
@@ -340,6 +349,53 @@
       [(list? value) (make-command-result value)]
       [else
        (assertion-violation 'command-runtime "command returned an invalid result" value)]))
+
+  (define (normalize-prefix-argument value)
+    (if (prefix-argument? value) value (make-prefix-argument value)))
+
+  (define (loop-key context)
+    (or (command-context-surface-id context)
+        (list 'source (command-context-source context))))
+
+  (define (command-runtime-loop-state service context)
+    (unless (and (command-runtime? service) (command-context? context))
+      (assertion-violation 'command-runtime-loop-state
+                           "expected a runtime and command context"))
+    (hashtable-ref (command-runtime-loop-states service) (loop-key context)
+                   (make-command-loop-state)))
+
+  (define (command-runtime-execution-history service)
+    (unless (command-runtime? service)
+      (assertion-violation 'command-runtime-execution-history
+                           "expected a command runtime" service))
+    (list-copy (command-runtime-execution-history-table service)))
+
+  (define (take-records items count)
+    (if (or (zero? count) (null? items))
+        '()
+        (cons (car items) (take-records (cdr items) (- count 1)))))
+
+  (define (transaction-with-command-metadata spec invocation transition)
+    (let* ([identity (command-invocation-identity invocation)]
+           [metadata
+            (list
+              (make-annotation 'command.invocation-id
+                               (command-invocation-id invocation))
+              (make-annotation 'command.semantic
+                               (or (command-loop-transition-semantic-command transition)
+                                   (command-identity-semantic identity)))
+              (make-annotation 'command.undo-policy
+                               (command-loop-transition-undo-policy transition)))])
+      (make-transaction-spec
+        (transaction-spec-buffer-id spec)
+        (transaction-spec-origin-view-id spec)
+        (transaction-spec-start-generation spec)
+        (transaction-spec-changes spec)
+        (transaction-spec-selection spec)
+        (transaction-spec-effects spec)
+        (append (transaction-spec-annotations spec) metadata)
+        (transaction-spec-scroll-request spec)
+        (transaction-spec-sequential? spec))))
 
   (define (invoke-with-advice service invocation definition context arguments)
     (let* ([advice (advice-for service (command-definition-name definition))]
@@ -397,11 +453,13 @@
           ((effect-handler-procedure handler) service invocation effect))
         handlers)))
 
-  (define (apply-outcome! service invocation outcome)
+  (define (apply-outcome! service invocation transition outcome)
     (cond
       [(command-handled? outcome) #t]
       [(transaction-spec? outcome)
-       (dispatcher-dispatch! (command-runtime-dispatcher service) outcome)]
+       (dispatcher-dispatch!
+         (command-runtime-dispatcher service)
+         (transaction-with-command-metadata outcome invocation transition))]
       [(view-transaction-spec? outcome)
        (dispatcher-dispatch-view! (command-runtime-dispatcher service) outcome)]
       [(host-operation? outcome)
@@ -413,7 +471,9 @@
   (define (apply-result! service invocation result)
     (let ([normalized (normalize-command-result result)])
       (for-each
-        (lambda (outcome) (apply-outcome! service invocation outcome))
+        (lambda (outcome)
+          (apply-outcome! service invocation
+                          (command-result-transition normalized) outcome))
         (command-result-outcomes normalized))
       normalized))
 
@@ -423,13 +483,78 @@
         (apply (runtime-hook-procedure entry) arguments))
       (hooks-for service phase)))
 
+  (define (record-terminal-invocation! service invocation outcome result transition)
+    (let* ([context (command-invocation-context invocation)]
+           [key (loop-key context)]
+           [previous (command-runtime-loop-state service context)]
+           [prefix (normalize-prefix-argument
+                     (command-context-prefix-argument context))]
+           [identity (command-invocation-identity invocation)]
+           [semantic (or (command-loop-transition-semantic-command transition)
+                         (command-identity-effective identity))]
+           [final-identity
+            (make-command-identity
+              (command-identity-requested identity)
+              (command-identity-effective identity)
+              semantic)]
+           [record
+            (make-command-execution-record
+              (command-invocation-id invocation) final-identity context
+              (command-invocation-arguments invocation) prefix
+              (command-context-source context) (command-context-key-sequence context)
+              outcome result transition)]
+           [completed? (eq? outcome 'completed)]
+           [repeat-record
+            (if (and completed? (command-loop-transition-repeatable? transition))
+                record (command-loop-state-repeat-record previous))]
+           [next-prefix
+            (if (and completed?
+                     (command-loop-transition-preserve-prefix? transition))
+                prefix (make-prefix-argument))])
+      (command-invocation-set-identity! invocation final-identity)
+      (hashtable-set!
+        (command-runtime-loop-states service) key
+        (make-command-loop-state
+          #f
+          (if completed? final-identity (command-loop-state-last previous))
+          next-prefix
+          (if completed? prefix (command-loop-state-last-prefix previous))
+          (if completed? record (command-loop-state-last-record previous))
+          repeat-record))
+      (command-runtime-execution-history-table-set!
+        service
+        (let ([items (cons record
+                          (command-runtime-execution-history-table service))])
+          (if (> (length items) 256) (take-records items 256) items)))
+      ;; Execution records are committed observations.  A diagnostic or
+      ;; recorder must not retroactively turn a completed command into an
+      ;; error, nor recurse while an error record is being published.
+      (guard (ignored [else #f])
+        (run-hooks! service 'execution-record record))
+      record))
+
   (define (invoke-definition! service invocation definition context arguments)
+    (let* ([key (loop-key context)]
+           [previous (command-runtime-loop-state service context)]
+           [prefix (normalize-prefix-argument
+                     (command-context-prefix-argument context))]
+           [identity (command-invocation-identity invocation)])
+      (hashtable-set!
+        (command-runtime-loop-states service) key
+        (make-command-loop-state identity
+                                 (command-loop-state-last previous)
+                                 prefix
+                                 (command-loop-state-last-prefix previous)
+                                 (command-loop-state-last-record previous)
+                                 (command-loop-state-repeat-record previous)))
     (run-hooks! service 'pre-command invocation)
     (let ([result (apply-result!
                     service invocation
                     (invoke-with-advice service invocation definition context arguments))])
       (run-hooks! service 'post-command invocation result)
-      result))
+      (record-terminal-invocation!
+        service invocation 'completed result (command-result-transition result))
+      result)))
 
   (define (retire-invocation! service invocation)
     (hashtable-delete! (command-runtime-invocations service)
@@ -447,6 +572,8 @@
               '(dismiss))])
       (command-invocation-record-condition! invocation entry)
       (command-invocation-cancel! invocation)
+      (record-terminal-invocation!
+        service invocation 'error entry (make-command-loop-transition #f #f 'ignore))
       ;; A hook failure is itself just a failed command lifecycle and must not
       ;; recursively create a second condition.
       (guard (ignored [else #f])
@@ -491,7 +618,7 @@
                            "expected a command runtime" service))
     (command-definition-interactive? (lookup-definition service name)))
 
-  (define (start! service name context interactive? arguments)
+  (define (start! service name context interactive? arguments . requested-names)
     (unless (and (command-runtime? service) (command-context? context) (list? arguments))
       (assertion-violation 'command-runtime-start! "invalid command start" name context arguments))
     (let* ([definition (lookup-definition service name)]
@@ -508,6 +635,10 @@
              (if (and interactive? (command-definition-interactive? definition))
                  (make-interactive-command-invocation definition context arguments)
                  (make-command-invocation definition context arguments))])
+      (command-invocation-set-identity!
+        invocation
+        (make-command-identity
+          (if (null? requested-names) name (car requested-names)) name name))
       (hashtable-set! (command-runtime-invocations service)
                       (command-invocation-id invocation) invocation)
       (advance-invocation! service invocation #f #f)))
@@ -521,6 +652,42 @@
     (case-lambda
       [(service name context) (start! service name context #t '())]
       [(service name context arguments) (start! service name context #t arguments)]))
+
+  (define (context-with-prefix context prefix source)
+    (make-command-context
+      (command-context-invocation-id context)
+      (command-context-surface-id context)
+      (command-context-window-id context)
+      (command-context-view-id context)
+      (command-context-buffer-id context)
+      (command-context-buffer-state context)
+      (command-context-view-state context)
+      (command-context-event context)
+      (command-context-key-sequence context)
+      prefix (command-context-target context) source
+      (command-context-layout context)))
+
+  (define (command-runtime-repeat-last! service context)
+    (unless (and (command-runtime? service) (command-context? context))
+      (assertion-violation 'command-runtime-repeat-last!
+                           "expected a runtime and current command context"))
+    (let ([record
+           (command-loop-state-repeat-record
+             (command-runtime-loop-state service context))])
+      (and record
+           (let* ([identity (command-execution-record-identity record)]
+                  [repeat-context
+                   (context-with-prefix
+                     context (command-execution-record-prefix-argument record)
+                     'repeat)])
+             (command-runtime-enqueue!
+               service
+               (make-command-invoke-message
+                 (command-identity-effective identity)
+                 repeat-context
+                 (command-execution-record-arguments record)
+                 #f
+                 (command-identity-requested identity)))))))
 
   (define (command-runtime-invocation service id . default)
     (let ([value (hashtable-ref (command-runtime-invocations service) id #f)])
@@ -539,6 +706,9 @@
       (and invocation
            (let ([cancelled? (command-invocation-cancel! invocation)])
              (when cancelled?
+               (record-terminal-invocation!
+                 service invocation 'cancelled #f
+                 (make-command-loop-transition #f #f 'ignore))
                (guard (ignored [else #f])
                  (run-hooks! service 'command-cancel invocation))
                (retire-invocation! service invocation))
@@ -553,17 +723,24 @@
       (immutable name command-invoke-message-name)
       (immutable context command-invoke-message-context)
       (immutable arguments command-invoke-message-arguments)
-      (immutable interactive? command-invoke-message-interactive?)))
+      (immutable interactive? command-invoke-message-interactive?)
+      (immutable requested-name command-invoke-message-requested-name)))
 
   (define make-command-invoke-message
     (case-lambda
       [(name context) (make-command-invoke-message name context '() #f)]
       [(name context arguments) (make-command-invoke-message name context arguments #f)]
       [(name context arguments interactive?)
+       (make-command-invoke-message name context arguments interactive? name)]
+      [(name context arguments interactive? requested-name)
        (unless (and (symbol? name) (command-context? context) (list? arguments))
          (assertion-violation 'make-command-invoke-message "invalid command message"
                               name context arguments))
-       (%make-command-invoke-message name context (list-copy arguments) (and interactive? #t))]))
+       (unless (symbol? requested-name)
+         (assertion-violation 'make-command-invoke-message
+                              "requested command name must be a symbol" requested-name))
+       (%make-command-invoke-message name context (list-copy arguments)
+                                     (and interactive? #t) requested-name)]))
 
   (define-record-type
     (command-resume-message %make-command-resume-message command-resume-message?)
@@ -613,14 +790,16 @@
       (cond
         [(command-invoke-message? message)
          (if (command-invoke-message-interactive? message)
-             (command-runtime-start-interactive!
+             (start!
                service (command-invoke-message-name message)
                (command-invoke-message-context message)
-               (command-invoke-message-arguments message))
-             (command-runtime-start!
+               #t (command-invoke-message-arguments message)
+               (command-invoke-message-requested-name message))
+             (start!
                service (command-invoke-message-name message)
                (command-invoke-message-context message)
-               (command-invoke-message-arguments message)))
+               #f (command-invoke-message-arguments message)
+               (command-invoke-message-requested-name message)))
          #t]
         [(command-resume-message? message)
          (command-runtime-resume!
