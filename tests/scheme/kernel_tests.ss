@@ -2395,6 +2395,17 @@
     (error 'kernel-tests "Kitty functional key decoding differs" events)))
 (let ([events
         (terminal-input-decoder-feed!
+          terminal-decoder
+          (string->utf8 "\x1b;[1;1:1B\x1b;[1;1:3B"))])
+  (unless (and (= (length events) 2)
+               (eq? (key-event-key (car events)) 'down)
+               (eq? (key-event-type (car events)) 'press)
+               (eq? (key-event-key (cadr events)) 'down)
+               (eq? (key-event-type (cadr events)) 'release))
+    (error 'kernel-tests
+           "Kitty legacy functional event types differ" events)))
+(let ([events
+        (terminal-input-decoder-feed!
           terminal-decoder (input-bytes 8 27 127))])
   (unless (and (= (length events) 2)
                (= (key-event-codepoint (car events)) (char->integer #\h))

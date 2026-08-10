@@ -354,7 +354,13 @@
     (and (surface-input-message? message)
          (= (surface-input-message-surface-id message)
             (surface-id (frontend-surface value)))
-         (frontend-dispatch-input! value (surface-input-message-event message))))
+         (let ([event (surface-input-message-event message)])
+           ;; Key release reports carry no editor action. Dropping them at the
+           ;; frontend boundary also avoids clearing feedback and presenting a
+           ;; second frame for one physical key cycle.
+           (if (and (key-event? event) (eq? (key-event-type event) 'release))
+               #t
+               (frontend-dispatch-input! value event)))))
 
   (define (frontend-handle-queued-message! value message)
     (guard

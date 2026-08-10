@@ -331,8 +331,22 @@
     (let ([fields (split-string parameters #\;)])
       (if (< (length fields) 2)
           0
-          (max 0
-            (- (or (optional-number (list-ref fields 1)) 1) 1)))))
+          (let ([modifier-fields (split-string (list-ref fields 1) #\:)])
+            (max 0
+              (- (or (optional-number (car modifier-fields)) 1) 1))))))
+
+  (define (legacy-event-type parameters)
+    (let ([fields (split-string parameters #\;)])
+      (if (< (length fields) 2)
+          'press
+          (let* ([modifier-fields (split-string (list-ref fields 1) #\:)]
+                 [number
+                  (and (> (length modifier-fields) 1)
+                       (optional-number (cadr modifier-fields)))])
+            (case number
+              [(2) 'repeat]
+              [(3) 'release]
+              [else 'press])))))
 
   (define (legacy-functional final parameters)
     (make-key-event
@@ -347,7 +361,7 @@
       (if (char=? final #\Z)
           (bitwise-ior (legacy-modifiers parameters) 1)
           (legacy-modifiers parameters))
-      'press empty-bytes))
+      (legacy-event-type parameters) empty-bytes))
 
   (define (legacy-tilde parameters)
     (let* ([fields (split-string parameters #\;)]
@@ -361,7 +375,8 @@
           [(15) 'f5] [(17) 'f6] [(18) 'f7] [(19) 'f8]
           [(20) 'f9] [(21) 'f10] [(23) 'f11] [(24) 'f12]
           [else 'unknown])
-        #f #f #f (legacy-modifiers parameters) 'press empty-bytes)))
+        #f #f #f (legacy-modifiers parameters)
+        (legacy-event-type parameters) empty-bytes)))
 
   (define (sgr-mouse-modifiers encoded)
     (bitwise-ior

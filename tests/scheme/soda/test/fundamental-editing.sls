@@ -3172,6 +3172,7 @@
         (host-state-command-runtime state) 'fundamental.beginning-of-buffer
         (application-command-context application))
       (send! (make-key-event 'down #f #f #f 0 'press (make-bytevector 0)))
+      (send! (make-key-event 'down #f #f #f 0 'release (make-bytevector 0)))
       (unless (= (selection-range-head
                    (selection-primary-range
                      (view-state-selection (view-state view))))
