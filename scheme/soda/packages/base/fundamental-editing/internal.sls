@@ -54,7 +54,13 @@
       [(_ runtime owner name (context . arguments) documentation class body ...)
        (define-command
          runtime owner name (context . arguments) documentation class
-         (scope 'mode) body ...)]))
+         (scope 'mode)
+         (command-result-with-transition
+           (begin body ...)
+           (make-command-loop-transition
+             name
+             (memq class '(editing motion selection kill yank viewport))
+             (if (memq class '(editing kill yank)) 'amalgamate 'ignore))))]))
 
   (define (make-fundamental-editing! runtime owner)
     (unless (and (command-runtime? runtime) (owner? owner))

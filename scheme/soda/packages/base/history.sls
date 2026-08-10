@@ -9,7 +9,7 @@
           (soda host command) (soda host command-runtime)
           (soda host dispatch-core) (soda host dispatch-transaction)
           (soda host value))
-  (define-record-type history-entry (fields undo redo))
+  (define-record-type history-entry (fields undo redo semantic invocation-id))
   (define-record-type history
     (fields undo redo saved
             (mutable registration history-registration history-registration-set!)))
@@ -47,6 +47,46 @@
       ;; ChangeSet owns the string/bytevector normalization and multi-range
       ;; coordinate mapping.  History must not reconstruct that protocol.
       (change-set-invert changes (snapshot-bytevector (buffer-state-document old)))))
+
+  (define (annotation-ref annotations key default)
+    (let ([entry (find (lambda (item) (eq? (annotation-key item) key)) annotations)])
+      (if entry (annotation-value entry) default)))
+
+  (define (push-update! value update)
+    (let* ([id (editor-update-buffer-id update)]
+           [annotations (editor-update-annotations update)]
+           [policy (annotation-ref annotations 'command.undo-policy 'boundary)]
+           [semantic (annotation-ref annotations 'command.semantic #f)]
+           [invocation-id (annotation-ref annotations 'command.invocation-id #f)]
+           [items (stack-ref (history-undo value) id)]
+           [current-undo (inverse update)]
+           [current-redo (editor-update-changes update)]
+           [merge?
+            (and (pair? items)
+                 ;; A save point is also an undo boundary: amalgamating by
+                 ;; replacing its head would make undo skip the saved text.
+                 (not (and (hashtable-contains? (history-saved value) id)
+                           (eq? items (hashtable-ref (history-saved value) id #f))))
+                 (or (and invocation-id
+                          (equal? invocation-id
+                                  (history-entry-invocation-id (car items))))
+                     (and (eq? policy 'amalgamate) semantic
+                          (eq? semantic (history-entry-semantic (car items))))))])
+      (unless (eq? policy 'ignore)
+        (unless (hashtable-contains? (history-saved value) id)
+          (history-mark-saved! value id))
+        (hashtable-set!
+          (history-undo value) id
+          (if merge?
+              (cons
+                (make-history-entry
+                  (change-set-compose current-undo (history-entry-undo (car items)))
+                  (change-set-compose (history-entry-redo (car items)) current-redo)
+                  semantic invocation-id)
+                (cdr items))
+              (cons (make-history-entry current-undo current-redo semantic invocation-id)
+                    items)))
+        (hashtable-set! (history-redo value) id '()))))
   (define (replay context changes)
     (make-transaction-spec (command-context-buffer-id context) (command-context-view-id context)
                            (buffer-state-generation (command-context-buffer-state context))
@@ -64,14 +104,7 @@
               (unless (exists (lambda (a) (eq? (annotation-key a) 'history.replay))
                               (editor-update-annotations update))
                 (unless (change-set-empty? (editor-update-changes update))
-                  ;; Buffers created after History are clean until their first
-                  ;; transaction.  Capture that initial stack before pushing.
-                  (unless (hashtable-contains? (history-saved value) id)
-                    (history-mark-saved! value id))
-                  (hashtable-set! (history-undo value) id
-                    (cons (make-history-entry (inverse update) (editor-update-changes update))
-                          (stack-ref (history-undo value) id)))
-                  (hashtable-set! (history-redo value) id '())))))))
+                  (push-update! value update)))))))
       (install-history-command! runtime owner 'history.undo "Undo the last Buffer transaction."
         (lambda (context)
           (let* ([id (command-context-buffer-id context)] [items (stack-ref (history-undo value) id)])
