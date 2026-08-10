@@ -51,6 +51,7 @@
           (soda packages edit-policy)
           (soda packages completion)
           (soda packages file-keymap)
+          (soda packages file-mode-registry)
           (soda packages file-path)
           (soda packages file-policy)
           (soda packages file-operation)
@@ -76,55 +77,18 @@
       (immutable keymap file-keymap)
       (immutable watch-service file-service-watch-service)
       (mutable recovery file-service-recovery file-service-recovery-set!)
-      (mutable mode-associations file-service-mode-associations
-                                 file-service-mode-associations-set!)))
-
-  (define-record-type
-    (file-mode-association %make-file-mode-association file-mode-association?)
-    (fields (immutable suffix file-mode-association-suffix)
-            (immutable mode file-mode-association-mode)))
+      (immutable mode-registry file-service-mode-registry)))
 
   (define (file-service-register-mode! service owner suffix mode)
-    (unless (and (file-service? service) (owner? owner)
-                 (string? suffix) (positive? (string-length suffix))
-                 (mode-spec? mode) (eq? (mode-spec-kind mode) 'major))
+    (unless (file-service? service)
       (assertion-violation 'file-service-register-mode!
-                           "expected a FileService, owner, suffix, and major ModeSpec"
-                           service owner suffix mode))
-    (owner-assert-active 'file-service-register-mode! owner)
-    (let ([association
-           (%make-file-mode-association (string-copy suffix) mode)])
-      (file-service-mode-associations-set!
-        service (cons association (file-service-mode-associations service)))
-      (make-registration
-        owner
-        (lambda ()
-          (file-service-mode-associations-set!
-            service
-            (filter (lambda (item) (not (eq? item association)))
-                    (file-service-mode-associations service)))))))
-
-  (define (string-suffix? suffix value)
-    (let ([offset (- (string-length value) (string-length suffix))])
-      (and (>= offset 0)
-           (string=? suffix (substring value offset (string-length value))))))
+                           "expected a FileService" service))
+    (file-mode-registry-register!
+      (file-service-mode-registry service) owner suffix mode))
 
   (define (file-service-mode-for service resource)
-    (let loop ([associations (file-service-mode-associations service)]
-               [best #f])
-      (if (null? associations)
-          (and best (file-mode-association-mode best))
-          (let ([association (car associations)])
-            (loop
-              (cdr associations)
-              (if (and (string-suffix?
-                         (file-mode-association-suffix association)
-                         (resource-locator resource))
-                       (or (not best)
-                           (> (string-length (file-mode-association-suffix association))
-                              (string-length (file-mode-association-suffix best)))))
-                  association
-                  best))))))
+    (file-mode-registry-mode-for
+      (file-service-mode-registry service) resource))
 
   (define (overwrite-decision value)
     (cond
@@ -1007,7 +971,8 @@
            [watch-service (make-file-watch-service owner)]
            [service
             (%make-file-service
-              (make-file-state) host owner history keymap watch-service #f '())])
+              (make-file-state) host owner history keymap watch-service #f
+              (make-file-mode-registry))])
       (file-service-recovery-set!
         service
         (and history
