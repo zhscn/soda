@@ -26,6 +26,7 @@
           make-interaction-string-reader)
   (import (rnrs)
           (soda host command)
+          (soda host command-argument)
           (soda host command-runtime)
           (soda host input)
           (soda host input-event)
@@ -250,17 +251,14 @@
     (owner-assert-active 'make-interaction-service! owner)
     (let ([service (%make-interaction-service runtime '() '() #f)])
       (define-command
-        runtime owner 'interaction.submit-key (context)
+        runtime owner 'interaction.submit-key (context codepoint)
         (documentation "Submit a discrete answer accepted by the active interaction.")
         (class 'interaction)
+        (interactive
+          (make-interactive-plan (list command-key-codepoint-reader)))
         (undo 'ignore)
-        (let* ([session (interaction-service-current service)]
-               [event (command-context-event context)]
-               [codepoint
-                (and session (key-event? event)
-                     (or (key-event-codepoint event)
-                         (key-event-shifted-codepoint event)))])
-          (when codepoint
+        (let ([session (interaction-service-current service)])
+          (when session
             (interaction-service-submit! service
                                          (string (integer->char codepoint))))
           (command-handled)))

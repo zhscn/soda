@@ -3,6 +3,7 @@
           command-prefix-argument-reader
           command-numeric-prefix-reader
           command-event-reader
+          command-key-codepoint-reader
           command-event-digit-reader)
   (import (rnrs)
           (soda host command)
@@ -53,12 +54,21 @@
       'input-event command-context-event input-event?
       "interactive command was not invoked by an input event"))
 
+  (define (event-codepoint context)
+    (let ([event (command-context-event context)])
+      (and (key-event? event)
+           (or (key-event-codepoint event)
+               (key-event-shifted-codepoint event)))))
+
+  (define command-key-codepoint-reader
+    (make-context-argument-reader
+      'key-codepoint event-codepoint
+      (lambda (value)
+        (and (integer? value) (exact? value) (<= 0 value #x10ffff)))
+      "interactive command was not invoked by a character key"))
+
   (define (event-digit context)
-    (let* ([event (command-context-event context)]
-           [codepoint
-            (and (key-event? event)
-                 (or (key-event-codepoint event)
-                     (key-event-shifted-codepoint event)))])
+    (let ([codepoint (event-codepoint context)])
       (and codepoint
            (<= (char->integer #\0) codepoint (char->integer #\9))
            (- codepoint (char->integer #\0)))))

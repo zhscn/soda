@@ -947,7 +947,8 @@
                      (eq? (input-disposition-value disposition) 'interaction.submit-key))
           (error 'fundamental-editing-tests
                  "query replace prompt did not install its discrete answer keymap"))
-        (command-runtime-start! runtime 'interaction.submit-key context))
+        (command-runtime-start-interactive!
+          runtime 'interaction.submit-key context))
       (host-state-run! state)
       (unless (and (string=? (buffer-string buffer) "1 one one")
                    (interaction-service-current interaction)

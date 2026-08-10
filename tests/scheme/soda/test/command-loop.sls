@@ -131,11 +131,16 @@
              context '())]
            [prefix-result
             ((interactive-reader-resolver command-numeric-prefix-reader)
-             context (interactive-ready-values digit-result))])
+             context (interactive-ready-values digit-result))]
+           [codepoint-result
+            ((interactive-reader-resolver command-key-codepoint-reader)
+             context '())])
       (check (and (interactive-ready? digit-result)
                   (equal? (interactive-ready-values digit-result) '(3))
                   (interactive-ready? prefix-result)
-                  (equal? (interactive-ready-values prefix-result) '(-4)))
+                  (equal? (interactive-ready-values prefix-result) '(-4))
+                  (equal? (interactive-ready-values codepoint-result)
+                          (list (char->integer #\3))))
              "standard context readers did not resolve typed command arguments")))
 
   (define (test-prefix-argument-transient-map)
