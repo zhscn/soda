@@ -16,6 +16,7 @@
           (soda kernel viewport)
           (soda packages base text-motion)
           (soda packages base fundamental-keymap)
+          (soda packages base fundamental-interface)
           (soda packages base editing-options)
           (soda packages buffer-mode)
           (soda host command)
@@ -949,27 +950,6 @@
                   (make-selection (list (collapse-range range point)) 0)
                   '() '())))))))
 
-  (define (viewport-intent context kind argument)
-    (let ([state (command-context-view-state context)])
-      (make-view-transaction-spec
-        (command-context-view-id context) (view-state-generation state)
-        #f #f #f '() '()
-        (make-scroll-request
-          kind
-          (command-context-surface-id context)
-          (command-context-window-id context)
-          (command-context-view-id context)
-          argument))))
-
-  (define (scroll-visual context amount page?)
-    (viewport-intent context (if page? 'scroll-pages 'scroll-rows) amount))
-
-  (define (recenter-viewport context placement)
-    (viewport-intent context 'recenter placement))
-
-  (define (move-to-viewport-row context placement)
-    (viewport-intent context 'move-point-to-window-row placement))
-
   (define (transpose-characters context)
     (let ([range (selection-primary-range (context-selection context))])
       (if (not (selection-range-empty? range))
@@ -1029,64 +1009,6 @@
                 (cons (if (= index primary) range (car remaining)) result))))
         primary)))
 
-  (define (pointer-word-range text offset)
-    (let ([size (text-size text)])
-      (cond
-        [(and (< offset size) (text-word-character-at? text offset))
-         (make-selection-range
-           (text-backward-word-offset text offset)
-           (text-forward-word-offset text offset))]
-        [(text-word-character-before? text offset)
-         (make-selection-range
-           (text-backward-word-offset text offset)
-           (text-forward-word-offset text offset))]
-        [else (make-selection-range offset offset)])))
-
-  (define (pointer-line-range text offset)
-    (let ([line (car (text-position text offset))])
-      (make-selection-range
-        (text-line-start text line)
-        (text-line-content-end text line)
-        'before 'line '())))
-
-  (define (pointer-selection context)
-    (let ([event (command-context-event context)]
-          [hit (command-context-target context)])
-      (if (not (and (pointer-event? event) (surface-hit? hit)
-                    (surface-hit-document-offset hit)))
-          (command-handled)
-          (let* ([selection (context-selection context)]
-                 [primary (selection-primary-range selection)]
-                 [offset (surface-hit-document-offset hit)]
-                 [phase (pointer-event-phase event)]
-                 [clicks (pointer-event-click-count event)]
-                 [shift? (pointer-event-modifier? event 'shift)]
-                 [ctrl? (pointer-event-modifier? event 'ctrl)])
-            (with-context-text
-              context
-              (lambda (text)
-                (let ([range
-                       (cond
-                         [(eq? phase 'release) primary]
-                         [(eq? phase 'move)
-                          (make-selection-range
-                            (selection-range-anchor primary) offset)]
-                         [(>= clicks 3) (pointer-line-range text offset)]
-                         [(= clicks 2) (pointer-word-range text offset)]
-                         [shift?
-                          (make-selection-range
-                            (selection-range-anchor primary) offset)]
-                         [else (make-selection-range offset offset)])])
-                  (view-selection-transaction
-                    context
-                    (if (and ctrl? (eq? phase 'press))
-                        (make-selection
-                          (append (selection-ranges selection) (list range))
-                          (length (selection-ranges selection)))
-                        (replace-primary-selection selection range))))))))))
-
-  (define (pointer-scroll context amount page?)
-    (scroll-visual context amount page?))
 
   (define (set-mark context)
     (view-selection-transaction context (set-mark-selection (context-selection context))))
@@ -1363,51 +1285,51 @@
       (install-command!
         runtime owner 'fundamental.scroll-up (context)
         "Scroll the Viewport toward the beginning of the Buffer." 'viewport
-        (scroll-visual context -1 #t))
+        (fundamental-scroll-visual context -1 #t))
       (install-command!
         runtime owner 'fundamental.scroll-down (context)
         "Scroll the Viewport toward the end of the Buffer." 'viewport
-        (scroll-visual context 1 #t))
+        (fundamental-scroll-visual context 1 #t))
       (install-command!
         runtime owner 'fundamental.scroll-backward-line (context)
         "Scroll the Viewport backward by one visual row." 'viewport
-        (scroll-visual context -1 #f))
+        (fundamental-scroll-visual context -1 #f))
       (install-command!
         runtime owner 'fundamental.scroll-forward-line (context)
         "Scroll the Viewport forward by one visual row." 'viewport
-        (scroll-visual context 1 #f))
+        (fundamental-scroll-visual context 1 #f))
       (install-command!
         runtime owner 'fundamental.pointer-select (context)
         "Select document content targeted by a pointer event." 'selection
-        (pointer-selection context))
+        (fundamental-pointer-selection context))
       (install-command!
         runtime owner 'fundamental.pointer-scroll (context amount page?)
         "Scroll the targeted View from a pointer wheel event." 'viewport
-        (pointer-scroll context amount page?))
+        (fundamental-scroll-visual context amount page?))
       (install-command!
         runtime owner 'fundamental.recenter (context)
         "Center point vertically in the active Window." 'viewport
-        (recenter-viewport context 'center))
+        (fundamental-recenter-viewport context 'center))
       (install-command!
         runtime owner 'fundamental.recenter-top (context)
         "Place point at the top of the active Window." 'viewport
-        (recenter-viewport context 'top))
+        (fundamental-recenter-viewport context 'top))
       (install-command!
         runtime owner 'fundamental.recenter-bottom (context)
         "Place point at the bottom of the active Window." 'viewport
-        (recenter-viewport context 'bottom))
+        (fundamental-recenter-viewport context 'bottom))
       (install-command!
         runtime owner 'fundamental.move-to-window-top (context)
         "Move point to the top visual row of the active Window." 'motion
-        (move-to-viewport-row context 'top))
+        (fundamental-move-to-viewport-row context 'top))
       (install-command!
         runtime owner 'fundamental.move-to-window-center (context)
         "Move point to the center visual row of the active Window." 'motion
-        (move-to-viewport-row context 'center))
+        (fundamental-move-to-viewport-row context 'center))
       (install-command!
         runtime owner 'fundamental.move-to-window-bottom (context)
         "Move point to the bottom visual row of the active Window." 'motion
-        (move-to-viewport-row context 'bottom))
+        (fundamental-move-to-viewport-row context 'bottom))
       (install-command!
         runtime owner 'fundamental.redraw (context)
         "Request a fresh presentation of the active Surface." 'interface
