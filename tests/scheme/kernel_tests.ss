@@ -73,6 +73,7 @@
         (soda test buffer-ui)
         (soda test host-integration)
         (soda test terminal-clipboard)
+        (soda test command-loop)
         (soda view display)
         (soda view projection)
         (soda view frame)
@@ -4765,4 +4766,5 @@
 (run-buffer-ui-tests!)
 (run-host-integration-tests!)
 (run-terminal-clipboard-tests!)
+(run-command-loop-tests!)
 (host-state-close! host)

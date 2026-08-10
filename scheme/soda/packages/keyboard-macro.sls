@@ -49,11 +49,12 @@
   (define (macro-command? name)
     (memq name macro-command-names))
 
-  (define (record-invocation! service invocation)
-    (let* ([definition (command-invocation-definition invocation)]
-           [name (command-definition-name definition)])
+  (define (record-execution! service record)
+    (let* ([identity (command-execution-record-identity record)]
+           [name (command-identity-effective identity)])
       (when (and (keyboard-macro-recording? service)
                  (not (keyboard-macro-playing? service))
+                 (eq? (command-execution-record-outcome record) 'completed)
                  (not (macro-command? name)))
         ;; Interactive readers have finished before pre-command hooks run.
         ;; Their decoded answers and any explicit repeat arguments therefore
@@ -63,10 +64,8 @@
           (cons
             (make-macro-step
               name
-              (copy-value (command-invocation-arguments invocation))
-              (copy-value
-                (command-context-prefix-argument
-                  (command-invocation-context invocation))))
+              (copy-value (command-execution-record-arguments record))
+              (copy-value (command-execution-record-prefix-argument record)))
             (keyboard-macro-recorded service))))))
 
   (define (stop-playback! service)
@@ -141,8 +140,8 @@
             (%make-keyboard-macro-service
               host owner keymap #f #f '() '() '() #f)])
       (command-runtime-add-hook!
-        runtime 'pre-command owner 'keyboard-macro-record
-        (lambda (invocation) (record-invocation! service invocation)))
+        runtime 'execution-record owner 'keyboard-macro-record
+        (lambda (record) (record-execution! service record)))
       (command-runtime-add-hook!
         runtime 'post-command owner 'keyboard-macro-advance
         (lambda (invocation result)
