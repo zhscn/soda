@@ -40,6 +40,7 @@
           (soda host internal operation)
           (soda host internal surface)
           (soda host dispatch gate)
+          (soda host dispatch global-operation)
           (soda host dispatch update)
           (soda host value)
           (soda view plugin))
@@ -62,10 +63,6 @@
     (dispatcher-observer %make-dispatcher-observer dispatcher-observer?)
     (fields (immutable procedure dispatcher-observer-procedure)))
 
-  (define-record-type
-    (global-operation-handler %make-global-operation-handler global-operation-handler?)
-    (fields owner damage procedure))
-
   (define make-dispatcher
     (case-lambda
       [(buffers views)
@@ -83,7 +80,7 @@
       (assertion-violation 'make-dispatcher "expected a listener or #f" listener))
     (%make-dispatcher
       buffers views surfaces (lambda (source condition) #f) listener #f '() '()
-      (make-eq-hashtable) (make-dispatch-gate))]))
+      (make-global-operation-registry) (make-dispatch-gate))]))
 
   (define (dispatcher-run! dispatcher thunk)
     (dispatch-gate-run! (dispatcher-gate dispatcher) thunk))
@@ -151,27 +148,12 @@
 
   (define (dispatcher-register-global-operation-handler!
            dispatcher owner kind damage procedure)
-    (unless (and (dispatcher? dispatcher) (owner? owner)
-                 (symbol? kind) (list? damage)
-                 (for-all symbol? damage) (procedure? procedure))
+    (unless (dispatcher? dispatcher)
       (assertion-violation
         'dispatcher-register-global-operation-handler!
-        "invalid global HostOperation handler"
-        dispatcher owner kind damage procedure))
-    (owner-assert-active 'dispatcher-register-global-operation-handler! owner)
-    (let ([table (dispatcher-global-handlers dispatcher)])
-      (when (hashtable-ref table kind #f)
-        (assertion-violation
-          'dispatcher-register-global-operation-handler!
-          "global HostOperation handler is already registered" kind))
-      (let ([entry
-             (%make-global-operation-handler owner (list-copy damage) procedure)])
-        (hashtable-set! table kind entry)
-        (make-registration
-          owner
-          (lambda ()
-            (when (eq? (hashtable-ref table kind #f) entry)
-              (hashtable-delete! table kind)))))))
+        "expected a Dispatcher" dispatcher))
+    (global-operation-register!
+      (dispatcher-global-handlers dispatcher) owner kind damage procedure))
 
   (define (notify-host-update! dispatcher update)
     (dispatcher-notify!
@@ -190,22 +172,10 @@
     update)
 
   (define (dispatch-global-operation! dispatcher operation)
-    (let ([entry
-           (hashtable-ref
-             (dispatcher-global-handlers dispatcher)
-             (host-operation-kind operation) #f)])
-      (unless entry
-        (assertion-violation
-          'dispatcher-dispatch-host! "unsupported global HostOperation" operation))
-      (let ([resolution
-             ((global-operation-handler-procedure entry)
-              (host-operation-value operation))])
-        (and resolution
-             (notify-host-update!
-               dispatcher
-               (make-host-update
-                 operation #f #f #f resolution
-                 (global-operation-handler-damage entry)))))))
+    (let ([update
+           (global-operation-dispatch
+             (dispatcher-global-handlers dispatcher) operation)])
+      (and update (notify-host-update! dispatcher update))))
 
   (define (dispatcher-dispatch-host-now! dispatcher operation)
     (unless (and (dispatcher? dispatcher) (host-operation? operation))
