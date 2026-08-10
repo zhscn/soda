@@ -14,9 +14,11 @@
           (soda host input)
           (soda host input-event)
           (soda host internal state)
+          (soda host render)
           (soda host runtime)
           (soda host value)
-          (soda packages prefix-argument))
+          (soda packages prefix-argument)
+          (soda view frame))
 
   (define (check condition message . irritants)
     (unless condition (apply error 'command-loop-tests message irritants)))
@@ -262,6 +264,27 @@
         (view-id view) (buffer-id buffer) (buffer-state buffer) (view-state view)
         #f '() (make-prefix-argument) #f 'test #f)))
 
+  (define (test-prefix-argument-render-feedback)
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [surface (soda-application-surface application)])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (command-runtime-start-interactive!
+            (host-state-command-runtime state)
+            'argument.universal (application-context application))
+          (let* ([frame
+                  (surface-render-frame
+                    (render-surface surface (host-state-views state)))]
+                 [row (- (frame-height frame) 1)])
+            (check
+              (and (string=? (frame-cell-grapheme (frame-cell-at frame row 0)) "A")
+                   (string=? (frame-cell-grapheme (frame-cell-at frame row 1)) "r")
+                   (string=? (frame-cell-grapheme (frame-cell-at frame row 2)) "g"))
+              "pending prefix argument was not visible in Surface chrome")))
+        (lambda () (soda-application-close! application)))))
+
   (define (test-undo-amalgamation)
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
@@ -293,5 +316,6 @@
     (test-standard-context-argument-reader)
     (test-prefix-argument-transient-map)
     (test-runtime-state-record-and-repeat)
+    (test-prefix-argument-render-feedback)
     (test-undo-amalgamation))
 )

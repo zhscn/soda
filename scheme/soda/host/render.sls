@@ -52,6 +52,9 @@
           (soda host internal surface)
           (soda host internal view)
           (soda host internal window)
+          (soda host command)
+          (soda host input)
+          (soda host input-label)
           (soda ffi unicode)
           (soda view compositor)
           (soda view decoration)
@@ -196,9 +199,12 @@
     (let* ([height (cdr (surface-size surface))]
            [position-message (surface-position-message surface views)]
            [hint-message
-            (and (>= height 3) (pair? (surface-shortcut-hints surface)))]
+            (and (>= height 3)
+                 (pair? (surface-shortcut-hints surface))
+                 (shortcut-hint-text (surface-shortcut-hints surface)))]
+           [input-message (surface-input-message surface views hint-message)]
            [content-height
-            (if (and (or position-message hint-message) (positive? height))
+            (if (and (or position-message input-message) (positive? height))
                 (- height 1)
                 height)])
       (content-rectangle surface leaf content-height)))
@@ -219,6 +225,31 @@
                    (string-append "Line " (number->string (+ (car position) 1))
                                   ", column " (number->string (+ (cdr position) 1)))))
                (lambda () (text-close! text)))))))
+
+  (define (surface-input-message surface views hint-message)
+    (let* ([leaf (surface-active-window surface)]
+           [view (and leaf (view-service-ref views (window-view-id leaf) #f))]
+           [stack (and view (view-state-input-state (view-state view)))]
+           [pending (and stack (input-stack-pending-sequence stack))]
+           [argument (and stack (input-stack-pending-argument stack))]
+           [sessions (and stack (input-stack-sessions stack))]
+           [transient?
+            (and (pair? sessions)
+                 (input-session-transient? (car sessions)))])
+      (cond
+        [argument
+         (string-append
+           "Arg: "
+           (number->string
+             (prefix-argument-numeric-value
+               (input-stack-prefix-argument stack))))]
+        [(pair? pending)
+         (let ([prefix (key-sequence-label pending)])
+           (if hint-message
+               (string-append prefix "  " hint-message)
+               prefix))]
+        [(and transient? hint-message) hint-message]
+        [else #f])))
 
   ;; RenderedView retains the pure layout projection needed for coordinate
   ;; routing.  It is part of a rendered Surface, not mutable View state.
@@ -423,8 +454,9 @@
             (and (>= height 3)
                  (pair? (surface-shortcut-hints surface))
                  (shortcut-hint-text (surface-shortcut-hints surface)))]
+           [input-message (surface-input-message surface views hint-message)]
            [message
-            (or (surface-status-message surface) position-message hint-message)])
+            (or (surface-status-message surface) input-message position-message)])
       (unless (and (nonnegative-exact-integer? width)
                    (nonnegative-exact-integer? height))
         (assertion-violation 'render-surface "invalid Surface size" size))
