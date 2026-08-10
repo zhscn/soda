@@ -77,5 +77,6 @@ soda_embed_chez_application(scheme_kernel_tests
 )
 add_test(NAME scheme_kernel_tests COMMAND scheme_kernel_tests)
 set_tests_properties(scheme_kernel_tests PROPERTIES
-  ENVIRONMENT "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp"
+  ENVIRONMENT
+    "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp;SODA_RECOVERY_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}/scheme-recovery"
 )
