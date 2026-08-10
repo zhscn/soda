@@ -11,6 +11,7 @@
           (soda kernel state)
           (soda kernel view-state)
           (soda packages base text-motion)
+          (soda packages search-options)
           (soda host command)
           (soda host command-runtime)
           (soda host buffer)
@@ -33,66 +34,6 @@
             (immutable case-sensitive? search-query-case-sensitive?)
             (immutable whole-word? search-query-whole-word?)
             (immutable regular-expression? search-query-regular-expression?)))
-
-  ;; Search policy belongs to the initiating View.  The policy is captured in
-  ;; SearchQuery so repeat and query-replace retain their meaning after later
-  ;; View reconfiguration.
-  (define (first-value values default)
-    (if (null? values) default (car values)))
-
-  (define search-case-sensitive-facet
-    (make-facet 'search-case-sensitive 'view #t
-                (lambda (values) (first-value values #t)) eq? eq?))
-
-  (define search-case-sensitive-compartment
-    (make-compartment 'search-case-sensitive 'view))
-
-  (define search-whole-word-facet
-    (make-facet 'search-whole-word 'view #f
-                (lambda (values) (first-value values #f)) eq? eq?))
-
-  (define search-whole-word-compartment
-    (make-compartment 'search-whole-word 'view))
-
-  (define search-regular-expression-facet
-    (make-facet 'search-regular-expression 'view #f
-                (lambda (values) (first-value values #f)) eq? eq?))
-
-  (define search-regular-expression-compartment
-    (make-compartment 'search-regular-expression 'view))
-
-  (define (search-case-sensitive? context)
-    (configuration-facet
-      (view-state-configuration (command-context-view-state context))
-      search-case-sensitive-facet 'view))
-
-  (define (make-search-case-sensitive-extension value)
-    (unless (boolean? value)
-      (assertion-violation 'make-search-case-sensitive-extension
-                           "expected a boolean" value))
-    (make-facet-provider search-case-sensitive-facet value))
-
-  (define (search-whole-word? context)
-    (configuration-facet
-      (view-state-configuration (command-context-view-state context))
-      search-whole-word-facet 'view))
-
-  (define (make-search-whole-word-extension value)
-    (unless (boolean? value)
-      (assertion-violation 'make-search-whole-word-extension
-                           "expected a boolean" value))
-    (make-facet-provider search-whole-word-facet value))
-
-  (define (search-regular-expression? context)
-    (configuration-facet
-      (view-state-configuration (command-context-view-state context))
-      search-regular-expression-facet 'view))
-
-  (define (make-search-regular-expression-extension value)
-    (unless (boolean? value)
-      (assertion-violation 'make-search-regular-expression-extension
-                           "expected a boolean" value))
-    (make-facet-provider search-regular-expression-facet value))
 
   (define-record-type
     (search-service %make-search-service search-service?)
