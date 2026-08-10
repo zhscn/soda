@@ -11,12 +11,11 @@
           (soda kernel state)
           (soda kernel view-state)
           (soda packages base text-motion)
+          (soda packages search-keymap)
           (soda packages search-options)
           (soda host command)
           (soda host command-runtime)
           (soda host buffer)
-          (soda host input)
-          (soda host input-event)
           (soda host operation)
           (soda host package)
           (soda host value)
@@ -56,15 +55,6 @@
                query-replace-session-match-start-set!)
       (mutable match-end query-replace-session-match-end
                query-replace-session-match-end-set!)))
-
-  (define (control-stroke character)
-    (make-key-stroke 'character (char->integer character) 4))
-
-  (define (meta-stroke character)
-    (make-key-stroke 'character (char->integer character) 2))
-
-  (define (plain-stroke character)
-    (make-key-stroke 'character (char->integer character) 0))
 
   (define (query-replace-session-live? service session)
     (and (query-replace-session? session)
@@ -629,7 +619,7 @@
       (assertion-violation 'make-search-service! "expected a PackageHost and owner"
                            host owner))
     (let* ([runtime (package-host-command-runtime host)]
-           [keymap (make-keymap 'search)]
+           [keymap (make-search-keymap)]
            [service
             (%make-search-service
               host keymap (make-eqv-hashtable) (make-eqv-hashtable))]
@@ -697,14 +687,5 @@
                    (query-replace-session-for-context
                      service (command-invocation-context invocation))])
               (when session (finish-query-replace! service session))))))
-      (keymap-bind! keymap (list (control-stroke #\w)) 'search.forward)
-      (keymap-bind! keymap (list (control-stroke #\\)) 'search.query-replace)
-      (keymap-bind! keymap (list (meta-stroke #\w)) 'search.next)
-      (keymap-bind! keymap (list (meta-stroke #\C)) 'search.toggle-case-sensitive)
-      (keymap-bind! keymap (list (meta-stroke #\`)) 'search.toggle-whole-word)
-      (keymap-bind! keymap (list (meta-stroke #\r)) 'search.toggle-regular-expression)
-      (keymap-bind! keymap
-                    (list (make-key-stroke 'character (char->integer #\w) 3))
-                    'search.previous)
       service))
 )
