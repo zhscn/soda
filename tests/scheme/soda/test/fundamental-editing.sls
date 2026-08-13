@@ -481,6 +481,48 @@
           (soda-application-close! application)
           (guard (condition [else #f]) (delete-file path)))))
 
+    ;; Replacing the initial scratch View with a file leaves scratch reusable
+    ;; in the Buffer catalog.  Closing that file must return to the same
+    ;; canonical scratch rather than manufacture another same-named Buffer.
+    (let* ([path (string-append "/tmp/soda-scratch-fallback-"
+                                (number->string (get-process-id)) ".txt")]
+           [application (make-soda-application)])
+      (dynamic-wind
+        (lambda () (vfs-write-file path (string->utf8 "fallback")))
+        (lambda ()
+          (let* ([state (soda-application-state application)]
+                 [runtime (host-state-command-runtime state)]
+                 [buffers (host-state-buffers state)]
+                 [scratch (soda-application-buffer application)])
+            (command-runtime-start!
+              runtime 'file.visit (application-command-context application) (list path))
+            (let ([file-id
+                   (command-context-buffer-id
+                     (application-command-context application))])
+              (command-runtime-start!
+                runtime 'file.close (application-command-context application)
+                (list file-id 'discard))
+              (host-state-run! state)
+              (let ([live-scratches
+                     (filter
+                       (lambda (buffer)
+                         (string=? (buffer-name buffer) "*scratch*"))
+                       (buffer-service-buffers buffers))])
+                (unless (and (= (length live-scratches) 1)
+                             (eq? (car live-scratches) scratch)
+                             (eq? (buffer-service-find-key
+                                    buffers (scratch-buffer-key) #f)
+                                  scratch)
+                             (= (command-context-buffer-id
+                                  (application-command-context application))
+                                (buffer-id scratch)))
+                  (error 'fundamental-editing-tests
+                         "file close did not reuse the canonical scratch Buffer"
+                         (map buffer-id live-scratches)))))))
+        (lambda ()
+          (soda-application-close! application)
+          (guard (condition [else #f]) (delete-file path)))))
+
     ;; Scheme startup supplies remaining argv entries to `scheme-start`.
     ;; Opening them here follows the same file.visit command path as C-x C-f.
     (let* ([path (string-append "/tmp/soda-startup-file-"

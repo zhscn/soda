@@ -217,25 +217,33 @@
            (surfaces (host-state-surfaces state))
            (target (buffer-service-ref buffers target-id #f)))
       (and target
-           (let ((fallback
-                  (let find-surface ((remaining (surface-service-surfaces surfaces)))
-                    (and (pair? remaining)
-                         (or (let find-window ((windows
-                                                (window-leaves
-                                                  (surface-root-window (car remaining)))))
-                               (and (pair? windows)
-                                    (let ((view (view-service-ref views
-                                                                  (window-view-id (car windows)) #f)))
-                                      (if (and view
-                                               (not (= (buffer-id (view-buffer view)) target-id)))
-                                          (view-buffer view)
-                                          (find-window (cdr windows))))))
-                             (find-surface (cdr remaining)))))))
-             (let ((replacement-buffer
-                    (or fallback
-                        (buffer-service-create!
-                          buffers owner "*scratch*" (make-document "")
-                          (buffer-state-configuration (buffer-state target))))))
+           (let* ((scratch
+                   (buffer-service-find-key buffers (scratch-buffer-key) #f))
+                  (fallback
+                   (or (and scratch
+                            (not (= (buffer-id scratch) target-id))
+                            scratch)
+                       (find
+                         (lambda (buffer)
+                           (not (= (buffer-id buffer) target-id)))
+                         (buffer-service-buffers buffers))))
+                  (replacement-needs-key? (and (not fallback) (eq? scratch target)))
+                  (replacement-buffer
+                   (or fallback
+                       (if replacement-needs-key?
+                           ;; The old scratch owns the canonical key until its
+                           ;; close commits.  Bind its replacement afterwards.
+                           (buffer-service-create!
+                             buffers owner "*scratch*" (make-document "")
+                             (buffer-state-configuration (buffer-state target)))
+                           (buffer-service-open-or-create!
+                             buffers owner (scratch-buffer-key)
+                             (lambda ()
+                               (buffer-service-create!
+                                 buffers owner "*scratch*" (make-document "")
+                                 (buffer-state-configuration
+                                   (buffer-state target)))))))))
+             (let ()
                (for-each
                  (lambda (surface)
                    (for-each
@@ -257,7 +265,11 @@
                                  "unable to replace a Buffer View before close" target-id))))))
                      (window-leaves (surface-root-window surface))))
                  (surface-service-surfaces surfaces))
-               (buffer-service-close-buffer! buffers target-id))))))
+               (let ((closed? (buffer-service-close-buffer! buffers target-id)))
+                 (when (and closed? replacement-needs-key?)
+                   (buffer-service-bind-key!
+                     buffers (scratch-buffer-key) replacement-buffer))
+                 closed?))))))
 
   (define (package-host-add-buffer-close-listener! host owner procedure)
     (buffer-service-add-close-listener!

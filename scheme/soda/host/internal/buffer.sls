@@ -13,6 +13,7 @@
           buffer-key?
           buffer-key-namespace
           buffer-key-identity
+          scratch-buffer-key
           make-buffer-service
           buffer-service?
           buffer-service-create!
@@ -64,6 +65,11 @@
       (cond [(string? identity) (string->immutable-string identity)]
             [(bytevector? identity) (bytevector->immutable-bytevector identity)]
             [else identity])))
+
+  ;; Scratch is a catalog resource, not merely a conventional display name.
+  ;; Its stable key lets bootstrap and close fallback share one live Buffer.
+  (define (scratch-buffer-key)
+    (make-buffer-key 'host 'scratch))
 
   (define (buffer-live? buffer)
     (and (buffer? buffer) (eq? (buffer-lifecycle buffer) 'live)))

@@ -134,8 +134,12 @@
                [next-document (make-document "")]
                [_document (set! document next-document)]
                [buffer
-                (buffer-service-create!
-                  (host-state-buffers state) owner "*scratch*" document configuration)]
+                (buffer-service-open-or-create!
+                  (host-state-buffers state) owner (scratch-buffer-key)
+                  (lambda ()
+                    (buffer-service-create!
+                      (host-state-buffers state) owner "*scratch*"
+                      document configuration)))]
                [_owned (set! document-owned? #f)]
                [view
                 (view-service-create!
