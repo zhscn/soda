@@ -3484,6 +3484,47 @@
                  0)
         (error 'fundamental-editing-tests
                "opposite key press did not supersede queued repeat debt"))
+      (dispatcher-dispatch-view!
+        (host-state-dispatch state)
+        (make-view-transaction-spec
+          (view-id view) (view-state-generation (view-state view))
+          (make-selection (list (make-selection-range 0 0)))
+          #f #f '() '() #f))
+      (frontend-step! frontend)
+      (frontend-enqueue!
+        frontend
+        (make-surface-input-message
+          (surface-id surface)
+          (make-key-event 'character (char->integer #\n) #f #f 4 'press
+                          (make-bytevector 0))))
+      (do ([index 0 (+ index 1)])
+          ((= index 3))
+        (frontend-enqueue!
+          frontend
+          (make-surface-input-message
+            (surface-id surface)
+            (make-key-event 'character (char->integer #\n) #f #f 4 'repeat
+                            (make-bytevector 0)))))
+      (frontend-step-action! frontend)
+      (unless (= (selection-range-head
+                   (selection-primary-range (view-state-selection (view-state view))))
+                 2)
+        (error 'fundamental-editing-tests
+               "one action turn consumed more than one C-n motion"))
+      ;; A terminal loop polls again here.  The new C-p press cancels C-n
+      ;; repeat debt before the next action turn begins.
+      (frontend-enqueue!
+        frontend
+        (make-surface-input-message
+          (surface-id surface)
+          (make-key-event 'character (char->integer #\p) #f #f 4 'press
+                          (make-bytevector 0))))
+      (frontend-step-action! frontend)
+      (unless (= (selection-range-head
+                   (selection-primary-range (view-state-selection (view-state view))))
+                 0)
+        (error 'fundamental-editing-tests
+               "C-p did not preempt queued C-n action turns"))
       (frontend-close! frontend)
       (soda-application-close! application))
 

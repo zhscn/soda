@@ -6,6 +6,7 @@
           frontend-dirty?
           frontend-enqueue!
           frontend-pending?
+          frontend-step-action!
           frontend-step!
           frontend-resize!
           frontend-cancel-pointer-capture!
@@ -456,34 +457,49 @@
            (frontend-input-scheduler value))
          (%frontend-render! value)))
 
+  ;; Runtime work and completed user actions are separate budgets.  This keeps
+  ;; the host queue generic while allowing an interactive frontend to yield at
+  ;; an action boundary instead of after an arbitrary number of messages.
+  (define (frontend-advance! who value limit action-limit)
+    (require-open who value)
+    (unless (and (integer? limit) (exact? limit) (> limit 0))
+      (assertion-violation who "limit must be a positive exact integer" limit))
+    (let loop ([processed 0]
+               [completed
+                (input-scheduler-completed-generation
+                  (frontend-input-scheduler value))]
+               [actions 0]
+               [presented? #f])
+      (if (or (>= processed limit)
+              (and action-limit (>= actions action-limit))
+              (not (frontend-pending? value)))
+          (begin
+            (unless presented? (frontend-render-if-ready! value))
+            processed)
+          (let* ([count (frontend-drain! value 1)]
+                 [next-completed
+                  (input-scheduler-completed-generation
+                    (frontend-input-scheduler value))]
+                 [cycle-completed? (> next-completed completed)])
+            (when cycle-completed? (frontend-render-if-ready! value))
+            (loop (+ processed count) next-completed
+                  (+ actions (if cycle-completed? 1 0))
+                  (or presented? cycle-completed?))))))
+
   (define frontend-step!
     (case-lambda
-      [(value)
-       (frontend-step! value 32)]
+      [(value) (frontend-step! value 32)]
+      [(value limit) (frontend-advance! 'frontend-step! value limit #f)]))
+
+  ;; Advance through exactly one complete user action.  Internal runtime
+  ;; messages needed by that action remain atomic, but control returns as soon
+  ;; as its cycle boundary commits so a frontend can poll for newer input
+  ;; before starting queued repeat debt.
+  (define frontend-step-action!
+    (case-lambda
+      [(value) (frontend-step-action! value 32)]
       [(value limit)
-       (require-open 'frontend-step! value)
-       (unless (and (integer? limit) (exact? limit) (> limit 0))
-         (assertion-violation 'frontend-step! "limit must be a positive exact integer" limit))
-       ;; Each input action carries an explicit completion boundary.  Runtime
-       ;; messages remain sequential, while presentation waits for the action's
-       ;; command and any priority work it schedules to finish.
-       (let loop ([processed 0]
-                  [completed
-                   (input-scheduler-completed-generation
-                     (frontend-input-scheduler value))]
-                  [presented? #f])
-         (if (or (>= processed limit) (not (frontend-pending? value)))
-             (begin
-               (unless presented? (frontend-render-if-ready! value))
-               processed)
-             (let* ([count (frontend-drain! value 1)]
-                    [next-completed
-                     (input-scheduler-completed-generation
-                       (frontend-input-scheduler value))]
-                    [cycle-completed? (> next-completed completed)])
-               (when cycle-completed? (frontend-render-if-ready! value))
-               (loop (+ processed count) next-completed
-                     (or presented? cycle-completed?)))))]))
+       (frontend-advance! 'frontend-step-action! value limit 1)]))
 
   (define (frontend-resize! value size)
     (require-open 'frontend-resize! value)

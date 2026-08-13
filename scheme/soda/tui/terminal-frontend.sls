@@ -183,7 +183,7 @@
       (lambda (event) (terminal-frontend-handle-native-event! value event))
       (native:runtime-poll-nowait! (terminal-frontend-runtime value)))
     (terminal-frontend-sync-size! value)
-    (frontend-step! (terminal-frontend-core value)))
+    (frontend-step-action! (terminal-frontend-core value)))
 
   (define (terminal-frontend-run! value)
     (unless (terminal-frontend-active? value)
@@ -197,7 +197,10 @@
                native:runtime-poll!)
            (terminal-frontend-runtime value)))
         (terminal-frontend-sync-size! value)
-        (frontend-step! (terminal-frontend-core value))
+        ;; One native poll and one complete editor action form a terminal turn.
+        ;; Returning here after every action lets a newly arrived direction
+        ;; preempt repeat events that have not started executing.
+        (frontend-step-action! (terminal-frontend-core value))
         (loop))))
 
   (define (terminal-frontend-close! value)
