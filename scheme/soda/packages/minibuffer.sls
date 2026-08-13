@@ -94,7 +94,10 @@
             stream 0
             (list
               (make-display-text (cdr value) 0 0 'minibuffer.prompt
-                                 (list 'minibuffer 'prompt))))))))
+                                 (list 'minibuffer 'prompt))))))
+      (lambda (update)
+        (or (view-update-damaged? update 'document)
+            (view-update-damaged? update 'configuration)))))
 
   (define (minibuffer-configuration service base request)
     (configuration-reconfigure

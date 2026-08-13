@@ -4,6 +4,7 @@
           view-update-damaged?
           make-view-plugin view-plugin? view-plugin-key view-plugin-create view-plugin-update
           view-plugin-destroy view-plugin-decorations view-plugin-display view-plugin-transform
+          view-plugin-invalidated?
           view-plugins-facet configuration-view-plugins)
   (import (rnrs) (soda kernel extension))
 
@@ -30,10 +31,12 @@
     (memq kind (view-update-damage update)))
 
   ;; A ViewPlugin declaration owns only callbacks and its configuration key.
+  ;; `invalidated?` declares when decorations, display, or transform output
+  ;; must be recomputed.  The update callback still receives every ViewUpdate.
   ;; Instances and their mutable lifecycle belong to (soda view internal plugin).
   (define-record-type
     (view-plugin %make-view-plugin view-plugin?)
-    (fields key create update destroy decorations display transform))
+    (fields key create update destroy decorations display transform invalidated?))
   (define (optional-procedure? value) (or (not value) (procedure? value)))
   (define make-view-plugin
     (case-lambda
@@ -42,11 +45,17 @@
       [(key create update destroy decorations display)
        (make-view-plugin key create update destroy decorations display #f)]
       [(key create update destroy decorations display transform)
+       (make-view-plugin
+         key create update destroy decorations display transform
+         (lambda (update) #t))]
+      [(key create update destroy decorations display transform invalidated?)
        (unless (and (symbol? key) (procedure? create) (optional-procedure? update)
                     (optional-procedure? destroy) (optional-procedure? decorations)
-                    (optional-procedure? display) (optional-procedure? transform))
+                    (optional-procedure? display) (optional-procedure? transform)
+                    (procedure? invalidated?))
          (assertion-violation 'make-view-plugin "invalid ViewPlugin contract" key))
-       (%make-view-plugin key create update destroy decorations display transform)]))
+       (%make-view-plugin
+         key create update destroy decorations display transform invalidated?)]))
 
   (define (append-plugin-lists values) (fold-left append '() values))
   (define view-plugins-facet

@@ -146,24 +146,6 @@
       (assertion-violation 'view-projection "expected a live View" view))
     (view-published-projection view))
 
-  (define (display-plugin? instance)
-    (let ([plugin (view-plugin-instance-plugin instance)])
-      (or (view-plugin-decorations plugin)
-          (view-plugin-display plugin)
-          (view-plugin-transform plugin))))
-
-  (define (view-display-plugin? view)
-    (exists display-plugin? (view-plugin-instances view)))
-
-  (define (render-damage? update view)
-    (or (exists (lambda (kind)
-                  (memq kind '(document selection viewport decoration chrome layout theme resize
-                                       configuration)))
-                (view-update-damage update))
-        ;; Input itself is not rendered by the core.  A display-producing
-        ;; plugin may however project its own InputState, e.g. a completion UI.
-        (and (view-update-damaged? update 'input) (view-display-plugin? view))))
-
   ;; Retain a destroyed instance until its definition leaves configuration.
   ;; Recreating it on every update would turn one plugin fault into a loop.
   (define (matching-plugin-instance instances plugin)
@@ -268,9 +250,10 @@
                  (destroy-plugin-instance! view instance 'plugin-update-cleanup)
                  (set! output-changed? #t)
                  #f])
-              (view-plugin-instance-update! instance update))))
+              (when (view-plugin-instance-update! instance update)
+                (set! output-changed? #t)))))
         (view-plugin-instances view))
-      (when (or output-changed? (render-damage? update view))
+      (when output-changed?
         (publish-view-projection! view))
       view))
 

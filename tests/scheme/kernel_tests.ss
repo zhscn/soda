@@ -1820,6 +1820,15 @@
             '() '() #f))]
        [after-selection (render-service-render! service surface (host-state-views host))]
        [state (view-state view)]
+       [_range-update
+        (dispatcher-dispatch-view!
+          (host-state-dispatch host)
+          (make-view-transaction-spec
+            (view-id view) (view-state-generation state)
+            (make-selection (list (make-selection-range 0 2))) #f #f
+            '() '() #f))]
+       [after-range (render-service-render! service surface (host-state-views host))]
+       [state (view-state view)]
        [_viewport-update
         (dispatcher-dispatch-view!
           (host-state-dispatch host)
@@ -1860,7 +1869,16 @@
        [after-layout (render-service-render! service surface (host-state-views host))])
   (unless (and (eq? initial after-input)
                (not (eq? after-input after-selection))
-               (not (eq? after-selection after-viewport))
+               (eq? (surface-render-frame after-input)
+                    (surface-render-frame after-selection))
+               (eq? (rendered-view-layout
+                      (car (surface-render-rendered-views after-input)))
+                    (rendered-view-layout
+                      (car (surface-render-rendered-views after-selection))))
+               (= (surface-render-cursor-column after-selection) 1)
+               (not (eq? (surface-render-frame after-selection)
+                         (surface-render-frame after-range)))
+               (not (eq? after-range after-viewport))
                (not (eq? after-viewport after-configuration))
                (not (eq? after-configuration after-document))
                (not (eq? after-document after-chrome))

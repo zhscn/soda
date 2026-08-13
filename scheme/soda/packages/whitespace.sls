@@ -134,7 +134,10 @@
                    (map
                      (lambda (fragment)
                        (marker-fragment fragment policy trailing))
-                     (display-stream-fragments stream)))))))))
+                     (display-stream-fragments stream)))))))
+      (lambda (update)
+        (or (view-update-damaged? update 'document)
+            (view-update-damaged? update 'configuration)))))
 
   (define (whitespace-view-extension service)
     (unless (whitespace-service? service)

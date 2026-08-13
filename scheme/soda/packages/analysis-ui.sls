@@ -112,5 +112,10 @@
                 result
                 (analysis-plugin-state-visible-ranges state)
                 (analysis-plugin-state-mapper state))
-              (make-decoration-set '()))))))
+              (make-decoration-set '()))))
+      #f #f
+      (lambda (update)
+        (or (not (view-update-editor-update update))
+            (view-update-damaged? update 'document)
+            (view-update-damaged? update 'decoration)))))
 )

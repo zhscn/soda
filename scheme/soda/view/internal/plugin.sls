@@ -61,10 +61,16 @@
     (let ([plugin (view-plugin-instance-plugin instance)])
       (let ([procedure (view-plugin-update plugin)])
         (when procedure (procedure (view-plugin-instance-value instance) update)))
-      (instance-decorations-set! instance (decorations plugin (view-plugin-instance-value instance)))
-      (instance-display-stream-set! instance (stream plugin (view-plugin-instance-value instance)))
-      (instance-display-transform-set! instance (transform plugin (view-plugin-instance-value instance)))
-      (view-plugin-instance-value instance)))
+      (if ((view-plugin-invalidated? plugin) update)
+          (begin
+            (instance-decorations-set!
+              instance (decorations plugin (view-plugin-instance-value instance)))
+            (instance-display-stream-set!
+              instance (stream plugin (view-plugin-instance-value instance)))
+            (instance-display-transform-set!
+              instance (transform plugin (view-plugin-instance-value instance)))
+            #t)
+          #f)))
   (define (view-plugin-instance-destroy! instance)
     (unless (view-plugin-instance? instance)
       (assertion-violation 'view-plugin-instance-destroy! "expected a ViewPlugin instance" instance))
