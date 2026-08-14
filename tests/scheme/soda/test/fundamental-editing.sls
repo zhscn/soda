@@ -5406,6 +5406,59 @@
       (frontend-close! frontend)
       (soda-application-close! application))
 
+    ;; A lifecycle command may stop the terminal while one read still contains
+    ;; later bytes.  The frontend must leave those bytes unconsumed instead of
+    ;; routing them through the old editing View after shutdown has begun.
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [surface (soda-application-surface application)]
+           [buffer (soda-application-buffer application)]
+           [editing (soda-application-editing application)]
+           [active? #t]
+           [keymap (make-keymap 'stop-input-burst)]
+           [frontend
+            (make-frontend
+              state surface
+              (lambda (active current-view)
+                (buffer-input-context
+                  active current-view
+                  (list
+                    (make-input-layer 'override keymap #f 'pass)
+                    (fundamental-fallback-input-layer editing))))
+              (lambda (context disposition)
+                (fundamental-input-disposition context disposition))
+              (lambda (render theme) #f)
+              (make-render-service) default-theme)])
+      (keymap-bind!
+        keymap
+        (list (make-key-stroke 'character (char->integer #\q) 0))
+        'test.stop-input-burst)
+      (define-command
+        runtime (host-state-owner state) 'test.stop-input-burst (context)
+        (documentation "Stop the current test input burst.")
+        (class 'application)
+        (undo 'ignore)
+        (set! active? #f)
+        (command-handled))
+      (frontend-enqueue!
+        frontend
+        (make-surface-input-message
+          (surface-id surface)
+          (make-key-event 'character (char->integer #\q) #f #f 0 'press
+                          (make-bytevector 0))))
+      (frontend-enqueue!
+        frontend
+        (make-surface-input-message
+          (surface-id surface) (make-text-input-event 'text (string->utf8 "x"))))
+      (frontend-step-input-burst! frontend 2 (lambda () active?))
+      (unless (and (not active?) (string=? (buffer-string buffer) ""))
+        (error 'fundamental-editing-tests
+               "stopped input burst routed bytes through the prior View"
+               (buffer-string buffer)))
+      (frontend-close! frontend)
+      (soda-application-close! application))
+
     ;; Prefix guidance is derived from the active keymaps and appears only
     ;; while a prefix is pending.  Ordinary editing keeps the echo area free
     ;; for messages and position feedback.

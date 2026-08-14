@@ -510,10 +510,12 @@
   ;; Runtime work and completed user actions are separate budgets.  This keeps
   ;; the host queue generic while allowing an interactive frontend to yield at
   ;; an action boundary instead of after an arbitrary number of messages.
-  (define (frontend-advance! who value limit action-limit present-each-action?)
+  (define (frontend-advance! who value limit action-limit present-each-action? continue?)
     (require-open who value)
     (unless (and (integer? limit) (exact? limit) (> limit 0))
       (assertion-violation who "limit must be a positive exact integer" limit))
+    (unless (procedure? continue?)
+      (assertion-violation who "continue predicate must be a procedure" continue?))
     (let ([previous-defer? (frontend-defer-presentation? value)])
       (dynamic-wind
         (lambda ()
@@ -526,11 +528,13 @@
                         (frontend-input-scheduler value))]
                      [actions 0]
                      [presented? #f])
-            (if (or (>= processed limit)
+            (if (or (not (continue?))
+                    (>= processed limit)
                     (and action-limit (>= actions action-limit))
                     (not (frontend-pending? value)))
                 (begin
-                  (unless presented? (frontend-render-if-ready! value))
+                  (when (and (continue?) (not presented?))
+                    (frontend-render-if-ready! value))
                   processed)
                 (let* ([count (frontend-drain! value 1)]
                        [next-completed
@@ -548,20 +552,25 @@
   (define frontend-step!
     (case-lambda
       [(value) (frontend-step! value 32)]
-      [(value limit) (frontend-advance! 'frontend-step! value limit #f #t)]))
+      [(value limit)
+       (frontend-advance! 'frontend-step! value limit #f #t (lambda () #t))]))
 
   ;; A terminal read is one ordered input burst.  Its actions still run in
   ;; order and each command receives the preceding command's state, but their
   ;; Frames are coalesced into one presentation.  This keeps movement paced by
   ;; available terminal input rather than by render round trips.
-  (define (frontend-step-input-burst! value action-count)
-    (unless (and (integer? action-count) (exact? action-count)
-                 (positive? action-count))
-      (assertion-violation
-        'frontend-step-input-burst! "expected a positive action count" action-count))
-    (frontend-advance!
-      'frontend-step-input-burst! value
-      (max 64 (* action-count 16)) action-count #f))
+  (define frontend-step-input-burst!
+    (case-lambda
+      [(value action-count)
+       (frontend-step-input-burst! value action-count (lambda () #t))]
+      [(value action-count continue?)
+       (unless (and (integer? action-count) (exact? action-count)
+                    (positive? action-count))
+         (assertion-violation
+           'frontend-step-input-burst! "expected a positive action count" action-count))
+       (frontend-advance!
+         'frontend-step-input-burst! value
+         (max 64 (* action-count 16)) action-count #f continue?)]))
 
   ;; Advance through exactly one complete user action.  Internal runtime
   ;; messages needed by that action remain atomic, but control returns as soon
@@ -571,7 +580,7 @@
     (case-lambda
       [(value) (frontend-step-action! value 32)]
       [(value limit)
-       (frontend-advance! 'frontend-step-action! value limit 1 #t)]))
+       (frontend-advance! 'frontend-step-action! value limit 1 #t (lambda () #t))]))
 
   (define (frontend-resize! value size)
     (require-open 'frontend-resize! value)

@@ -203,7 +203,9 @@
              (native:runtime-poll-nowait! (terminal-frontend-runtime value)))])
       (terminal-frontend-sync-size! value)
       (if (positive? input-count)
-          (frontend-step-input-burst! (terminal-frontend-core value) input-count)
+          (frontend-step-input-burst!
+            (terminal-frontend-core value) input-count
+            (lambda () (terminal-frontend-active? value)))
           (frontend-step-action! (terminal-frontend-core value)))))
 
   (define (terminal-frontend-run! value)
@@ -221,7 +223,8 @@
           (terminal-frontend-sync-size! value)
           (if (positive? input-count)
               (frontend-step-input-burst!
-                (terminal-frontend-core value) input-count)
+                (terminal-frontend-core value) input-count
+                (lambda () (terminal-frontend-active? value)))
               ;; Background runtime work remains a single action so it cannot
               ;; starve newly readable terminal input.
               (frontend-step-action! (terminal-frontend-core value)))
