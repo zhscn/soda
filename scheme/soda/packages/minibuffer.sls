@@ -411,75 +411,97 @@
             (minibuffer-session-completion-viewport-set!
               session (make-list-viewport 0 completion-window-height))
             (close-completion-presentation! service session))
-          (let* ([viewport
-                  (list-viewport-reveal
-                    (minibuffer-session-completion-viewport session)
-                    (length candidates)
-                    (completion-controller-selected-index controller))]
-                 [_ (minibuffer-session-completion-viewport-set! session viewport)]
-                 [host (minibuffer-service-host service)]
-                 [configuration (completion-configuration service)]
-                 [buffer
-                  (or (and (minibuffer-session-completion-buffer-id session)
-                           (package-host-buffer-ref
-                             host
-                             (minibuffer-session-completion-buffer-id session)
-                             #f))
-                      (package-host-create-buffer!
-                        host (minibuffer-service-owner service)
-                        " *Completions*" (make-document "") configuration))]
-                 [view
-                  (or (and (minibuffer-session-completion-view-id session)
-                           (package-host-view-ref
-                             host (minibuffer-session-completion-view-id session) #f))
-                      (let ([created
-                             (package-host-create-interaction-companion-view!
-                               host (minibuffer-service-owner service)
-                               buffer configuration
-                               (minibuffer-session-surface-id session)
-                               (minibuffer-session-view-id session)
-                               completion-window-height)])
-                        created))])
-            (if (not view)
-                (begin
-                  (package-host-close-buffer! host (buffer-id buffer))
-                  #f)
-                (let* ([state (buffer-state buffer)]
-                       [old-size
-                        (snapshot-byte-size (buffer-state-document state))]
-                       [text (completion-text session controller)]
-                       [published
-                        (package-host-dispatch!
-                          host
-                          (make-transaction-spec
-                            (buffer-id buffer) (view-id view)
-                            (buffer-state-generation state)
-                            (make-change-set
-                              old-size
-                              (list
-                                (make-text-change
-                                  0 old-size (string->utf8 text))))
-                            #f '() '()))])
-                  (minibuffer-session-completion-buffer-id-set!
-                    session (buffer-id buffer))
-                  (minibuffer-session-completion-view-id-set!
-                    session (view-id view))
-                  (let ([selected
-                         (completion-controller-selected-index controller)])
-                    (when selected
-                      (let ([current (package-host-view-ref host (view-id view) #f)])
-                        (when current
-                          (package-host-dispatch-view!
-                            host
-                            (make-view-transaction-spec
-                              (view-id current)
-                              (view-state-generation (view-state current))
-                              #f
-                              (make-viewport
-                                (max 0 (- selected (- completion-window-height 1)))
-                                0)
-                              #f '() '() #f))))))
-                  published))))))
+          (let ([created-buffer #f] [created-view #f] [committed? #f])
+            ;; A completion list is an ordinary temporary presentation.  Do
+            ;; not record it in the session until its initial contents have
+            ;; been published; this makes an exception or a rejected
+            ;; transaction leave no orphan Buffer or companion Window.
+            (dynamic-wind
+              (lambda () #f)
+              (lambda ()
+                (let* ([viewport
+                        (list-viewport-reveal
+                          (minibuffer-session-completion-viewport session)
+                          (length candidates)
+                          (completion-controller-selected-index controller))]
+                       [_ (minibuffer-session-completion-viewport-set! session viewport)]
+                       [host (minibuffer-service-host service)]
+                       [configuration (completion-configuration service)]
+                       [buffer
+                        (or (and (minibuffer-session-completion-buffer-id session)
+                                 (package-host-buffer-ref
+                                   host
+                                   (minibuffer-session-completion-buffer-id session)
+                                   #f))
+                            (let ([created
+                                   (package-host-create-buffer!
+                                     host (minibuffer-service-owner service)
+                                     " *Completions*" (make-document "") configuration)])
+                              (set! created-buffer created)
+                              created))]
+                       [view
+                        (or (and (minibuffer-session-completion-view-id session)
+                                 (package-host-view-ref
+                                   host (minibuffer-session-completion-view-id session) #f))
+                            (let ([created
+                                   (package-host-create-interaction-companion-view!
+                                     host (minibuffer-service-owner service)
+                                     buffer configuration
+                                     (minibuffer-session-surface-id session)
+                                     (minibuffer-session-view-id session)
+                                     completion-window-height)])
+                              (set! created-view created)
+                              created))])
+                  (and view
+                       (let* ([state (buffer-state buffer)]
+                              [old-size
+                               (snapshot-byte-size (buffer-state-document state))]
+                              [text (completion-text session controller)]
+                              [published
+                               (package-host-dispatch!
+                                 host
+                                 (make-transaction-spec
+                                   (buffer-id buffer) (view-id view)
+                                   (buffer-state-generation state)
+                                   (make-change-set
+                                     old-size
+                                     (list
+                                       (make-text-change
+                                         0 old-size (string->utf8 text))))
+                                   #f '() '()))])
+                         (and published
+                              (begin
+                                (minibuffer-session-completion-buffer-id-set!
+                                  session (buffer-id buffer))
+                                (minibuffer-session-completion-view-id-set!
+                                  session (view-id view))
+                                (let ([selected
+                                       (completion-controller-selected-index controller)])
+                                  (when selected
+                                    (let ([current (package-host-view-ref host (view-id view) #f)])
+                                      (when current
+                                        (package-host-dispatch-view!
+                                          host
+                                          (make-view-transaction-spec
+                                            (view-id current)
+                                            (view-state-generation (view-state current))
+                                            #f
+                                            (make-viewport
+                                              (max 0 (- selected (- completion-window-height 1)))
+                                              0)
+                                            #f '() '() #f))))))
+                                (set! committed? #t)
+                                published))))))
+              (lambda ()
+                (unless committed?
+                  (when created-view
+                    (package-host-remove-interaction-view!
+                      (minibuffer-service-host service)
+                      (minibuffer-session-surface-id session)
+                      (view-id created-view)))
+                  (when created-buffer
+                    (package-host-close-buffer!
+                      (minibuffer-service-host service) (buffer-id created-buffer))))))))))
 
   (define (close! service interaction outcome)
     (let ([session (session-for service interaction)])
