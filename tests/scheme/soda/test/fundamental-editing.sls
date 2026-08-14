@@ -1449,6 +1449,11 @@
                            (car (surface-render-rendered-views first)))
                          (rendered-view-layout
                            (car (surface-render-rendered-views second))))
+                    (let ([spans
+                           (frame-diff (surface-render-frame first)
+                                       (surface-render-frame second))])
+                      (and (= (length spans) 1)
+                           (= (frame-row-span-row (car spans)) row)))
                     (string-contains?
                       (frame-row-string (surface-render-frame second) row)
                       "L1 C2"))

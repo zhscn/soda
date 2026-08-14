@@ -752,16 +752,6 @@
                               presentations))
        (render-surface-with-presentations surface views presentations)]))
 
-  (define (frame-replace-row frame row start-column replacement)
-    (let loop ([column 0] [updates '()])
-      (if (= column (frame-width replacement))
-          (frame-with-cells frame (reverse updates))
-          (loop
-            (+ column 1)
-            (cons (list row (+ start-column column)
-                        (frame-cell-at replacement 0 column))
-                  updates)))))
-
   ;; Collapsed-caret motion does not change text layout.  Retarget the cursor
   ;; and the active Window's mode line against the committed DisplayMap so
   ;; line/column feedback stays current without rebuilding every View Frame.
@@ -791,8 +781,8 @@
                   [frame (surface-render-frame render)]
                   [next-frame
                    (if mode-rectangle
-                       (frame-replace-row
-                         frame (car mode-rectangle) (cadr mode-rectangle)
+                       (frame-with-row
+                         frame (car mode-rectangle)
                          (status-frame
                            (caddr mode-rectangle)
                            (mode-line-message view presentations)

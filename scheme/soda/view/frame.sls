@@ -16,6 +16,7 @@
           frame-cell-at
           frame-with-cell
           frame-with-cells
+          frame-with-row
           make-frame-row-span
           frame-row-span?
           frame-row-span-row
@@ -150,6 +151,22 @@
       (assertion-violation 'frame-with-cell "expected a FrameCell" cell))
     (frame-with-cells frame (list (list row column cell))))
 
+  ;; Replace one complete row by structurally sharing the row from a
+  ;; single-row Frame.  This is the immutable Frame operation for high-rate
+  ;; chrome updates such as a mode line following caret motion: no
+  ;; cell-by-cell patching or copying is needed.
+  (define (frame-with-row frame row replacement)
+    (unless (and (frame? frame)
+                 (exact-integer? row) (<= 0 row) (< row (frame-height frame))
+                 (frame? replacement) (= (frame-height replacement) 1)
+                 (= (frame-width replacement) (frame-width frame)))
+      (assertion-violation
+        'frame-with-row "expected a Frame row and matching single-row replacement"
+        frame row replacement))
+    (let ([rows (vector-copy (frame-rows frame))])
+      (vector-set! rows row (vector-ref (frame-rows replacement) 0))
+      (%make-frame (frame-width frame) (frame-height frame) rows)))
+
   ;; Updates is a list of (row column FrameCell).  Copy once so composing a
   ;; window tree never creates an intermediate Frame per terminal cell.
   (define (frame-with-cells frame updates)
@@ -158,7 +175,8 @@
     (if (null? updates)
         frame
         (let ([rows (vector-copy (frame-rows frame))]
-              [changed-rows '()])
+              [changed-rows '()]
+              [changed? (make-eqv-hashtable)])
           (for-each
             (lambda (update)
               (unless (and (list? update) (= (length update) 3)
@@ -166,8 +184,9 @@
                 (assertion-violation 'frame-with-cells "invalid frame cell update" update))
               (let ([row (car update)] [column (cadr update)] [cell (caddr update)])
                 (frame-assert-index frame row column 'frame-with-cells)
-                (unless (memv row changed-rows)
+                (unless (hashtable-contains? changed? row)
                   (vector-set! rows row (vector-copy (vector-ref rows row)))
+                  (hashtable-set! changed? row #t)
                   (set! changed-rows (cons row changed-rows)))
                 (vector-set! (vector-ref rows row) column cell)))
             updates)
