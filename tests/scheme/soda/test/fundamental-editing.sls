@@ -1702,6 +1702,8 @@
            [runtime (host-state-command-runtime state)]
            [interaction (soda-application-interaction application)]
            [minibuffer (soda-application-minibuffer application)]
+           [baseline-buffer-count
+            (length (buffer-service-buffers (host-state-buffers state)))]
            [owner (make-owner 'interaction-package-test)]
            [observed #f]
            [must-match-value #f]
@@ -1843,7 +1845,11 @@
                    (not (minibuffer-service-current minibuffer))
                    (eq? (interaction-session-status session) 'accepted)
                    (string=? exit-input "acceptedé")
-                   (equal? (reverse events) '(opened accepted)))
+                   (equal? (reverse events) '(opened accepted))
+                   (= (length (buffer-service-buffers (host-state-buffers state)))
+                      baseline-buffer-count)
+                   (null? (surface-interaction-windows
+                            (soda-application-surface application))))
         (error 'fundamental-editing-tests "interaction submission did not resume through the queue"))
       ;; A required prompt adapter must not leave an invocation suspended when
       ;; its presentation target is unavailable.
@@ -2199,7 +2205,11 @@
         (host-state-run! state)
         (unless (and (not (minibuffer-service-current minibuffer))
                      (eq? restored-snapshot preview-snapshot)
-                     (equal? (reverse completion-events) '(preview restore)))
+                     (equal? (reverse completion-events) '(preview restore))
+                     (= (length (buffer-service-buffers (host-state-buffers state)))
+                        baseline-buffer-count)
+                     (null? (surface-interaction-windows
+                              (soda-application-surface application))))
           (error 'fundamental-editing-tests
                  "completion cancellation did not restore its originating preview snapshot"
                  completion-events preview-snapshot restored-snapshot)))
