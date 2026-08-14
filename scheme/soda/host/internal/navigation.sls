@@ -8,6 +8,7 @@
           navigation-history-back!
           navigation-history-forward!
           navigation-history-commit!
+          navigation-history-rollback!
           navigation-history-cancel!
           navigation-entry?
           navigation-entry-from
@@ -24,7 +25,7 @@
 
   (define-record-type
     (navigation-jump %make-navigation-jump navigation-jump?)
-    (fields history serial kind from target cursor))
+    (fields history serial kind from target cursor entries))
 
   ;; Cursor is the number of committed transitions currently applied.  New
   ;; jumps truncate entries after it, while back/forward only move it after
@@ -54,7 +55,8 @@
     (let* ([serial (+ 1 (navigation-history-serial history))]
            [jump (%make-navigation-jump
                    history serial kind from target
-                   (navigation-history-cursor history))])
+                   (navigation-history-cursor history)
+                   (navigation-history-entries history))])
       (navigation-history-serial-set! history serial)
       ;; Replacing pending makes the old token observationally superseded.
       (navigation-history-pending-set! history jump)
@@ -123,6 +125,21 @@
                history (+ (navigation-jump-cursor jump) 1))])
           (navigation-history-pending-set! history #f)
           #t)))
+
+  ;; A follow commits history before its View/Surface transaction publishes.
+  ;; Until another jump begins, a failed transaction can restore the exact
+  ;; pre-jump cursor and entry sequence without observing partial navigation.
+  (define (navigation-history-rollback! history jump)
+    (unless (and (navigation-history? history) (navigation-jump? jump))
+      (assertion-violation
+        'navigation-history-rollback! "invalid navigation rollback" history jump))
+    (and (eq? history (navigation-jump-history jump))
+         (= (navigation-history-serial history) (navigation-jump-serial jump))
+         (not (navigation-history-pending history))
+         (begin
+           (navigation-history-entries-set! history (navigation-jump-entries jump))
+           (navigation-history-cursor-set! history (navigation-jump-cursor jump))
+           #t)))
 
   (define (navigation-history-cancel! history jump)
     (unless (and (navigation-history? history) (navigation-jump? jump))

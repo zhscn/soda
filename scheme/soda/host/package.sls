@@ -678,15 +678,17 @@
                          views owner buffer (buffer-state-configuration (buffer-state buffer)))
                        #t)))))))
 
-  ;; All Location follows use one Host-owned commit boundary.  The target is
-  ;; resolved before placement; the history token moves only after selection
-  ;; and reveal were published for the resulting View.
+  ;; All Location follows use one Host-owned commit boundary.  After target
+  ;; resolution, history is staged before placement so reentrant observers
+  ;; never see a placed Location without a matching history entry; a rejected
+  ;; View/Window transaction restores the pre-follow history snapshot.
   (define (follow-resolved-location! host owner context resolution jump)
     (let ([buffer
            (and (eq? (location-resolution-status resolution) 'resolved)
                 (package-host-buffer-ref
                   host (location-resolution-buffer-id resolution) #f))]
           [committed? #f]
+          [history-committed? #f]
           ;; A View created while staging is not owned by a Window until the
           ;; composite dispatch succeeds.  Keep that ownership explicit so a
           ;; rejected transaction, including one that raises, cannot leak it.
@@ -718,25 +720,26 @@
                              [same-view? (= (view-id view) (command-context-view-id context))])
                         (when created?
                           (set! unplaced-created-view view))
-                        (let ([placed?
-                               (if same-view?
-                                   (package-host-dispatch-view! host selection)
-                                   (dispatcher-dispatch-view-with-host!
-                                     (host-state-dispatch (package-host-state host))
-                                     selection
-                                     (make-replace-window-view-operation
-                                       (command-context-surface-id context)
-                                       (command-context-window-id context)
-                                       (view-id view))))])
-                          (and placed?
-                               (begin
-                                 ;; The Surface now owns the new placement.  It
-                                 ;; must survive a later history-token failure.
-                                 (set! unplaced-created-view #f)
-                                 (and (navigation-history-commit!
-                                        (host-state-navigation (package-host-state host))
-                                        jump (location-resolution-location resolution))
+                        (and (navigation-history-commit!
+                               (host-state-navigation (package-host-state host))
+                               jump (location-resolution-location resolution))
+                             (begin
+                               (set! history-committed? #t)
+                               (let ([placed?
+                                      (if same-view?
+                                          (package-host-dispatch-view! host selection)
+                                          (dispatcher-dispatch-view-with-host!
+                                            (host-state-dispatch (package-host-state host))
+                                            selection
+                                            (make-replace-window-view-operation
+                                              (command-context-surface-id context)
+                                              (command-context-window-id context)
+                                              (view-id view))))])
+                                 (and placed?
                                       (begin
+                                        ;; The Surface owns the newly-created
+                                        ;; View only after placement succeeds.
+                                        (set! unplaced-created-view #f)
                                         (set! committed? #t)
                                         (make-command-context
                                           #f
@@ -749,8 +752,11 @@
                                           #f '() #f #f 'location-follow #f))))))))))
              (lambda ()
                (unless committed?
-                 (navigation-history-cancel!
-                   (host-state-navigation (package-host-state host)) jump)
+                 (if history-committed?
+                     (navigation-history-rollback!
+                       (host-state-navigation (package-host-state host)) jump)
+                     (navigation-history-cancel!
+                       (host-state-navigation (package-host-state host)) jump))
                  (when unplaced-created-view
                    (view-service-close-view!
                      (host-state-views (package-host-state host))

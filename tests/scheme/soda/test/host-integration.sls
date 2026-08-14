@@ -164,6 +164,46 @@
           (owner-close! owner)
           (soda-application-close! application)))))
 
+  ;; Location follow commits its history token before publishing the combined
+  ;; View/Window transaction.  A rejected placement must restore the exact
+  ;; pre-follow traversal position, for both a new jump and a history walk.
+  (define (run-navigation-history-rollback-test!)
+    (let* ([history (make-navigation-history)]
+           [resource (make-resource 'buffer "navigation-history-test")]
+           [location-at
+            (lambda (offset)
+              (make-location
+                resource (make-byte-position offset) (make-byte-position offset)
+                #f 'after '()))]
+           [origin (location-at 0)]
+           [first (location-at 1)]
+           [second (location-at 2)]
+           [initial (navigation-history-begin! history origin first)])
+      (unless (navigation-history-commit! history initial first)
+        (error 'host-integration-tests "could not establish navigation history fixture"))
+      (let ([new-jump (navigation-history-begin! history first second)])
+        (unless (navigation-history-commit! history new-jump second)
+          (error 'host-integration-tests "could not commit staged navigation jump"))
+        (unless (and (= (navigation-history-cursor history) 2)
+                     (= (length (navigation-history-entries history)) 2)
+                     (navigation-history-rollback! history new-jump)
+                     (= (navigation-history-cursor history) 1)
+                     (= (length (navigation-history-entries history)) 1)
+                     (not (navigation-history-pending? history)))
+          (error 'host-integration-tests
+                 "navigation rollback did not restore a staged new jump")))
+      (let ([back (navigation-history-back! history)])
+        (unless (and back
+                     (navigation-history-commit!
+                       history back (navigation-jump-target back))
+                     (= (navigation-history-cursor history) 0)
+                     (navigation-history-rollback! history back)
+                     (= (navigation-history-cursor history) 1)
+                     (= (length (navigation-history-entries history)) 1)
+                     (not (navigation-history-pending? history)))
+          (error 'host-integration-tests
+                 "navigation rollback did not restore a staged history traversal")))))
+
   ;; Effects retain a CommandContext only as a conditional presentation
   ;; target.  Once its View has been replaced, a late result must neither
   ;; reclaim the Window nor allocate another presentation for itself.
@@ -473,6 +513,7 @@
     (run-dispatch-gate-test!)
     (run-interaction-placement-rollback-test!)
     (run-composite-view-placement-rollback-test!)
+    (run-navigation-history-rollback-test!)
     (run-stale-presentation-test!)
     (run-removed-surface-presentation-test!)
     (run-navigation-capability-test!)
