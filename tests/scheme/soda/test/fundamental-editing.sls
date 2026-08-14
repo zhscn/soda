@@ -3478,6 +3478,43 @@
       (frontend-close! frontend)
       (soda-application-close! application))
 
+    ;; The application-owned composition is the authoritative input stack for
+    ;; both ordinary Views and minibuffers.  A global override keymap retains
+    ;; key priority without intercepting committed terminal text.
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [surface (soda-application-surface application)]
+           [decoder (make-terminal-input-decoder)]
+           [event (car (terminal-input-decoder-feed!
+                         decoder (string->utf8 "a")))]
+           [active (surface-active-context surface (host-state-views state))]
+           [view (view-service-ref
+                   (host-state-views state) (active-context-view-id active))]
+           [ordinary
+            (input-dispatch
+              (soda-application-resolve-input-context application active view)
+              event)])
+      (command-runtime-start-interactive!
+        (host-state-command-runtime state) 'file.visit
+        (application-command-context application))
+      (host-state-run! state)
+      (let* ([prompt-active
+              (surface-active-context surface (host-state-views state))]
+             [prompt-view
+              (view-service-ref
+                (host-state-views state)
+                (active-context-view-id prompt-active))]
+             [prompt
+              (input-dispatch
+                (soda-application-resolve-input-context
+                  application prompt-active prompt-view)
+                event)])
+        (unless (and (eq? (input-disposition-kind ordinary) 'text)
+                     (eq? (input-disposition-kind prompt) 'text))
+          (error 'fundamental-editing-tests
+                 "application override layer intercepted committed text")))
+      (soda-application-close! application))
+
     ;; Terminal protocol reports, scheduling, command execution, and Frame
     ;; presentation form one input contract.  A Kitty Down press followed by
     ;; release produces one motion and exposes no intermediate chrome frame.
@@ -3565,9 +3602,9 @@
                   (frame-row-string
                     (surface-render-frame (car presented))
                     (- (frame-height (surface-render-frame (car presented))) 1))
-                  "C-"))
+                  "Line 2"))
         (error 'fundamental-editing-tests
-               "terminal Down lifecycle did not commit one complete visible action"
+               "terminal Down lifecycle exposed scheduling state or lost position feedback"
                (selection-range-head
                  (selection-primary-range
                    (view-state-selection (view-state view))))

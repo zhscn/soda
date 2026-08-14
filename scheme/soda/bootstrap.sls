@@ -20,6 +20,7 @@
           soda-application-minibuffer
           soda-application-buffer-item-actions
           soda-application-buffer-lists
+          soda-application-resolve-input-context
           soda-application-open-files!
           soda-application-run!
           soda-application-close!)
@@ -430,15 +431,17 @@
         (startup-files paths)))
     application)
 
-  (define (make-resolver application)
-    (lambda (active view)
-      (or (minibuffer-input-context
+  ;; Application composition is a named boundary so frontends and contract
+  ;; tests use the same layer stack.  It remains a pure projection of the
+  ;; active context and View.
+  (define (soda-application-resolve-input-context application active view)
+    (or (minibuffer-input-context
             (soda-application-minibuffer application) active view
             (list
               (make-input-layer
                 'override
                 (soda-application-override-keymap application)
-                #f 'ignore)
+                #f 'pass)
               (fundamental-fallback-input-layer
                 (soda-application-editing application))))
           (buffer-input-context
@@ -447,7 +450,7 @@
               (make-input-layer
                 'override
                 (soda-application-override-keymap application)
-                #f 'ignore)
+                #f 'pass)
               (make-input-layer
                 'global
                 (editor-options-keymap (soda-application-options application))
@@ -483,7 +486,7 @@
               (make-input-layer
                 'global
                 (soda-application-default-keymap application)
-                #f 'pass))))))
+                #f 'pass)))))
 
   (define (make-disposition-handler application)
     (lambda (context disposition)
@@ -504,7 +507,8 @@
            [terminal
             (make-terminal-frontend
               state (soda-application-surface application)
-              (make-resolver application)
+              (lambda (active view)
+                (soda-application-resolve-input-context application active view))
               (make-disposition-handler application))])
       (soda-application-terminal-set! application terminal)
       (guard

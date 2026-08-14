@@ -348,11 +348,7 @@
            [view (and leaf (view-service-ref views (window-view-id leaf) #f))]
            [stack (and view (view-state-input-state (view-state view)))]
            [pending (and stack (input-stack-pending-sequence stack))]
-           [argument (and stack (input-stack-pending-argument stack))]
-           [sessions (and stack (input-stack-sessions stack))]
-           [transient?
-            (and (pair? sessions)
-                 (input-session-transient? (car sessions)))])
+           [argument (and stack (input-stack-pending-argument stack))])
       (cond
         [(input-stack-feedback stack) (input-stack-feedback stack)]
         [argument
@@ -366,7 +362,6 @@
            (if hint-message
                (string-append prefix "  " hint-message)
                prefix))]
-        [(and transient? hint-message) hint-message]
         [else #f])))
 
   ;; RenderedView retains the pure layout projection needed for coordinate
