@@ -1602,7 +1602,35 @@
                                    "fundamental.insert-text"))
                        (completion-controller-candidates controller)))
           (error 'fundamental-editing-tests
-                 "M-x did not expose mode-aware command completion")))
+                 "M-x did not expose mode-aware command completion"))
+        (unless (> (length (completion-controller-candidates controller)) 7)
+          (error 'fundamental-editing-tests
+                 "M-x did not provide enough commands to test candidate scrolling"))
+        (let* ([candidate
+                (list-ref (completion-controller-candidates controller) 7)]
+               [_ (minibuffer-service-select-completion! minibuffer 7)]
+               [companion
+                (find
+                  (lambda (window)
+                    (let ([purpose (window-purpose window)])
+                      (and (pair? purpose) (eq? (car purpose) 'companion))))
+                  (surface-interaction-windows
+                    (soda-application-surface application)))]
+               [completion-view
+                (and companion
+                     (view-service-ref
+                       (host-state-views state) (window-view-id companion)))]
+               [text (and completion-view
+                          (buffer-string (view-buffer completion-view)))])
+          (unless (and text
+                       (string-contains?
+                         text
+                         (string-append "> "
+                                        (completion-candidate-label candidate))))
+            (error 'fundamental-editing-tests
+                   "completion viewport did not reveal a selected off-screen candidate"
+                   text))
+          (minibuffer-service-select-completion! minibuffer 0)))
       (command-runtime-start!
         runtime 'fundamental.insert-text (application-command-context application)
         (list (string->utf8 "message.show-position")))

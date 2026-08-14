@@ -51,6 +51,7 @@
           (soda packages edit-policy)
           (soda view decoration)
           (soda view display)
+          (soda view list-viewport)
           (soda view plugin))
 
   ;; Prompt buffers are ordinary transient buffers.  The service owns their
@@ -62,6 +63,8 @@
                      minibuffer-session-completion-buffer-id-set!)
             (mutable completion-view-id minibuffer-session-completion-view-id
                      minibuffer-session-completion-view-id-set!)
+            (mutable completion-viewport minibuffer-session-completion-viewport
+                     minibuffer-session-completion-viewport-set!)
             (mutable history-index minibuffer-session-history-index
                      minibuffer-session-history-index-set!)
             (mutable history-draft minibuffer-session-history-draft
@@ -282,7 +285,9 @@
               (let ([session
                      (%make-minibuffer-session interaction (buffer-id buffer) (view-id view)
                                                 (view-id origin) (command-context-surface-id context)
-                                                1 #f #f #f
+                                                1 #f #f
+                                                (make-list-viewport 0 completion-window-height)
+                                                #f
                                                 (or (interaction-request-initial-value request) "")
                                                 #f #f)])
                 (minibuffer-service-sessions-set!
@@ -301,17 +306,23 @@
         (if annotation (string-append "  " annotation) ""))
       "\n"))
 
-  (define (completion-text controller)
-    (let ([selected (completion-controller-selected-index controller)])
-      (let loop ([remaining (completion-controller-candidates controller)]
-                 [index 0] [result ""])
-        (if (null? remaining)
-            result
-            (loop (cdr remaining) (+ index 1)
-                  (string-append
-                    result
-                    (candidate-line (car remaining)
-                                    (and selected (= selected index)))))))))
+  (define (completion-text session controller)
+    (let* ([candidates (completion-controller-candidates controller)]
+           [range
+            (list-viewport-visible-range
+              (minibuffer-session-completion-viewport session)
+              (length candidates))]
+           [selected (completion-controller-selected-index controller)])
+      (let loop ([remaining candidates] [index 0] [result ""])
+        (cond
+          [(or (null? remaining) (= index (cdr range))) result]
+          [(< index (car range)) (loop (cdr remaining) (+ index 1) result)]
+          [else
+           (loop (cdr remaining) (+ index 1)
+                 (string-append
+                   result
+                   (candidate-line (car remaining)
+                                   (and selected (= selected index)))))]))))
 
   (define (close-completion-presentation! service session)
     (let ([view-id (minibuffer-session-completion-view-id session)]
@@ -332,8 +343,17 @@
   (define (ensure-completion-presentation! service session controller)
     (let ([candidates (completion-controller-candidates controller)])
       (if (null? candidates)
-          (close-completion-presentation! service session)
-          (let* ([host (minibuffer-service-host service)]
+          (begin
+            (minibuffer-session-completion-viewport-set!
+              session (make-list-viewport 0 completion-window-height))
+            (close-completion-presentation! service session))
+          (let* ([viewport
+                  (list-viewport-reveal
+                    (minibuffer-session-completion-viewport session)
+                    (length candidates)
+                    (completion-controller-selected-index controller))]
+                 [_ (minibuffer-session-completion-viewport-set! session viewport)]
+                 [host (minibuffer-service-host service)]
                  [configuration (completion-configuration service)]
                  [buffer
                   (or (and (minibuffer-session-completion-buffer-id session)
@@ -365,7 +385,7 @@
                 (let* ([state (buffer-state buffer)]
                        [old-size
                         (snapshot-byte-size (buffer-state-document state))]
-                       [text (completion-text controller)]
+                       [text (completion-text session controller)]
                        [published
                         (package-host-dispatch!
                           host
@@ -641,6 +661,12 @@
       (keymap-bind!
         keymap
         (list (make-key-stroke 'character (char->integer #\n) 2))
+        'minibuffer.next-history)
+      (keymap-bind!
+        keymap (list (make-key-stroke 'up #f 2))
+        'minibuffer.previous-history)
+      (keymap-bind!
+        keymap (list (make-key-stroke 'down #f 2))
         'minibuffer.next-history)
       (keymap-bind! keymap (list (control-stroke #\g)) 'minibuffer.cancel)
       (keymap-bind! keymap (list (make-key-stroke 'escape #f 0)) 'minibuffer.cancel)

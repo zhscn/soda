@@ -75,6 +75,7 @@
         (soda test host-integration)
         (soda test terminal-clipboard)
         (soda test command-loop)
+        (soda test view-presentation)
         (soda view display)
         (soda view projection)
         (soda view frame)
@@ -4959,4 +4960,5 @@
 (run-host-integration-tests!)
 (run-terminal-clipboard-tests!)
 (run-command-loop-tests!)
+(run-view-presentation-tests!)
 (host-state-close! host)
