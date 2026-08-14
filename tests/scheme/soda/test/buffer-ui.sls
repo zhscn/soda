@@ -10,14 +10,18 @@
           (soda kernel range-set)
           (soda kernel state)
           (soda kernel selection)
+          (soda kernel viewport)
           (soda kernel view-state)
           (soda host command)
           (soda host command-runtime)
           (soda host dispatch)
+          (soda host frontend)
           (soda host internal buffer)
           (soda host internal buffer-attachment)
+          (soda host internal context)
           (soda host internal mode)
           (soda host internal state)
+          (soda host internal surface)
           (soda host internal view)
           (soda host value)
           (soda packages buffer-mode)
@@ -434,11 +438,48 @@
 
   (define (run-bootstrap-buffer-ui-test!)
     (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
            [buffer (soda-application-buffer application)]
-           [actions (soda-application-buffer-item-actions application)])
+           [actions (soda-application-buffer-item-actions application)]
+           [last-scroll #f]
+           [_listener
+            (host-frontend-add-update-listener!
+              state
+              (lambda (update)
+                (when (editor-update-scroll-request update)
+                  (set! last-scroll (editor-update-scroll-request update)))))])
+      (define (current-context)
+        (let* ([surface (soda-application-surface application)]
+               [active
+                (surface-active-context surface (host-state-views state))]
+               [view
+                (view-service-ref
+                  (host-state-views state) (active-context-view-id active))]
+               [current (view-buffer view)])
+          (make-command-context
+            #f
+            (active-context-surface-id active)
+            (active-context-window-id active)
+            (view-id view) (buffer-id current)
+            (buffer-state current) (view-state view)
+            #f '() #f #f 'buffer-ui-test)))
       (unless (and (pair? (buffer-item-ranges (buffer-state buffer)))
                    (buffer-item-action-service? actions))
         (error 'buffer-ui-tests "bootstrap did not install standard Buffer UI extensions"))
+      (command-runtime-start!
+        (host-state-command-runtime state) 'buffer.list (current-context))
+      (set! last-scroll #f)
+      (command-runtime-start!
+        (host-state-command-runtime state) 'buffer.last-item (current-context))
+      (let ([active (surface-active-context
+                      (soda-application-surface application)
+                      (host-state-views state))])
+        (unless (and (scroll-request? last-scroll)
+                     (eq? (scroll-request-kind last-scroll) 'reveal-point)
+                     (= (scroll-request-view-id last-scroll)
+                        (active-context-view-id active)))
+          (error 'buffer-ui-tests
+                 "BufferItem navigation did not request point visibility")))
       (soda-application-close! application)))
 
   (define (run-buffer-ui-tests!)
