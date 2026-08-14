@@ -3,7 +3,6 @@
           file-service-format file-service-conflict file-service-recovery
           file-service-watch-service
           file-service-attach-runtime! file-service-handle-runtime-event!
-          file-service-handle-state-event! file-service-add-state-listener!
           file-service-register-mode! file-service-modified-count
           file-service-shutdown-effects file-service-rename-resource!
           file-service-delete-resource! file-conflict? file-conflict-buffer-id

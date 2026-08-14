@@ -3362,9 +3362,9 @@
           (soda-application-close! application)
           (when (file-exists? path) (delete-file path)))))
 
-    ;; External changes enter through immutable FileStateEvents.  Clean
-    ;; Buffers reload automatically; dirty Buffers retain their contents until
-    ;; an InteractionService decision is revalidated against the disk version.
+    ;; External changes enter through the command-loop FileStateEvent handoff.
+    ;; Clean Buffers reload automatically; dirty Buffers retain their contents
+    ;; until an explicit user resolution is revalidated against the disk version.
     (let* ([path (string-append "/tmp/soda-external-policy-"
                                 (number->string (get-process-id)) ".txt")]
            [saved-as (string-append path ".local")]
@@ -3375,9 +3375,11 @@
           (and (vfs-file-exists? path) (vfs-stat-path path))
           (if (eq? kind 'replaced) '(rename) '(change)) 0))
       (define (publish-external! files buffer kind)
-        (file-service-handle-state-event!
-          files (external-event files buffer kind)
-          (application-command-context application))
+        (command-runtime-start!
+          (host-state-command-runtime (soda-application-state application))
+          'file.handle-state-event
+          (application-command-context application)
+          (list (external-event files buffer kind)))
         (host-state-run! (soda-application-state application)))
       (dynamic-wind
         (lambda ()
@@ -3413,9 +3415,10 @@
               ;; The clean/dirty decision is checked again when the queued
               ;; reload effect runs, so an intervening edit cannot be lost.
               (vfs-write-file path (string->utf8 "race"))
-              (file-service-handle-state-event!
-                files (external-event files buffer 'replaced)
-                (application-command-context application))
+              (command-runtime-start!
+                runtime 'file.handle-state-event
+                (application-command-context application)
+                (list (external-event files buffer 'replaced)))
               (command-runtime-start!
                 runtime 'fundamental.end-of-buffer
                 (application-command-context application))
