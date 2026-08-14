@@ -68,6 +68,7 @@
           (soda packages minibuffer)
           (soda packages resource)
           (soda support vfs)
+          (prefix (soda ffi runtime) native:)
           (soda tui frontend)
           (soda tui terminal-input)
           (soda view decoration)
@@ -1394,7 +1395,7 @@
                   surface (host-state-views state)
                   (host-state-presentations state)))]
              [row (- (frame-height frame) 2)])
-        (unless (and (string-prefix? "**--  *scratch*   Fund"
+        (unless (and (string-prefix? "**----  *scratch*   Fund"
                                      (frame-row-string frame row))
                      (eq? (frame-cell-face (frame-cell-at frame row 0))
                           'mode-line))
@@ -1408,7 +1409,7 @@
                   surface (host-state-views state)
                   (host-state-presentations state)))]
              [row (- (frame-height frame) 2)])
-        (unless (string-prefix? "----  *scratch*"
+        (unless (string-prefix? "------  *scratch*"
                                 (frame-row-string frame row))
           (error 'fundamental-editing-tests
                  "mode line did not clear modified state at the save point")))
@@ -1422,7 +1423,7 @@
                   surface (host-state-views state)
                   (host-state-presentations state)))]
              [row (- (frame-height frame) 2)])
-        (unless (string-prefix? "**%%  *scratch*"
+        (unless (string-prefix? "**%%--  *scratch*"
                                 (frame-row-string frame row))
           (error 'fundamental-editing-tests
                  "mode line did not project read-only policy")))
@@ -3297,6 +3298,70 @@
           (when (file-exists? saved-as) (delete-file saved-as))
           (when (file-exists? scratch-save) (delete-file scratch-save)))))
 
+    ;; A native file-watch event only queues a FileStateEvent.  It cannot
+    ;; mutate the FileService or open a transient interaction until the
+    ;; command loop accepts that background work.
+    (let* ([path (string-append "/tmp/soda-file-watch-queue-"
+                                (number->string (get-process-id)) ".txt")]
+           [application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [files (soda-application-files application)]
+           [interaction (soda-application-interaction application)]
+           [native-runtime (native:make-runtime)])
+      (define (handle-native-events! events)
+        (let loop ([remaining events] [handled? #f])
+          (if (null? remaining)
+              handled?
+              (let ([result
+                     (file-service-handle-runtime-event!
+                       files (car remaining)
+                       (application-command-context application))])
+                (loop (cdr remaining)
+                      (or handled? (and result (pair? result))))))))
+      (dynamic-wind
+        (lambda ()
+          (when (file-exists? path) (delete-file path))
+          (vfs-write-file path (string->utf8 "initial")))
+        (lambda ()
+          (command-runtime-start!
+            runtime 'file.visit (application-command-context application) (list path))
+          (file-service-attach-runtime! files native-runtime)
+          (let ([buffer
+                 (buffer-service-ref
+                   (host-state-buffers state)
+                   (command-context-buffer-id (application-command-context application)))])
+            (command-runtime-start!
+              runtime 'fundamental.end-of-buffer
+              (application-command-context application))
+            (command-runtime-start!
+              runtime 'fundamental.insert-text
+              (application-command-context application) (list (string->utf8 " local")))
+            (vfs-write-file path (string->utf8 "external"))
+            (let poll ([remaining 4])
+              (let* ([events (native:runtime-poll! native-runtime)]
+                     [handled? (handle-native-events! events)])
+                (cond
+                  [handled?
+                   (unless (not (file-service-conflict files (buffer-id buffer) #f))
+                     (error 'fundamental-editing-tests
+                            "native file-watch callback mutated conflict state before command dispatch"))
+                   (host-state-run! state)
+                   (unless (and (eq? (file-conflict-status
+                                       (file-service-conflict files (buffer-id buffer)))
+                                     'pending)
+                                (not (interaction-service-current interaction)))
+                     (error 'fundamental-editing-tests
+                            "native file-watch event did not become background conflict state"))]
+                  [(zero? remaining)
+                   (error 'fundamental-editing-tests
+                          "native file-watch did not report the external write")]
+                  [else (poll (- remaining 1))])))))
+        (lambda ()
+          (native:runtime-close! native-runtime)
+          (soda-application-close! application)
+          (when (file-exists? path) (delete-file path)))))
+
     ;; External changes enter through immutable FileStateEvents.  Clean
     ;; Buffers reload automatically; dirty Buffers retain their contents until
     ;; an InteractionService decision is revalidated against the disk version.
@@ -3333,6 +3398,10 @@
                      (host-state-buffers state)
                      (command-context-buffer-id
                        (application-command-context application)))])
+              (define (begin-conflict-resolution!)
+                (command-runtime-start-interactive!
+                  runtime 'file.resolve-external-change
+                  (application-command-context application)))
               (vfs-write-file path (string->utf8 "automatic"))
               (publish-external! files buffer 'replaced)
               (unless (and (string=? (buffer-string buffer) "automatic")
@@ -3359,9 +3428,14 @@
                            (eq? (file-conflict-status
                                   (file-service-conflict files (buffer-id buffer)))
                                 'pending)
-                           (interaction-service-current interaction))
+                           (eq? (buffer-presentation-service-ref
+                                  (host-state-presentations state)
+                                  (buffer-id buffer) 'file-conflict #f)
+                                'pending)
+                           (not (interaction-service-current interaction)))
                 (error 'fundamental-editing-tests
-                       "queued automatic reload overwrote an intervening edit"))
+                       "queued automatic reload did not retain the intervening edit as background conflict state"))
+              (begin-conflict-resolution!)
               (interaction-service-submit! interaction 'reload)
               (host-state-run! state)
               (unless (string=? (buffer-string buffer) "race")
@@ -3378,24 +3452,28 @@
               (publish-external! files buffer 'replaced)
               (let ([session (interaction-service-current interaction)]
                     [conflict (file-service-conflict files (buffer-id buffer))])
-                (unless (and session
-                             (eq? (interaction-request-kind
-                                    (interaction-session-request session))
-                                  'external-file-change)
+                (unless (and (not session)
                              (eq? (file-conflict-status conflict) 'pending)
+                             (eq? (buffer-presentation-service-ref
+                                    (host-state-presentations state)
+                                    (buffer-id buffer) 'file-conflict #f)
+                                  'pending)
                              (string=? (buffer-string buffer) "race local"))
                   (error 'fundamental-editing-tests
-                         "dirty Buffer did not enter an explicit external conflict")))
+                         "dirty Buffer did not enter a durable background conflict")))
+              (begin-conflict-resolution!)
 
               ;; A decision for external-one must not load external-two.
               (vfs-write-file path (string->utf8 "external-two"))
               (interaction-service-submit! interaction 'reload)
               (host-state-run! state)
               (unless (and (string=? (buffer-string buffer) "race local")
-                           (file-service-conflict files (buffer-id buffer) #f))
+                           (file-service-conflict files (buffer-id buffer) #f)
+                           (not (interaction-service-current interaction)))
                 (error 'fundamental-editing-tests
                        "stale reload decision crossed the disk-version boundary"))
               (publish-external! files buffer 'replaced)
+              (begin-conflict-resolution!)
               (interaction-service-submit! interaction 'reload)
               (host-state-run! state)
               (unless (and (string=? (buffer-string buffer) "external-two")
@@ -3412,6 +3490,7 @@
                 (application-command-context application) (list (string->utf8 " keep")))
               (vfs-write-file path (string->utf8 "external-ignore"))
               (publish-external! files buffer 'replaced)
+              (begin-conflict-resolution!)
               (interaction-service-submit! interaction 'ignore)
               (host-state-run! state)
               (unless (and (string=? (buffer-string buffer) "external-two keep")
@@ -3423,6 +3502,7 @@
 
               (vfs-write-file path (string->utf8 "external-overwrite"))
               (publish-external! files buffer 'replaced)
+              (begin-conflict-resolution!)
               (interaction-service-submit! interaction 'overwrite)
               (host-state-run! state)
               (unless (and (string=? (utf8->string (vfs-read-file path))
@@ -3440,6 +3520,7 @@
                 (application-command-context application) (list (string->utf8 " save-as")))
               (vfs-write-file path (string->utf8 "external-save-as"))
               (publish-external! files buffer 'replaced)
+              (begin-conflict-resolution!)
               (interaction-service-submit! interaction 'save-as)
               (host-state-run! state)
               (unless (eq? (interaction-request-kind
@@ -3465,12 +3546,11 @@
                              (resource-locator
                                (file-service-resource files (buffer-id buffer)))
                              path)
-                           (eq? (interaction-request-kind
-                                  (interaction-session-request
-                                    (interaction-service-current interaction)))
-                                'external-file-change))
+                           (file-service-conflict files (buffer-id buffer) #f)
+                           (not (interaction-service-current interaction)))
                 (error 'fundamental-editing-tests
                        "stale save-as confirmation overwrote a newer destination"))
+              (begin-conflict-resolution!)
               (interaction-service-submit! interaction 'save-as)
               (host-state-run! state)
               (interaction-service-submit! interaction saved-as)

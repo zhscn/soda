@@ -25,7 +25,7 @@ prefix key、minibuffer、echo area、mode line、Buffer/View/Window 语义作�
 | file prompt default directory | 已访问 Buffer 使用其文件所在目录；其他 Buffer 使用 session 创建时的当前目录，候选和最终路径共享该基准 |
 | 修改 Buffer 在关闭和退出时的保存决策 | 在实际关闭边界请求用户决策 |
 | 覆盖已有目标文件的明确确认 | 写入前通过 minibuffer 确认 |
-| 外部修改检测 | 保存时校验 resource version |
+| 外部修改检测 | 原生 watch 只投递后台状态事件；未修改 Buffer 自动重载，已修改 Buffer 在 mode line 保留冲突标记，用户通过 `M-x file.resolve-external-change` 进入重载、覆盖、另存或忽略决策 |
 | regular file 的同目录原子写入与 mode 保留 | 写入 effect 保持文件元数据 |
 | 同目录 `path~` 备份策略 | 文件 package 策略控制 |
 | 相邻 `.soda-lock` 锁文件、冲突只读打开与 token 匹配释放 | 锁属于 file Buffer resource 生命周期 |

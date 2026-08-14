@@ -188,16 +188,19 @@
                     (file-state-event-version event)
                     (file-state-event-kind event)
                     (if automatic? 'reloading 'pending))])
-            (file-state-set-conflict!
-              (file-service-state service) buffer-id conflict)
-            (command-runtime-enqueue!
-              (package-host-command-runtime (file-service-host service))
-              (make-command-invoke-message
-                (if automatic?
-                    'file.external-auto-reload
-                    'file.resolve-external-change)
-                context (list buffer-id (file-state-event-version event))
-                (not automatic?))))))))
+            (set-file-conflict! service buffer-id conflict)
+            ;; A file-watch event is background state.  An unmodified Buffer
+            ;; may reload without interaction; a modified Buffer keeps a
+            ;; durable conflict marker until the user explicitly resolves it.
+            ;; In particular, native I/O never opens a minibuffer or takes
+            ;; focus from the current command.
+            (when automatic?
+              (command-runtime-enqueue!
+                (package-host-command-runtime (file-service-host service))
+                (make-command-invoke-message
+                  'file.external-auto-reload
+                  context (list buffer-id (file-state-event-version event))
+                  #f))))))))
 
   (define file-service-handle-runtime-event!
     (case-lambda
@@ -215,7 +218,10 @@
          (when events
            (for-each
              (lambda (state-event)
-               (file-service-handle-state-event! service state-event context))
+               (command-runtime-enqueue-background!
+                 (package-host-command-runtime (file-service-host service))
+                 (make-command-invoke-message
+                   'file.handle-state-event context (list state-event) #f)))
              events))
          events)]))
 
@@ -422,14 +428,12 @@
                   buffer-id (file-conflict-resource old) version
                   (if version 'replaced 'deleted)
                   (if automatic? 'reloading 'pending))])
-          (file-state-set-conflict! (file-service-state service) buffer-id next)
-          (command-runtime-enqueue!
-            (package-host-command-runtime (file-service-host service))
-            (make-command-invoke-message
-              (if automatic?
-                  'file.external-auto-reload
-                  'file.resolve-external-change)
-              context (list buffer-id version) (not automatic?)))))))
+          (set-file-conflict! service buffer-id next)
+          (when automatic?
+            (command-runtime-enqueue!
+              (package-host-command-runtime (file-service-host service))
+              (make-command-invoke-message
+                'file.external-auto-reload context (list buffer-id version) #f)))))))
 
   (define (automatic-reload-became-dirty? service request)
     (let ([conflict
@@ -448,11 +452,7 @@
              service (file-external-resolution-buffer-id request) #f)])
       (when conflict
         (file-conflict-status-set! conflict 'pending)
-        (command-runtime-enqueue!
-          (package-host-command-runtime (file-service-host service))
-          (make-command-invoke-message
-            'file.resolve-external-change context
-            (list (file-conflict-buffer-id conflict)
-                  (file-conflict-version conflict))
-            #t)))))
+        (package-host-publish-buffer-presentation!
+          (file-service-host service) (file-conflict-buffer-id conflict)
+          'file-conflict 'pending))))
 )

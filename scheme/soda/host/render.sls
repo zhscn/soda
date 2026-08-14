@@ -352,10 +352,15 @@
             (and presentations
                  (buffer-presentation-service-ref
                    presentations (buffer-id buffer) 'read-only #f))]
+           [file-conflict
+            (and presentations
+                 (buffer-presentation-service-ref
+                   presentations (buffer-id buffer) 'file-conflict #f))]
            [position (view-line-column view)])
       (string-append
         (if modified? "**" "--")
         (if read-only? "%%" "--")
+        (if file-conflict "!!" "--")
         "  " (buffer-name buffer)
         "   " (buffer-mode-name state)
         "   L" (number->string (car position))

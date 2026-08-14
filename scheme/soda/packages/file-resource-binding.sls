@@ -8,6 +8,7 @@
           file-service-attach-runtime!
           set-file-resource!
           file-buffer-key
+          set-file-conflict!
           clear-file-conflict!)
   (import (rnrs)
           (soda kernel resource)
@@ -102,8 +103,8 @@
         (set-file-resource!
           service buffer-id (file-binding-resource binding) #f #f
           (file-binding-format binding) #t)
-        (file-state-set-conflict!
-          (file-service-state service) buffer-id
+        (set-file-conflict!
+          service buffer-id
           (make-file-conflict
             buffer-id (file-binding-resource binding) #f 'deleted 'pending)))
       #t))
@@ -140,6 +141,24 @@
   (define (file-buffer-key resource)
     (make-buffer-key 'file (resource-locator resource)))
 
+  ;; File-state is package-owned mutable policy.  Its user-visible shadow is
+  ;; a semantic Buffer presentation attribute, so a render can show a durable
+  ;; conflict marker without querying package state or occupying the echo
+  ;; area.  State changes are made by command-loop work, never by a renderer.
+  (define (set-file-conflict! service buffer-id conflict)
+    (unless (and (file-service? service) (buffer-id? buffer-id)
+                 (file-conflict? conflict))
+      (assertion-violation 'set-file-conflict!
+                           "expected a FileService, Buffer id, and FileConflict"
+                           service buffer-id conflict))
+    (file-state-set-conflict! (file-service-state service) buffer-id conflict)
+    (package-host-publish-buffer-presentation!
+      (file-service-host service) buffer-id 'file-conflict
+      (file-conflict-status conflict))
+    conflict)
+
   (define (clear-file-conflict! service buffer-id)
-    (file-state-clear-conflict! (file-service-state service) buffer-id))
+    (file-state-clear-conflict! (file-service-state service) buffer-id)
+    (package-host-publish-buffer-presentation!
+      (file-service-host service) buffer-id 'file-conflict #f))
 )

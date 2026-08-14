@@ -255,6 +255,17 @@
                        service request (command-invocation-context invocation))
                      (raise condition)])
                   (resolve-external-file! service request))))))
+      ;; Native watchers decode immutable FileStateEvents only.  This command
+      ;; is their command-loop handoff: it applies package policy after any
+      ;; already queued user input and never opens an interaction by itself.
+      (define-command
+        runtime owner 'file.handle-state-event (context event)
+        (documentation "Apply one observed external file state event.")
+        (class 'file)
+        (visible #f)
+        (undo 'ignore)
+        (file-service-handle-state-event! service event context)
+        (command-handled))
       (define-command
         runtime owner 'file.external-auto-reload (context buffer-id version)
         (documentation "Reload an unmodified Buffer after a stable external change.")
@@ -269,7 +280,6 @@
         (context buffer-id version action . arguments)
         (documentation "Resolve a changed-on-disk conflict without applying a stale decision.")
         (class 'file)
-        (visible #f)
         (interactive
           (make-interactive-plan
             (list (make-conflict-target-reader service)
