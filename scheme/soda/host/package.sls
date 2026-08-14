@@ -773,9 +773,13 @@
       (assertion-violation 'package-host-publish-feedback-if-current!
                            "expected a PackageHost, CommandContext, and UserFeedback"
                            host context feedback))
-    (and (package-host-command-context-current? host context)
-         (package-host-publish-feedback!
-           host (command-context-surface-id context) feedback)))
+    (dispatcher-dispatch-host!
+      (host-state-dispatch (package-host-state host))
+      (make-set-surface-feedback-if-current-operation
+        (command-context-surface-id context)
+        (command-context-window-id context)
+        (command-context-view-id context)
+        feedback)))
 
   (define (package-host-publish-buffer-presentation! host buffer-id key value)
     (unless (package-host? host)

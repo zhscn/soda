@@ -17,6 +17,7 @@
           make-resize-surface-operation
           make-invalidate-surface-operation
           make-set-surface-feedback-operation
+          make-set-surface-feedback-if-current-operation
           make-set-surface-prefix-guidance-operation
           host-update?
           host-update-operation

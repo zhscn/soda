@@ -37,6 +37,7 @@
           (soda host command-message)
           (soda host input)
           (soda host condition)
+          (soda host feedback)
           (soda host dispatch-transaction)
           (soda host dispatch-core)
           (soda host dispatch-operation)
@@ -598,6 +599,40 @@
                        (command-invocation-id invocation))
     invocation)
 
+  (define (single-line-text value)
+    (list->string
+      (map (lambda (character)
+             (if (or (char=? character #\newline) (char=? character #\return))
+                 #\space
+                 character))
+           (string->list value))))
+
+  (define (command-condition-feedback condition)
+    (make-user-feedback
+      (single-line-text
+        (if (message-condition? condition)
+            (condition-message condition)
+            "Command failed"))
+      'error))
+
+  (define (publish-command-condition! service invocation condition)
+    (let ([context (command-invocation-context invocation)])
+      ;; Runtime-owned maintenance commands can use a non-routed context.
+      ;; They retain their diagnostic without inventing terminal chrome.
+      (and (exact-integer-value? (command-context-surface-id context))
+           (>= (command-context-surface-id context) 0)
+           (exact-integer-value? (command-context-window-id context))
+           (>= (command-context-window-id context) 0)
+           (exact-integer-value? (command-context-view-id context))
+           (>= (command-context-view-id context) 0)
+           (dispatcher-dispatch-host!
+             (command-runtime-dispatcher service)
+             (make-set-surface-feedback-if-current-operation
+               (command-context-surface-id context)
+               (command-context-window-id context)
+               (command-context-view-id context)
+               (command-condition-feedback condition))))))
+
   (define (capture-command-condition! service invocation condition)
     (let* ([entry
             (condition-service-capture
@@ -611,10 +646,13 @@
       (command-invocation-cancel! invocation)
       (record-terminal-invocation!
         service invocation 'error entry (make-command-loop-transition #f #f 'ignore))
-      ;; A hook failure is itself just a failed command lifecycle and must not
-      ;; recursively create a second condition.
+      ;; Error cleanup restores the command's initiating editing context before
+      ;; its transient error is considered for the echo area.  A hook failure
+      ;; is itself just a failed command lifecycle and must not recursively
+      ;; create a second condition.
       (guard (ignored [else #f])
         (run-hooks! service 'command-error invocation entry))
+      (publish-command-condition! service invocation condition)
       (retire-invocation! service invocation)))
 
   (define (advance-invocation! service invocation resume? value)

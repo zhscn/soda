@@ -17,6 +17,7 @@
           make-resize-surface-operation
           make-invalidate-surface-operation
           make-set-surface-feedback-operation
+          make-set-surface-feedback-if-current-operation
           make-set-surface-prefix-guidance-operation
           make-global-host-operation
           make-host-update
@@ -152,6 +153,20 @@
                            "invalid Surface identity or UserFeedback"
                            surface-id feedback))
     (%make-host-operation 'set-surface-feedback surface-id feedback))
+
+  ;; Feedback from a retained command context is conditional terminal chrome:
+  ;; it applies only while the same View remains the selected input target.
+  ;; The predicate travels with the operation so the dispatcher evaluates it
+  ;; at publication time rather than asking callers to race focus changes.
+  (define (make-set-surface-feedback-if-current-operation
+            surface-id window-id view-id feedback)
+    (unless (and (identity? surface-id) (identity? window-id) (identity? view-id)
+                 (user-feedback? feedback))
+      (assertion-violation 'make-set-surface-feedback-if-current-operation
+                           "invalid current-context feedback operation"
+                           surface-id window-id view-id feedback))
+    (%make-host-operation
+      'set-surface-feedback-if-current surface-id (list window-id view-id feedback)))
 
   (define (make-set-surface-prefix-guidance-operation surface-id guidance)
     (unless (and (identity? surface-id) (list? guidance)

@@ -58,6 +58,14 @@
        (and (surface-invalidate! surface) #t)]
       [(set-surface-feedback)
        (and (surface-set-feedback! surface (host-operation-value operation)) #t)]
+      [(set-surface-feedback-if-current)
+       (let* ([value (host-operation-value operation)]
+              [active (surface-active-context surface views)])
+         (and active
+              (= (active-context-window-id active) (car value))
+              (= (active-context-view-id active) (cadr value))
+              (surface-set-feedback! surface (caddr value))
+              #t))]
       [(set-surface-prefix-guidance)
        (and (surface-set-prefix-guidance!
               surface (host-operation-value operation))

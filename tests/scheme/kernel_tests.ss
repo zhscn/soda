@@ -4537,6 +4537,80 @@
         (error 'kernel-tests "current message effect did not publish feedback")))
     (lambda () (soda-application-close! application))))
 
+;; Command failures retain a ConditionService diagnostic, while their echo
+;; feedback follows the same current-View rule as delayed command results.
+(let* ([application (make-soda-application)]
+       [state (soda-application-state application)]
+       [runtime (host-state-command-runtime state)]
+       [surface (soda-application-surface application)]
+       [owner (make-owner 'command-error-feedback-test)]
+       [before (length (condition-service-entries (host-state-conditions state)))])
+  (dynamic-wind
+    (lambda () #f)
+    (lambda ()
+      (define-command
+        runtime owner 'test.command-error-feedback (context)
+        (documentation "Raise a test command condition.")
+        (visible #f)
+        (undo 'ignore)
+        (error 'test.command-error-feedback "visible command failure"))
+      (define-command
+        runtime owner 'test.interactive-command-error-feedback (context value)
+        (documentation "Raise a test command condition after minibuffer input.")
+        (visible #f)
+        (interactive
+          (make-interactive-plan
+            (list (make-interaction-string-reader
+                    'test-error "Test error input: "))))
+        (undo 'ignore)
+        (error 'test.interactive-command-error-feedback
+               "interactive command failure"))
+      (command-runtime-start!
+        runtime 'test.command-error-feedback (application-command-context application))
+      (unless (and (surface-feedback surface)
+                   (eq? (user-feedback-severity (surface-feedback surface)) 'error)
+                   (string-contains?
+                     (user-feedback-text (surface-feedback surface))
+                     "visible command failure"))
+        (error 'kernel-tests "current command failure did not reach the echo area"))
+      (dispatcher-dispatch-host!
+        (host-state-dispatch state)
+        (make-set-surface-feedback-operation (surface-id surface) #f))
+      (let* ([active (surface-active-context surface (host-state-views state))]
+             [view
+              (view-service-ref
+                (host-state-views state) (active-context-view-id active))]
+             [buffer (view-buffer view)]
+             [stale-context
+              (make-command-context
+                #f (surface-id surface) (active-context-window-id active)
+                (+ 1000 (view-id view)) (buffer-id buffer)
+                (buffer-state buffer) (view-state view)
+                #f '() #f active 'stale-command-error)])
+        (command-runtime-start! runtime 'test.command-error-feedback stale-context)
+        (unless (not (surface-feedback surface))
+          (error 'kernel-tests "stale command failure occupied the echo area")))
+      (command-runtime-start-interactive!
+        runtime 'test.interactive-command-error-feedback
+        (application-command-context application))
+      (interaction-service-submit!
+        (soda-application-interaction application) "answer")
+      (host-state-run! state)
+      (unless (and (not (interaction-service-current
+                           (soda-application-interaction application)))
+                   (surface-feedback surface)
+                   (string-contains?
+                     (user-feedback-text (surface-feedback surface))
+                     "interactive command failure"))
+        (error 'kernel-tests
+               "interactive command failure did not close its prompt before feedback"))
+      (unless (= (length (condition-service-entries (host-state-conditions state)))
+                 (+ before 3))
+        (error 'kernel-tests "command failures did not retain their diagnostics")))
+    (lambda ()
+      (owner-close! owner)
+      (soda-application-close! application))))
+
 ;; Recovery discovery is session state, not startup chrome.  An application
 ;; with a real pending artifact remains a normal *scratch* editing session
 ;; until the user explicitly invokes recovery.restore.

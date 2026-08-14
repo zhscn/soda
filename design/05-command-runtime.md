@@ -111,7 +111,8 @@ queued
 
 runtime 以 invocation id 管理存活状态。resume/cancel message 必须匹配仍 suspended 的 invocation；
 重复或过期消息被拒绝。condition 在 command boundary 捕获并交给 ConditionService，不能留下部分
-发布的 transaction。
+发布的 transaction。命令错误在 cleanup 之后仅对仍为当前输入目标的发起 View 发布单行 echo feedback；
+失焦的错误保留为 ConditionService 诊断而不打断当前交互。
 
 ## Hook
 
