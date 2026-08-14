@@ -8,6 +8,8 @@
           (soda host command-runtime)
           (soda host dispatch)
           (soda host dispatch gate)
+          (soda host input)
+          (soda host input-event)
           (soda host internal context)
           (soda host internal navigation)
           (soda host internal operation)
@@ -136,10 +138,22 @@
             (buffer-state buffer)
             (view-state view)
             #f '() #f #f 'host-integration #f)))
+      (define (dispatch-navigation-key modifiers)
+        (let* ([active (surface-active-context surface (host-state-views state))]
+               [view
+                (view-service-ref (host-state-views state)
+                                  (active-context-view-id active))])
+          (input-dispatch
+            (soda-application-resolve-input-context application active view)
+            (make-key-event
+              'character (char->integer #\,) #f #f modifiers 'press
+              (make-bytevector 0)))))
       (dynamic-wind
         (lambda () #f)
         (lambda ()
-          (let* ([location
+          (let* ([back-key (dispatch-navigation-key 2)]
+                 [forward-key (dispatch-navigation-key 6)]
+                 [location
                   (make-location
                     (make-resource 'buffer (number->string (buffer-id target)))
                     (make-byte-position 0) (make-byte-position 0)
@@ -149,7 +163,11 @@
                   (package-host-follow-location! host owner (current-context) location)]
                  [history (host-state-navigation state)]
                  [runtime (host-state-command-runtime state)])
-            (unless (and followed
+            (unless (and (eq? (input-disposition-kind back-key) 'command)
+                         (eq? (input-disposition-value back-key) 'navigation.back)
+                         (eq? (input-disposition-kind forward-key) 'command)
+                         (eq? (input-disposition-value forward-key) 'navigation.forward)
+                         followed
                          (= (command-context-buffer-id followed) (buffer-id target))
                          (= (navigation-history-cursor history) 1))
               (error 'host-integration-tests

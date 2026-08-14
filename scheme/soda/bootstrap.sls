@@ -363,7 +363,7 @@
                     (list (make-key-stroke 'character (char->integer #\,) 2))
                     'navigation.back)
       (keymap-bind! keymap
-                    (list (make-key-stroke 'character (char->integer #\.) 2))
+                    (list (make-key-stroke 'character (char->integer #\,) 6))
                     'navigation.forward)
       (keymap-bind! keymap
                     (list (make-key-stroke 'character (char->integer #\h) 4)
