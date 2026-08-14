@@ -461,10 +461,7 @@
           (view-state-input-state state) "Input does not match an available choice")
         '() '() #f)))
 
-  (define minibuffer-service-submit!
-    (case-lambda
-      [(service) (minibuffer-service-submit! service #f)]
-      [(service context)
+  (define (minibuffer-service-submit-value! service context use-candidate?)
        (let ([session (minibuffer-service-current service)])
          (and session
            (let* ([buffer
@@ -473,7 +470,9 @@
                      (minibuffer-session-buffer-id session) #f)]
                   [raw (and buffer (snapshot-string (buffer-state-document (buffer-state buffer))))]
                   [controller (minibuffer-session-completion session)]
-                  [candidate (and controller (completion-controller-selected controller))]
+                  [candidate
+                   (and use-candidate? controller
+                        (completion-controller-selected controller))]
                   [snapshot (minibuffer-session-snapshot service session)]
                   [request (interaction-session-request (minibuffer-session-interaction session))]
                   [policy (interaction-request-selection-policy
@@ -499,7 +498,13 @@
                    (minibuffer-session-submitted-value-set! session value)
                    (interaction-service-submit!
                      (minibuffer-service-interactions service) value))
-                 (and context (invalid-input-feedback context))))))]))
+                 (and context (invalid-input-feedback context)))))))
+
+  (define minibuffer-service-submit!
+    (case-lambda
+      [(service) (minibuffer-service-submit! service #f)]
+      [(service context)
+       (minibuffer-service-submit-value! service context #t)]))
   (define (minibuffer-service-refresh-completion! service)
     (let ([session (minibuffer-service-current service)])
       (and session
@@ -635,10 +640,17 @@
       (and (pair? candidates)
            (let* ([current (completion-controller-selected-index controller)]
                   [last (- (length candidates) 1)]
+                  [policy (completion-controller-selection-policy controller)]
                   [target
                    (cond
-                     [(not current) (if (positive? delta) 0 last)]
-                     [else (max 0 (min last (+ current delta)))])])
+                     [(not current)
+                      (cond
+                        [(positive? delta) 0]
+                        [(eq? policy 'free) -1]
+                        [else last])]
+                     [else
+                      (max (if (eq? policy 'free) -1 0)
+                           (min last (+ current delta)))])])
              (minibuffer-service-select-completion! service target)))))
   (define (minibuffer-service-cancel! service)
     (and (minibuffer-service-current service)
@@ -649,7 +661,17 @@
     (let ([keymap (make-keymap 'minibuffer)])
       (keymap-bind! keymap (list (make-key-stroke 'enter #f 0)) 'minibuffer.accept)
       (keymap-bind! keymap (list (control-stroke #\j)) 'minibuffer.accept)
+      (keymap-bind!
+        keymap (list (make-key-stroke 'enter #f 2))
+        'minibuffer.accept-input)
+      (keymap-bind!
+        keymap
+        (list (make-key-stroke 'character (char->integer #\j) 2))
+        'minibuffer.accept-input)
       (keymap-bind! keymap (list (make-key-stroke 'tab #f 0)) 'minibuffer.complete)
+      (keymap-bind!
+        keymap (list (make-key-stroke 'tab #f 1))
+        'minibuffer.previous-completion)
       (keymap-bind! keymap (list (make-key-stroke 'down #f 0)) 'minibuffer.next-completion)
       (keymap-bind! keymap (list (control-stroke #\n)) 'minibuffer.next-completion)
       (keymap-bind! keymap (list (make-key-stroke 'up #f 0)) 'minibuffer.previous-completion)
@@ -703,6 +725,13 @@
         (class 'minibuffer)
         (undo 'ignore)
         (minibuffer-service-complete! service context))
+      (define-command
+        (package-host-command-runtime host) owner 'minibuffer.accept-input (context)
+        (documentation "Accept the minibuffer input without using the selected completion.")
+        (class 'minibuffer)
+        (undo 'ignore)
+        (or (minibuffer-service-submit-value! service context #f)
+            (command-handled)))
       (define-command
         (package-host-command-runtime host) owner 'minibuffer.next-completion (context)
         (documentation "Select the next minibuffer completion candidate.")

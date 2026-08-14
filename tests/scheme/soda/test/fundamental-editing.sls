@@ -1540,6 +1540,62 @@
           (error 'fundamental-editing-tests
                  "completion cancellation did not restore its originating preview snapshot"
                  completion-events preview-snapshot restored-snapshot)))
+      (let* ([raw-value #f]
+             [source
+              (make-completion-source
+                (lambda (snapshot)
+                  (list
+                    (make-completion-candidate
+                      'candidate "candidate" "candidate" #f #f #f)))
+                #f #f #f)]
+             [reader
+              (make-interactive-reader
+                'read-free-value
+                (lambda (context arguments)
+                  (make-interactive-suspend
+                    (make-interaction-request
+                      'string "Free value: " "raw" source 'free)
+                    (lambda (value) (make-interactive-ready (list value))))))]
+             [_command
+              (command-runtime-register-command!
+                runtime
+                (make-command-definition
+                  'interaction.free-test
+                  (lambda (context value)
+                    (set! raw-value value)
+                    (command-handled))
+                  owner "Free completion interaction test" 'test
+                  (make-interactive-plan (list reader))))])
+        (command-runtime-start-interactive!
+          runtime 'interaction.free-test (application-command-context application))
+        (let ([controller (minibuffer-service-refresh-completion! minibuffer)])
+          (minibuffer-service-select-completion! minibuffer 0)
+          (command-runtime-start!
+            runtime 'minibuffer.accept-input
+            (application-command-context application))
+          (host-state-run! state)
+          (unless (and (string=? raw-value "raw")
+                       (not (minibuffer-service-current minibuffer)))
+            (error 'fundamental-editing-tests
+                   "explicit raw-input acceptance submitted the selected candidate")))
+        (command-runtime-start-interactive!
+          runtime 'interaction.free-test (application-command-context application))
+        (let ([controller (minibuffer-service-refresh-completion! minibuffer)])
+          (minibuffer-service-select-completion! minibuffer 0)
+          (command-runtime-start!
+            runtime 'minibuffer.previous-completion
+            (application-command-context application))
+          (unless (not (completion-controller-selected-index controller))
+            (error 'fundamental-editing-tests
+                   "free completion could not navigate back to raw input"))
+          (command-runtime-start!
+            runtime 'minibuffer.next-completion
+            (application-command-context application))
+          (unless (equal? (completion-controller-selected-index controller) 0)
+            (error 'fundamental-editing-tests
+                   "free completion did not navigate from raw input to its first candidate")))
+        (minibuffer-service-cancel! minibuffer)
+        (host-state-run! state))
       (let ([cancelled
              (command-runtime-start-interactive!
                runtime 'interaction.package-test (application-command-context application))])
