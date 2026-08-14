@@ -246,19 +246,18 @@
            [keymap (make-keymap 'buffer-list)]
            [result-keymap (make-keymap 'buffer-list-result)]
            [authority (make-edit-authority owner 'buffer-list-refresh)]
+           [profile
+            (make-generated-buffer-profile
+              #t authority #t
+              (list (make-input-layer 'buffer result-keymap #f 'ignore)
+                    (buffer-item-input-layer actions)))]
            [mode
             (make-mode-spec
               'buffer-list-mode 'major "Buffer List" #f
-              (append
-                (generated-projection-extension)
-                (list
-                  (make-buffer-input-layer-extension
-                    (list (make-input-layer 'buffer result-keymap #f 'ignore)
-                          (buffer-item-input-layer actions)
-                          (generated-buffer-input-layer)))
-                  (make-buffer-edit-policy-extension
-                    (make-buffer-edit-policy 'reject #f authority))))
-              '(buffer-list generated-buffer buffer-item) "Buffers")]
+              (generated-buffer-profile-extensions profile)
+              (append '(buffer-list)
+                      (generated-buffer-profile-command-categories profile))
+              "Buffers")]
            [service
             (%make-buffer-list-service
               host owner history actions keymap result-keymap authority mode

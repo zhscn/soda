@@ -130,6 +130,15 @@ Buffer 关闭时 catalog 删除映射；name 冲突只影响显示名生成。
 BufferKey 不等同于 Project。文件、目录和 Scheme environment 可以在没有 Project 的情况
 下拥有稳定资源 identity。
 
+## Generated Buffer profile
+
+只读结果界面通过 `GeneratedBufferProfile` 组合为普通 Buffer mode。profile 统一提供
+只读 edit policy、上下移动、分页、`q` 返回前一个 View，以及 `generated-buffer` command
+capability。producer 可以选择 projection state、附加自己的 refresh layer，并在发布稳定
+item range 与 action registry 时启用 `buffer-item` capability。Help、目录、Buffer List、
+拼写结果和 Process 输出都使用这份契约；异步 producer 的 edit authority 只允许其自身发布
+更新。
+
 ## Buffer 局部状态
 
 Soda 不提供任意可变的 buffer-local variable alist。局部能力分为三种：

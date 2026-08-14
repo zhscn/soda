@@ -368,18 +368,18 @@
     (let* ([runtime (package-host-command-runtime host)]
            [keymap (make-keymap 'spell)]
            [result-keymap (make-keymap 'spell-result)]
+           [profile
+            (make-generated-buffer-profile
+              #f #f #t
+              (list (make-input-layer 'buffer result-keymap #f 'ignore)
+                    (buffer-item-input-layer actions)))]
            [result-mode
             (make-mode-spec
               'spell-result-mode 'major "Spell Results" #f
-              (list
-                (buffer-item-field-extension)
-                (make-buffer-input-layer-extension
-                  (list (make-input-layer 'buffer result-keymap #f 'ignore)
-                        (buffer-item-input-layer actions)
-                        (generated-buffer-input-layer)))
-                (make-buffer-edit-policy-extension
-                  (make-buffer-edit-policy 'reject)))
-              '(spell generated-buffer buffer-item) "Spell")]
+              (generated-buffer-profile-extensions profile)
+              (append '(spell)
+                      (generated-buffer-profile-command-categories profile))
+              "Spell")]
            [service
             (%make-spell-service
               host owner processes keymap result-keymap result-mode)])

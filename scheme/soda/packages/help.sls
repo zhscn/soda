@@ -106,18 +106,17 @@
                            "expected a PackageHost, Owner, and application keymaps"))
     (let* ([keymap (make-keymap 'help)]
            [authority (make-edit-authority owner 'help-refresh)]
+           [profile
+            (make-generated-buffer-profile
+              #t authority #f
+              (list (make-input-layer 'buffer keymap #f 'ignore)))]
            [mode
             (make-mode-spec
               'help-mode 'major "Help" #f
-              (append
-                (generated-projection-extension)
-                (list
-                  (make-buffer-input-layer-extension
-                  (list (make-input-layer 'buffer keymap #f 'ignore)
-                          (generated-buffer-input-layer)))
-                  (make-buffer-edit-policy-extension
-                    (make-buffer-edit-policy 'reject #f authority))))
-              '(help generated-buffer) "Help")]
+              (generated-buffer-profile-extensions profile)
+              (append '(help)
+                      (generated-buffer-profile-command-categories profile))
+              "Help")]
            [service
             (make-help-service
               host owner keymap mode fallback-keymaps authority 0)])

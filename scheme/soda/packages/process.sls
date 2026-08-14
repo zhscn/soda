@@ -221,15 +221,14 @@
     (let* ([runtime (package-host-command-runtime host)]
            [keymap (make-keymap 'process)]
            [authority (make-edit-authority owner 'process-output)]
+           [profile (make-generated-buffer-profile #f authority #f '())]
            [mode
             (make-mode-spec
               'process-mode 'major "Process" #f
-              (list
-                (make-buffer-input-layer-extension
-                  (list (generated-buffer-input-layer)))
-                (make-buffer-edit-policy-extension
-                  (make-buffer-edit-policy 'reject #f authority)))
-              '(process generated-buffer) "Process")]
+              (generated-buffer-profile-extensions profile)
+              (append '(process)
+                      (generated-buffer-profile-command-categories profile))
+              "Process")]
            [service
             (%make-process-service
               host owner keymap authority mode (make-eqv-hashtable) #f)])

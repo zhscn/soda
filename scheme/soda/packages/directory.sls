@@ -351,19 +351,18 @@
            [keymap (make-keymap 'directory)]
            [result-keymap (make-keymap 'directory-result)]
            [authority (make-edit-authority owner 'directory-refresh)]
+           [profile
+            (make-generated-buffer-profile
+              #t authority #t
+              (list (make-input-layer 'buffer result-keymap #f 'ignore)
+                    (buffer-item-input-layer actions)))]
            [mode
             (make-mode-spec
               'directory-mode 'major "Directory" #f
-              (append
-                (generated-projection-extension)
-                (list
-                  (make-buffer-input-layer-extension
-                    (list (make-input-layer 'buffer result-keymap #f 'ignore)
-                          (buffer-item-input-layer actions)
-                          (generated-buffer-input-layer)))
-                  (make-buffer-edit-policy-extension
-                    (make-buffer-edit-policy 'reject #f authority))))
-              '(directory generated-buffer buffer-item) "Directory")]
+              (generated-buffer-profile-extensions profile)
+              (append '(directory)
+                      (generated-buffer-profile-command-categories profile))
+              "Directory")]
            [service
             (%make-directory-service
               host owner files actions keymap result-keymap authority mode
