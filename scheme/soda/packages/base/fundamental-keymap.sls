@@ -21,7 +21,7 @@
         (cons (list (control #\e)) 'fundamental.end-of-line)
         (cons (list (control #\p)) 'fundamental.previous-line)
         (cons (list (control #\n)) 'fundamental.next-line)
-        (cons (list (control #\j)) 'fundamental.fill-paragraph)
+        (cons (list (control #\j)) 'fundamental.newline)
         (cons (list (control #\t)) 'fundamental.transpose-characters)
         (cons (list (control #\l)) 'fundamental.recenter)
         (cons (list (control #\v)) 'fundamental.scroll-down)

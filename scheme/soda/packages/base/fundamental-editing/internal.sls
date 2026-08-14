@@ -269,9 +269,9 @@
         "Kill the active region or text through the next logical line boundary." 'kill
         (kill-line context))
       (install-command!
-        runtime owner 'fundamental.cut-text (context)
-        "Cut the active region, or the current logical line when no region is active." 'kill
-        (cut-text context))
+        runtime owner 'fundamental.kill-whole-line (context)
+        "Kill the active region, or the complete current logical line." 'kill
+        (kill-whole-line context))
       (install-command!
         runtime owner 'fundamental.yank (context)
         "Insert the newest kill-ring entry at every selection." 'yank

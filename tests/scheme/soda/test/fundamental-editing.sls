@@ -198,7 +198,7 @@
             (input-dispatch
               context (make-key-event 'character (char->integer #\k) #f #f 4 'press
                                       (make-bytevector 0)))]
-           [justify
+           [control-j
             (input-dispatch
               context (make-key-event 'character (char->integer #\j) #f #f 4 'press
                                       (make-bytevector 0)))]
@@ -230,7 +230,7 @@
                         'fundamental.delete-backward)
                    (eq? (input-disposition-value yank) 'fundamental.yank)
                    (eq? (input-disposition-value kill-line) 'fundamental.kill-line)
-                   (eq? (input-disposition-value justify) 'fundamental.fill-paragraph)
+                   (eq? (input-disposition-value control-j) 'fundamental.newline)
                    (eq? (input-disposition-value set-mark) 'fundamental.set-mark)
                    (eq? (command-invocation-phase redraw) 'completed)
                    (= (surface-generation surface) (+ before-surface-generation 1))
@@ -868,23 +868,23 @@
                               (list (string->utf8 "first\nsecond\nthird")))
       (command-runtime-start! runtime 'fundamental.goto-line
                               (application-command-context application) (list 2 3))
-      (command-runtime-start! runtime 'fundamental.cut-text
+      (command-runtime-start! runtime 'fundamental.kill-whole-line
                               (application-command-context application))
       (unless (and (string=? (buffer-string buffer) "first\nthird")
                    (= (selection-range-head
                         (selection-primary-range (view-state-selection (view-state view))))
                       6))
         (error 'fundamental-editing-tests
-               "cut-text did not cut the complete current logical line"))
+               "kill-whole-line did not kill the complete current logical line"))
       (command-runtime-start! runtime 'fundamental.set-mark
                               (application-command-context application))
       (command-runtime-start! runtime 'fundamental.forward-char
                               (application-command-context application))
-      (command-runtime-start! runtime 'fundamental.cut-text
+      (command-runtime-start! runtime 'fundamental.kill-whole-line
                               (application-command-context application))
       (unless (string=? (buffer-string buffer) "first\nhird")
         (error 'fundamental-editing-tests
-               "cut-text did not preserve active-region semantics"))
+               "kill-whole-line did not preserve active-region semantics"))
       (soda-application-close! application))
 
     (let* ([application (make-soda-application)]
@@ -3285,7 +3285,7 @@
           (when (file-exists? path) (delete-file path))
           (when (file-exists? backup) (delete-file backup)))))
 
-    ;; Write Out and Save As preserve an explicit overwrite boundary.  A
+    ;; Saving an unvisited Buffer and Save As preserve an explicit overwrite boundary. A
     ;; declined confirmation changes neither the resource nor the Buffer's
     ;; file association.
     (let* ([path (string-append "/tmp/soda-overwrite-"

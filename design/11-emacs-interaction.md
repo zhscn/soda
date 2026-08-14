@@ -17,6 +17,7 @@ prefix key、minibuffer、echo area、mode line、Buffer/View/Window 语义作�
 | 能力 | 交互合同 |
 |---|---|
 | 启动时打开多个文件与 `+LINE[,COLUMN]` 定位 | 每个文件使用可重用 Buffer，并在目标 View 中定位 |
+| 不带文件启动 | 进入唯一的 `*scratch*` Buffer；启动不要求回应恢复、保存或帮助界面 |
 | 访问、插入、保存、另存、重载与关闭 file Buffer | 文件生命周期通过 command 与 interaction 组合 |
 | 文件名 completion、目录浏览与 Buffer 列表 | 使用普通 Buffer/View 和 minibuffer |
 | file prompt default directory | 已访问 Buffer 使用其文件所在目录；其他 Buffer 使用 session 创建时的当前目录，候选和最终路径共享该基准 |
@@ -26,6 +27,7 @@ prefix key、minibuffer、echo area、mode line、Buffer/View/Window 语义作�
 | regular file 的同目录原子写入与 mode 保留 | 写入 effect 保持文件元数据 |
 | 同目录 `path~` 备份策略 | 文件 package 策略控制 |
 | 相邻 `.soda-lock` 锁文件、冲突只读打开与 token 匹配释放 | 锁属于 file Buffer resource 生命周期 |
+| 未清理 recovery artifact | 启动时被被动发现；用户通过 `M-x recovery.restore` 选择恢复、丢弃或稍后处理 |
 
 ### 文本编辑
 
@@ -33,6 +35,8 @@ prefix key、minibuffer、echo area、mode line、Buffer/View/Window 语义作�
 |---|---|
 | committed text、paste、tab、换行、删除与多 selection 替换 | 输入转换为 Document transaction |
 | region、mark、copy、kill word/line 与 yank | mark 与 point 形成 region，kill ring 行为由 command 组合 |
+| `C-j` | 与 `RET` 一样插入换行；paragraph fill 保持为显式 command |
+| `kill-whole-line` | 在无激活 region 时杀掉当前完整逻辑行；有 region 时杀掉 region |
 | undo/redo 与 saved revision | History 记录编辑事务，保存点属于 Buffer |
 | word、logical line、Buffer 边界与匹配分隔符移动 | motion command 仅更新 View-local selection |
 | 行缩进/反缩进、自动缩进与 paragraph fill | 编辑策略由 Buffer configuration 和 mode 提供 |

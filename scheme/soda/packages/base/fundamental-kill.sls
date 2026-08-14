@@ -6,7 +6,7 @@
           kill-region
           kill-word
           kill-line
-          cut-text
+          kill-whole-line
           yank)
   (import (rnrs)
           (soda kernel change)
@@ -127,9 +127,8 @@
                 (kill-range context range point to)))))))
 
   ;; The line-oriented variant removes the complete logical line when there
-  ;; is no active region.  It remains a separate reusable primitive from
-  ;; kill-to-end-of-line.
-  (define (cut-text context)
+  ;; is no active region. It remains separate from kill-to-end-of-line.
+  (define (kill-whole-line context)
     (let ([range (selection-primary-range (context-selection context))])
       (if (not (selection-range-empty? range))
           (kill-region context)
