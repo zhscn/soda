@@ -88,19 +88,34 @@
       (symbol->string
         (command-definition-name (command-access-definition right)))))
 
+  ;; An unbound user command is present in the projection only when the
+  ;; current InputContext can actually begin an extended-command interaction.
+  ;; Temporary interfaces such as the minibuffer intentionally omit M-x, so
+  ;; presenting their unrelated global commands as "M-x only" would invent a
+  ;; path the user cannot take.
+  (define (extended-command-reachable? runtime context keymaps)
+    (and (command-runtime-command-available?
+           runtime 'command.execute-extended context)
+         (pair? (keymap-where-is keymaps 'command.execute-extended))))
+
   (define (command-context-command-accesses runtime context fallback-layers)
     (unless (command-runtime? runtime)
       (assertion-violation 'command-context-command-accesses
                            "expected a CommandRuntime" runtime))
-    (let ([keymaps (command-context-keymaps context fallback-layers)])
+    (let* ([keymaps (command-context-keymaps context fallback-layers)]
+           [extended? (extended-command-reachable? runtime context keymaps)])
       (list-sort
         access<?
-        (map
-          (lambda (definition)
-            (%make-command-access
-              definition
-              (keymap-where-is keymaps (command-definition-name definition))))
-          (command-runtime-available-user-command-definitions runtime context)))))
+        (filter
+          command-access?
+          (map
+            (lambda (definition)
+              (let ([keys
+                     (keymap-where-is
+                       keymaps (command-definition-name definition))])
+                (and (or (pair? keys) extended?)
+                     (%make-command-access definition keys))))
+            (command-runtime-available-user-command-definitions runtime context))))))
 
   (define (command-context-command-access runtime context fallback-layers name)
     (unless (symbol? name)

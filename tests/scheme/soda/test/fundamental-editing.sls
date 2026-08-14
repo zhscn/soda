@@ -2428,6 +2428,18 @@
                  cancelled-order)))
       (command-runtime-start-interactive!
         runtime 'command.execute-extended (application-command-context application))
+      (let* ([minibuffer-context (application-command-context application)]
+             [quit-access
+              (command-context-command-access
+                runtime minibuffer-context '() 'keyboard.quit)])
+        (unless (and (not (command-context-command-access
+                            runtime minibuffer-context '() 'buffer.bury))
+                     quit-access
+                     (member "C-g"
+                             (map key-sequence-name
+                                  (command-access-key-sequences quit-access))))
+          (error 'fundamental-editing-tests
+                 "minibuffer command projection invented an unavailable M-x path")))
       (let* ([request
               (interaction-session-request (interaction-service-current interaction))]
              [controller (minibuffer-service-refresh-completion! minibuffer)])
