@@ -2398,6 +2398,20 @@
                 "available through M-x")
         (error 'fundamental-editing-tests
                "where-is did not explain M-x-only command access"))
+      ;; The completion list and manual minibuffer submission share the same
+      ;; user-command projection.  A hidden runtime command must not become
+      ;; executable merely because its name was typed instead of selected.
+      (command-runtime-start-interactive!
+        runtime 'command.execute-extended (application-command-context application))
+      (command-runtime-start!
+        runtime 'fundamental.insert-text (application-command-context application)
+        (list (string->utf8 "recovery.flush")))
+      (unless (and (not (minibuffer-service-submit! minibuffer))
+                   (minibuffer-service-current minibuffer))
+        (error 'fundamental-editing-tests
+               "M-x accepted a runtime-only command typed into the minibuffer"))
+      (minibuffer-service-cancel! minibuffer)
+      (host-state-run! state)
       (owner-close! owner)
       (soda-application-close! application))
 

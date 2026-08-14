@@ -1,9 +1,17 @@
 (library (soda packages command-presentation)
-  (export command-context-keymaps key-sequence-name join-strings)
+  (export command-context-keymaps
+          command-access?
+          command-access-definition
+          command-access-key-sequences
+          command-context-command-accesses
+          command-context-command-access
+          key-sequence-name
+          join-strings)
   (import (rnrs)
           (soda kernel extension)
           (soda kernel state)
           (soda host command)
+          (soda host command-runtime)
           (soda host input)
           (soda host input-event)
           (soda packages buffer-mode))
@@ -61,4 +69,43 @@
                      buffer-input-layers-facet 'buffer)
                    '())
                fallback-layers)))))
+
+  ;; A CommandAccess is the canonical user-facing projection for one command
+  ;; in one context.  An empty key sequence list means it is available only
+  ;; through M-x.  Command UI surfaces share this projection instead of
+  ;; independently filtering the registry or reinterpreting Keymaps.
+  (define-record-type
+    (command-access %make-command-access command-access?)
+    (fields (immutable definition command-access-definition)
+            (immutable key-sequences command-access-key-sequences)))
+
+  (define (access<? left right)
+    (string<?
+      (symbol->string
+        (command-definition-name (command-access-definition left)))
+      (symbol->string
+        (command-definition-name (command-access-definition right)))))
+
+  (define (command-context-command-accesses runtime context fallback-layers)
+    (unless (command-runtime? runtime)
+      (assertion-violation 'command-context-command-accesses
+                           "expected a CommandRuntime" runtime))
+    (let ([keymaps (command-context-keymaps context fallback-layers)])
+      (list-sort
+        access<?
+        (map
+          (lambda (definition)
+            (%make-command-access
+              definition
+              (keymap-where-is keymaps (command-definition-name definition))))
+          (command-runtime-available-user-command-definitions runtime context)))))
+
+  (define (command-context-command-access runtime context fallback-layers name)
+    (unless (symbol? name)
+      (assertion-violation 'command-context-command-access
+                           "expected a command name" name))
+    (find
+      (lambda (access)
+        (eq? (command-definition-name (command-access-definition access)) name))
+      (command-context-command-accesses runtime context fallback-layers)))
 )

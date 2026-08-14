@@ -22,37 +22,40 @@
                            (substring value index (+ index (string-length needle))))
                  (loop (+ index 1)))))))
 
-  (define (command-source runtime context)
+  (define (command-source runtime context fallback-layers)
     (make-completion-source
       (lambda (snapshot)
         (let ([query (prompt-snapshot-input snapshot)])
           (map
-            (lambda (definition)
-              (let ([name (symbol->string (command-definition-name definition))])
+            (lambda (access)
+              (let* ([definition (command-access-definition access)]
+                     [name (symbol->string (command-definition-name definition))])
                 (make-completion-candidate
                   (command-definition-name definition) name name
                   (command-definition-documentation definition)
                   (symbol->string (command-definition-scope definition)) definition)))
             (filter
-              (lambda (definition)
+              (lambda (access)
                 (string-contains?
-                  (symbol->string (command-definition-name definition)) query))
-              (command-runtime-available-user-command-definitions runtime context)))))
+                  (symbol->string
+                    (command-definition-name (command-access-definition access)))
+                  query))
+              (command-context-command-accesses runtime context fallback-layers)))))
       #f #f #f
       (lambda (input snapshot)
-        (let ([name (string->symbol input)])
-          (command-runtime-command-available? runtime name context)))))
+        (command-context-command-access
+          runtime context fallback-layers (string->symbol input)))))
 
-  (define (make-command-reader runtime name prompt)
+  (define (make-command-reader runtime name prompt fallback-layers)
     (make-interactive-reader
       name
       (lambda (context arguments)
         (make-interactive-suspend
           (make-interaction-request
-            'command prompt "" (command-source runtime context) 'must-match
+            'command prompt "" (command-source runtime context fallback-layers) 'must-match
             (lambda (input snapshot)
-              (command-runtime-command-available?
-                runtime (string->symbol input) context))
+              (command-context-command-access
+                runtime context fallback-layers (string->symbol input)))
             'extended-command)
           (lambda (value)
             (make-interactive-ready (list (string->symbol value))))))))
@@ -76,9 +79,12 @@
                  (list? fallback-layers) (for-all input-layer? fallback-layers))
       (assertion-violation 'make-command-ui!
                            "expected a runtime, owner, and application InputLayers"))
-    (let ([execute-reader (make-command-reader runtime 'extended-command "M-x ")]
-          [describe-reader (make-command-reader runtime 'describe-command "Describe command: ")]
-          [where-reader (make-command-reader runtime 'where-is "Where is command: ")])
+    (let ([execute-reader
+           (make-command-reader runtime 'extended-command "M-x " fallback-layers)]
+          [describe-reader
+           (make-command-reader runtime 'describe-command "Describe command: " fallback-layers)]
+          [where-reader
+           (make-command-reader runtime 'where-is "Where is command: " fallback-layers)])
       (define-command
         runtime owner 'command.execute-extended (context name)
         (documentation "Read and enqueue an available command for interactive execution.")
@@ -102,19 +108,23 @@
         (class 'command)
         (interactive (make-interactive-plan (list where-reader)))
         (undo 'ignore)
-        (let ([sequences
-               (keymap-where-is
-                 (command-context-keymaps context fallback-layers) name)])
-          (make-command-effect
-            'message.show
-            (make-message-request
-              context
-              (if (null? sequences)
-                  (string-append
-                    (symbol->string name)
-                    " is available through M-x; it has no direct key binding")
-                  (string-append
-                    (symbol->string name) " is on "
-                    (join-strings (map key-sequence-name sequences) ", ")))))))
+        (let ([access
+               (command-context-command-access
+                 runtime context fallback-layers name)])
+          (unless access
+            (assertion-violation 'command.where-is
+                                 "command is not available to the user" name))
+          (let ([sequences (command-access-key-sequences access)])
+            (make-command-effect
+              'message.show
+              (make-message-request
+                context
+                (if (null? sequences)
+                    (string-append
+                      (symbol->string name)
+                      " is available through M-x; it has no direct key binding")
+                    (string-append
+                      (symbol->string name) " is on "
+                      (join-strings (map key-sequence-name sequences) ", "))))))))
       #t))
 )

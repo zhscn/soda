@@ -20,27 +20,21 @@
           (soda packages generated-buffer)
           (soda packages buffer-item))
 
-  (define (definition<? left right)
-    (string<? (symbol->string (command-definition-name left))
-              (symbol->string (command-definition-name right))))
-
   (define (help-text service context)
     (let* ([runtime (package-host-command-runtime (help-service-host service))]
-           [keymaps
-            (command-context-keymaps
-              context (help-service-fallback-layers service))]
-           [definitions
-            (list-sort
-              definition<?
-              (command-runtime-available-user-command-definitions runtime context))])
+           [accesses
+            (command-context-command-accesses
+              runtime context (help-service-fallback-layers service))])
       (string-append
         "Soda Help\n\n"
         "Commands available in the current context:\n\n"
         (apply string-append
           (map
-            (lambda (definition)
-              (let* ([name (command-definition-name definition)]
-                     [keys (map key-sequence-name (keymap-where-is keymaps name))]
+            (lambda (command-access)
+              (let* ([definition (command-access-definition command-access)]
+                     [name (command-definition-name definition)]
+                     [keys (map key-sequence-name
+                                (command-access-key-sequences command-access))]
                      [access
                       (if (null? keys)
                           (string-append "M-x " (symbol->string name))
@@ -50,7 +44,7 @@
                   (or (command-definition-documentation definition)
                       (symbol->string name))
                   "  [" (symbol->string name) "]\n\n")))
-            definitions)))))
+            accesses)))))
 
   (define-record-type help-service
     (fields host owner keymap mode fallback-layers authority
