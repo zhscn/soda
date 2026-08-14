@@ -103,7 +103,7 @@
                         (and (mode-spec? parent) (eq? kind (mode-spec-kind parent))))
                     (list? extensions) (list? categories)
                     (for-all symbol? categories)
-                    (or (not modeline) (procedure? modeline) (string? modeline))
+                    (or (not modeline) (string? modeline))
                     (optional-procedure? activate) (optional-procedure? deactivate)
                     (or (not comment-syntax) (comment-syntax? comment-syntax)))
          (assertion-violation 'make-mode-spec "invalid mode specification"

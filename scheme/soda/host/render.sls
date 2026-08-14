@@ -231,11 +231,25 @@
            (list (+ (car rectangle) (cadddr rectangle) -1)
                  (cadr rectangle) (caddr rectangle) 1))))
 
+  (define (mode-line-name mode)
+    (or (mode-spec-modeline-contribution mode)
+        (mode-spec-display-name mode)))
+
   (define (buffer-mode-name state)
-    (let ([mode
-           (configuration-facet
-             (buffer-state-configuration state) buffer-mode-facet 'buffer)])
-      (if mode (mode-spec-display-name mode) "Fundamental")))
+    (let* ([configuration (buffer-state-configuration state)]
+           [major
+            (configuration-facet configuration buffer-mode-facet 'buffer)]
+           [minor
+            (configuration-facet
+              configuration buffer-minor-modes-facet 'buffer)])
+      (let loop ([modes (if major (cons major minor) minor)] [result ""])
+        (if (null? modes)
+            (if (string=? result "") "Fundamental" result)
+            (loop
+              (cdr modes)
+              (string-append
+                result (if (string=? result "") "" " ")
+                (mode-line-name (car modes))))))))
 
   (define (view-line-column view)
     (let ([text

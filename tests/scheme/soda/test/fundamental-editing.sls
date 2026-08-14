@@ -930,7 +930,7 @@
                   surface (host-state-views state)
                   (host-state-presentations state)))]
              [row (- (frame-height frame) 2)])
-        (unless (and (string-prefix? "**--  *scratch*   Fundamental"
+        (unless (and (string-prefix? "**--  *scratch*   Fund"
                                      (frame-row-string frame row))
                      (eq? (frame-cell-face (frame-cell-at frame row 0))
                           'mode-line))
