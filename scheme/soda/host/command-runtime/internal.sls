@@ -311,9 +311,27 @@
            (%make-runtime-advice
              name owner where procedure depth (next-order! service))))]))
 
+  (define (command-outcome? value)
+    (or (command-handled? value)
+        (command-effect? value)
+        (transaction-spec? value)
+        (view-transaction-spec? value)
+        (user-feedback? value)
+        (host-operation? value)))
+
+  ;; Validate every outcome before execution begins.  In particular, a list
+  ;; with a valid leading transaction and an invalid trailing value must not
+  ;; leave the editor half-updated before the command failure is recorded.
+  (define (validate-command-result result)
+    (unless (for-all command-outcome? (command-result-outcomes result))
+      (assertion-violation 'command-runtime
+                           "command returned an invalid result"
+                           (command-result-outcomes result)))
+    result)
+
   (define (normalize-command-result value)
     (cond
-      [(command-result? value) value]
+      [(command-result? value) (validate-command-result value)]
       [(or (command-handled? value)
            (command-effect? value)
            (transaction-spec? value)
@@ -321,7 +339,8 @@
            (user-feedback? value)
            (host-operation? value))
        (make-command-result (list value))]
-      [(list? value) (make-command-result value)]
+      [(list? value)
+       (validate-command-result (make-command-result value))]
       [else
        (assertion-violation 'command-runtime "command returned an invalid result" value)]))
 

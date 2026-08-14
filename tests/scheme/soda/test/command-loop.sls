@@ -360,6 +360,37 @@
              "Runtime did not preserve input priority and action boundaries"
              events)))
 
+  (define (test-invalid-command-result-is-atomic)
+    (let* ([host (make-host-state)]
+           [runtime (host-state-command-runtime host)]
+           [owner (make-owner 'invalid-command-result-test)]
+           [context
+            (make-command-context
+              #f #f #f #f #f #f #f #f '() (make-prefix-argument) #f 'test #f)]
+           [effect-applied? #f])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (command-runtime-register-command!
+            runtime
+            (make-command-definition
+              'test.invalid-result
+              (lambda (ignored)
+                (list (make-command-effect 'test.invalid-result-effect 'first) 'invalid))
+              owner))
+          (command-runtime-register-effect-handler!
+            runtime 'test.invalid-result-effect owner 'observe-invalid-result
+            (lambda (ignored invocation effect) (set! effect-applied? #t)))
+          (let ([invocation
+                 (command-runtime-start! runtime 'test.invalid-result context)])
+            (check (and (eq? (command-invocation-phase invocation) 'cancelled)
+                        (command-invocation-condition invocation)
+                        (not effect-applied?))
+                   "invalid command result applied a leading outcome before failing")))
+        (lambda ()
+          (owner-close! owner)
+          (host-state-close! host)))))
+
   (define (run-command-loop-tests!)
     (test-prefix-argument)
     (test-command-policy-override)
@@ -371,5 +402,6 @@
     (test-runtime-state-record-and-repeat)
     (test-prefix-argument-render-feedback)
     (test-undo-amalgamation)
-    (test-runtime-input-lane))
+    (test-runtime-input-lane)
+    (test-invalid-command-result-is-atomic))
 )
