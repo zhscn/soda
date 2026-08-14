@@ -15,6 +15,7 @@
           selection-primary
           selection-range-at
           selection-map
+          selection-map-preserving
           selection-map-change
           selection-primary-range
           change-by-range)
@@ -202,6 +203,28 @@
             mapped))
         (selection-ranges selection))
       (selection-primary selection)))
+
+  ;; A pure selection transform can preserve identity when every range is
+  ;; retained.  Callers use that fact to avoid publishing a View update for a
+  ;; semantic no-op while retaining normal Selection normalization whenever a
+  ;; range actually changes.
+  (define (selection-map-preserving selection mapper)
+    (unless (selection? selection)
+      (assertion-violation 'selection-map-preserving "expected a Selection" selection))
+    (unless (procedure? mapper)
+      (assertion-violation 'selection-map-preserving "expected a range mapper" mapper))
+    (let loop ([ranges (selection-ranges selection)] [changed? #f] [result '()])
+      (if (null? ranges)
+          (if changed?
+              (make-selection (reverse result) (selection-primary selection))
+              selection)
+          (let* ([range (car ranges)] [mapped (mapper range)])
+            (unless (selection-range? mapped)
+              (assertion-violation 'selection-map-preserving
+                                   "range mapper returned a non-SelectionRange" mapped))
+            (loop (cdr ranges)
+                  (or changed? (not (eq? mapped range)))
+                  (cons mapped result))))))
 
   (define (selection-map-change selection changes)
     (unless (or (change-set? changes) (change-desc? changes))

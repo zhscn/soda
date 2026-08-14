@@ -3,6 +3,7 @@
   (import (rnrs)
           (soda kernel document)
           (soda kernel selection)
+          (soda kernel viewport)
           (soda view decoration)
           (soda view list-viewport)
           (soda view text-layout)
@@ -34,14 +35,38 @@
            [resolution
             (resolve-display-scroll-request
               layout 2 0 selection 'scroll-pages 1)]
-           [next (display-scroll-resolution-selection resolution)]
+           [next (viewport-scroll-resolution-selection resolution)]
            [point
             (text-layout-document->point
               layout (selection-range-head (selection-primary-range next)))])
-      (check (= (display-scroll-resolution-row resolution) 1)
+      (check (and (display-viewport?
+                    (viewport-scroll-resolution-viewport resolution))
+                  (= (viewport-visual-row
+                      (viewport-scroll-resolution-viewport resolution))
+                     1))
              "Display scroll resolver did not advance by one page")
       (check (equal? point '(1 . 0))
              "Display scroll resolver did not retain point in the target viewport")
+      (snapshot-close! snapshot)
+      (document-close! document))
+
+    (let* ([document (make-document "a\nb\nc\nd")]
+           [snapshot (document-snapshot document)]
+           [text (snapshot-text snapshot)]
+           [selection (make-selection (list (make-selection-range 0 0)))]
+           [resolution
+            (resolve-document-scroll-request
+              text default-text-layout-options 8 2 default-viewport selection
+              'scroll-pages 1)]
+           [viewport (viewport-scroll-resolution-viewport resolution)]
+           [next (viewport-scroll-resolution-selection resolution)])
+      (check (and (document-viewport? viewport)
+                  (= (viewport-first-line viewport) 2)
+                  (= (viewport-visual-row viewport) 0))
+             "Document scroll resolver did not retain a document-origin viewport")
+      (check (= (selection-range-head (selection-primary-range next)) 4)
+             "Document scroll resolver did not retain point in the target viewport")
+      (text-close! text)
       (snapshot-close! snapshot)
       (document-close! document)))
 )

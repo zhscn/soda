@@ -1,31 +1,35 @@
 (library (soda view viewport-resolution)
-  (export make-display-scroll-resolution
-          display-scroll-resolution?
-          display-scroll-resolution-row
-          display-scroll-resolution-selection
+  (export make-viewport-scroll-resolution
+          viewport-scroll-resolution?
+          viewport-scroll-resolution-viewport
+          viewport-scroll-resolution-selection
           display-row-document-offset
+          resolve-document-reveal-request
+          resolve-document-scroll-request
           resolve-display-scroll-request)
   (import (rnrs)
+          (soda kernel document)
           (soda kernel selection)
+          (soda kernel viewport)
           (soda view frame)
           (soda view text-layout))
 
-  ;; A DisplayScrollResolution is the pure coordinate result for a structural
-  ;; projection.  Its row is in DisplayMap coordinates; the host decides how
-  ;; that result becomes a View transaction.
+  ;; A ViewportScrollResolution is a pure presentation result.  It combines a
+  ;; Viewport coordinate with a Selection transformed only when a command's
+  ;; interaction contract requires point to remain visible.
   (define-record-type
-    (display-scroll-resolution %make-display-scroll-resolution
-                               display-scroll-resolution?)
-    (fields row selection))
+    (viewport-scroll-resolution %make-viewport-scroll-resolution
+                                viewport-scroll-resolution?)
+    (fields viewport selection))
 
   (define (offset? value)
     (and (integer? value) (exact? value) (>= value 0)))
 
-  (define (make-display-scroll-resolution row selection)
-    (unless (and (offset? row) (selection? selection))
-      (assertion-violation 'make-display-scroll-resolution
-                           "invalid display scroll resolution" row selection))
-    (%make-display-scroll-resolution row selection))
+  (define (make-viewport-scroll-resolution viewport selection)
+    (unless (and (viewport? viewport) (selection? selection))
+      (assertion-violation 'make-viewport-scroll-resolution
+                           "invalid viewport scroll resolution" viewport selection))
+    (%make-viewport-scroll-resolution viewport selection))
 
   (define (screen-row placement height)
     (case placement
@@ -53,19 +57,8 @@
                                (text-layout-point->document layout row right))])
                     (or left-value right-value (loop (+ distance 1)))))))))
 
-  (define (replace-ranges selection mapper)
-    (let loop ([ranges (selection-ranges selection)] [changed? #f] [result '()])
-      (if (null? ranges)
-          (if changed?
-              (make-selection (reverse result) (selection-primary selection))
-              selection)
-          (let* ([range (car ranges)] [replacement (mapper range)])
-            (loop (cdr ranges)
-                  (or changed? (not (eq? replacement range)))
-                  (cons replacement result))))))
-
   (define (collapse-selection-at selection offset)
-    (replace-ranges
+    (selection-map-preserving
       selection
       (lambda (range)
         (if (and (= (selection-range-anchor range) offset)
@@ -79,7 +72,7 @@
 
   (define (keep-selection-visible layout selection top height content-height)
     (let ([bottom (min (- content-height 1) (+ top (- height 1)))])
-      (replace-ranges
+      (selection-map-preserving
         selection
         (lambda (range)
           (let* ([head (selection-range-head range)]
@@ -101,8 +94,112 @@
                   (selection-range-granularity range)
                   (selection-range-metadata range))))))))
 
+  (define (visual-position-before? left right)
+    (or (< (visual-position-line left) (visual-position-line right))
+        (and (= (visual-position-line left) (visual-position-line right))
+             (< (visual-position-row left) (visual-position-row right)))))
+
+  (define (document-screen-row-position text options width height viewport row column)
+    (text-layout-viewport-row-position
+      text options width height viewport row column))
+
+  (define (visual-position->document-viewport position)
+    (make-viewport (visual-position-line position) (visual-position-row position)))
+
+  (define (document-keep-selection-visible text options width height viewport selection)
+    (let* ([top (document-screen-row-position text options width height viewport 0 0)]
+           [bottom
+            (document-screen-row-position text options width height viewport
+                                          (- height 1) 0)])
+      (selection-map-preserving
+        selection
+        (lambda (range)
+          (let* ([head (selection-range-head range)]
+                 [position
+                  (text-layout-document-visual-position text options width head)]
+                 [screen-row
+                  (cond [(visual-position-before? position top) 0]
+                        [(visual-position-before? bottom position) (- height 1)]
+                        [else #f])]
+                 [next
+                  (and screen-row
+                       (document-screen-row-position
+                         text options width height viewport screen-row
+                         (visual-position-column position)))]
+                 [offset (and next (visual-position-offset next))])
+            (if (or (not offset) (= offset head))
+                range
+                (make-selection-range
+                  offset offset
+                  (selection-range-affinity range)
+                  (selection-range-granularity range)
+                  (selection-range-metadata range))))))))
+
+  (define (resolve-document-reveal-request text options width height viewport selection)
+    (unless (and (text? text) (text-layout-options? options)
+                 (offset? width) (> width 0) (offset? height) (> height 0)
+                 (document-viewport? viewport) (selection? selection))
+      (assertion-violation 'resolve-document-reveal-request
+                           "invalid document reveal request"
+                           text options width height viewport selection))
+    (make-viewport-scroll-resolution
+      (text-layout-reveal-viewport
+        text options width height viewport
+        (selection-range-head (selection-primary-range selection)))
+      selection))
+
+  ;; Resolve scrolling directly in document visual coordinates.  This path
+  ;; never materializes a whole-document DisplayMap.
+  (define (resolve-document-scroll-request text options width height viewport selection kind argument)
+    (unless (and (text? text) (text-layout-options? options)
+                 (offset? width) (> width 0) (offset? height) (> height 0)
+                 (document-viewport? viewport) (selection? selection)
+                 (memq kind '(scroll-rows scroll-pages recenter
+                                           move-point-to-window-row))
+                 (case kind
+                   [(scroll-rows scroll-pages)
+                    (and (integer? argument) (exact? argument) (not (zero? argument)))]
+                   [else (memq argument '(top center bottom))]))
+      (assertion-violation 'resolve-document-scroll-request
+                           "invalid document scroll request"
+                           text options width height viewport selection kind argument))
+    (let* ([target
+            (case kind
+              [(scroll-rows)
+               (visual-position->document-viewport
+                 (text-layout-scroll-start text options width height viewport argument))]
+              [(scroll-pages)
+               (visual-position->document-viewport
+                 (text-layout-scroll-start
+                   text options width height viewport (* argument height)))]
+              [(recenter)
+               (visual-position->document-viewport
+                 (text-layout-recenter-start
+                   text options width height
+                   (selection-range-head (selection-primary-range selection))
+                   (screen-row argument height)))]
+              [else viewport])]
+           [next-selection
+            (case kind
+              [(scroll-rows scroll-pages)
+               (document-keep-selection-visible text options width height target selection)]
+              [(move-point-to-window-row)
+               (let* ([primary (selection-primary-range selection)]
+                      [position
+                       (text-layout-document-visual-position
+                         text options width (selection-range-head primary))]
+                      [target-position
+                       (document-screen-row-position
+                         text options width height viewport
+                         (screen-row argument height)
+                         (visual-position-column position))])
+                 (collapse-selection-at selection
+                                        (visual-position-offset target-position)))]
+              [else selection])])
+      (make-viewport-scroll-resolution target next-selection)))
+
   ;; Resolve a semantic scroll intent against a complete structural layout.
-  ;; CURRENT-TOP and the resulting row are DisplayMap coordinates.  Plain
+  ;; CURRENT-TOP and the result Viewport are in DisplayMap coordinates.  Plain
   ;; document Views use the incremental visual-measurement resolver instead.
   (define (resolve-display-scroll-request layout height current-top selection kind argument)
     (unless (and (text-layout? layout) (text-layout-complete? layout)
@@ -151,5 +248,6 @@
               [(scroll-rows scroll-pages)
                (keep-selection-visible layout selection target-top height content-height)]
               [else selection])])
-      (make-display-scroll-resolution target-top next-selection)))
+      (make-viewport-scroll-resolution
+        (make-display-viewport target-top) next-selection)))
 )

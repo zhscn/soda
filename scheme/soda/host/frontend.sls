@@ -259,7 +259,7 @@
       (and (not (view-projection-display-stream projection))
            (null? (view-projection-transforms projection)))))
 
-  (define (raw-document-reveal-viewport view state width height request)
+  (define (raw-document-reveal-resolution view state width height request)
     (and (eq? (scroll-request-kind request) 'reveal-point)
            (plain-document-projection? view)
            (document-viewport? (view-state-viewport state))
@@ -270,103 +270,14 @@
              (dynamic-wind
                (lambda () #f)
                (lambda ()
-                 (text-layout-reveal-viewport
+                 (resolve-document-reveal-request
                    text options width height (view-state-viewport state)
-                   (selection-range-head
-                     (selection-primary-range (view-state-selection state)))))
+                   (view-state-selection state)))
                (lambda () (text-close! text))))))
 
-  (define (visual-position-before? left right)
-    (or (< (visual-position-line left) (visual-position-line right))
-        (and (= (visual-position-line left) (visual-position-line right))
-             (< (visual-position-row left) (visual-position-row right)))))
-
-  (define (document-viewport-screen-row text options width viewport height row)
-    (text-layout-viewport-row-position
-      text options width height viewport row 0))
-
-  ;; Scroll commands keep point visible, matching the DisplayMap resolver's
-  ;; behavior.  This uses only document visual positions, so paging a normal
-  ;; Buffer does not need a whole-document terminal layout.
-  (define (document-scroll-selection text options width height viewport selection)
-    (let* ([top (document-viewport-screen-row text options width viewport height 0)]
-           [bottom
-            (document-viewport-screen-row text options width viewport height
-                                          (- height 1))])
-      (let loop ([ranges (selection-ranges selection)] [changed? #f] [result '()])
-        (if (null? ranges)
-            (if changed?
-                (make-selection (reverse result) (selection-primary selection))
-                selection)
-            (let* ([range (car ranges)]
-                   [head (selection-range-head range)]
-                   [position
-                    (text-layout-document-visual-position text options width head)]
-                   [screen-row
-                    (cond [(visual-position-before? position top) 0]
-                          [(visual-position-before? bottom position) (- height 1)]
-                          [else #f])]
-                   [next
-                    (and screen-row
-                         (text-layout-viewport-row-position
-                           text options width height viewport screen-row
-                           (visual-position-column position)))]
-                   [offset (and next (visual-position-offset next))]
-                   [replacement
-                    (if (or (not offset) (= offset head))
-                        range
-                        (make-selection-range
-                          offset offset
-                          (selection-range-affinity range)
-                          (selection-range-granularity range)
-                          (selection-range-metadata range)))])
-              (loop (cdr ranges)
-                    (or changed? (not (eq? replacement range)))
-                    (cons replacement result)))))))
-
-  (define (document-scroll-screen-row placement height)
-    (case placement
-      [(top) 0]
-      [(center) (div (- height 1) 2)]
-      [(bottom) (- height 1)]))
-
-  (define (visual-position->viewport position)
-    (make-viewport (visual-position-line position) (visual-position-row position)))
-
-  (define (collapse-selection-at selection offset)
-    (let loop ([ranges (selection-ranges selection)] [changed? #f] [result '()])
-      (if (null? ranges)
-          (if changed?
-              (make-selection (reverse result) (selection-primary selection))
-              selection)
-          (let* ([range (car ranges)]
-                 [replacement
-                  (if (and (= (selection-range-anchor range) offset)
-                           (= (selection-range-head range) offset))
-                      range
-                      (make-selection-range
-                        offset offset
-                        (selection-range-affinity range)
-                        (selection-range-granularity range)
-                        (selection-range-metadata range)))])
-            (loop (cdr ranges)
-                  (or changed? (not (eq? replacement range)))
-                  (cons replacement result))))))
-
-  (define (document-scroll-to-screen-row text options width height viewport selection row)
-    (let* ([primary (selection-primary-range selection)]
-           [position
-            (text-layout-document-visual-position
-              text options width (selection-range-head primary))]
-           [target
-            (text-layout-viewport-row-position
-              text options width height viewport row (visual-position-column position))]
-           [offset (visual-position-offset target)])
-      (collapse-selection-at selection offset)))
-
-  ;; The result is (Viewport . Selection).  It applies only to document-origin
-  ;; Viewports with no structural display projection; all other presentation
-  ;; policies remain on the general DisplayMap path below.
+  ;; This applies only to document-origin Viewports with no structural display
+  ;; projection; all other presentation policies use the complete DisplayMap
+  ;; resolver below.
   (define (raw-document-scroll-resolution view state width height request)
     (and (plain-document-projection? view)
          (document-viewport? (view-state-viewport state))
@@ -384,34 +295,8 @@
            (dynamic-wind
              (lambda () #f)
              (lambda ()
-               (let* ([target
-                       (case kind
-                         [(scroll-rows)
-                          (visual-position->viewport
-                            (text-layout-scroll-start
-                              text options width height current argument))]
-                         [(scroll-pages)
-                          (visual-position->viewport
-                            (text-layout-scroll-start
-                              text options width height current (* argument height)))]
-                         [(recenter)
-                          (visual-position->viewport
-                            (text-layout-recenter-start
-                              text options width height
-                              (selection-range-head (selection-primary-range selection))
-                              (document-scroll-screen-row argument height)))]
-                         [else current])]
-                      [next-selection
-                       (case kind
-                         [(scroll-rows scroll-pages)
-                          (document-scroll-selection
-                            text options width height target selection)]
-                         [(move-point-to-window-row)
-                          (document-scroll-to-screen-row
-                            text options width height current selection
-                            (document-scroll-screen-row argument height))]
-                         [else selection])])
-                 (cons target next-selection)))
+               (resolve-document-scroll-request
+                 text options width height current selection kind argument))
              (lambda () (text-close! text))))))
 
   ;; A stale display-origin plain View can reach the structural resolver while
@@ -433,8 +318,9 @@
                      (visual-position-row position))))
                (lambda () (text-close! text)))))))
 
-  (define (publish-document-resolution! state view state-value resolution)
-    (let ([viewport (car resolution)] [selection (cdr resolution)])
+  (define (publish-viewport-resolution! state view state-value resolution)
+    (let ([viewport (viewport-scroll-resolution-viewport resolution)]
+          [selection (viewport-scroll-resolution-selection resolution)])
       (unless (and (viewport=? viewport (view-state-viewport state-value))
                    (eq? selection (view-state-selection state-value)))
         (dispatcher-dispatch-view!
@@ -473,19 +359,18 @@
                (if (visible-reveal? layout request
                                     (view-state-selection view-state))
                    #t
-                   (let ([raw-viewport
-                          (raw-document-reveal-viewport
+                   (let ([raw-reveal
+                          (raw-document-reveal-resolution
                             view view-state width height request)]
                          [raw-scroll
                           (raw-document-scroll-resolution
                             view view-state width height request)])
                      (cond
-                       [raw-viewport
-                        (publish-document-resolution!
-                          state view view-state
-                          (cons raw-viewport (view-state-selection view-state)))]
+                       [raw-reveal
+                        (publish-viewport-resolution!
+                          state view view-state raw-reveal)]
                        [raw-scroll
-                        (publish-document-resolution!
+                        (publish-viewport-resolution!
                           state view view-state raw-scroll)]
                        [else
                          (let* ([options
@@ -516,14 +401,18 @@
                          geometry height current-top selection
                          (scroll-request-kind request)
                          (scroll-request-argument request))]
-                      [target-top (display-scroll-resolution-row resolution)]
+                      [target-top
+                       (viewport-visual-row
+                         (viewport-scroll-resolution-viewport resolution))]
+                      [display-target
+                       (viewport-scroll-resolution-viewport resolution)]
                       [target
                        (or (and (plain-document-projection? view)
                                 (document-viewport-at-display-row
                                   view options width geometry target-top))
-                           (make-display-viewport target-top))]
+                           display-target)]
                       [next-selection
-                       (display-scroll-resolution-selection resolution)])
+                       (viewport-scroll-resolution-selection resolution)])
                  (unless (and (viewport=? target current)
                               (or (not next-selection)
                                   (equal? next-selection selection)))
