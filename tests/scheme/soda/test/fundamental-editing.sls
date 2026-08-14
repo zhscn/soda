@@ -4739,6 +4739,60 @@
       (frontend-close! frontend)
       (soda-application-close! application))
 
+    ;; Input resolution may encounter an optional or stale binding whose
+    ;; command does not apply to the active mode.  The frontend reports that
+    ;; at the input boundary instead of creating an invocation that fails
+    ;; later in CommandRuntime; direct runtime entry retains its own guard.
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [surface (soda-application-surface application)]
+           [runtime (host-state-command-runtime state)]
+           [unavailable-map (make-keymap 'unavailable-binding)]
+           [_binding
+            (keymap-bind!
+              unavailable-map
+              (list (make-key-stroke 'character (char->integer #\q) 0))
+              'buffer.next-item)]
+           [frontend
+            (make-frontend
+              state surface
+              (lambda (active view)
+                (let ([base
+                       (soda-application-resolve-input-context
+                         application active view)])
+                  (input-context-with-translation
+                    (make-input-context
+                      (input-context-view-id base)
+                      (input-context-buffer-id base)
+                      (cons (make-input-layer 'override unavailable-map #f 'pass)
+                            (input-context-layers base))
+                      (input-context-stack base))
+                    (input-context-translation base))))
+              (lambda (context disposition)
+                (fundamental-input-disposition context disposition))
+              (lambda (render theme) #f)
+              (make-render-service) default-theme)])
+      (frontend-enqueue!
+        frontend
+        (make-surface-input-message
+          (surface-id surface)
+          (make-key-event 'character (char->integer #\q) #f #f 0
+                          'press (make-bytevector 0))))
+      (frontend-step! frontend)
+      (unless (and (let ([feedback (surface-feedback-text surface)])
+                     (and feedback
+                          (string-contains?
+                            feedback "q is not available in this context")))
+                   (guard (condition [else #t])
+                     (command-runtime-start!
+                       runtime 'buffer.next-item
+                       (application-command-context application))
+                     #f))
+        (error 'fundamental-editing-tests
+               "unavailable key binding crossed the command invocation boundary"))
+      (frontend-close! frontend)
+      (soda-application-close! application))
+
     ;; The application-owned composition is the authoritative input stack for
     ;; both ordinary Views and minibuffers.  A global override keymap retains
     ;; key priority without intercepting committed terminal text.
