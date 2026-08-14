@@ -1248,6 +1248,8 @@
            [observed #f]
            [must-match-value #f]
            [completion-events '()]
+           [preview-snapshot #f]
+           [restored-snapshot #f]
            [events '()]
            [setup-input #f]
            [exit-input #f]
@@ -1390,8 +1392,10 @@
                           'allowed "allowed" "allowed" #f #f #f))
                       '()))
                 (lambda (candidate snapshot)
+                  (set! preview-snapshot snapshot)
                   (set! completion-events (cons 'preview completion-events)))
                 (lambda (snapshot)
+                  (set! restored-snapshot snapshot)
                   (set! completion-events (cons 'restore completion-events)))
                 (lambda (candidate snapshot)
                   (set! completion-events (cons 'accept completion-events))
@@ -1507,17 +1511,20 @@
           runtime 'interaction.match-test (application-command-context application))
         (minibuffer-service-refresh-completion! minibuffer)
         (minibuffer-service-select-completion! minibuffer 0)
+        (minibuffer-service-refresh-completion! minibuffer)
         (minibuffer-service-submit! minibuffer)
-        (unless (equal? completion-events '(preview))
+        (unless (equal? (reverse completion-events) '(preview restore preview))
           (error 'fundamental-editing-tests
-                 "completion accept ran before the interaction committed"
+                 "same-revision refresh did not restore and re-establish preview"
                  completion-events))
         (host-state-run! state)
         (unless (and (string=? must-match-value "allowed")
                      (not (minibuffer-service-current minibuffer))
-                     (equal? (reverse completion-events) '(preview accept)))
+                     (equal? (reverse completion-events)
+                             '(preview restore preview accept restore))
+                     (eq? restored-snapshot preview-snapshot))
           (error 'fundamental-editing-tests
-                 "completion finalization did not follow interaction acceptance"
+                 "failed completion acceptance did not restore its active preview"
                  completion-events))
         (set! completion-events '())
         (command-runtime-start-interactive!
@@ -1527,10 +1534,11 @@
         (minibuffer-service-cancel! minibuffer)
         (host-state-run! state)
         (unless (and (not (minibuffer-service-current minibuffer))
+                     (eq? restored-snapshot preview-snapshot)
                      (equal? (reverse completion-events) '(preview restore)))
           (error 'fundamental-editing-tests
-                 "completion cancellation did not restore its active preview"
-                 completion-events)))
+                 "completion cancellation did not restore its originating preview snapshot"
+                 completion-events preview-snapshot restored-snapshot)))
       (let ([cancelled
              (command-runtime-start-interactive!
                runtime 'interaction.package-test (application-command-context application))])

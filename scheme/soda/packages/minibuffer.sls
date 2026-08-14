@@ -436,7 +436,7 @@
               (when controller
                 (if (eq? outcome 'accepted)
                     (completion-controller-accept! controller snapshot)
-                    (completion-controller-restore! controller snapshot)))
+                    (completion-controller-restore! controller)))
               (notify-hooks! (minibuffer-service-exit-hooks service) snapshot)))
           (lambda ()
             ;; Package callbacks are isolated from Host resource ownership.

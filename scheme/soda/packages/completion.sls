@@ -82,8 +82,8 @@
             (mutable selected-index completion-controller-selected-index completion-controller-selected-index-set!)
             (mutable input-revision completion-controller-input-revision
                      completion-controller-input-revision-set!)
-            (mutable preview-active? completion-controller-preview-active?
-                     completion-controller-preview-active?-set!)
+            (mutable preview-snapshot completion-controller-preview-snapshot
+                     completion-controller-preview-snapshot-set!)
             (immutable selection-policy completion-controller-selection-policy)))
   (define (make-completion-controller source selection-policy)
     (unless (and (completion-source? source) (memq selection-policy '(free must-match)))
@@ -93,13 +93,23 @@
     (let ([index (completion-controller-selected-index controller)]
           [candidates (completion-controller-candidates controller)])
       (and index (>= index 0) (< index (length candidates)) (list-ref candidates index))))
-  (define (completion-controller-restore! controller snapshot)
-    (when (completion-controller-preview-active? controller)
-      (let ([restore (completion-source-restore (completion-controller-source controller))])
-        (when restore (restore snapshot)))
-      (completion-controller-preview-active?-set! controller #f)))
+  (define (completion-controller-restore! controller)
+    (let ([preview-snapshot (completion-controller-preview-snapshot controller)])
+      (when preview-snapshot
+        (let ([restore
+               (completion-source-restore
+                 (completion-controller-source controller))])
+          (when restore (restore preview-snapshot)))
+        (completion-controller-preview-snapshot-set! controller #f))))
+
+  (define (completion-controller-preview! controller snapshot)
+    (let ([preview (completion-source-preview (completion-controller-source controller))]
+          [candidate (completion-controller-selected controller)])
+      (when (and candidate preview)
+        (preview candidate snapshot)
+        (completion-controller-preview-snapshot-set! controller snapshot))))
   (define (completion-controller-refresh! controller snapshot)
-    (completion-controller-restore! controller snapshot)
+    (completion-controller-restore! controller)
     (let* ([same-input?
             (and (completion-controller-input-revision controller)
                  (= (completion-controller-input-revision controller)
@@ -119,28 +129,32 @@
                (if (equal? selected-id (completion-candidate-id (car items)))
                    index
                    (loop (cdr items) (+ index 1))))))
+      (completion-controller-preview! controller snapshot)
       controller))
   (define (completion-controller-select! controller index snapshot)
     (unless (and (integer? index) (exact? index) (>= index -1)
                  (< index (length (completion-controller-candidates controller))))
       (assertion-violation 'completion-controller-select! "invalid candidate index" index))
-    (completion-controller-restore! controller snapshot)
+    (completion-controller-restore! controller)
     (completion-controller-selected-index-set! controller (and (>= index 0) index))
-    (let ([preview (completion-source-preview (completion-controller-source controller))]
-          [candidate (completion-controller-selected controller)])
-      (if candidate
-          (when preview
-            (preview candidate snapshot)
-            (completion-controller-preview-active?-set! controller #t))))
+    (completion-controller-preview! controller snapshot)
     controller)
   (define (completion-controller-accept! controller snapshot)
     (let ([candidate (completion-controller-selected controller)]
           [accept (completion-source-accept (completion-controller-source controller))])
       (if (and candidate accept)
-          (begin
+          (guard
+            (condition
+              [else
+               ;; Accept is the only finalizer allowed to consume a preview.
+               ;; If it fails, make a best-effort restore using the snapshot
+               ;; that established that preview, then preserve the failure.
+               (guard (ignored [else #f])
+                 (completion-controller-restore! controller))
+               (raise condition)])
             (accept candidate snapshot)
-            (completion-controller-preview-active?-set! controller #f))
-          (completion-controller-restore! controller snapshot))
+            (completion-controller-preview-snapshot-set! controller #f))
+          (completion-controller-restore! controller))
       candidate))
   (define (completion-controller-valid-input? controller input snapshot)
     (unless (and (completion-controller? controller) (string? input))

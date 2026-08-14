@@ -127,8 +127,11 @@ completion source，也不解释 candidate payload。`free` reader 允许 index 
 
 Consult 类 adapter 通过 source 的 `preview`、`restore`、`accept` 三个 action 接口提供
 预览。controller 在选中候选变化时提交可取消 preview request；关闭、取消、generation
-切换和 source 替换时调用 restore；最终接受只调用 accept。预览目标由 source payload
-解析，避免让 minibuffer 保存 project、buffer 或 window 的可变引用。
+切换和 source 替换时调用 restore；restore 接收建立该 preview 时保存的 snapshot，
+而不是触发撤销的新输入 snapshot。同一输入 revision 上刷新并保留候选时，controller
+先恢复旧 preview，再以刷新后的候选重新建立 preview。成功的最终接受只调用 accept。预览目标由 source payload
+解析，避免让 minibuffer 保存 project、buffer 或 window 的可变引用。accept 回调失败时，
+controller 使用来源 snapshot 尽力恢复 preview，并继续传播原始失败。
 
 ## Buffer、View 与焦点
 
