@@ -291,35 +291,32 @@
                    ;; The Buffer owns the Document after successful creation.
                    (set! document #f)
                    (set! view
-                         (package-host-create-view!
+                         (package-host-create-interaction-view!
                            host (minibuffer-service-owner service)
-                           buffer configuration))
+                           buffer configuration
+                           (command-context-surface-id context) 1))
                    ;; Initial prompt contents are ready for continuation.
-                   ;; Establish point before placement so every frontend sees
-                   ;; the same first Frame.
-                   (let ([end
-                          (snapshot-byte-size
-                            (buffer-state-document (buffer-state buffer)))])
-                     (when (positive? end)
-                       (let ([state (view-state view)])
-                         (package-host-dispatch-view!
-                           host
-                           (make-view-transaction-spec
-                             (view-id view) (view-state-generation state)
-                             (make-selection
-                               (list (make-selection-range end end)))
-                             (view-state-viewport state)
-                             #f '() '()
-                             (make-scroll-request
-                               'reveal-point
-                               (command-context-surface-id context)
-                               #f (view-id view)))))))
-                   (set! placed?
-                         (and
-                           (package-host-push-interaction-view!
-                             host (command-context-surface-id context)
-                             (view-id view) 1)
-                           #t))
+                   ;; The command turn commits placement and this selection
+                   ;; before frontend rendering observes the prompt.
+                   (when view
+                     (let ([end
+                            (snapshot-byte-size
+                              (buffer-state-document (buffer-state buffer)))])
+                       (when (positive? end)
+                         (let ([state (view-state view)])
+                           (package-host-dispatch-view!
+                             host
+                             (make-view-transaction-spec
+                               (view-id view) (view-state-generation state)
+                               (make-selection
+                                 (list (make-selection-range end end)))
+                               (view-state-viewport state)
+                               #f '() '()
+                               (make-scroll-request
+                                 'reveal-point
+                                 (command-context-surface-id context)
+                                 #f (view-id view))))))))
+                   (set! placed? (and view #t))
                    (and placed?
                         (let ([session
                                (%make-minibuffer-session
@@ -436,15 +433,13 @@
                            (package-host-view-ref
                              host (minibuffer-session-completion-view-id session) #f))
                       (let ([created
-                             (package-host-create-view!
+                             (package-host-create-interaction-companion-view!
                                host (minibuffer-service-owner service)
-                               buffer configuration)])
-                        (if (package-host-add-interaction-companion-view!
-                              host (minibuffer-session-surface-id session)
-                              (minibuffer-session-view-id session)
-                              (view-id created) completion-window-height)
-                            created
-                            #f)))])
+                               buffer configuration
+                               (minibuffer-session-surface-id session)
+                               (minibuffer-session-view-id session)
+                               completion-window-height)])
+                        created))])
             (if (not view)
                 (begin
                   (package-host-close-buffer! host (buffer-id buffer))

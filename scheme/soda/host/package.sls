@@ -40,21 +40,17 @@
           package-host-find-buffer-key
           package-host-rebind-buffer-key!
           package-host-view-ref
-          package-host-create-view!
           package-host-present-buffer!
           package-host-present-buffer-if-current!
+          package-host-create-interaction-view!
+          package-host-create-interaction-companion-view!
           package-host-split-window!
           package-host-focus-next-window!
           package-host-delete-window!
           package-host-delete-other-windows!
           package-host-bury-window!
-          package-host-close-view!
           package-host-surface-size
           package-host-invalidate-surface!
-          package-host-replace-window-view!
-          package-host-push-interaction-view!
-          package-host-add-interaction-companion-view!
-          package-host-pop-interaction-view!
           package-host-remove-interaction-view!
           package-host-publish-feedback!
           package-host-publish-feedback-if-current!
@@ -475,10 +471,6 @@
   (define (package-host-view-ref host id . default)
     (apply view-service-ref (host-state-views (package-host-state host)) id default))
 
-  (define (package-host-create-view! host owner buffer configuration . input-state)
-    (apply view-service-create!
-           (host-state-views (package-host-state host)) owner buffer configuration input-state))
-
   (define (recent-buffer-view surface views target-id)
     (let loop ([ids (surface-view-history surface)])
       (and (pair? ids)
@@ -736,28 +728,42 @@
           (package-host-close-view! host view-id)
           #f)))
 
-  (define (package-host-replace-window-view! host surface-id window-id view-id)
-    (place-view! host
-                 (make-replace-window-view-operation surface-id window-id view-id)
-                 view-id))
+  ;; Interaction interfaces are ordinary Buffer/View presentations, but their
+  ;; placement is an overlay owned by the Surface.  Packages request the two
+  ;; supported presentations instead of composing a bare View creation with
+  ;; an unrelated Surface operation.  The Host owns rollback in both cases.
+  (define (package-host-create-interaction-view!
+            host owner buffer configuration surface-id height)
+    (let* ([state (package-host-state host)]
+           [views (host-state-views state)]
+           [created (view-service-create! views owner buffer configuration)])
+      (guard
+        (condition
+          [else
+           (view-service-close-view! views (view-id created))
+           (raise condition)])
+        (and (place-view!
+               host
+               (make-push-interaction-operation surface-id (view-id created) height)
+               (view-id created))
+             created))))
 
-  (define (package-host-push-interaction-view! host surface-id view-id height)
-    (place-view! host
-                 (make-push-interaction-operation surface-id view-id height)
-                 view-id))
-
-  (define (package-host-add-interaction-companion-view!
-            host surface-id anchor-view-id view-id height)
-    (place-view!
-      host
-      (make-add-interaction-companion-operation
-        surface-id anchor-view-id view-id height)
-      view-id))
-
-  (define (package-host-pop-interaction-view! host surface-id)
-    (dispatcher-dispatch-host!
-      (host-state-dispatch (package-host-state host))
-      (make-pop-interaction-operation surface-id)))
+  (define (package-host-create-interaction-companion-view!
+            host owner buffer configuration surface-id anchor-view-id height)
+    (let* ([state (package-host-state host)]
+           [views (host-state-views state)]
+           [created (view-service-create! views owner buffer configuration)])
+      (guard
+        (condition
+          [else
+           (view-service-close-view! views (view-id created))
+           (raise condition)])
+        (and (place-view!
+               host
+               (make-add-interaction-companion-operation
+                 surface-id anchor-view-id (view-id created) height)
+               (view-id created))
+             created))))
 
   (define (package-host-remove-interaction-view! host surface-id view-id)
     (dispatcher-dispatch-host!

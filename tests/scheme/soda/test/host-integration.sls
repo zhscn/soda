@@ -3,12 +3,18 @@
   (import (rnrs)
           (soda bootstrap)
           (soda host condition)
+          (soda host buffer)
           (soda host dispatch)
           (soda host dispatch gate)
           (soda host internal operation)
+          (soda host package)
           (soda host internal state)
           (soda host internal surface)
+          (soda host internal view)
           (soda host value)
+          (soda kernel document)
+          (soda kernel extension)
+          (soda kernel state)
           (soda support cleanup))
 
   (define (run-cleanup-test!)
@@ -69,7 +75,36 @@
         (error 'host-integration-tests
                "dispatch gate did not defer reentrant work" events))))
 
+  ;; A package can ask for a temporary prompt or completion presentation, but
+  ;; cannot retain a View when the target Surface cannot accept it.  The
+  ;; Buffer remains the caller's resource until its normal cleanup path.
+  (define (run-interaction-placement-rollback-test!)
+    (let* ([state (make-host-state)]
+           [host (make-package-host state)]
+           [owner (make-owner 'interaction-placement-rollback-test)]
+           [buffer
+            (package-host-create-buffer!
+              host owner " *interaction-test*" (make-document "")
+              (make-configuration '()))]
+           [views (host-state-views state)])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (unless
+            (and (not (package-host-create-interaction-view!
+                        host owner buffer (make-configuration '()) 999 1))
+                 (not (package-host-create-interaction-companion-view!
+                        host owner buffer (make-configuration '()) 999 998 1))
+                 (null? (view-service-views views)))
+            (error 'host-integration-tests
+                   "failed interaction placement retained an orphan View")))
+        (lambda ()
+          (package-host-close-buffer! host (buffer-id buffer))
+          (owner-close! owner)
+          (host-state-close! state)))))
+
   (define (run-host-integration-tests!)
     (run-cleanup-test!)
     (run-dispatcher-observer-test!)
-    (run-dispatch-gate-test!)))
+    (run-dispatch-gate-test!)
+    (run-interaction-placement-rollback-test!)))
