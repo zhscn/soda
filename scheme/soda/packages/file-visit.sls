@@ -104,23 +104,18 @@
       (assertion-violation 'file.visit "invalid file visit request" request))
     (let* ([context (file-visit-context request)]
            [resource (file-visit-resource request)]
-           [host (file-service-host service)]
-           [buffer (ensure-file-buffer! service context resource)]
-           [current-id (command-context-buffer-id context)])
-      (if (= (buffer-id buffer) current-id)
-          buffer
-          (let* ([surface-id (command-context-surface-id context)]
-                 [window-id (command-context-window-id context)])
-            (unless (and (buffer-id? surface-id) (buffer-id? window-id))
-              (assertion-violation 'file.visit
-                                   "file visit requires a routed Window context" context))
-            (let ([view
-                   (package-host-present-buffer!
-                     host (file-service-owner service) buffer surface-id window-id
-                     (buffer-state-configuration (buffer-state buffer)))])
-              (unless view
-                (assertion-violation 'file.visit "origin Window is no longer available" context))
-              buffer)))))
+           [host (file-service-host service)])
+      ;; File loading is an effect.  Its final presentation remains conditional
+      ;; on the originating View, so an input transition cannot be overwritten
+      ;; by a delayed visit completion.
+      (let* ([buffer (ensure-file-buffer! service context resource)]
+             [current-id (command-context-buffer-id context)])
+        (if (= (buffer-id buffer) current-id)
+            buffer
+            (and (package-host-present-buffer-if-current!
+                   host (file-service-owner service) buffer context
+                   (buffer-state-configuration (buffer-state buffer)))
+                 buffer)))))
 
   (define (reset-selection)
     (make-selection (list (make-selection-range 0 0))))
