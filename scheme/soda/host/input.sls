@@ -69,6 +69,7 @@
           input-disposition-value
           input-disposition-requested-command
           input-disposition-input-state
+          input-disposition-clears-feedback?
           input-pass
           input-consume
           input-dispatch)
@@ -582,6 +583,17 @@
     (case-lambda
       [() (%make-input-disposition 'consume #f #f #f)]
       [(input-state) (%make-input-disposition 'consume #f #f input-state)]))
+
+  ;; Echo feedback belongs to the last completed editor action.  This
+  ;; classification is part of semantic input composition, not a property of
+  ;; terminal events: prefixes, accepted text, and commands begin a new user
+  ;; action; ignored and undefined input does not erase prior feedback.
+  (define (input-disposition-clears-feedback? disposition)
+    (unless (input-disposition? disposition)
+      (assertion-violation
+        'input-disposition-clears-feedback?
+        "expected an InputDisposition" disposition))
+    (memq (input-disposition-kind disposition) '(command text consume)))
 
   (define (input-reset context)
     (unless (input-context? context)

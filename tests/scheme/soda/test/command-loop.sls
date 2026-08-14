@@ -90,6 +90,34 @@
                        'command.requested))
              "input remapping discarded requested command identity")))
 
+  (define (test-feedback-input-lifetime)
+    (let* ([map (make-keymap 'feedback-lifetime)]
+           [_binding
+            (keymap-bind!
+              map (list (make-key-stroke 'character (char->integer #\a) 4))
+              'command.action)]
+           [context
+            (make-input-context
+              #f #f (list (make-input-layer 'major map #f 'accept))
+              (make-input-stack (make-input-state 'feedback-lifetime (list map) 'accept)))]
+           [command
+            (input-dispatch
+              context
+              (make-key-event 'character (char->integer #\a) #f #f 4
+                              'press (make-bytevector 0)))]
+           [prefix (input-consume)]
+           [text (input-dispatch context (make-text-input-event 'text (string->utf8 "x")))]
+           [undefined
+            (input-dispatch
+              context
+              (make-key-event 'f1 #f #f #f 0 'press (make-bytevector 0)))])
+      (check (and (input-disposition-clears-feedback? command)
+                  (input-disposition-clears-feedback? prefix)
+                  (input-disposition-clears-feedback? text)
+                  (not (input-disposition-clears-feedback? (input-pass)))
+                  (not (input-disposition-clears-feedback? undefined)))
+             "InputDisposition did not classify echo feedback lifetime")))
+
   (define (test-transient-input-exits-after-command)
     (let* ([durable-map (make-keymap 'durable)]
            [transient-map (make-keymap 'transient)]
@@ -312,6 +340,7 @@
     (test-prefix-argument)
     (test-command-policy-override)
     (test-remapped-identity)
+    (test-feedback-input-lifetime)
     (test-transient-input-exits-after-command)
     (test-standard-context-argument-reader)
     (test-prefix-argument-transient-map)

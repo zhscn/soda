@@ -310,24 +310,11 @@
       (command-runtime-enqueue!
         (host-state-command-runtime (frontend-host-state value)) result)))
 
-  (define (feedback-clearing-event? event)
-    (or (text-input-event? event)
-        (and (key-event? event) (not (eq? (key-event-type event) 'release)))
-        (and (pointer-event? event)
-             (memq (pointer-event-phase event) '(press wheel)))))
-
   (define (frontend-dispatch-input! value event)
     (require-open 'frontend-dispatch-input! value)
     (unless (input-event? event)
       (assertion-violation 'frontend-dispatch-input! "expected an input event" event))
     (input-scheduler-begin-cycle! (frontend-input-scheduler value))
-    ;; Echo-area command feedback is cleared by the next actionable user input
-    ;; before dispatch. A command may publish a new semantic feedback value at
-    ;; the same boundary. Durable status belongs to a mode line, Buffer, or
-    ;; explicit interaction rather than resurfacing from behind input chrome.
-    (when (feedback-clearing-event? event)
-      (host-frontend-clear-surface-feedback!
-        (frontend-host-state value) (frontend-surface value)))
     (let* ([route (and (pointer-event? event) (pointer-route value event))]
            [current
             (if route
@@ -341,6 +328,14 @@
                   [sequence (event-key-sequence context event)]
                   [disposition (input-dispatch context event)]
                   [next-input (input-disposition-input-state disposition)])
+             ;; Feedback lifetime follows semantic input rather than terminal
+             ;; event shape.  Prefixes, text, and commands retire the prior
+             ;; command result; ignored input retains it.  A routed pointer
+             ;; action changes the selected Window and is likewise a new
+             ;; editor action even when it has no key disposition.
+             (when (or route (input-disposition-clears-feedback? disposition))
+               (host-frontend-clear-surface-feedback!
+                 (frontend-host-state value) (frontend-surface value)))
              ;; InputState is published through the Dispatcher before a command
              ;; snapshot is made. The command therefore observes the reset
              ;; prefix/session state that the next event will observe too.

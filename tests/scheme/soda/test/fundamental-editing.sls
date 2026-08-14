@@ -5366,6 +5366,7 @@
                     (and (string=? (car entry) "C-x C-f")
                          (string=? (cdr entry) "file.visit")))
                   (surface-prefix-guidance surface))
+                (not (surface-feedback surface))
                 (string-contains?
                   (frame-row-string
                     (surface-render-frame presented)
