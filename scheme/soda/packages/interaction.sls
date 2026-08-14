@@ -319,6 +319,8 @@
 
   ;; Submission and cancellation travel through Runtime's queue.  This keeps
   ;; native input, TUI actions, and RPC adapters at the same command boundary.
+  ;; They return whether an open interaction was queued; callers query the
+  ;; service for session state rather than receiving a mutable session value.
   (define (interaction-service-submit! service value)
     (unless (interaction-service? service)
       (assertion-violation 'interaction-service-submit! "expected an interaction service" service))
@@ -340,7 +342,7 @@
                  (make-command-resume-message
                    (interaction-session-invocation-id session) value))
                (transition-session! session 'submitting)
-               session)))))
+               #t)))))
 
   ;; A completion belongs to the interaction's close boundary.  It is useful
   ;; for feedback such as `Quit`, which must reach the echo area only after a
@@ -364,7 +366,7 @@
                   (make-command-cancel-message
                     (interaction-session-invocation-id session)))
                 (transition-session! session 'cancelling)
-                session)))]))
+                #t)))]))
 
   (define (interaction-service-cancel-all! service)
     (unless (interaction-service? service)

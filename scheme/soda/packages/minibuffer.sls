@@ -715,10 +715,9 @@
     (and (minibuffer-service-current service)
          (interaction-service-cancel! (minibuffer-service-interactions service))))
 
-  ;; The submission service is also used as a programmatic API, where a
-  ;; successful queueing operation returns its InteractionSession.  The
-  ;; command boundary forwards only prompt transactions that keep an
-  ;; interaction open; successful submission is represented by handled.
+  ;; The submission service is also used as a programmatic API.  Its successful
+  ;; queueing result is a boolean; the command boundary forwards only prompt
+  ;; transactions that keep an interaction open and otherwise returns handled.
   (define (submission-command-outcome result)
     (if (or (transaction-spec? result) (view-transaction-spec? result))
         result

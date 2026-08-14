@@ -2191,7 +2191,9 @@
         (minibuffer-service-refresh-completion! minibuffer)
         (minibuffer-service-select-completion! minibuffer 0)
         (minibuffer-service-refresh-completion! minibuffer)
-        (minibuffer-service-submit! minibuffer)
+        (unless (minibuffer-service-submit! minibuffer)
+          (error 'fundamental-editing-tests
+                 "minibuffer submission did not report a queued interaction"))
         (unless (equal? (reverse completion-events) '(preview restore preview))
           (error 'fundamental-editing-tests
                  "same-revision refresh did not restore and re-establish preview"
