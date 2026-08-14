@@ -5344,7 +5344,16 @@
         (unless (<= (length presented-rows) 2)
           (error 'fundamental-editing-tests
                  "input burst presented intermediate movement Frames"
-                 presented-rows)))
+                 presented-rows))
+        ;; Legacy terminals do not report release.  Once this read's input
+        ;; burst has drained, a later empty frontend turn must not synthesize
+        ;; another motion after the physical key has been released.
+        (frontend-step-action! frontend)
+        (unless (= (selection-range-head
+                     (selection-primary-range (view-state-selection (view-state view))))
+                   6)
+          (error 'fundamental-editing-tests
+                 "legacy input burst retained motion after it drained")))
       ;; A burst that crosses the visible edge performs one final reveal.  It
       ;; must not rebuild and publish a new viewport for every C-n in the
       ;; terminal read; the last point is the only one the user can observe.
