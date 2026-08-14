@@ -132,7 +132,7 @@
                  (when (pending-repeat-tracked? scheduler surface-id event)
                    (forget-repeat! scheduler surface-id event)
                    (loop))))]))))
-    (host-frontend-enqueue! (input-scheduler-state scheduler) message))
+    (host-frontend-enqueue-input! (input-scheduler-state scheduler) message))
 
   ;; Frontend invokes this exactly when an input message leaves Runtime.  The
   ;; count stays accurate across partial drains, so a later press or release

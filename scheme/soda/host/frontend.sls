@@ -10,6 +10,7 @@
           viewport-resolution-cache?
           host-frontend-resolve-scroll-request!
           host-frontend-enqueue!
+          host-frontend-enqueue-input!
           host-frontend-enqueue-priority!
           host-frontend-discard!
           host-frontend-register-handler!
@@ -425,6 +426,9 @@
 
   (define (host-frontend-enqueue! state message)
     (runtime-enqueue! (host-state-runtime state) message))
+
+  (define (host-frontend-enqueue-input! state message)
+    (runtime-enqueue-input! (host-state-runtime state) message))
 
   (define (host-frontend-enqueue-priority! state message)
     (runtime-enqueue-priority! (host-state-runtime state) message))

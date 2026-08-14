@@ -28,6 +28,7 @@
           (soda host internal view)
           (soda host internal window)
           (soda host render-service)
+          (soda host runtime)
           (soda host value)
           (soda kernel change)
           (soda kernel document)
@@ -5403,6 +5404,61 @@
                    (view-state-viewport (view-state view))
                    presented-rows)))
         (registration-close! registration))
+      (frontend-close! frontend)
+      (soda-application-close! application))
+
+    ;; Terminal input is a latency-sensitive lane.  A background completion
+    ;; already queued by analysis or a process must not delay the next user
+    ;; action, while the background work remains available at the following
+    ;; idle boundary.
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [surface (soda-application-surface application)]
+           [view (soda-application-view application)]
+           [editing (soda-application-editing application)]
+           [background-ran? #f]
+           [frontend
+            (make-frontend
+              state surface
+              (lambda (active current-view)
+                (buffer-input-context
+                  active current-view
+                  (list (fundamental-fallback-input-layer editing))))
+              (lambda (context disposition)
+                (fundamental-input-disposition context disposition))
+              (lambda (render theme) #f)
+              (make-render-service) default-theme)])
+      (frontend-enqueue!
+        frontend
+        (make-surface-input-message
+          (surface-id surface)
+          (make-text-input-event 'text (string->utf8 "a\nb"))))
+      (frontend-step! frontend)
+      (command-runtime-start!
+        runtime 'fundamental.beginning-of-buffer
+        (application-command-context application))
+      (runtime-enqueue!
+        (host-state-runtime state) (lambda () (set! background-ran? #t)))
+      (frontend-enqueue!
+        frontend
+        (make-surface-input-message
+          (surface-id surface)
+          (make-key-event 'character (char->integer #\n) #f #f 4 'press
+                          (make-bytevector 0))))
+      (frontend-step-input-burst! frontend 1)
+      (unless (and (not background-ran?)
+                   (= (selection-range-head
+                        (selection-primary-range
+                          (view-state-selection (view-state view))))
+                      2))
+        (error 'fundamental-editing-tests
+               "terminal input did not preempt queued background work"
+               background-ran?))
+      (frontend-step-action! frontend)
+      (unless background-ran?
+        (error 'fundamental-editing-tests
+               "queued background work did not resume after terminal input"))
       (frontend-close! frontend)
       (soda-application-close! application))
 

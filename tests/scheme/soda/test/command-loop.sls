@@ -336,6 +336,30 @@
                  "amalgamated edit commands did not form one undo unit"))
         (lambda () (soda-application-close! application)))))
 
+  ;; Runtime lanes make input latency a scheduling contract: an input burst is
+  ;; FIFO, preempts background work, and still yields to the priority command
+  ;; and cycle boundary emitted by its current action.
+  (define (test-runtime-input-lane)
+    (let ([runtime (make-runtime)] [events '()])
+      (runtime-enqueue! runtime 'background-a)
+      (runtime-enqueue! runtime 'background-b)
+      (runtime-enqueue-input! runtime 'input-a)
+      (runtime-enqueue-input! runtime 'input-b)
+      (runtime-drain!
+        runtime
+        (lambda (event)
+          (set! events (append events (list event)))
+          (when (eq? event 'input-a)
+            ;; This is the order used by frontend input: the boundary is
+            ;; scheduled first and its command then takes immediate priority.
+            (runtime-enqueue-priority! runtime 'input-boundary)
+            (runtime-enqueue-priority! runtime 'input-command))))
+      (check (equal? events
+                     '(input-a input-command input-boundary input-b
+                               background-a background-b))
+             "Runtime did not preserve input priority and action boundaries"
+             events)))
+
   (define (run-command-loop-tests!)
     (test-prefix-argument)
     (test-command-policy-override)
@@ -346,5 +370,6 @@
     (test-prefix-argument-transient-map)
     (test-runtime-state-record-and-repeat)
     (test-prefix-argument-render-feedback)
-    (test-undo-amalgamation))
+    (test-undo-amalgamation)
+    (test-runtime-input-lane))
 )
