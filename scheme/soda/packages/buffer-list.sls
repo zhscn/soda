@@ -251,15 +251,10 @@
       (if (= (buffer-id buffer) (command-context-buffer-id context))
           buffer
           (let ([view
-                 (package-host-present-buffer!
-                   host (buffer-list-service-owner service) buffer
-                   (command-context-surface-id context)
-                   (command-context-window-id context)
+                 (package-host-present-buffer-if-current!
+                   host (buffer-list-service-owner service) buffer context
                    (buffer-state-configuration (buffer-state buffer)))])
-            (unless view
-              (assertion-violation 'buffer.list
-                                   "origin Window is no longer available" context))
-            buffer))))
+            (and view buffer)))))
 
   (define (refresh-buffer-list! service request)
     (let* ([context (buffer-list-refresh-request-context request)]
