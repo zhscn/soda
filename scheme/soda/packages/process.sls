@@ -138,13 +138,12 @@
             (package-host-create-buffer!
               host (process-service-owner service)
               (make-process-buffer-name (process-request-command request))
-              (make-document "") configuration)]
-           [view
-            (package-host-create-view! host (process-service-owner service) buffer configuration)])
+              (make-document "") configuration)])
       (unless
-        (package-host-replace-window-view!
-          host (command-context-surface-id context)
-          (command-context-window-id context) (view-id view))
+        (package-host-present-buffer!
+          host (process-service-owner service) buffer
+          (command-context-surface-id context)
+          (command-context-window-id context) configuration)
         (package-host-close-buffer! host (buffer-id buffer))
         (assertion-violation 'process.execute
                              "origin Window is no longer available" context))

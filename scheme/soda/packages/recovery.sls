@@ -335,18 +335,16 @@
                              "recovery requires a routed Window context" context))
       (let* ([resource (recovery-artifact-resource artifact)]
              [buffer
-              (package-host-create-buffer!
-                host (recovery-service-owner service)
-                (string-append "*recovered: " (resource-locator resource) "*")
-                (make-document (recovery-artifact-contents artifact))
-                configuration)]
-             [view
-              (package-host-create-view!
-                host (recovery-service-owner service) buffer configuration)])
+             (package-host-create-buffer!
+               host (recovery-service-owner service)
+               (string-append "*recovered: " (resource-locator resource) "*")
+               (make-document (recovery-artifact-contents artifact))
+               configuration)])
         (unless
-          (package-host-replace-window-view!
-            host (command-context-surface-id context)
-            (command-context-window-id context) (view-id view))
+          (package-host-present-buffer!
+            host (recovery-service-owner service) buffer
+            (command-context-surface-id context)
+            (command-context-window-id context) configuration)
           (package-host-close-buffer! host (buffer-id buffer))
           (assertion-violation 'recovery.restore
                                "origin Window is no longer available" context))
