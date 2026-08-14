@@ -2317,6 +2317,13 @@
               name (lambda (context) (command-handled)) binding-owner)))]
        [first-registration (register 'configured.default)]
        [second-registration (register 'configured.scheme)]
+       [mode-registration
+        (command-runtime-register-command!
+          runtime
+          (make-command-definition
+            'configured.edit
+            (lambda (context) (command-handled)) binding-owner
+            "Configured editing command" 'editing #f 'mode))]
        [binding-source
         (make-location
           (make-resource 'file "/tmp/soda-keys.conf")
@@ -2331,6 +2338,15 @@
         (make-key-binding-declaration
           'editing 'scheme (list control-s) 'configured.scheme
           'global binding-source)]
+       [editing-mode
+        (make-mode-spec
+          'scheme 'major "Configured editing" #f '() '(editing) "Configured")]
+       [restricted-mode
+        (make-mode-spec
+          'scheme 'major "Configured restricted" #f '() '() "Configured")]
+       [other-mode
+        (make-mode-spec
+          'other 'major "Configured other" #f '() '() "Configured")]
        [layers
         (package-host-materialize-key-bindings
           (make-package-host host)
@@ -2359,6 +2375,36 @@
         #f)
       (error 'kernel-tests
              "configured key did not diagnose an unknown command")))
+  (let ([mode-binding
+         (make-key-binding-declaration
+           'editing 'scheme (list control-x) 'configured.edit
+           'global binding-source)])
+    (unless
+      (and (eq? (cadr
+                  (resolve-key-sequence
+                    (package-host-materialize-key-bindings
+                      (make-package-host host) (list mode-binding)
+                      'editing editing-mode)
+                    (list control-x)))
+                'configured.edit)
+           (null?
+             (package-host-materialize-key-bindings
+               (make-package-host host) (list mode-binding)
+               'editing other-mode))
+           (guard
+             (condition
+               [(key-binding-configuration-error? condition)
+                (and (eq? (key-binding-configuration-error-reason condition)
+                          'mode-capability)
+                     (eq? (key-binding-configuration-error-source condition)
+                          binding-source))]
+               [else #f])
+             (package-host-materialize-key-bindings
+               (make-package-host host) (list mode-binding)
+               'editing restricted-mode)
+             #f))
+      (error 'kernel-tests
+             "configured mode binding did not validate command capability")))
   (let ([invalid
          (make-key-binding-declaration
            'editing #f (list 'not-a-key-stroke) 'configured.default
@@ -2393,6 +2439,7 @@
              "configured keys accepted a same-layer conflict")))
   (registration-close! second-registration)
   (registration-close! first-registration)
+  (registration-close! mode-registration)
   (owner-close! binding-owner)
   (unless
     (guard

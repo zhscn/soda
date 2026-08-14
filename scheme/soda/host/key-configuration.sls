@@ -58,6 +58,7 @@
           (case reason
             [(invalid-key) "key sequence contains an invalid key stroke"]
             [(unknown-command) "key binding names an unregistered command"]
+            [(mode-capability) "key binding command is unavailable in the declared mode"]
             [(conflict) "key bindings conflict at the same semantic layer"]
             [else "invalid key binding configuration"]))
         (make-irritants-condition
@@ -75,7 +76,7 @@
     (map key-stroke-binding-key
          (key-binding-declaration-sequence declaration)))
 
-  (define (validate-declarations declarations command-known?)
+  (define (validate-declarations declarations command-known? command-compatible?)
     (let ([seen (make-hashtable equal-hash equal?)])
       (for-each
         (lambda (declaration)
@@ -89,6 +90,8 @@
           (unless (command-known?
                     (key-binding-declaration-command declaration))
             (raise-binding-error 'unknown-command declaration #f))
+          (unless (command-compatible? declaration)
+            (raise-binding-error 'mode-capability declaration #f))
           (let* ([token
                   (list
                     (key-binding-declaration-context declaration)
@@ -119,14 +122,15 @@
         (key-binding-declaration-precedence declaration) keymap #f 'pass)))
 
   (define (key-binding-declarations->input-layers
-           declarations command-known? context mode)
+           declarations command-known? command-compatible? context mode)
     (unless (and (list? declarations) (procedure? command-known?)
+                 (procedure? command-compatible?)
                  (symbol? context) (or (not mode) (symbol? mode)))
       (assertion-violation
         'key-binding-declarations->input-layers
         "invalid key binding materialization request"
-        declarations command-known? context mode))
-    (validate-declarations declarations command-known?)
+        declarations command-known? command-compatible? context mode))
+    (validate-declarations declarations command-known? command-compatible?)
     (let* ([applicable
             (filter
               (lambda (declaration)

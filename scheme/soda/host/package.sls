@@ -52,6 +52,7 @@
           package-host-refresh-command-context)
   (import (rnrs)
           (soda kernel document)
+          (soda kernel mode)
           (soda kernel state)
           (soda kernel view-state)
           (soda host command)
@@ -149,13 +150,41 @@
       (host-state-settings (package-host-state host)) scope context))
 
   (define (package-host-materialize-key-bindings host declarations context mode)
-    (let ([runtime
-           (host-state-command-runtime (package-host-state host))])
+    (unless (and (package-host? host)
+                 (or (not mode) (symbol? mode) (mode-spec? mode)))
+      (assertion-violation 'package-host-materialize-key-bindings
+                           "expected a PackageHost and optional ModeSpec or mode id"
+                           host mode))
+    (let* ([runtime
+            (host-state-command-runtime (package-host-state host))]
+           [mode-id (if (mode-spec? mode) (mode-spec-id mode) mode)]
+           [categories
+            (if (mode-spec? mode)
+                (mode-spec-command-category-list mode)
+                #f)])
       (key-binding-declarations->input-layers
         declarations
         (lambda (name)
           (and (command-runtime-command-definition runtime name #f) #t))
-        context mode)))
+        (lambda (declaration)
+          (let ([definition
+                 (command-runtime-command-definition
+                   runtime (key-binding-declaration-command declaration) #f)])
+            (and definition
+                 (or (eq? (command-definition-scope definition) 'global)
+                     ;; A configuration collection can contain declarations
+                     ;; for other modes.  Validate a mode command when its
+                     ;; declaration targets this materialized ModeSpec; the
+                     ;; mode catalog validates declarations before a target
+                     ;; ModeSpec is available.
+                     (not (eq? (key-binding-declaration-mode declaration)
+                               mode-id))
+                     (and categories
+                          (key-binding-declaration-mode declaration)
+                          (command-definition-class definition)
+                          (memq (command-definition-class definition)
+                                categories))))))
+        context mode-id)))
 
   (define (package-host-register-location-provider! host owner provider)
     (location-service-register!
