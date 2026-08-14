@@ -1848,8 +1848,11 @@
                    (= (length (buffer-service-buffers (host-state-buffers state)))
                       baseline-buffer-count)
                    (null? (surface-interaction-windows
-                            (soda-application-surface application))))
-        (error 'fundamental-editing-tests "interaction submission did not resume through the queue"))
+                            (soda-application-surface application)))
+                   (not (surface-feedback
+                          (soda-application-surface application))))
+        (error 'fundamental-editing-tests
+               "interaction submission did not resume through the queue"))
       ;; A required prompt adapter must not leave an invocation suspended when
       ;; its presentation target is unavailable.
       (let* ([root-view (soda-application-view application)]

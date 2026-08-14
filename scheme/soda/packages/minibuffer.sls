@@ -714,6 +714,16 @@
   (define (minibuffer-service-cancel! service)
     (and (minibuffer-service-current service)
          (interaction-service-cancel! (minibuffer-service-interactions service))))
+
+  ;; The submission service is also used as a programmatic API, where a
+  ;; successful queueing operation returns its InteractionSession.  The
+  ;; command boundary forwards only prompt transactions that keep an
+  ;; interaction open; successful submission is represented by handled.
+  (define (submission-command-outcome result)
+    (if (or (transaction-spec? result) (view-transaction-spec? result))
+        result
+        (command-handled)))
+
   (define (make-minibuffer-service! host interactions owner)
     (unless (and (package-host? host) (interaction-service? interactions) (owner? owner))
       (assertion-violation 'make-minibuffer-service! "invalid minibuffer dependencies"))
@@ -778,8 +788,8 @@
         (class 'minibuffer)
         (scope 'mode)
         (undo 'ignore)
-        (or (minibuffer-service-submit! service context)
-            (command-handled)))
+        (submission-command-outcome
+          (minibuffer-service-submit! service context)))
       (define-command
         (package-host-command-runtime host) owner 'minibuffer.complete (context)
         (documentation "Apply the current prompt completion without accepting the prompt.")
@@ -793,8 +803,8 @@
         (class 'minibuffer)
         (scope 'mode)
         (undo 'ignore)
-        (or (minibuffer-service-submit-value! service context #f)
-            (command-handled)))
+        (submission-command-outcome
+          (minibuffer-service-submit-value! service context #f)))
       (define-command
         (package-host-command-runtime host) owner 'minibuffer.next-completion (context)
         (documentation "Select the next minibuffer completion candidate.")
