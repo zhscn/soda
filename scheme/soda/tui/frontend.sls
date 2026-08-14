@@ -321,7 +321,7 @@
     ;; dispatch. A command may publish a new semantic feedback value at the
     ;; same boundary; sticky feedback survives without obscuring input chrome.
     (when (feedback-clearing-event? event)
-      (host-frontend-clear-input-feedback!
+      (host-frontend-clear-transient-surface-feedback!
         (frontend-host-state value) (frontend-surface value)))
     (let* ([route (and (pointer-event? event) (pointer-route value event))]
            [current
