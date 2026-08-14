@@ -4141,6 +4141,37 @@
       (snapshot-close! snapshot)
       (document-close! document))
 
+    ;; A terminal cell boundary belongs to the following visual row for an
+    ;; after-caret.  Visual measurement and TextLayout must retain the same
+    ;; coordinate so incremental reveal never leaves that caret off screen.
+    (let* ([document (make-document "abcd")]
+           [snapshot (document-snapshot document)]
+           [text (snapshot-text snapshot)]
+           [selection (make-selection (list (make-selection-range 4 4)))]
+           [layout (layout-text-snapshot snapshot selection 0 2 3)]
+           [position
+            (text-layout-document-visual-position
+              text default-text-layout-options 2 4)]
+           [viewport
+            (text-layout-reveal-viewport
+              text default-text-layout-options 2 1 default-viewport 4)]
+           [display (make-display-viewport 2)])
+      (unless (and (= (text-layout-cursor-row layout) 2)
+                   (= (text-layout-cursor-column layout) 0)
+                   (= (visual-position-line position) 0)
+                   (= (visual-position-row position) 2)
+                   (= (visual-position-column position) 0)
+                   (document-viewport? viewport)
+                   (= (viewport-first-line viewport) 0)
+                   (= (viewport-visual-row viewport) 2)
+                   (display-viewport? display)
+                   (not (viewport=? display viewport)))
+        (error 'fundamental-editing-tests
+               "visual measurement diverged from the terminal boundary caret"))
+      (text-close! text)
+      (snapshot-close! snapshot)
+      (document-close! document))
+
     ;; Editing options are immutable state contributions: auto-indent follows
     ;; the Buffer across commands, while layout choices remain View-local.
     (let* ([application (make-soda-application)]
@@ -5399,9 +5430,10 @@
                             (selection-primary-range
                               (view-state-selection (view-state view))))
                           6)
-                       (> (viewport-visual-row
-                            (view-state-viewport (view-state view)))
-                          0)
+                       (let ([viewport (view-state-viewport (view-state view))])
+                         (and (document-viewport? viewport)
+                              (or (> (viewport-first-line viewport) 0)
+                                  (> (viewport-visual-row viewport) 0))))
                        (= viewport-updates 1)
                        (<= (length presented-rows) 2))
             (error 'fundamental-editing-tests

@@ -270,6 +270,33 @@
            layout
            (selection-range-head (selection-primary-range selection)))))
 
+  (define (raw-document-reveal-viewport view state width height request)
+    (let ([projection (view-projection view)])
+      (and (eq? (scroll-request-kind request) 'reveal-point)
+           (not (view-projection-display-stream projection))
+           (null? (view-projection-transforms projection))
+           (let* ([snapshot (buffer-state-document (buffer-state (view-buffer view)))]
+                  [text (snapshot-text snapshot)]
+                  [options (configuration-facet (view-state-configuration state)
+                                                text-layout-options-facet 'view)])
+             (dynamic-wind
+               (lambda () #f)
+               (lambda ()
+                 (text-layout-reveal-viewport
+                   text options width height (view-state-viewport state)
+                   (selection-range-head
+                     (selection-primary-range (view-state-selection state)))))
+               (lambda () (text-close! text)))))))
+
+  (define (publish-revealed-viewport! state view state-value viewport)
+    (unless (viewport=? viewport (view-state-viewport state-value))
+      (dispatcher-dispatch-view!
+        (host-state-dispatch state)
+        (make-view-transaction-spec
+          (view-id view) (view-state-generation state-value)
+          #f viewport #f '() '() #f)))
+    #t)
+
   (define (resolve-scroll-request! state active layout request cache)
     (unless (and (host-state? state) (active-context? active)
                  (text-layout? layout) (scroll-request? request)
@@ -298,7 +325,13 @@
                (if (visible-reveal? layout request
                                     (view-state-selection view-state))
                    #t
-                   (let* ([options
+                   (let ([raw-viewport
+                          (raw-document-reveal-viewport
+                            view view-state width height request)])
+                     (if raw-viewport
+                         (publish-revealed-viewport!
+                           state view view-state raw-viewport)
+                         (let* ([options
                        (configuration-facet
                          (view-state-configuration view-state)
                          text-layout-options-facet 'view)]
@@ -351,7 +384,7 @@
                          [(recenter) (- point-row (screen-row argument))]
                          [(move-point-to-window-row) current-top])]
                       [target-top (min last-top (max 0 requested-top))]
-                      [target (make-viewport 0 target-top)]
+                      [target (make-display-viewport target-top)]
                       [next-selection
                        (cond
                          [(eq? kind 'move-point-to-window-row)
@@ -415,7 +448,7 @@
                             next-selection)
                        (and (not (viewport=? target current)) target)
                        #f '() '() #f)))
-                 #t))))))
+                 #t))))))))
 
   (define host-frontend-resolve-scroll-request!
     (case-lambda

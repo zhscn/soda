@@ -60,7 +60,21 @@
           (list (cons start end))
           (let loop ([offset start] [row-start start] [column 0] [segments '()])
             (if (= offset end)
-                (reverse (cons (cons row-start end) segments))
+                (let ([result (reverse (cons (cons row-start end) segments))])
+                  ;; A terminal advances the caret to the next visual row
+                  ;; after a final glyph occupies its last cell.  At EOF this
+                  ;; is a real, empty caret row, so retain it as an explicit
+                  ;; zero-width segment.  Before a hard line break the next
+                  ;; logical line is the canonical owner of that same row.
+                  (let ([last (car (reverse result))])
+                    (if (and (= line (- (text-line-count text) 1))
+                             (= end (text-size text))
+                             (not (= (car last) (cdr last)))
+                             (= (text-layout-segment-column
+                                  text options width last end)
+                                width))
+                        (append result (list (cons end end)))
+                        result)))
                 (let* ([next (text-next-grapheme-offset text offset)]
                        [glyph-width
                         (text-layout-grapheme-width text offset next column options width)])
@@ -102,6 +116,10 @@
                            "expected Text, TextLayoutOptions, and a positive layout width"
                            text options width)))
 
+  (define (require-document-viewport who viewport)
+    (unless (document-viewport? viewport)
+      (assertion-violation who "expected a document-origin Viewport" viewport)))
+
   ;; Map a document offset to its raw visual row.  Display transforms can
   ;; override this with TextLayout's DisplayMap while they are on screen; this
   ;; function supplies the unbounded document measurement used when a motion
@@ -113,13 +131,24 @@
                            "document offset is outside Text" offset))
     (let* ([location (text-position text offset)]
            [line (car location)]
+           [end (text-line-content-end text line)]
            [segments (text-layout-line-visual-segments text options width line)]
            [index (or (text-layout-segment-index segments offset)
                       (- (length segments) 1))]
-           [segment (list-ref segments index)])
-      (make-visual-position
-        offset line index
-        (text-layout-segment-column text options width segment offset))))
+           [segment (list-ref segments index)]
+           [column
+            (text-layout-segment-column text options width segment offset)]
+           [last-line (- (text-line-count text) 1)])
+      ;; At the end of an exactly full non-final line, the DisplayMap's
+      ;; `after` association is the following logical line's first cell.
+      ;; Canonicalizing this boundary avoids counting that physical row twice
+      ;; while preserving the EOF caret row above.
+      (if (and (= offset end)
+               (< line last-line)
+               (= column width)
+               (text-layout-options-wrap? options))
+          (make-visual-position offset (+ line 1) 0 0)
+          (make-visual-position offset line index column))))
 
   ;; Produce the start of a particular visual row for a Viewport.  A stale
   ;; visual-row value is clamped to the last row of its logical line, keeping
@@ -213,6 +242,7 @@
       (assertion-violation 'text-layout-scroll-start
                            "invalid visual scroll request"
                            text options width height viewport delta))
+    (require-document-viewport 'text-layout-scroll-start viewport)
     (let* ([top
             (text-layout-visual-position-at
               text options width
@@ -274,6 +304,7 @@
       (assertion-violation 'text-layout-viewport-row-position
                            "invalid viewport row request"
                            text options width height viewport screen-row goal-column))
+    (require-document-viewport 'text-layout-viewport-row-position viewport)
     (let ([top
            (text-layout-visual-position-at
              text options width
@@ -293,6 +324,7 @@
       (assertion-violation 'text-layout-reveal-viewport
                            "invalid point reveal request"
                            text options width height viewport offset))
+    (require-document-viewport 'text-layout-reveal-viewport viewport)
     (let* ([top
            (text-layout-visual-position-at
               text options width
@@ -318,4 +350,3 @@
              (visual-position-line next-top) (visual-position-row next-top)))]
         [else viewport])))
 )
-
