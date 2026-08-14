@@ -1131,6 +1131,21 @@
   (view-service-create!
     (host-state-views host) owner buffer configuration))
 
+;; Buffer names are stable user-facing identities within a live catalog.  A
+;; collision receives the same deterministic suffix convention as Emacs.
+(let* ([duplicate
+        (buffer-service-create!
+          (host-state-buffers host) owner "*kernel*"
+          (make-document "") configuration)]
+       [third
+        (buffer-service-create!
+          (host-state-buffers host) owner "*kernel*"
+          (make-document "") configuration)])
+  (unless (and (string=? (buffer-name buffer) "*kernel*")
+               (string=? (buffer-name duplicate) "*kernel*<2>")
+               (string=? (buffer-name third) "*kernel*<3>"))
+    (error 'kernel-tests "BufferService did not uniquify display names")))
+
 (let* ([package-host (make-package-host host)]
        [provider-owner (make-owner 'analysis-service-test)]
        [decoration-publications 0]

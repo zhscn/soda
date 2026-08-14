@@ -91,7 +91,7 @@
            [buffer
             (%make-buffer
               (identity-source-next! identity-source)
-              owner name document
+              owner (string->immutable-string name) document
               (make-buffer-state snapshot configuration)
               (list (weak-cons snapshot #f))
               1
@@ -207,12 +207,28 @@
             (filter (lambda (item) (not (eq? item listener)))
                     (buffer-service-close-listeners service)))))))
 
+  (define (buffer-service-name-used? service candidate)
+    (exists
+      (lambda (buffer) (string=? (buffer-name buffer) candidate))
+      (buffer-service-buffers service)))
+
+  (define (buffer-service-unique-name service name)
+    (if (not (buffer-service-name-used? service name))
+        name
+        (let loop ([suffix 2])
+          (let ([candidate
+                 (string-append name "<" (number->string suffix) ">")])
+            (if (buffer-service-name-used? service candidate)
+                (loop (+ suffix 1))
+                candidate)))))
+
   (define (buffer-service-create! service owner name document configuration)
     (unless (buffer-service? service)
       (assertion-violation 'buffer-service-create! "expected a buffer service" service))
     (let ([buffer (make-buffer-record
                     (buffer-service-identities service)
-                    owner name document configuration
+                    owner (buffer-service-unique-name service name)
+                    document configuration
                     (lambda (buffer)
                       (buffer-service-close-buffer! service (buffer-id buffer))))])
       (hashtable-set! (buffer-service-table service) (buffer-id buffer) buffer)
