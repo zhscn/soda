@@ -40,14 +40,25 @@
            sequence)
       " "))
 
-  (define (command-context-keymaps context fallback-keymaps)
+  ;; Presentation queries use the same semantic layer ordering as input
+  ;; dispatch.  Fallbacks therefore retain their InputLayer ranks instead of
+  ;; being flattened into unranked Keymaps.
+  (define (command-context-keymaps context fallback-layers)
+    (unless (and (command-context? context)
+                 (list? fallback-layers)
+                 (for-all input-layer? fallback-layers))
+      (assertion-violation
+        'command-context-keymaps
+        "expected a CommandContext and fallback InputLayers"
+        context fallback-layers))
     (let ([state (command-context-buffer-state context)])
-      (append
-        (if state
-            (map input-layer-keymap
-                 (configuration-facet
-                   (buffer-state-configuration state)
-                   buffer-input-layers-facet 'buffer))
-            '())
-        fallback-keymaps)))
+      (map input-layer-keymap
+           (input-layer-compose
+             (append
+               (if state
+                   (configuration-facet
+                     (buffer-state-configuration state)
+                     buffer-input-layers-facet 'buffer)
+                   '())
+               fallback-layers)))))
 )

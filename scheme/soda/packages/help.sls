@@ -28,7 +28,7 @@
     (let* ([runtime (package-host-command-runtime (help-service-host service))]
            [keymaps
             (command-context-keymaps
-              context (help-service-fallback-keymaps service))]
+              context (help-service-fallback-layers service))]
            [definitions
             (list-sort
               definition<?
@@ -53,7 +53,7 @@
             definitions)))))
 
   (define-record-type help-service
-    (fields host owner keymap mode fallback-keymaps authority
+    (fields host owner keymap mode fallback-layers authority
             (mutable generation help-service-generation
                      help-service-generation-set!)))
 
@@ -99,11 +99,11 @@
           (assertion-violation
             'help.show "origin Window is no longer available" context)))))
 
-  (define (make-help-service! host owner actions fallback-keymaps)
+  (define (make-help-service! host owner fallback-layers)
     (unless (and (package-host? host) (owner? owner)
-                 (list? fallback-keymaps) (for-all keymap? fallback-keymaps))
+                 (list? fallback-layers) (for-all input-layer? fallback-layers))
       (assertion-violation 'make-help-service!
-                           "expected a PackageHost, Owner, and application keymaps"))
+                           "expected a PackageHost, Owner, and application InputLayers"))
     (let* ([keymap (make-keymap 'help)]
            [authority (make-edit-authority owner 'help-refresh)]
            [profile
@@ -119,7 +119,7 @@
               "Help")]
            [service
             (make-help-service
-              host owner keymap mode fallback-keymaps authority 0)])
+              host owner keymap mode fallback-layers authority 0)])
       (define-command
         (package-host-command-runtime host) owner 'help.show (context)
         (documentation "Show commands and active key bindings for the current context.")

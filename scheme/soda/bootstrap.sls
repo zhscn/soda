@@ -97,6 +97,7 @@
       (immutable buffer-lists soda-application-buffer-lists)
       (immutable override-keymap soda-application-override-keymap)
       (immutable default-keymap soda-application-default-keymap)
+      (immutable input-layers soda-application-input-layers)
       (mutable terminal soda-application-terminal soda-application-terminal-set!)
       (mutable effect-registration soda-application-effect-registration
                soda-application-effect-registration-set!)
@@ -192,34 +193,47 @@
                 (install-keyboard-quit-command! host owner interaction)]
                [override-keymap (make-override-keymap)]
                [default-keymap (make-default-keymap)]
-               [application-keymaps
-                (list override-keymap
-                      (editor-options-keymap options)
-                      (search-keymap search)
-                      (word-completion-keymap word-completion)
-                      (whitespace-keymap whitespace)
-                      (comment-keymap comments)
-                      (keyboard-macro-keymap keyboard-macros)
-                      (message-keymap messages)
-                      (spell-keymap spelling)
-                      (process-keymap processes)
-                      (file-keymap files)
-                      (directory-keymap directories)
-                      (buffer-list-keymap buffer-lists)
-                      default-keymap)]
+               [application-input-layers
+                (make-application-input-layers
+                  override-keymap options search word-completion whitespace comments
+                  keyboard-macros messages spelling processes files directories
+                  buffer-lists default-keymap)]
                [_help
                 (make-help-service!
-                  host owner buffer-item-actions application-keymaps)]
+                  host owner application-input-layers)]
                [_command-ui
                 (make-command-ui!
-                  (host-state-command-runtime state) owner application-keymaps)])
+                  (host-state-command-runtime state) owner application-input-layers)])
           (install-buffer-item-commands!
             (host-state-command-runtime state) owner buffer-item-actions host)
           (surface-service-register! (host-state-surfaces state) surface)
           (history-mark-saved! history (buffer-id buffer))
           (%make-soda-application
-            state owner buffer view surface editing options history keyboard-macros files scheme-mode directories processes spelling messages search interaction minibuffer buffer-item-actions buffer-lists override-keymap default-keymap
+            state owner buffer view surface editing options history keyboard-macros files scheme-mode directories processes spelling messages search interaction minibuffer buffer-item-actions buffer-lists override-keymap default-keymap application-input-layers
             #f #f #f)))))
+
+  ;; This is the application composition boundary shared by terminal input,
+  ;; Help, and command presentation.  Keeping the ranks here prevents a key
+  ;; from being advertised by Help or where-is while absent from dispatch.
+  (define (make-application-input-layers
+            override-keymap options search word-completion whitespace comments
+            keyboard-macros messages spelling processes files directories
+            buffer-lists default-keymap)
+    (list
+      (make-input-layer 'override override-keymap #f 'pass)
+      (make-input-layer 'global (editor-options-keymap options) #f 'pass)
+      (make-input-layer 'global (search-keymap search) #f 'pass)
+      (make-input-layer 'global (word-completion-keymap word-completion) #f 'pass)
+      (make-input-layer 'global (whitespace-keymap whitespace) #f 'pass)
+      (make-input-layer 'global (comment-keymap comments) #f 'pass)
+      (make-input-layer 'global (keyboard-macro-keymap keyboard-macros) #f 'pass)
+      (make-input-layer 'global (message-keymap messages) #f 'pass)
+      (make-input-layer 'global (spell-keymap spelling) #f 'pass)
+      (make-input-layer 'global (process-keymap processes) #f 'pass)
+      (make-input-layer 'global (file-keymap files) #f 'pass)
+      (make-input-layer 'global (directory-keymap directories) #f 'pass)
+      (make-input-layer 'global (buffer-list-keymap buffer-lists) #f 'pass)
+      (make-input-layer 'global default-keymap #f 'pass)))
 
   (define (make-override-keymap)
     (let ([keymap (make-keymap 'soda-override)])
@@ -450,47 +464,7 @@
                   (soda-application-editing application))))
             (buffer-input-context
               active view
-              (list
-                (make-input-layer
-                  'override
-                  (soda-application-override-keymap application)
-                  #f 'pass)
-                (make-input-layer
-                  'global
-                  (editor-options-keymap (soda-application-options application))
-                  #f 'pass)
-                (make-input-layer
-                  'global
-                  (search-keymap (soda-application-search application))
-                  #f 'pass)
-                (make-input-layer
-                  'global
-                  (message-keymap (soda-application-messages application))
-                  #f 'pass)
-                (make-input-layer
-                  'global
-                  (spell-keymap (soda-application-spelling application))
-                  #f 'pass)
-                (make-input-layer
-                  'global
-                  (process-keymap (soda-application-processes application))
-                  #f 'pass)
-                (make-input-layer
-                  'global
-                  (file-keymap (soda-application-files application))
-                  #f 'pass)
-                (make-input-layer
-                  'global
-                  (directory-keymap (soda-application-directories application))
-                  #f 'pass)
-                (make-input-layer
-                  'global
-                  (buffer-list-keymap (soda-application-buffer-lists application))
-                  #f 'pass)
-                (make-input-layer
-                  'global
-                  (soda-application-default-keymap application)
-                  #f 'pass))))
+              (soda-application-input-layers application)))
       emacs-input-translation))
 
   (define (make-disposition-handler application)

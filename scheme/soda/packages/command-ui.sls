@@ -71,11 +71,11 @@
                 "No documentation."))
           (string-append "Unknown command: " (symbol->string name)))))
 
-  (define (make-command-ui! runtime owner fallback-keymaps)
+  (define (make-command-ui! runtime owner fallback-layers)
     (unless (and (command-runtime? runtime) (owner? owner)
-                 (list? fallback-keymaps) (for-all keymap? fallback-keymaps))
+                 (list? fallback-layers) (for-all input-layer? fallback-layers))
       (assertion-violation 'make-command-ui!
-                           "expected a runtime, owner, and application keymaps"))
+                           "expected a runtime, owner, and application InputLayers"))
     (let ([execute-reader (make-command-reader runtime 'extended-command "M-x ")]
           [describe-reader (make-command-reader runtime 'describe-command "Describe command: ")]
           [where-reader (make-command-reader runtime 'where-is "Where is command: ")])
@@ -104,7 +104,7 @@
         (undo 'ignore)
         (let ([sequences
                (keymap-where-is
-                 (command-context-keymaps context fallback-keymaps) name)])
+                 (command-context-keymaps context fallback-layers) name)])
           (make-command-effect
             'message.show
             (make-message-request

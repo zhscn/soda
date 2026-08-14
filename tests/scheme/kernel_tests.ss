@@ -4994,6 +4994,21 @@
   (dynamic-wind
     (lambda () #f)
     (lambda ()
+      (let* ([surface (soda-application-surface application)]
+             [active (surface-active-context surface (host-state-views state))]
+             [view (view-service-ref (host-state-views state)
+                                     (active-context-view-id active))]
+             [context
+              (soda-application-resolve-input-context application active view)]
+             [disposition
+              (input-dispatch
+                context
+                (make-key-event
+                  'tab #f #f #f 2 'press (make-bytevector 0)))])
+        (unless (and (eq? (input-disposition-kind disposition) 'command)
+                     (eq? (input-disposition-value disposition) 'word.complete))
+          (error 'kernel-tests
+                 "application key composition omitted an advertised completion command")))
       (command-runtime-start! runtime 'help.show (application-command-context application))
       (let* ([surface (soda-application-surface application)]
              [active (surface-active-context surface (host-state-views state))]
