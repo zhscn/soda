@@ -12,7 +12,6 @@
           (soda kernel selection)
           (soda kernel state)
           (soda kernel mode)
-          (soda kernel viewport)
           (soda kernel view-state)
           (soda host command)
           (soda host command-runtime)
@@ -261,12 +260,7 @@
                     (make-view-transaction-spec
                       (view-id view) (view-state-generation (view-state view))
                       (source-selection (spell-finding-offset finding))
-                      #f #f '() '()
-                      (make-scroll-request
-                        'reveal-point
-                        (command-context-surface-id context)
-                        (command-context-window-id context)
-                        (view-id view))))
+                      #f #f '() '() #f))
                   (make-command-context
                     #f (command-context-surface-id context) (command-context-window-id context)
                     (view-id view) (buffer-id source) (buffer-state source) (view-state view)

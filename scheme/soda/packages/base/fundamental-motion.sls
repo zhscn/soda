@@ -14,7 +14,6 @@
           (soda kernel state)
           (soda kernel syntax-profile)
           (soda kernel view-state)
-          (soda kernel viewport)
           (soda packages base editing-context)
           (soda packages base text-motion)
           (soda packages buffer-mode)
@@ -47,12 +46,7 @@
                [state (command-context-view-state context)])
           (make-view-transaction-spec
             (command-context-view-id context) (view-state-generation state)
-            next #f #f '() '()
-            (make-scroll-request
-              'reveal-point
-              (command-context-surface-id context)
-              (command-context-window-id context)
-              (command-context-view-id context)))))))
+            next #f #f '() '() #f)))))
 
   (define (move-selection-by context target)
     (with-context-text
@@ -70,12 +64,7 @@
                [state (command-context-view-state context)])
           (make-view-transaction-spec
             (command-context-view-id context) (view-state-generation state)
-            next #f #f '() '()
-            (make-scroll-request
-              'reveal-point
-              (command-context-surface-id context)
-              (command-context-window-id context)
-              (command-context-view-id context)))))))
+            next #f #f '() '() #f)))))
 
   (define (text-character-at text offset)
     (let* ([next (text-next-grapheme-offset text offset)]
@@ -218,12 +207,7 @@
                [state (command-context-view-state context)])
           (make-view-transaction-spec
             (command-context-view-id context) (view-state-generation state)
-            next #f #f '() '()
-            (make-scroll-request
-              'reveal-point
-              (command-context-surface-id context)
-              (command-context-window-id context)
-              (command-context-view-id context)))))))
+            next #f #f '() '() #f)))))
 
   (define (move-buffer-boundary context end?)
     (move-selection-by

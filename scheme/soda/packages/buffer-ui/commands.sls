@@ -34,12 +34,7 @@
       (view-state-generation (command-context-view-state context))
       (make-selection
         (list (make-selection-range (range-value-from range) (range-value-from range))))
-      #f #f '() '()
-      (make-scroll-request
-        'reveal-point
-        (command-context-surface-id context)
-        (command-context-window-id context)
-        (command-context-view-id context))))
+      #f #f '() '() #f))
 
   (define (move-line context amount)
     (let* ([state (command-context-buffer-state context)]

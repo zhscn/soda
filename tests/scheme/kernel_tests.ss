@@ -1011,6 +1011,53 @@
                     (selection-primary-range (view-state-selection (view-state view))))
                   2))
     (error 'kernel-tests "Dispatcher did not defer a reentrant view update")))
+
+;; Point motion is a semantic selection change.  Dispatcher owns the default
+;; reveal contract so every package gets one viewport policy without coupling
+;; its command implementation to a Surface or terminal geometry.
+(let* ([document (make-document "abc")]
+       [configuration (make-configuration '())]
+       [buffer
+        (buffer-service-create!
+          (host-state-buffers host) owner "*point-reveal*" document configuration)]
+       [view (view-service-create! (host-state-views host) owner buffer configuration)]
+       [dispatcher (host-state-dispatch host)]
+       [view-request #f]
+       [viewport-request #t]
+       [buffer-request #f]
+       [selection (make-selection (list (make-selection-range 1 1)))])
+  (dispatcher-set-listener!
+    dispatcher
+    (lambda (update)
+      (cond
+        [(not view-request) (set! view-request (editor-update-scroll-request update))]
+        [(eq? viewport-request #t)
+         (set! viewport-request (editor-update-scroll-request update))]
+        [else (set! buffer-request (editor-update-scroll-request update))])))
+  (dispatcher-dispatch-view!
+    dispatcher
+    (make-view-transaction-spec
+      (view-id view) (view-state-generation (view-state view))
+      selection #f #f '() '() #f))
+  (dispatcher-dispatch-view!
+    dispatcher
+    (make-view-transaction-spec
+      (view-id view) (view-state-generation (view-state view))
+      selection (make-viewport 0 1) #f '() '() #f))
+  (dispatcher-dispatch!
+    dispatcher
+    (make-transaction-spec
+      (buffer-id buffer) (view-id view) (buffer-state-generation (buffer-state buffer))
+      (make-change-set 3 '()) selection '() '()))
+  (dispatcher-set-listener! dispatcher #f)
+  (unless (and (scroll-request? view-request)
+               (eq? (scroll-request-kind view-request) 'reveal-point)
+               (= (scroll-request-view-id view-request) (view-id view))
+               (not viewport-request)
+               (scroll-request? buffer-request)
+               (eq? (scroll-request-kind buffer-request) 'reveal-point)
+               (= (scroll-request-view-id buffer-request) (view-id view)))
+    (error 'kernel-tests "Dispatcher point reveal contract differs")))
 (let ([text (string->text "e\x301;\x1f469;\x200d;\x1f4bb;")])
   (let ([first (text-next-grapheme-offset text 0)]
         [second (text-next-grapheme-offset text 3)]
