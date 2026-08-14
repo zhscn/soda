@@ -448,7 +448,8 @@
             (command-runtime-start! runtime 'file.visit
                                     (application-command-context application) (list path))
             (let* ([file-context (application-command-context application)]
-                   [file-id (command-context-buffer-id file-context)])
+                   [file-id (command-context-buffer-id file-context)]
+                   [file-view-id (command-context-view-id file-context)])
               (command-runtime-start! runtime 'fundamental.end-of-buffer file-context)
               (command-runtime-start! runtime 'fundamental.insert-text
                                       (application-command-context application)
@@ -480,6 +481,11 @@
                            file-id)
                   (error 'fundamental-editing-tests
                          "buffer.list activation did not select its BufferItem target"))
+                (unless (= (command-context-view-id
+                             (application-command-context application))
+                           file-view-id)
+                  (error 'fundamental-editing-tests
+                         "buffer.list activation did not restore the recent View"))
                 (command-runtime-start! runtime 'buffer.list
                                         (application-command-context application))
                 (unless (= (command-context-buffer-id
@@ -489,7 +495,18 @@
                          "buffer.list did not reuse its canonical generated Buffer"))
                 ;; `d` retains the Buffer List as the active context and
                 ;; passes the selected row as an explicit close target.  The
-                ;; normal File package still owns its save/discard prompt.
+                ;; Select the file row explicitly; the normal File package
+                ;; still owns its save/discard prompt.
+                (let* ([context (application-command-context application)]
+                       [view (view-service-ref
+                               (host-state-views state)
+                               (command-context-view-id context))])
+                  (dispatcher-dispatch-view!
+                    (host-state-dispatch state)
+                    (make-view-transaction-spec
+                      (view-id view) (view-state-generation (view-state view))
+                      (make-selection (list (make-selection-range 0 0)))
+                      #f #f '() '() #f)))
                 (command-runtime-start! runtime 'buffer.next-item
                                         (application-command-context application))
                 (command-runtime-start! runtime 'buffer.next-item

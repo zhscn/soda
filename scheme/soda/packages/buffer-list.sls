@@ -133,13 +133,12 @@
       (if (= (buffer-id buffer) (command-context-buffer-id context))
           buffer
           (let ([view
-                 (package-host-create-view!
+                 (package-host-present-buffer!
                    host (buffer-list-service-owner service) buffer
+                   (command-context-surface-id context)
+                   (command-context-window-id context)
                    (buffer-state-configuration (buffer-state buffer)))])
-            (unless
-              (package-host-replace-window-view!
-                host (command-context-surface-id context)
-                (command-context-window-id context) (view-id view))
+            (unless view
               (assertion-violation 'buffer.list
                                    "origin Window is no longer available" context))
             buffer))))
@@ -158,13 +157,12 @@
       (if (or (not target) (= target-id (command-context-buffer-id context)))
           (command-handled)
           (let* ([view
-                  (package-host-create-view!
+                  (package-host-present-buffer!
                     host (buffer-list-service-owner service) target
+                    (command-context-surface-id context)
+                    (command-context-window-id context)
                     (buffer-state-configuration (buffer-state target)))])
-            (unless
-              (package-host-replace-window-view!
-                host (command-context-surface-id context)
-                (command-context-window-id context) (view-id view))
+            (unless view
               (assertion-violation 'buffer-list.visit
                                    "origin Window is no longer available" context))
             (command-handled)))))

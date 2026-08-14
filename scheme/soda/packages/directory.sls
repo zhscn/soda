@@ -190,13 +190,12 @@
                               (buffer-id buffer) directory-state)
               (publish-directory! service buffer))
             (let ([view
-                   (package-host-create-view!
+                   (package-host-present-buffer!
                      host (directory-service-owner service) buffer
+                     (command-context-surface-id context)
+                     (command-context-window-id context)
                      (buffer-state-configuration (buffer-state buffer)))])
-              (unless
-                (package-host-replace-window-view!
-                  host (command-context-surface-id context)
-                  (command-context-window-id context) (view-id view))
+              (unless view
                 (assertion-violation 'directory.browse
                                      "origin Window is no longer available" context))
               buffer)))))

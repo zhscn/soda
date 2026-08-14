@@ -115,11 +115,10 @@
               (assertion-violation 'file.visit
                                    "file visit requires a routed Window context" context))
             (let ([view
-                   (package-host-create-view!
-                     host (file-service-owner service) buffer
+                   (package-host-present-buffer!
+                     host (file-service-owner service) buffer surface-id window-id
                      (buffer-state-configuration (buffer-state buffer)))])
-              (unless
-                (package-host-replace-window-view! host surface-id window-id (view-id view))
+              (unless view
                 (assertion-violation 'file.visit "origin Window is no longer available" context))
               buffer)))))
 
@@ -136,4 +135,3 @@
         (make-change-set length (list (make-text-change 0 length contents)))
         (reset-selection) '() '())))
 )
-

@@ -36,6 +36,7 @@
           package-host-rebind-buffer-key!
           package-host-view-ref
           package-host-create-view!
+          package-host-present-buffer!
           package-host-close-view!
           package-host-surface-size
           package-host-replace-window-view!
@@ -288,6 +289,55 @@
   (define (package-host-create-view! host owner buffer configuration . input-state)
     (apply view-service-create!
            (host-state-views (package-host-state host)) owner buffer configuration input-state))
+
+  (define (recent-buffer-view surface views target-id)
+    (let loop ([ids (surface-view-history surface)])
+      (and (pair? ids)
+           (let ([view (view-service-ref views (car ids) #f)])
+             (if (and view (= (buffer-id (view-buffer view)) target-id))
+                 view
+                 (loop (cdr ids)))))))
+
+  ;; Presenting a Buffer is a host navigation operation.  It restores the
+  ;; Surface's most recently used View for that Buffer, preserving point,
+  ;; viewport, and input state.  A View is created only on first presentation.
+  (define (package-host-present-buffer!
+            host owner buffer target-surface-id target-window-id configuration)
+    (unless (and (package-host? host) (owner? owner) (buffer? buffer))
+      (assertion-violation 'package-host-present-buffer!
+                           "expected a PackageHost, Owner, and Buffer"
+                           host owner buffer))
+    (let* ([state (package-host-state host)]
+           [views (host-state-views state)]
+           [surface
+            (surface-service-ref
+              (host-state-surfaces state) target-surface-id #f)]
+           [window (and surface
+                        (find (lambda (leaf) (= (window-id leaf) target-window-id))
+                              (window-leaves (surface-root-window surface))))])
+      (and window
+           (let ([current (view-service-ref views (window-view-id window) #f)])
+             (if (and current
+                      (= (buffer-id (view-buffer current)) (buffer-id buffer)))
+                 current
+                 (let ([recent (recent-buffer-view surface views (buffer-id buffer))])
+                   (if recent
+                       (and (dispatcher-dispatch-host!
+                              (host-state-dispatch state)
+                              (make-replace-window-view-operation
+                                target-surface-id target-window-id (view-id recent)))
+                            recent)
+                       (let ([created
+                              (view-service-create!
+                                views owner buffer configuration)])
+                         (if (dispatcher-dispatch-host!
+                               (host-state-dispatch state)
+                               (make-replace-window-view-operation
+                                 target-surface-id target-window-id (view-id created)))
+                             created
+                             (begin
+                               (view-service-close-view! views (view-id created))
+                               #f))))))))))
 
   (define (package-host-close-view! host id)
     (view-service-close-view! (host-state-views (package-host-state host)) id))

@@ -74,7 +74,7 @@
                    (when (and old-context
                               (eq? (host-operation-kind operation)
                                    'replace-window-view)
-                              (not (surface-service-view-placed?
+                              (not (surface-service-view-retained?
                                      surfaces
                                      (active-context-view-id old-context))))
                      (view-service-close-view!

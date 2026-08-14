@@ -9,6 +9,7 @@
           surface-size
           surface-root-window
           surface-selected-window
+          surface-view-history
           surface-interaction-windows
           surface-active-window
           surface-windows
@@ -29,6 +30,7 @@
           surface-service-ref
           surface-service-surfaces
           surface-service-view-placed?
+          surface-service-view-retained?
           surface-service-set-remove-handler!
           surface-service-remove!
           surface-service-prune-view!
@@ -68,6 +70,7 @@
       (mutable size surface-size surface-size-set!)
       (mutable root-window surface-root-window surface-root-window-set!)
       (mutable selected-window surface-selected-window surface-selected-window-set!)
+      (mutable view-history surface-view-history-raw surface-view-history-set!)
       (mutable interactions surface-interaction-windows surface-interaction-windows-set!)
       (mutable generation surface-generation surface-generation-set!)))
 
@@ -91,7 +94,23 @@
          (window-set-selected! selected #t)
          (%make-surface (identity-source-next! surface-identities)
                         frontend (list-copy capabilities) #f '()
-                        size root-window selected '() 0))]))
+                        size root-window selected
+                        (map window-view-id (window-leaves root-window)) '() 0))]))
+
+  ;; View history is presentation history, not Buffer registry order.  It is
+  ;; kept on the Surface because different frontends may have independent
+  ;; navigation contexts.
+  (define (surface-view-history surface)
+    (unless (surface? surface)
+      (assertion-violation 'surface-view-history "expected a Surface" surface))
+    (list-copy (surface-view-history-raw surface)))
+
+  (define (surface-record-view-switch! surface old-view-id new-view-id)
+    (surface-view-history-set!
+      surface
+      (cons old-view-id
+            (remv new-view-id
+                  (remv old-view-id (surface-view-history-raw surface))))))
 
   (define (surface-set-shortcut-hints! surface hints)
     (unless (and (surface? surface) (list? hints)
@@ -193,12 +212,15 @@
            (let ([replacement (window-retarget-view target view-id)])
              (if (eq? target replacement)
                  target
-                 (surface-rebuild-window!
-                   surface
-                   (replace-window root target replacement)
-                   (if (eq? target (surface-selected-window surface))
-                       replacement
-                       (surface-selected-window surface))))))))
+                 (begin
+                   (surface-record-view-switch!
+                     surface (window-view-id target) view-id)
+                   (surface-rebuild-window!
+                     surface
+                     (replace-window root target replacement)
+                     (if (eq? target (surface-selected-window surface))
+                         replacement
+                         (surface-selected-window surface)))))))))
 
   (define view-id? nonnegative-exact-integer?)
 
@@ -402,6 +424,15 @@
                 (surface-windows surface)))
       (surface-service-surfaces service)))
 
+  (define (surface-service-view-retained? service view-id)
+    (unless (and (surface-service? service) (view-id? view-id))
+      (assertion-violation 'surface-service-view-retained?
+                           "invalid SurfaceService or View identity" service view-id))
+    (or (surface-service-view-placed? service view-id)
+        (exists
+          (lambda (surface) (memv view-id (surface-view-history-raw surface)))
+          (surface-service-surfaces service))))
+
   (define (surface-service-remove! service id)
     (unless (and (surface-service? service) (nonnegative-exact-integer? id))
       (assertion-violation 'surface-service-remove! "invalid SurfaceService or identity"
@@ -419,6 +450,8 @@
                            "invalid SurfaceService or View identity" service view-id))
     (for-each
       (lambda (surface)
+        (surface-view-history-set!
+          surface (remv view-id (surface-view-history-raw surface)))
         (unless (surface-prune-view! surface view-id)
           (surface-service-remove! service (surface-id surface))))
       (surface-service-surfaces service))
