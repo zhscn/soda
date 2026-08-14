@@ -7,6 +7,9 @@
   (define (control-key character)
     (make-key-stroke 'character (char->integer character) 4))
 
+  (define (plain-key character)
+    (make-key-stroke 'character (char->integer character) 0))
+
   (define (meta-key character)
     (make-key-stroke 'character (char->integer character) 2))
 
@@ -15,8 +18,8 @@
       (keymap-bind! keymap (list (control-key #\x) (control-key #\f)) 'file.visit)
       (keymap-bind! keymap (list (control-key #\x) (control-key #\s)) 'file.save)
       (keymap-bind! keymap (list (control-key #\x) (control-key #\w)) 'file.save-as)
-      (keymap-bind! keymap (list (control-key #\x) (control-key #\k)) 'file.close)
-      (keymap-bind! keymap (list (control-key #\x) (control-key #\i)) 'file.insert)
+      (keymap-bind! keymap (list (control-key #\x) (plain-key #\k)) 'file.close)
+      (keymap-bind! keymap (list (control-key #\x) (plain-key #\i)) 'file.insert)
       (keymap-bind! keymap (list (meta-key #\r)) 'file.revert)
       (keymap-bind! keymap (list (meta-key #\B)) 'file.toggle-backup)
       keymap))

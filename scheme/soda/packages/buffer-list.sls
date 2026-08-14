@@ -263,7 +263,10 @@
             (%make-buffer-list-service
               host owner history actions keymap result-keymap authority mode
               (make-eqv-hashtable))])
-      (keymap-bind! keymap (list (control-stroke #\x) (control-stroke #\b)) 'buffer.list)
+      (keymap-bind! keymap
+                    (list (control-stroke #\x)
+                          (make-key-stroke 'character (char->integer #\b) 0))
+                    'buffer.list)
       (keymap-bind! result-keymap (list (make-key-stroke 'character (char->integer #\g) 0))
                     'buffer-list.refresh)
       (keymap-bind! result-keymap (list (make-key-stroke 'character (char->integer #\d) 0))

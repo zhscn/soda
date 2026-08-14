@@ -269,10 +269,6 @@
                           (make-key-stroke 'character (char->integer #\z) 0))
                     'command.repeat)
       (keymap-bind! keymap
-                    (list (make-key-stroke 'character (char->integer #\x) 4)
-                          (make-key-stroke 'character (char->integer #\u) 0))
-                    'argument.universal)
-      (keymap-bind! keymap
                     (list (make-key-stroke 'character (char->integer #\u) 4))
                     'argument.universal)
       (for-each

@@ -368,7 +368,10 @@
             (%make-directory-service
               host owner files actions keymap result-keymap authority mode
               (make-eqv-hashtable))])
-      (keymap-bind! keymap (list (control-stroke #\x) (control-stroke #\d)) 'directory.browse)
+      (keymap-bind! keymap
+                    (list (control-stroke #\x)
+                          (make-key-stroke 'character (char->integer #\d) 0))
+                    'directory.browse)
       (keymap-bind! result-keymap
                     (list (make-key-stroke 'character (char->integer #\g) 0))
                     'directory.refresh)

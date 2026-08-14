@@ -210,7 +210,11 @@
            [redraw
             (command-runtime-start!
               runtime 'fundamental.redraw (application-command-context application))]
-           [file-map (file-keymap (soda-application-files application))])
+           [file-map (file-keymap (soda-application-files application))]
+           [buffer-list-map
+            (buffer-list-keymap (soda-application-buffer-lists application))]
+           [directory-map
+            (directory-keymap (soda-application-directories application))])
       (unless (and (eq? (command-invocation-phase inserted) 'completed)
                    (eq? (command-invocation-phase backward) 'completed)
                    (eq? (command-invocation-phase deleted) 'completed)
@@ -241,14 +245,66 @@
                    (eq? (keymap-lookup
                           file-map
                           (list (make-key-stroke 'character (char->integer #\x) 4)
-                                (make-key-stroke 'character (char->integer #\i) 4)))
+                                (make-key-stroke 'character (char->integer #\i) 0)))
                          'file.insert)
+                   (eq? (keymap-lookup
+                          file-map
+                          (list (make-key-stroke 'character (char->integer #\x) 4)
+                                (make-key-stroke 'character (char->integer #\k) 0)))
+                        'file.close)
+                   (not (keymap-lookup
+                          file-map
+                          (list (make-key-stroke 'character (char->integer #\x) 4)
+                                (make-key-stroke 'character (char->integer #\k) 4))))
+                   (eq? (keymap-lookup
+                          buffer-list-map
+                          (list (make-key-stroke 'character (char->integer #\x) 4)
+                                (make-key-stroke 'character (char->integer #\b) 0)))
+                        'buffer.list)
+                   (eq? (keymap-lookup
+                          directory-map
+                          (list (make-key-stroke 'character (char->integer #\x) 4)
+                                (make-key-stroke 'character (char->integer #\d) 0)))
+                        'directory.browse)
+                   (eq? (keymap-lookup
+                          (fundamental-editing-keymap editing)
+                          (list (make-key-stroke 'character (char->integer #\x) 4)
+                                (make-key-stroke 'character (char->integer #\h) 0)))
+                        'fundamental.mark-whole-buffer)
                    (eq? (keymap-lookup
                           file-map
                           (list (make-key-stroke 'character (char->integer #\r) 2)))
                          'file.revert))
         (error 'fundamental-editing-tests
                "fundamental editing did not produce stable editor state"))
+      (let* ([active (surface-active-context surface (host-state-views state))]
+             [active-view
+              (view-service-ref
+                (host-state-views state) (active-context-view-id active))]
+             [input-context
+              (soda-application-resolve-input-context application active active-view)]
+             [prefix
+              (input-dispatch
+                input-context
+                (make-key-event 'character (char->integer #\x) #f #f 4 'press
+                                (make-bytevector 0)))]
+             [continued
+              (input-context-with-translation
+                (make-input-context
+                  (input-context-view-id input-context)
+                  (input-context-buffer-id input-context)
+                  (input-context-layers input-context)
+                  (input-disposition-input-state prefix))
+                (input-context-translation input-context))]
+             [former-universal
+              (input-dispatch
+                continued
+                (make-key-event 'character (char->integer #\u) #f #f 4 'press
+                                (make-bytevector 0)))])
+        (unless (and (eq? (input-disposition-kind prefix) 'consume)
+                     (eq? (input-disposition-kind former-universal) 'undefined))
+          (error 'fundamental-editing-tests
+                 "C-x C-u retained a non-Emacs universal-argument binding")))
       (soda-application-close! application))
 
     ;; Override commands remain reachable while an ordinary key prefix is
