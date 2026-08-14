@@ -1445,6 +1445,79 @@
                    "Unicode initial prompt did not place point at its logical end")))
         (minibuffer-service-cancel! minibuffer)
         (host-state-run! state))
+      (let* ([long-value (make-string 48 #\x)]
+             [long-reader
+              (make-interactive-reader
+                'read-long-initial
+                (lambda (context arguments)
+                  (make-interactive-suspend
+                    (make-interaction-request
+                      'string "Long: " long-value #f 'free)
+                    (lambda (value) (make-interactive-ready (list value))))))]
+             [_long-command
+              (command-runtime-register-command!
+                runtime
+                (make-command-definition
+                  'interaction.long-initial-test
+                  (lambda (context value) (command-handled))
+                  owner "Long initial prompt test" 'test
+                  (make-interactive-plan (list long-reader))))]
+             [surface (soda-application-surface application)]
+             [editing (soda-application-editing application)]
+             [presented '()]
+             [frontend
+              (make-frontend
+                state surface
+                (lambda (active prompt-view)
+                  (or (minibuffer-input-context
+                        minibuffer active prompt-view
+                        (list (fundamental-fallback-input-layer editing)))
+                      (buffer-input-context
+                        active prompt-view
+                        (list (fundamental-fallback-input-layer editing)))))
+                (lambda (context disposition)
+                  (fundamental-input-disposition context disposition))
+                (lambda (render theme)
+                  (set! presented (cons render presented)))
+                (make-render-service) default-theme)])
+        (frontend-resize! frontend '(12 . 5))
+        (frontend-step! frontend)
+        (set! presented '())
+        (command-runtime-start-interactive!
+          runtime 'interaction.long-initial-test
+          (application-command-context application))
+        (frontend-step! frontend)
+        (let* ([prompt-session (minibuffer-service-current minibuffer)]
+               [prompt-view
+                (view-service-ref
+                  (host-state-views state)
+                  (minibuffer-session-view-id prompt-session))]
+               [render (and (pair? presented) (car presented))]
+               [rendered
+                (and render
+                     (find
+                       (lambda (item)
+                         (= (rendered-view-view-id item)
+                            (view-id prompt-view)))
+                       (surface-render-rendered-views render)))]
+               [cursor-row (and render (surface-render-cursor-row render))])
+          (unless (and (= (length presented) 1)
+                       rendered cursor-row
+                       (<= (car (rendered-view-rectangle rendered))
+                           cursor-row
+                           (- (+ (car (rendered-view-rectangle rendered))
+                                 (cadddr (rendered-view-rectangle rendered)))
+                              1))
+                       (positive?
+                         (viewport-visual-row
+                           (view-state-viewport (view-state prompt-view)))))
+            (error 'fundamental-editing-tests
+                   "long initial prompt exposed an off-screen provisional frame"
+                   (length presented) cursor-row)))
+        (minibuffer-service-cancel! minibuffer)
+        (host-state-run! state)
+        (frontend-resize! frontend '(80 . 24))
+        (frontend-close! frontend))
       (let* ([source
               (make-completion-source
                 (lambda (snapshot)

@@ -309,7 +309,11 @@
                              (make-selection
                                (list (make-selection-range end end)))
                              (view-state-viewport state)
-                             #f '() '() #f)))))
+                             #f '() '()
+                             (make-scroll-request
+                               'reveal-point
+                               (command-context-surface-id context)
+                               #f (view-id view)))))))
                    (set! placed?
                          (and
                            (package-host-push-interaction-view!

@@ -1083,6 +1083,11 @@ ViewPlugin 在 View publication boundary 更新。没有 display damage 时不�
 cache 的 key 至少包含 Buffer generation、View render generation、viewport、width、tab policy、
 wrap policy 和 display facet generation。
 
+需要 TextLayout 才能解析的 semantic scroll request 使用 staged render。frontend 先构造不提交给
+presenter 的 provisional SurfaceRender，以其 DisplayMap 解析并发布目标 viewport；viewport
+变化后重新构造 SurfaceRender，只有最终 Frame 成为 desired frame。首次 placement、resize 与
+普通 point motion 因此不会暴露 point 尚未 reveal 的中间帧。
+
 ### Frame 与 presenter
 
 Frame 是终端尺寸的 immutable cell grid，包含 grapheme、cell width、语义 face 和 source

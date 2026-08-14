@@ -437,21 +437,26 @@
     (require-open 'frontend-render! value)
     (if (not (frontend-dirty? value))
         #f
-        (begin
-          ;; A scroll intent resolved from this render may publish a newer
-          ;; viewport and set dirty again.  Clear the old damage first so that
-          ;; notification is retained for the follow-up render.
+        (let stage ()
+          ;; A request may need a layout for a View that has never been
+          ;; presented. Render it provisionally, resolve the semantic scroll
+          ;; intent, then commit only the Frame for the resulting viewport.
+          ;; This keeps an off-screen point from flashing for one frame.
           (frontend-dirty?-set! value #f)
           (let ([render
-               (host-frontend-render!
-                 (frontend-host-state value) (frontend-render-service value)
-                 (frontend-surface value))])
-          ((frontend-present! value) render (frontend-theme value))
-          (host-frontend-publish-render-feedback!
-            (frontend-host-state value) render
-            (lambda () (frontend-dirty?-set! value #t)))
-          (frontend-resolve-scroll-request! value)
-          render))))
+                 (host-frontend-render!
+                   (frontend-host-state value) (frontend-render-service value)
+                   (frontend-surface value))])
+            (frontend-resolve-scroll-request! value)
+            (if (and (frontend-dirty? value)
+                     (not (frontend-pending-scroll value)))
+                (stage)
+                (begin
+                  ((frontend-present! value) render (frontend-theme value))
+                  (host-frontend-publish-render-feedback!
+                    (frontend-host-state value) render
+                    (lambda () (frontend-dirty?-set! value #t)))
+                  render))))))
 
   ;; Public callers cannot present a partially dispatched input action.
   (define (frontend-render! value)
