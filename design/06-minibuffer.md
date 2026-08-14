@@ -120,8 +120,8 @@ CompletionController {
 ```
 
 source 可以同步或异步地产生结构化 candidate。异步回复必须携带 session id、input
-revision 和 generation；任一值不匹配时丢弃。candidate 保存稳定 identity、insert text、
-label、annotation、group、payload、accept behavior 与可选 preview target。accept behavior
+revision 和 generation；任一值不匹配时丢弃。candidate 保存稳定 identity、字符坐标的
+replacement range、insert text、label、annotation、group、payload、accept behavior 与可选 preview target。accept behavior
 为 `final` 或 `continue`：前者结束读取，后者用 insert text 更新 prompt 并开始下一段读取。
 controller 负责筛选、排序、
 候选选择和接受策略，presenter 只读取其已发布快照。
@@ -208,8 +208,8 @@ choice source 显式提供 metadata、boundaries、candidates、validate 和 can
 候选分别保存 insert text、label、annotation、group、source、payload 和 accept behavior，显示文本
 不承担返回值或对象身份。
 
-`boundaries(input, point)` 使用字符索引返回当前 field 的 `[start, end)`。completion
-query 是 `[start, point)`；应用候选时原子替换 `[start, end)`，因此光标位于 field
+`boundaries(input, point)` 使用字符索引返回当前 field 的 `[start, end)`，candidate 将
+该范围固化为自己的 replacement range。completion query 是 `[start, point)`；应用候选时原子替换 `[start, end)`，因此光标位于 field
 中间时不会留下旧后缀。路径、复合命令和其他分段 reader 可以在插入候选后返回一个
 新的空 field，例如 `root/usr/|`。`RET` 遇到这种边界会提交当前 field 并继续读取，
 直到候选没有引入后续 field 才结束 prompt。`TAB` 始终只提交当前 field。

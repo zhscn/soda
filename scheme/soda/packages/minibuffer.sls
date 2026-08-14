@@ -473,6 +473,11 @@
                   [candidate
                    (and use-candidate? controller
                         (completion-controller-selected controller))]
+                  [candidate-application
+                   (and candidate
+                        (call-with-values
+                          (lambda () (completion-candidate-apply candidate raw))
+                          cons))]
                   [snapshot (minibuffer-session-snapshot service session)]
                   [request (interaction-session-request (minibuffer-session-interaction session))]
                   [policy (interaction-request-selection-policy
@@ -480,7 +485,7 @@
                   [default-action (interaction-request-default-action request)]
                   [value
                    (cond
-                     [candidate (completion-candidate-insert-text candidate)]
+                     [candidate (car candidate-application)]
                      [(eq? policy 'choice)
                       (and default-action (string=? raw "")
                            (choice-action-id default-action))]
@@ -490,8 +495,9 @@
                      (eq? (completion-candidate-accept-behavior candidate)
                           'continue))
                 (and context
-                     (replace-prompt-input
-                       context (completion-candidate-insert-text candidate)))]
+                     (replace-prompt-input-at
+                       context (car candidate-application)
+                       (cdr candidate-application) '()))]
                [(and value
                       (or (eq? policy 'free)
                           (and (eq? policy 'choice) (symbol? value))
@@ -527,43 +533,26 @@
                     (ensure-completion-presentation! service session controller)
                     controller))))))
 
-  (define (string-prefix? prefix value)
-    (let ([length (string-length prefix)])
-      (and (<= length (string-length value))
-           (string=? prefix (substring value 0 length)))))
-
-  (define (common-prefix strings)
-    (if (null? strings)
-        ""
-        (let* ([first (car strings)]
-               [limit (string-length first)])
-          (let loop ([index 0])
-            (if (or (= index limit)
-                    (exists
-                      (lambda (value)
-                        (or (= index (string-length value))
-                            (not (char=? (string-ref first index)
-                                         (string-ref value index)))))
-                      (cdr strings)))
-                (substring first 0 index)
-                (loop (+ index 1)))))))
+  (define (replace-prompt-input-at context value point annotations)
+    (let* ([state (command-context-buffer-state context)]
+           [length (snapshot-byte-size (buffer-state-document state))]
+           [bytes (string->utf8 value)]
+           [point-bytes
+            (bytevector-length (string->utf8 (substring value 0 point)))]
+           [selection (make-selection
+                        (list (make-selection-range point-bytes point-bytes)))])
+      (make-transaction-spec
+        (command-context-buffer-id context) (command-context-view-id context)
+        (buffer-state-generation state)
+        (make-change-set length (list (make-text-change 0 length bytes)))
+        selection '() annotations)))
 
   (define replace-prompt-input
     (case-lambda
       [(context value) (replace-prompt-input context value '())]
       [(context value annotations)
-       (let* ([state (command-context-buffer-state context)]
-              [length (snapshot-byte-size (buffer-state-document state))]
-              [bytes (string->utf8 value)]
-              [selection (make-selection
-                           (list (make-selection-range
-                                   (bytevector-length bytes)
-                                   (bytevector-length bytes))))])
-         (make-transaction-spec
-           (command-context-buffer-id context) (command-context-view-id context)
-           (buffer-state-generation state)
-           (make-change-set length (list (make-text-change 0 length bytes)))
-           selection '() annotations))]))
+       (replace-prompt-input-at
+         context value (string-length value) annotations)]))
 
   (define (minibuffer-service-move-history service context delta)
     (let* ([session (minibuffer-service-current service)]
@@ -606,26 +595,12 @@
           (command-handled)
           (let* ([controller (minibuffer-service-refresh-completion! service)]
                  [snapshot (minibuffer-session-snapshot service session)]
-                 [input (prompt-snapshot-input snapshot)]
-                 [candidates (and controller
-                                  (completion-controller-candidates controller))]
-                 [selected (and controller
-                                (completion-controller-selected controller))]
-                 [value
-                  (cond
-                    [selected (completion-candidate-insert-text selected)]
-                    [(and (pair? candidates) (null? (cdr candidates)))
-                     (completion-candidate-insert-text (car candidates))]
-                    [else
-                     (let ([prefix
-                            (common-prefix
-                              (map completion-candidate-insert-text
-                                   (or candidates '())))])
-                       (and (> (string-length prefix) (string-length input))
-                            (string-prefix? input prefix)
-                            prefix))])])
-            (if value
-                (replace-prompt-input context value)
+                 [application
+                  (and controller
+                       (completion-controller-application controller snapshot))])
+            (if application
+                (replace-prompt-input-at
+                  context (car application) (cdr application) '())
                 (command-handled))))))
   (define (minibuffer-service-select-completion! service index)
     (let ([session (minibuffer-service-current service)])

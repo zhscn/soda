@@ -43,6 +43,7 @@
           (soda packages base history)
           (soda packages base text-motion)
           (soda packages completion)
+          (soda packages file-path)
           (soda packages file-service)
           (soda packages file-format)
           (soda packages file-watch)
@@ -2064,6 +2065,47 @@
           (let* ([state (soda-application-state application)]
                  [runtime (host-state-command-runtime state)]
                  [minibuffer (soda-application-minibuffer application)])
+            (let* ([input (string-append root "/su/target.txt")]
+                   [point (string-length (string-append root "/su"))]
+                   [snapshot
+                    (make-prompt-snapshot
+                      1 #f input 0 point #f #f 0 '())]
+                   [candidates
+                    ((completion-source-refresh file-name-completion-source)
+                     snapshot)]
+                   [directory-candidate
+                    (find
+                      (lambda (candidate)
+                        (eq? (completion-candidate-accept-behavior candidate)
+                             'continue))
+                      candidates)])
+              (unless directory-candidate
+                (error 'fundamental-editing-tests
+                       "file completion did not offer the directory under point"))
+              (call-with-values
+                (lambda ()
+                  (completion-candidate-apply directory-candidate input))
+                (lambda (value next-point)
+                  (unless (and (string=? value
+                                         (string-append
+                                           (vfs-directory-path directory)
+                                           "target.txt"))
+                               (= next-point
+                                  (string-length
+                                    (vfs-directory-path directory))))
+                    (error 'fundamental-editing-tests
+                           "ranged file completion did not preserve the path suffix"
+                           value next-point)))))
+            (call-with-values
+              (lambda ()
+                (completion-candidate-apply
+                  (make-replacement-completion-candidate
+                    'unicode 1 2 "é" "é" #f #f #f 'final)
+                  "a😀z"))
+              (lambda (value point)
+                (unless (and (string=? value "aéz") (= point 2))
+                  (error 'fundamental-editing-tests
+                         "completion replacement did not use character coordinates"))))
             (command-runtime-start-interactive!
               runtime 'file.visit (application-command-context application))
             (command-runtime-start!
@@ -2076,9 +2118,12 @@
                     (let find ([items candidates] [position 0])
                       (cond
                         [(null? items) #f]
-                        [(string=?
-                           (completion-candidate-insert-text (car items))
-                           (vfs-directory-path directory))
+                        [(call-with-values
+                           (lambda ()
+                             (completion-candidate-apply
+                               (car items) (string-append root "/s")))
+                           (lambda (value point)
+                             (string=? value (vfs-directory-path directory))))
                          position]
                         [else (find (cdr items) (+ position 1))]))])
               (unless (and index
@@ -2238,7 +2283,12 @@
               (unless (and controller
                            (exists
                              (lambda (candidate)
-                               (string=? (completion-candidate-insert-text candidate) path))
+                               (call-with-values
+                                 (lambda ()
+                                   (completion-candidate-apply
+                                     candidate
+                                     (substring path 0 (- (string-length path) 4))))
+                                 (lambda (value point) (string=? value path))))
                              (completion-controller-candidates controller)))
                 (error 'fundamental-editing-tests
                        "file-name completion did not offer the visited file")))

@@ -65,6 +65,12 @@
             [(vfs-path-separator? (string-ref value index)) (+ index 1)]
             [else (loop (- index 1))])))
 
+  (define (path-field-end value point)
+    (let loop ([index point])
+      (cond [(= index (string-length value)) index]
+            [(vfs-path-separator? (string-ref value index)) index]
+            [else (loop (+ index 1))])))
+
   ;; File-name completion has no project ownership.  It resolves the path
   ;; field under point against the process directory, preserving the spelling
   ;; already typed in the prompt for the candidate insertion text.
@@ -72,11 +78,8 @@
     (let* ([input (prompt-snapshot-input snapshot)]
            [point (prompt-snapshot-point snapshot)]
            [length (string-length input)])
-      ;; Completion replacement currently addresses one whole prompt value.
-      ;; Do not offer a candidate if text after point would be overwritten.
-      (if (not (= point length))
-          '()
-          (let* ([start (path-field-start input point)]
+      (let* ([start (path-field-start input point)]
+                 [end (path-field-end input point)]
                  [directory-prefix (substring input 0 start)]
                  [name-prefix (substring input start point)]
                  [directory
@@ -90,18 +93,22 @@
                   (let* ([name (vfs-entry-name entry)]
                          [directory? (eq? (vfs-entry-kind entry) 'directory)]
                          [label (if directory? (vfs-directory-path name) name)]
-                         [insert-text (string-append directory-prefix label)])
-                    ((if directory?
-                         make-continuing-completion-candidate
-                         make-completion-candidate)
-                      (vfs-path-join directory name) insert-text label
-                      (if directory? "directory" "file") "file" entry)))
+                         [behavior (if directory? 'continue 'final)]
+                         [replacement-end
+                          (if (and directory? (< end length)
+                                   (vfs-path-separator?
+                                     (string-ref input end)))
+                              (+ end 1)
+                              end)])
+                    (make-replacement-completion-candidate
+                      (vfs-path-join directory name) start replacement-end label label
+                      (if directory? "directory" "file") "file" entry behavior)))
                 (filter
                   (lambda (entry)
                     (and (not (string=? (vfs-entry-name entry) "."))
                          (not (string=? (vfs-entry-name entry) ".."))
                          (string-prefix? name-prefix (vfs-entry-name entry))))
-                  (vfs-list-directory directory))))))))
+                  (vfs-list-directory directory)))))))
 
   (define file-name-completion-source
     (make-completion-source file-name-candidates #f #f #f))
