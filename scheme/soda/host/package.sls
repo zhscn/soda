@@ -41,7 +41,7 @@
           package-host-view-ref
           package-host-create-view!
           package-host-present-buffer!
-          package-host-command-context-current?
+          package-host-present-buffer-if-current!
           package-host-quit-window!
           package-host-close-view!
           package-host-surface-size
@@ -500,6 +500,23 @@
                    (window-leaves (surface-root-window surface))))])
       (and window
            (= (window-view-id window) (command-context-view-id context)))))
+
+  ;; An asynchronous producer presents its result only when the View that
+  ;; requested it is still current in its Window.  The predicate remains a
+  ;; host detail so packages select a presentation policy without inspecting
+  ;; or repairing Window placement themselves.
+  (define (package-host-present-buffer-if-current! host owner buffer context configuration)
+    (unless (and (package-host? host) (owner? owner) (buffer? buffer)
+                 (command-context? context))
+      (assertion-violation 'package-host-present-buffer-if-current!
+                           "expected a PackageHost, Owner, Buffer, and CommandContext"
+                           host owner buffer context))
+    (and (package-host-command-context-current? host context)
+         (package-host-present-buffer!
+           host owner buffer
+           (command-context-surface-id context)
+           (command-context-window-id context)
+           configuration)))
 
   ;; Quitting a temporary presentation returns the target Window to its most
   ;; recently shown different View.  The Buffer remains alive: its owner may
