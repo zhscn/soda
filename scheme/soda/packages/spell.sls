@@ -315,19 +315,21 @@
               host (spell-service-owner service)
               (string-append "*Spelling: " (spell-request-buffer-name request) "*")
               (make-document (car layout))
-              configuration)]
-           [view
-            (package-host-create-view! host (spell-service-owner service) buffer configuration)])
+              configuration)])
       (package-host-dispatch! host
         (make-transaction-spec
           (buffer-id buffer) #f (buffer-state-generation (buffer-state buffer))
           (make-change-set (snapshot-byte-size (buffer-state-document (buffer-state buffer))) '())
           #f (list (make-buffer-items-effect (cdr layout))) '()))
-      (unless
-        (package-host-replace-window-view!
-          host (command-context-surface-id context)
-          (command-context-window-id context) (view-id view))
-        (package-host-close-buffer! host (buffer-id buffer)))
+      (when (package-host-command-context-current? host context)
+        (let ([view
+               (package-host-create-view!
+                 host (spell-service-owner service) buffer configuration)])
+          (unless
+            (package-host-replace-window-view!
+              host (command-context-surface-id context)
+              (command-context-window-id context) (view-id view))
+            (package-host-close-buffer! host (buffer-id buffer)))))
       buffer))
 
   (define (start-spell-check! service request)

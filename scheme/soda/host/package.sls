@@ -41,6 +41,7 @@
           package-host-view-ref
           package-host-create-view!
           package-host-present-buffer!
+          package-host-command-context-current?
           package-host-quit-window!
           package-host-close-view!
           package-host-surface-size
@@ -477,6 +478,28 @@
                              (begin
                                (view-service-close-view! views (view-id created))
                                #f))))))))))
+
+  ;; An asynchronous producer may use its initiating CommandContext only for
+  ;; placement while that exact View is still shown by the target Window.
+  ;; This prevents a late result from replacing content selected by the user
+  ;; after the command began.
+  (define (package-host-command-context-current? host context)
+    (unless (and (package-host? host) (command-context? context))
+      (assertion-violation 'package-host-command-context-current?
+                           "expected a PackageHost and CommandContext" host context))
+    (let* ([state (package-host-state host)]
+           [surface
+            (surface-service-ref
+              (host-state-surfaces state)
+              (command-context-surface-id context) #f)]
+           [window
+            (and surface
+                 (find
+                   (lambda (leaf)
+                     (= (window-id leaf) (command-context-window-id context)))
+                   (window-leaves (surface-root-window surface))))])
+      (and window
+           (= (window-view-id window) (command-context-view-id context)))))
 
   ;; Quitting a temporary presentation returns the target Window to its most
   ;; recently shown different View.  The Buffer remains alive: its owner may

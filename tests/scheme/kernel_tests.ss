@@ -5067,6 +5067,51 @@
       (native:runtime-close! native-runtime)
       (soda-application-close! application))))
 
+;; A foreground tool may finish after the user has changed the originating
+;; Window.  Its result remains available, but completion must not reclaim
+;; that Window or publish a transient interruption.
+(let* ([application (make-soda-application)]
+       [state (soda-application-state application)]
+       [runtime (host-state-command-runtime state)]
+       [processes (soda-application-processes application)]
+       [native-runtime (native:make-runtime)])
+  (dynamic-wind
+    (lambda () #f)
+    (lambda ()
+      (process-service-attach-runtime! processes native-runtime)
+      (command-runtime-start!
+        runtime 'fundamental.insert-text (application-command-context application)
+        (list (string->utf8 "helo\n")))
+      (command-runtime-start! runtime 'spell.check (application-command-context application))
+      (command-runtime-start! runtime 'help.show (application-command-context application))
+      (let poll ([remaining 4])
+        (for-each
+          (lambda (event) (process-service-handle-runtime-event! processes event))
+          (native:runtime-poll! native-runtime))
+        (let* ([surface (soda-application-surface application)]
+               [active (surface-active-context surface (host-state-views state))]
+               [current
+                (buffer-service-ref
+                  (host-state-buffers state) (active-context-buffer-id active) #f)]
+               [report
+                (find
+                  (lambda (buffer)
+                    (string=? (buffer-name buffer) "*Spelling: *scratch**"))
+                  (buffer-service-buffers (host-state-buffers state)))])
+          (cond
+            [report
+             (unless (and current
+                          (string=? (buffer-name current) "*help*")
+                          (not (surface-feedback surface)))
+               (error 'kernel-tests
+                      "background spell result replaced the user's current presentation"))]
+            [(zero? remaining)
+             (error 'kernel-tests "background spell result was not retained")]
+            [else (poll (- remaining 1))]))))
+    (lambda ()
+      (native:runtime-close! native-runtime)
+      (soda-application-close! application))))
+
 ;; Application override bindings retain their Emacs semantics in special
 ;; Buffers: C-g cancels, while q returns to the preceding View without
 ;; destroying the generated Buffer.

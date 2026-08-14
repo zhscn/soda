@@ -52,7 +52,7 @@ prefix key、minibuffer、echo area、mode line、Buffer/View/Window 语义作�
 | Unicode case-sensitive / case-insensitive literal search policy | search session 持有显式策略 |
 | Unicode whole-word literal search policy | word boundary 由 search package 定义 |
 | POSIX ERE search policy、repeat 与 replace | 编译器状态属于 search session |
-| 拼写检查、替换建议与结果 Buffer | 结果和候选是可导航的普通 Buffer；finding 激活复用源 View 并 reveal 目标位置 |
+| 拼写检查、替换建议与结果 Buffer | 结果和候选是可导航的普通 Buffer；前台检查只在发起 View 仍当前时展示结果，否则保留结果 Buffer 供显式访问；finding 激活复用源 View 并 reveal 目标位置 |
 | help、describe-command 与 where-is | help 是按调用时 InputContext 刷新的可复用 generated Buffer；`q` 返回前一个 View 而保留 Buffer，简短结果进入 echo area |
 | `M-x` command completion | 仅列出当前上下文可用且声明为用户可见的 command；Help、describe 与 where-is 使用和 terminal dispatch 相同的有序 InputLayer 投影；输入、effect continuation 与 frontend adapter 不进入候选 |
 | 声明式 mode key binding | ModeCatalog 按 mode id 提供继承后的 command category；配置验证与 ModeSpec materialization 都在配置来源处验证 mode-scoped command |
