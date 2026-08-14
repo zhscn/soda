@@ -340,14 +340,16 @@
                (string-append "*recovered: " (resource-locator resource) "*")
                (make-document (recovery-artifact-contents artifact))
                configuration)])
-        (unless
-          (package-host-present-buffer-if-current!
-            host (recovery-service-owner service) buffer context configuration)
-          (package-host-close-buffer! host (buffer-id buffer))
-          (assertion-violation 'recovery.restore
-                               "origin View is no longer current" context))
-        (remove-pending-artifact! service artifact #t)
-        buffer)))
+        (if (package-host-present-buffer-if-current!
+              host (recovery-service-owner service) buffer context configuration)
+            (begin
+              (remove-pending-artifact! service artifact #t)
+              buffer)
+            (begin
+              ;; A delayed decision is no longer entitled to occupy a Window.
+              ;; Keep the artifact for a later explicit recovery request.
+              (package-host-close-buffer! host (buffer-id buffer))
+              #f)))))
 
   (define (handle-recovery-decision! service artifact decision context)
     (case decision
