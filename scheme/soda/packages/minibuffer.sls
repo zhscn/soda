@@ -19,6 +19,7 @@
           minibuffer-service-add-hook!
           minibuffer-service-refresh-completion!
           minibuffer-service-select-completion!
+          minibuffer-service-history-entries
           minibuffer-input-context
           minibuffer-service-submit!
           minibuffer-service-cancel!)
@@ -45,6 +46,7 @@
           (soda host value)
           (soda packages interaction)
           (soda packages completion)
+          (soda packages input-history)
           (soda packages buffer-mode)
           (soda packages edit-policy)
           (soda view decoration)
@@ -60,12 +62,18 @@
                      minibuffer-session-completion-buffer-id-set!)
             (mutable completion-view-id minibuffer-session-completion-view-id
                      minibuffer-session-completion-view-id-set!)
+            (mutable history-index minibuffer-session-history-index
+                     minibuffer-session-history-index-set!)
+            (mutable history-draft minibuffer-session-history-draft
+                     minibuffer-session-history-draft-set!)
+            (mutable submitted-value minibuffer-session-submitted-value
+                     minibuffer-session-submitted-value-set!)
             (mutable completion minibuffer-session-completion minibuffer-session-completion-set!)))
   (define-record-type minibuffer-hook
     (fields owner procedure))
   (define-record-type
     (minibuffer-service %make-minibuffer-service minibuffer-service?)
-    (fields host interactions owner keymap mode completion-mode
+    (fields host interactions owner keymap mode completion-mode histories
             (mutable sessions minibuffer-service-sessions minibuffer-service-sessions-set!)
             (mutable setup-hooks minibuffer-service-setup-hooks minibuffer-service-setup-hooks-set!)
             (mutable exit-hooks minibuffer-service-exit-hooks minibuffer-service-exit-hooks-set!)
@@ -121,6 +129,31 @@
       (and (pair? sessions)
            (if (eq? interaction (minibuffer-session-interaction (car sessions)))
                (car sessions) (loop (cdr sessions))))))
+
+  (define minibuffer-history-limit 100)
+
+  (define (session-history-key session)
+    (interaction-request-history-key
+      (interaction-session-request
+        (minibuffer-session-interaction session))))
+
+  (define (history-for service key create?)
+    (and key
+         (or (hashtable-ref (minibuffer-service-histories service) key #f)
+             (and create?
+                  (let ([history (make-input-history minibuffer-history-limit)])
+                    (hashtable-set!
+                      (minibuffer-service-histories service) key history)
+                    history)))))
+
+  (define (minibuffer-service-history-entries service key)
+    (unless (and (minibuffer-service? service) (symbol? key))
+      (assertion-violation 'minibuffer-service-history-entries
+                           "expected a MinibufferService and history key"
+                           service key))
+    (let ([history (history-for service key #f)])
+      (if history (input-history-entries history) '())))
+
   (define (minibuffer-service-current service)
     (and (minibuffer-service? service)
          (let ([sessions (minibuffer-service-sessions service)])
@@ -249,7 +282,9 @@
               (let ([session
                      (%make-minibuffer-session interaction (buffer-id buffer) (view-id view)
                                                 (view-id origin) (command-context-surface-id context)
-                                                1 #f #f #f)])
+                                                1 #f #f #f
+                                                (or (interaction-request-initial-value request) "")
+                                                #f #f)])
                 (minibuffer-service-sessions-set!
                   service (cons session (minibuffer-service-sessions service)))
                 (notify-hooks! (minibuffer-service-setup-hooks service)
@@ -372,6 +407,12 @@
           (lambda ()
             (let* ([snapshot (minibuffer-session-snapshot service session)]
                    [controller (minibuffer-session-completion session)])
+              (when (and (eq? outcome 'accepted)
+                         (session-history-key session)
+                         (string? (minibuffer-session-submitted-value session)))
+                (input-history-add!
+                  (history-for service (session-history-key session) #t)
+                  (minibuffer-session-submitted-value session)))
               (when controller
                 (if (eq? outcome 'accepted)
                     (completion-controller-accept! controller snapshot)
@@ -435,6 +476,7 @@
                                      (completion-controller-valid-input?
                                        controller value snapshot))))))
                  (begin
+                   (minibuffer-session-submitted-value-set! session value)
                    (interaction-service-submit!
                      (minibuffer-service-interactions service) value))
                  (and context (invalid-input-feedback context))))))]))
@@ -474,18 +516,52 @@
                 (substring first 0 index)
                 (loop (+ index 1)))))))
 
-  (define (replace-prompt-input context value)
-    (let* ([state (command-context-buffer-state context)]
-           [length (snapshot-byte-size (buffer-state-document state))]
-           [bytes (string->utf8 value)]
-           [selection (make-selection
-                        (list (make-selection-range
-                                (bytevector-length bytes) (bytevector-length bytes))))])
-      (make-transaction-spec
-        (command-context-buffer-id context) (command-context-view-id context)
-        (buffer-state-generation state)
-        (make-change-set length (list (make-text-change 0 length bytes)))
-        selection '() '())))
+  (define replace-prompt-input
+    (case-lambda
+      [(context value) (replace-prompt-input context value '())]
+      [(context value annotations)
+       (let* ([state (command-context-buffer-state context)]
+              [length (snapshot-byte-size (buffer-state-document state))]
+              [bytes (string->utf8 value)]
+              [selection (make-selection
+                           (list (make-selection-range
+                                   (bytevector-length bytes)
+                                   (bytevector-length bytes))))])
+         (make-transaction-spec
+           (command-context-buffer-id context) (command-context-view-id context)
+           (buffer-state-generation state)
+           (make-change-set length (list (make-text-change 0 length bytes)))
+           selection '() annotations))]))
+
+  (define (minibuffer-service-move-history service context delta)
+    (let* ([session (minibuffer-service-current service)]
+           [key (and session (session-history-key session))]
+           [history (and key (history-for service key #f))]
+           [entries (and history (input-history-entries history))]
+           [current (and session (minibuffer-session-history-index session))])
+      (if (or (not session) (null? (or entries '())))
+          (command-handled)
+          (let* ([last (- (length entries) 1)]
+                 [target
+                  (cond
+                    [(not current) (and (positive? delta) 0)]
+                    [else (+ current delta)])])
+            (cond
+              [(not target) (command-handled)]
+              [(negative? target)
+               (minibuffer-session-history-index-set! session #f)
+               (replace-prompt-input
+                 context (minibuffer-session-history-draft session)
+                 (list (make-annotation 'minibuffer.history #t)))]
+              [else
+               (when (not current)
+                 (minibuffer-session-history-draft-set!
+                   session (or (session-input service session) "")))
+               (let ([index (min last target)])
+                 (minibuffer-session-history-index-set! session index)
+                 (replace-prompt-input
+                   context (list-ref entries index)
+                   (list (make-annotation 'minibuffer.history #t))))])))))
 
   ;; Completion application is a normal prompt-buffer transaction.  Sources
   ;; continue to own candidate generation; this service only chooses one
@@ -558,6 +634,14 @@
       (keymap-bind! keymap (list (control-stroke #\n)) 'minibuffer.next-completion)
       (keymap-bind! keymap (list (make-key-stroke 'up #f 0)) 'minibuffer.previous-completion)
       (keymap-bind! keymap (list (control-stroke #\p)) 'minibuffer.previous-completion)
+      (keymap-bind!
+        keymap
+        (list (make-key-stroke 'character (char->integer #\p) 2))
+        'minibuffer.previous-history)
+      (keymap-bind!
+        keymap
+        (list (make-key-stroke 'character (char->integer #\n) 2))
+        'minibuffer.next-history)
       (keymap-bind! keymap (list (control-stroke #\g)) 'minibuffer.cancel)
       (keymap-bind! keymap (list (make-key-stroke 'escape #f 0)) 'minibuffer.cancel)
       (let* ([mode
@@ -578,6 +662,7 @@
              [service
               (%make-minibuffer-service
                 host interactions owner keymap mode completion-mode
+                (make-eq-hashtable)
                 '() '() '() #f)])
       (define-command
         (package-host-command-runtime host) owner 'minibuffer.accept (context)
@@ -607,6 +692,18 @@
         (minibuffer-service-move-completion! service -1)
         (command-handled))
       (define-command
+        (package-host-command-runtime host) owner 'minibuffer.previous-history (context)
+        (documentation "Replace minibuffer input with an older history entry.")
+        (class 'minibuffer)
+        (undo 'ignore)
+        (minibuffer-service-move-history service context 1))
+      (define-command
+        (package-host-command-runtime host) owner 'minibuffer.next-history (context)
+        (documentation "Replace minibuffer input with a newer history entry or the saved draft.")
+        (class 'minibuffer)
+        (undo 'ignore)
+        (minibuffer-service-move-history service context -1))
+      (define-command
         (package-host-command-runtime host) owner 'minibuffer.cancel (context)
         (documentation "Cancel the current minibuffer input.")
         (class 'minibuffer)
@@ -628,8 +725,18 @@
             (when (and session
                        (= (editor-update-buffer-id update)
                           (minibuffer-session-buffer-id session))
-                       (not (change-set-empty? (editor-update-changes update)))
-                       (minibuffer-session-completion session))
-              (minibuffer-service-refresh-completion! service)))))
+                       (not (change-set-empty? (editor-update-changes update))))
+              (unless (exists
+                        (lambda (annotation)
+                          (eq? (annotation-key annotation) 'minibuffer.history))
+                        (editor-update-annotations update))
+                (minibuffer-session-history-index-set! session #f)
+                (minibuffer-session-history-draft-set!
+                  session
+                  (snapshot-string
+                    (buffer-state-document
+                      (editor-update-new-buffer-state update)))))
+              (when (minibuffer-session-completion session)
+                (minibuffer-service-refresh-completion! service))))))
       service)))
 )

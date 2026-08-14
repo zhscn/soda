@@ -22,6 +22,7 @@
           interaction-request-completion-source
           interaction-request-selection-policy
           interaction-request-validator
+          interaction-request-history-key
           interaction-request-keymap
           interaction-request-actions
           interaction-request-display-prompt
@@ -153,6 +154,7 @@
       (immutable completion-source interaction-request-completion-source)
       (immutable selection-policy interaction-request-selection-policy)
       (immutable validator interaction-request-validator)
+      (immutable history-key interaction-request-history-key)
       ;; A request-specific keymap routes declared action keys without giving
       ;; the input layer knowledge of a particular command.
       (immutable keymap interaction-request-keymap)
@@ -217,20 +219,24 @@
       [(kind prompt initial-value completion-source selection-policy)
        (make-interaction-request kind prompt initial-value completion-source selection-policy #f)]
       [(kind prompt initial-value completion-source selection-policy validator)
+       (make-interaction-request
+         kind prompt initial-value completion-source selection-policy validator #f)]
+      [(kind prompt initial-value completion-source selection-policy validator history-key)
        (unless (and (symbol? kind) (string? prompt)
                     (memq selection-policy '(free must-match))
-                    (or (not validator) (procedure? validator)))
+                    (or (not validator) (procedure? validator))
+                    (or (not history-key) (symbol? history-key)))
          (assertion-violation 'make-interaction-request "invalid interaction request"
                               kind prompt selection-policy))
        (%make-interaction-request kind prompt initial-value completion-source selection-policy
-                                  validator #f '())]))
+                                  validator history-key #f '())]))
 
   (define (make-choice-interaction-request kind prompt actions)
     (unless (and (symbol? kind) (string? prompt) (choice-actions-valid? actions))
       (assertion-violation 'make-choice-interaction-request
                            "invalid structured choice request" kind prompt actions))
     (%make-interaction-request
-      kind prompt #f #f 'choice #f
+      kind prompt #f #f 'choice #f #f
       (make-answer-keymap
         (fold-left append '() (map choice-action-keys actions)))
       (list-copy actions)))

@@ -110,6 +110,7 @@
       (lambda (context arguments)
         (make-interactive-suspend
           (make-interaction-request
-            'file-name prompt #f file-name-completion-source 'free)
+            'file-name prompt #f file-name-completion-source 'free
+            #f 'file-name)
           (lambda (value) (make-interactive-ready (list value)))))))
 )

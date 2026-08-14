@@ -52,7 +52,8 @@
             'command prompt "" (command-source runtime context) 'must-match
             (lambda (input snapshot)
               (command-runtime-command-available?
-                runtime (string->symbol input) context)))
+                runtime (string->symbol input) context))
+            'extended-command)
           (lambda (value)
             (make-interactive-ready (list (string->symbol value))))))))
 

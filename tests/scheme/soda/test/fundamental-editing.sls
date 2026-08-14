@@ -57,6 +57,7 @@
           (soda packages scheme-mode)
           (soda packages message)
           (soda packages interaction)
+          (soda packages input-history)
           (soda packages keyboard-macro)
           (soda packages minibuffer)
           (soda packages resource)
@@ -147,6 +148,14 @@
           (eq? face value))))
 
   (define (run-fundamental-editing-tests!)
+    (let ([history (make-input-history 2)])
+      (input-history-add! history "first")
+      (input-history-add! history "second")
+      (input-history-add! history "first")
+      (input-history-add! history "third")
+      (unless (equal? (input-history-entries history) '("third" "first"))
+        (error 'fundamental-editing-tests
+               "InputHistory did not bound and promote accepted values")))
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
            [runtime (host-state-command-runtime state)]
@@ -1583,6 +1592,8 @@
               (interaction-session-request (interaction-service-current interaction))]
              [controller (minibuffer-service-refresh-completion! minibuffer)])
         (unless (and (eq? (interaction-request-kind request) 'command)
+                     (eq? (interaction-request-history-key request)
+                          'extended-command)
                      (eq? (interaction-request-selection-policy request) 'must-match)
                      controller
                      (exists
@@ -1592,7 +1603,10 @@
                        (completion-controller-candidates controller)))
           (error 'fundamental-editing-tests
                  "M-x did not expose mode-aware command completion")))
-      (interaction-service-submit! interaction "message.show-position")
+      (command-runtime-start!
+        runtime 'fundamental.insert-text (application-command-context application)
+        (list (string->utf8 "message.show-position")))
+      (minibuffer-service-submit! minibuffer)
       (host-state-run! state)
       (host-state-run! state)
       (let ([message (surface-feedback-text (soda-application-surface application))])
@@ -1607,6 +1621,39 @@
                               (condition-message (caddr value))
                               value)))
                       (condition-service-entries (host-state-conditions state))))))
+      (unless (equal?
+                (minibuffer-service-history-entries minibuffer 'extended-command)
+                '("message.show-position"))
+        (error 'fundamental-editing-tests
+               "accepted M-x input was not recorded in its history"))
+      (command-runtime-start-interactive!
+        runtime 'command.execute-extended (application-command-context application))
+      (command-runtime-start!
+        runtime 'minibuffer.previous-history
+        (application-command-context application))
+      (host-state-run! state)
+      (let* ([session (minibuffer-service-current minibuffer)]
+             [prompt-buffer
+              (buffer-service-ref
+                (host-state-buffers state)
+                (minibuffer-session-buffer-id session))])
+        (unless (string=? (buffer-string prompt-buffer) "message.show-position")
+          (error 'fundamental-editing-tests
+                 "M-p did not recall the newest M-x history entry"))
+        (command-runtime-start!
+          runtime 'minibuffer.next-history
+          (application-command-context application))
+        (host-state-run! state)
+        (unless (string=? (buffer-string prompt-buffer) "")
+          (error 'fundamental-editing-tests
+                 "M-n did not restore the minibuffer draft")))
+      (minibuffer-service-cancel! minibuffer)
+      (host-state-run! state)
+      (unless (equal?
+                (minibuffer-service-history-entries minibuffer 'extended-command)
+                '("message.show-position"))
+        (error 'fundamental-editing-tests
+               "cancelled minibuffer input entered command history"))
       (command-runtime-start-interactive!
         runtime 'command.describe (application-command-context application))
       (interaction-service-submit! interaction "message.show-position")
@@ -1923,6 +1970,7 @@
             (let ([request (interaction-session-request
                              (interaction-service-current interaction))])
               (unless (and (eq? (interaction-request-kind request) 'file-name)
+                           (eq? (interaction-request-history-key request) 'file-name)
                            (string=? (interaction-request-prompt request) "Write file: "))
                 (error 'fundamental-editing-tests
                        "file.save did not ask an unvisited Buffer for its destination")))
@@ -1953,6 +2001,7 @@
             (let ([request (interaction-session-request
                              (interaction-service-current interaction))])
               (unless (and (eq? (interaction-request-kind request) 'file-name)
+                           (eq? (interaction-request-history-key request) 'file-name)
                            (completion-source?
                              (interaction-request-completion-source request))
                            (string=? (interaction-request-prompt request) "Visit file: "))

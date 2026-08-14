@@ -120,7 +120,8 @@
             (make-interactive-ready '())
             (make-interactive-suspend
               (make-interaction-request
-                'file-name "Write file: " #f file-name-completion-source 'free)
+                'file-name "Write file: " #f file-name-completion-source 'free
+                #f 'file-name)
               (lambda (value) (make-interactive-ready (list value))))))))
 
   (define (file-service-add-state-listener! service owner procedure)

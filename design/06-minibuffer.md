@@ -50,7 +50,7 @@ message，使键绑定、直接 command message 与 `M-x` 共享错误处理和 
 PromptRequest {
   prompt,
   initial,
-  history-id?,
+  history-key?,
   default?,
   accept-policy,
   validator?,
@@ -66,7 +66,8 @@ PromptRequest {
 - `prompt` 是 chrome，由 TUI component 渲染，不属于输入 Document。
 - `initial` 是输入 Buffer 的初始正文。
 - `default` 只在接受空输入时成为结果，不预先插入 Document。
-- `history-id` 选择 Editor 持有的 history collection。
+- `history-key` 按输入用途选择 MinibufferService 持有的 history collection。共享键的
+  request 共享已接受值；文件名和扩展命令等不同用途保持隔离。
 - `accept-policy` 为 `free` 或 `must-match`；`must-match` 使用 validator 检查最终值。
 - `completion-source` 为读取附加结构化 choice completion。
 - `keymap` 为离散回答提供位于普通 prompt 编辑 keymap 之前的临时键绑定。绑定仍以
@@ -164,7 +165,7 @@ face。输入 cell 保留 transient Document position 和 component source，因
 - `TAB`：插入候选并保持 minibuffer 活动；
 - `S-TAB`：选择上一个候选。
 
-history 由 Editor 按 symbol 标识并保存，条目以最新值优先。首次向后浏览前保存当前
+history 由 MinibufferService 按 symbol 标识并保存，条目以最新值优先。首次向后浏览前保存当前
 draft；向前越过最新条目时恢复 draft。只有通过验证的非空接受值进入 history，
 连续重复值只保留一份。default、initial 和 history 是彼此独立的输入来源。
 
