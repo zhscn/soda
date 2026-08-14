@@ -954,7 +954,7 @@
         (unless (and (string=? (buffer-name help-buffer) "*help*")
                      (string-contains? (buffer-string help-buffer) "C-x C-f")
                      (not (string-contains?
-                            (buffer-string help-buffer) "buffer.close")))
+                            (buffer-string help-buffer) "buffer.quit")))
           (error 'fundamental-editing-tests "help.show did not display contextual command help"))
         (let ([rejected?
                (guard (condition [else #t])
@@ -973,7 +973,7 @@
                         (command-context-buffer-id
                           (application-command-context application)))
                      (string-contains?
-                       (buffer-string help-buffer) "buffer.close")
+                       (buffer-string help-buffer) "buffer.quit")
                      (not (string-contains?
                             (buffer-string help-buffer) "buffer.next-item")))
           (error 'fundamental-editing-tests

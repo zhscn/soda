@@ -4985,8 +4985,9 @@
       (native:runtime-close! native-runtime)
       (soda-application-close! application))))
 
-;; Buffer-local help input must outrank the fundamental global binding: C-g
-;; closes help instead of reopening it.
+;; Application override bindings retain their Emacs semantics in special
+;; Buffers: C-g cancels, while q returns to the preceding View without
+;; destroying the generated Buffer.
 (let* ([application (make-soda-application)]
        [state (soda-application-state application)]
        [runtime (host-state-command-runtime state)])
@@ -4998,22 +4999,39 @@
              [active (surface-active-context surface (host-state-views state))]
              [view (view-service-ref (host-state-views state) (active-context-view-id active))]
              [context
-              (buffer-input-context
-                active view
-                (list (fundamental-fallback-input-layer
-                        (soda-application-editing application))))]
-             [disposition
+              (soda-application-resolve-input-context application active view)]
+             [quit-disposition
               (input-dispatch
                 context
                 (make-key-event
                   'character (char->integer #\g) #f #f 4 'press (make-bytevector 0)))]
+             [return-disposition
+              (input-dispatch
+                context
+                (make-key-event
+                  'character (char->integer #\q) #f #f 0 'press (make-bytevector 0)))]
              [text-disposition
               (input-dispatch context
                               (make-text-input-event 'text (string->utf8 "x")))])
-        (unless (and (eq? (input-disposition-kind disposition) 'command)
-                     (eq? (input-disposition-value disposition) 'buffer.close)
+        (unless (and (eq? (input-disposition-kind quit-disposition) 'command)
+                     (eq? (input-disposition-value quit-disposition) 'keyboard.quit)
+                     (eq? (input-disposition-kind return-disposition) 'command)
+                     (eq? (input-disposition-value return-disposition) 'buffer.quit)
                      (eq? (input-disposition-kind text-disposition) 'pass))
-          (error 'kernel-tests "help Buffer did not override C-g with close"))))
+          (error 'kernel-tests "generated Buffer did not preserve quit and return bindings"))
+        (command-runtime-start! runtime 'buffer.quit (application-command-context application))
+        (let* ([returned (surface-active-context surface (host-state-views state))]
+               [returned-buffer
+                (buffer-service-ref
+                  (host-state-buffers state) (active-context-buffer-id returned) #f)]
+               [help
+                (package-host-find-buffer-key
+                  (make-package-host state) (make-buffer-key 'help 'commands) #f)])
+          (unless (and returned-buffer
+                       (string=? (buffer-name returned-buffer) "*scratch*")
+                       help
+                       (string=? (buffer-name help) "*help*"))
+            (error 'kernel-tests "buffer.quit did not return while retaining help")))))
     (lambda () (soda-application-close! application))))
 
 ;; A semantic spelling item can carry immutable target data through an

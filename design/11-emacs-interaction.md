@@ -53,7 +53,7 @@ prefix key、minibuffer、echo area、mode line、Buffer/View/Window 语义作�
 | Unicode whole-word literal search policy | word boundary 由 search package 定义 |
 | POSIX ERE search policy、repeat 与 replace | 编译器状态属于 search session |
 | 拼写检查、替换建议与结果 Buffer | 结果和候选是可导航的普通 Buffer；finding 激活复用源 View 并 reveal 目标位置 |
-| help、describe-command 与 where-is | help 是按调用时 InputContext 刷新的可复用 generated Buffer；简短结果进入 echo area |
+| help、describe-command 与 where-is | help 是按调用时 InputContext 刷新的可复用 generated Buffer；`q` 返回前一个 View 而保留 Buffer，简短结果进入 echo area |
 | `M-x` command completion | 仅列出当前上下文可用且声明为用户可见的 command；输入、effect continuation 与 frontend adapter 不进入候选 |
 | 外部命令的 process Buffer | 前台命令创建只读的 Process generated Buffer；外部 I/O 通过 effect 和 package owner authority 追加输出，后台输出不改变当前焦点 |
 | 位置与词/行/字符统计 | 结果显示在 echo area 或结果 Buffer |

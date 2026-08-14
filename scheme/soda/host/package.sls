@@ -38,6 +38,7 @@
           package-host-view-ref
           package-host-create-view!
           package-host-present-buffer!
+          package-host-quit-window!
           package-host-close-view!
           package-host-surface-size
           package-host-replace-window-view!
@@ -403,6 +404,35 @@
                              (begin
                                (view-service-close-view! views (view-id created))
                                #f))))))))))
+
+  ;; Quitting a temporary presentation returns the target Window to its most
+  ;; recently shown different View.  The Buffer remains alive: its owner may
+  ;; refresh it and the user may revisit it without reconstructing state.
+  ;; This is intentionally distinct from closing a Buffer resource.
+  (define (package-host-quit-window! host target-surface-id target-window-id)
+    (unless (package-host? host)
+      (assertion-violation 'package-host-quit-window! "expected a PackageHost" host))
+    (let* ([state (package-host-state host)]
+           [views (host-state-views state)]
+           [surface
+            (surface-service-ref
+              (host-state-surfaces state) target-surface-id #f)]
+           [window
+            (and surface
+                 (find (lambda (leaf) (= (window-id leaf) target-window-id))
+                       (window-leaves (surface-root-window surface))))]
+           [current
+            (and window (view-service-ref views (window-view-id window) #f))])
+      (and current
+           (let ([previous
+                  (recent-replacement-view
+                    surface views (buffer-id (view-buffer current)))])
+             (and previous
+                  (dispatcher-dispatch-host!
+                    (host-state-dispatch state)
+                    (make-replace-window-view-operation
+                      target-surface-id target-window-id (view-id previous)))
+                  previous)))))
 
   (define (package-host-close-view! host id)
     (view-service-close-view! (host-state-views (package-host-state host)) id))

@@ -153,5 +153,13 @@
       (class 'generated-buffer) (scope 'mode) (undo 'ignore)
       (package-host-close-buffer-with-fallback!
         host owner (command-context-buffer-id context))
+      (command-handled))
+    (define-command
+      runtime owner 'buffer.quit (context)
+      (documentation "Return from the active special Buffer without closing it.")
+      (class 'generated-buffer) (scope 'mode) (undo 'ignore)
+      (package-host-quit-window!
+        host (command-context-surface-id context)
+        (command-context-window-id context))
       (command-handled)))
 )

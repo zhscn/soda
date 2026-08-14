@@ -34,8 +34,8 @@
       (bind 'page-up 'buffer.page-up)
       (bind 'page-down 'buffer.page-down)
       (keymap-bind! keymap
-                    (list (make-key-stroke 'character (char->integer #\g) 4))
-                    'buffer.close)
+                    (list (make-key-stroke 'character (char->integer #\q) 0))
+                    'buffer.quit)
       keymap))
 
   (define (make-buffer-item-action-service)
