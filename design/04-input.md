@@ -78,9 +78,16 @@ InputContext {
   view_id,
   buffer_id,
   layers,
-  input_stack
+  input_stack,
+  translation
 }
 ```
+
+`InputTranslation` 把 frontend-neutral 的原始 KeyStroke sequence 投影为 resolver sequence，并为
+introspection 提供等价输入序列。pending sequence 保留原始按键，因此 echo area 反映用户实际输入；
+dispatch、prefix guidance 和 command lookup 使用同一个 translation。Emacs application 将
+`ESC + key` 规范化为对应的 Meta KeyStroke，连续 Escape 保持独立 prefix key。其他 application
+使用 identity translation。
 
 layer 按高到低组合：
 

@@ -15,7 +15,9 @@
            [key
             (if (key-stroke-codepoint stroke)
                 (string (integer->char (key-stroke-codepoint stroke)))
-                (symbol->string (key-stroke-key stroke)))])
+                (case (key-stroke-key stroke)
+                  [(escape) "ESC"]
+                  [else (symbol->string (key-stroke-key stroke))]))])
       (string-append prefix key)))
 
   (define (key-sequence-label sequence)

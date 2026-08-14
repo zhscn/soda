@@ -45,6 +45,7 @@
           (soda packages base fundamental-editing)
           (soda packages base history)
           (soda packages editor-options)
+          (soda packages emacs-input)
           (soda packages file-service)
           (soda packages scheme-mode)
           (soda packages directory)
@@ -441,58 +442,60 @@
   ;; tests use the same layer stack.  It remains a pure projection of the
   ;; active context and View.
   (define (soda-application-resolve-input-context application active view)
-    (or (minibuffer-input-context
-            (soda-application-minibuffer application) active view
-            (list
-              (make-input-layer
-                'override
-                (soda-application-override-keymap application)
-                #f 'pass)
-              (fundamental-fallback-input-layer
-                (soda-application-editing application))))
-          (buffer-input-context
-            active view
-            (list
-              (make-input-layer
-                'override
-                (soda-application-override-keymap application)
-                #f 'pass)
-              (make-input-layer
-                'global
-                (editor-options-keymap (soda-application-options application))
-                #f 'pass)
-              (make-input-layer
-                'global
-                (search-keymap (soda-application-search application))
-                #f 'pass)
-              (make-input-layer
-                'global
-                (message-keymap (soda-application-messages application))
-                #f 'pass)
-              (make-input-layer
-                'global
-                (spell-keymap (soda-application-spelling application))
-                #f 'pass)
-              (make-input-layer
-                'global
-                (process-keymap (soda-application-processes application))
-                #f 'pass)
-              (make-input-layer
-                'global
-                (file-keymap (soda-application-files application))
-                #f 'pass)
-              (make-input-layer
-                'global
-                (directory-keymap (soda-application-directories application))
-                #f 'pass)
-              (make-input-layer
-                'global
-                (buffer-list-keymap (soda-application-buffer-lists application))
-                #f 'pass)
-              (make-input-layer
-                'global
-                (soda-application-default-keymap application)
-                #f 'pass)))))
+    (input-context-with-translation
+      (or (minibuffer-input-context
+              (soda-application-minibuffer application) active view
+              (list
+                (make-input-layer
+                  'override
+                  (soda-application-override-keymap application)
+                  #f 'pass)
+                (fundamental-fallback-input-layer
+                  (soda-application-editing application))))
+            (buffer-input-context
+              active view
+              (list
+                (make-input-layer
+                  'override
+                  (soda-application-override-keymap application)
+                  #f 'pass)
+                (make-input-layer
+                  'global
+                  (editor-options-keymap (soda-application-options application))
+                  #f 'pass)
+                (make-input-layer
+                  'global
+                  (search-keymap (soda-application-search application))
+                  #f 'pass)
+                (make-input-layer
+                  'global
+                  (message-keymap (soda-application-messages application))
+                  #f 'pass)
+                (make-input-layer
+                  'global
+                  (spell-keymap (soda-application-spelling application))
+                  #f 'pass)
+                (make-input-layer
+                  'global
+                  (process-keymap (soda-application-processes application))
+                  #f 'pass)
+                (make-input-layer
+                  'global
+                  (file-keymap (soda-application-files application))
+                  #f 'pass)
+                (make-input-layer
+                  'global
+                  (directory-keymap (soda-application-directories application))
+                  #f 'pass)
+                (make-input-layer
+                  'global
+                  (buffer-list-keymap (soda-application-buffer-lists application))
+                  #f 'pass)
+                (make-input-layer
+                  'global
+                  (soda-application-default-keymap application)
+                  #f 'pass))))
+      emacs-input-translation))
 
   (define (make-disposition-handler application)
     (lambda (context disposition)

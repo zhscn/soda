@@ -4315,6 +4315,68 @@
           (error 'fundamental-editing-tests
                  "chunked legacy ESC sequence was not preserved"))))
 
+    ;; Application input translation gives an explicit Escape prefix the same
+    ;; command semantics as a reported Meta modifier.  The rule applies to
+    ;; ordinary and transient minibuffer keymaps without duplicating bindings.
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [surface (soda-application-surface application)]
+           [frontend
+            (make-frontend
+              state surface
+              (lambda (active view)
+                (soda-application-resolve-input-context application active view))
+              (lambda (context disposition)
+                (fundamental-input-disposition context disposition))
+              (lambda (render theme) #f)
+              (make-render-service) default-theme)])
+      (define (send-key! key codepoint modifiers)
+        (frontend-enqueue!
+          frontend
+          (make-surface-input-message
+            (surface-id surface)
+            (make-key-event
+              key codepoint #f #f modifiers 'press (make-bytevector 0))))
+        (frontend-step! frontend))
+      (send-key! 'escape 27 0)
+      (unless
+        (exists
+          (lambda (entry)
+            (and (string=? (car entry) "ESC x")
+                 (string=? (cdr entry) "command.execute-extended")))
+          (surface-prefix-guidance surface))
+        (error 'fundamental-editing-tests
+               "Escape prefix guidance omitted the M-x alias"
+               (surface-prefix-guidance surface)))
+      (send-key! 'character (char->integer #\x) 0)
+      (unless (minibuffer-service-current (soda-application-minibuffer application))
+        (error 'fundamental-editing-tests
+               "ESC x did not invoke the canonical M-x command"))
+      (send-key! 'escape 27 0)
+      (send-key! 'character (char->integer #\p) 0)
+      (unless
+        (let* ([session
+                (minibuffer-service-current
+                  (soda-application-minibuffer application))]
+               [view
+                (and session
+                     (view-service-ref
+                       (host-state-views state)
+                       (minibuffer-session-view-id session)))])
+          (and view
+               (not
+                 (input-stack-pending-sequence
+                   (view-state-input-state (view-state view))))))
+        (error 'fundamental-editing-tests
+               "minibuffer ESC p did not resolve through the M-p binding"))
+      (send-key! 'character (char->integer #\g) 4)
+      (send-key! 'character (char->integer #\x) 2)
+      (unless (minibuffer-service-current (soda-application-minibuffer application))
+        (error 'fundamental-editing-tests
+               "reported M-x diverged from its Escape-prefix alias"))
+      (frontend-close! frontend)
+      (soda-application-close! application))
+
     ;; Terminal protocol reports, scheduling, command execution, and Frame
     ;; presentation form one input contract.  A Kitty Down press followed by
     ;; release produces one motion and exposes no intermediate chrome frame.

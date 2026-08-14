@@ -40,19 +40,34 @@
            [sequences
             (fold-left append '()
               (map (lambda (layer)
-                     (map car (keymap-binding-entries (input-layer-keymap layer))))
+                     (fold-left
+                       append '()
+                       (map
+                         (lambda (entry)
+                           (input-translation-aliases
+                             (input-context-translation input-context)
+                             (car entry)))
+                         (keymap-binding-entries
+                           (input-layer-keymap layer)))))
                    layers))]
            [candidates
             (fold-left
               (lambda (result sequence)
-                (let* ([resolved (resolve-key-sequence layers sequence)]
+                (let* ([translated
+                        (input-translation-translate
+                          (input-context-translation input-context) sequence)]
+                       [resolved (resolve-key-sequence layers translated)]
                        [shown
                         (if (and (pair? pending)
                                  (sequence-prefix? pending sequence)
                                  (> (length sequence) (length pending)))
                             (sequence-take sequence (+ 1 (length pending)))
                             sequence)]
-                       [shown-resolution (resolve-key-sequence layers shown)]
+                       [shown-resolution
+                        (resolve-key-sequence
+                          layers
+                          (input-translation-translate
+                            (input-context-translation input-context) shown))]
                        [label (key-sequence-label shown)])
                   (if (and (pair? pending)
                            (eq? (car resolved) 'command)

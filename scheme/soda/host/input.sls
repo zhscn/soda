@@ -48,12 +48,18 @@
           input-layer-kind
           input-layer-handler
           input-layer-text-policy
+          make-input-translation
+          input-translation?
+          input-translation-translate
+          input-translation-aliases
           make-input-context
           input-context?
           input-context-view-id
           input-context-buffer-id
           input-context-layers
           input-context-stack
+          input-context-translation
+          input-context-with-translation
           input-layer-compose
           resolve-key-sequence
           input-disposition?
@@ -67,6 +73,7 @@
   (import (rnrs)
           (soda host command)
           (soda host input-event)
+          (soda host input-translation)
           (soda host value))
 
   (define-record-type
@@ -432,7 +439,8 @@
       (immutable view-id input-context-view-id)
       (immutable buffer-id input-context-buffer-id)
       (immutable layers input-context-layers)
-      (immutable stack input-context-stack)))
+      (immutable stack input-context-stack)
+      (immutable translation input-context-translation)))
 
   (define (make-input-context view-id buffer-id layers . stack)
     (%make-input-context
@@ -442,7 +450,21 @@
           (let ([value (car stack)])
             (unless (input-stack? value)
               (assertion-violation 'make-input-context "expected an input stack" value))
-            value))))
+            value))
+      identity-input-translation))
+
+  (define (input-context-with-translation context translation)
+    (unless (and (input-context? context) (input-translation? translation))
+      (assertion-violation
+        'input-context-with-translation
+        "expected an InputContext and InputTranslation"
+        context translation))
+    (%make-input-context
+      (input-context-view-id context)
+      (input-context-buffer-id context)
+      (input-context-layers context)
+      (input-context-stack context)
+      translation))
 
   (define (input-layer-rank kind)
     (cdr (assq kind input-layer-order)))
@@ -552,13 +574,16 @@
         [else
          (let* ([stroke (key-event->key-stroke event)]
                 [single-sequence (list stroke)]
+                [translated-single
+                 (input-translation-translate
+                   (input-context-translation context) single-sequence)]
                 [single-result
                  (and pending
                       (resolve-command
                         (input-context-layers context)
-                        single-sequence
+                        translated-single
                         (resolve-key-sequence
-                          (input-context-layers context) single-sequence)))]
+                          (input-context-layers context) translated-single)))]
                 ;; An override command is an application-declared interrupt:
                 ;; it remains reachable while an ordinary prefix is pending.
                 ;; Input owns this composition rule; it does not know which
@@ -572,14 +597,17 @@
                               (if pending
                                   (append pending single-sequence)
                                   single-sequence))]
+                [translated-sequence
+                 (input-translation-translate
+                   (input-context-translation context) sequence)]
                 [result
                  (if interrupt?
                      single-result
                      (resolve-command
                        (input-context-layers context)
-                       sequence
+                       translated-sequence
                        (resolve-key-sequence
-                         (input-context-layers context) sequence)))])
+                         (input-context-layers context) translated-sequence)))])
            (case (car result)
              [(prefix)
               (input-consume
@@ -613,9 +641,12 @@
                 (input-context-stack context))
               (input-pass (input-context-stack context))))
         (if (key-event? event)
-            (let ([result (resolve-key-sequence
-                            (input-context-layers context)
-                            (list (key-event->key-stroke event)))])
+            (let* ([sequence (list (key-event->key-stroke event))]
+                   [translated
+                    (input-translation-translate
+                      (input-context-translation context) sequence)]
+                   [result (resolve-key-sequence
+                             (input-context-layers context) translated)])
               (case (car result)
                 [(command)
                  (%make-input-disposition
