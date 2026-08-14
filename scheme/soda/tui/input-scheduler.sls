@@ -2,6 +2,7 @@
   (export make-input-scheduler
           input-scheduler?
           input-scheduler-enqueue!
+          input-scheduler-consume!
           input-scheduler-begin-cycle!
           input-scheduler-completed-generation
           input-scheduler-presentation-ready?)
@@ -18,13 +19,19 @@
     (input-scheduler %make-input-scheduler input-scheduler?)
     (fields
       (immutable state input-scheduler-state)
+      ;; Entries are (surface-id key-stroke count).  They describe only
+      ;; repeats still waiting in Runtime, rather than every decoded key.
+      ;; This lets legacy terminals enqueue a large press-only read without
+      ;; repeatedly scanning it for repeat events that cannot exist.
+      (mutable pending-repeats input-scheduler-pending-repeats
+                               input-scheduler-pending-repeats-set!)
       (mutable open-cycles input-scheduler-open-cycles
                            input-scheduler-open-cycles-set!)
       (mutable completed-generation input-scheduler-completed-generation
                                     input-scheduler-completed-generation-set!)))
 
   (define (make-input-scheduler state)
-    (%make-input-scheduler state 0 0))
+    (%make-input-scheduler state '() 0 0))
 
   (define (same-physical-key? left right)
     (and (key-event? left) (key-event? right)
@@ -46,6 +53,55 @@
            (and (key-event? candidate)
                 (eq? (key-event-type candidate) 'repeat)))))
 
+  (define (repeat-entry-matches? entry surface-id event)
+    (and (= (car entry) surface-id)
+         (key-stroke=? (cadr entry) (key-event->key-stroke event))))
+
+  (define (pending-repeat-on-surface-tracked? scheduler surface-id)
+    (exists (lambda (entry) (= (car entry) surface-id))
+            (input-scheduler-pending-repeats scheduler)))
+
+  (define (pending-repeat-tracked? scheduler surface-id event)
+    (exists (lambda (entry) (repeat-entry-matches? entry surface-id event))
+            (input-scheduler-pending-repeats scheduler)))
+
+  (define (remember-repeat! scheduler surface-id event)
+    (let ([entries (input-scheduler-pending-repeats scheduler)])
+      (if (pending-repeat-tracked? scheduler surface-id event)
+          (input-scheduler-pending-repeats-set!
+            scheduler
+            (map (lambda (entry)
+                   (if (repeat-entry-matches? entry surface-id event)
+                       (list (car entry) (cadr entry) (+ (caddr entry) 1))
+                       entry))
+                 entries))
+          (input-scheduler-pending-repeats-set!
+            scheduler
+            (cons (list surface-id (key-event->key-stroke event) 1) entries)))))
+
+  (define (forget-repeat! scheduler surface-id event)
+    (let loop ([remaining (input-scheduler-pending-repeats scheduler)]
+               [result '()])
+      (cond
+        [(null? remaining)
+         (input-scheduler-pending-repeats-set! scheduler (reverse result))]
+        [(repeat-entry-matches? (car remaining) surface-id event)
+         (let ([entry (car remaining)])
+           (input-scheduler-pending-repeats-set!
+             scheduler
+             (append (reverse result)
+                     (if (> (caddr entry) 1)
+                         (cons (list (car entry) (cadr entry) (- (caddr entry) 1))
+                               (cdr remaining))
+                         (cdr remaining)))))]
+        [else (loop (cdr remaining) (cons (car remaining) result))])))
+
+  (define (forget-repeats-on-surface! scheduler surface-id)
+    (input-scheduler-pending-repeats-set!
+      scheduler
+      (filter (lambda (entry) (not (= (car entry) surface-id)))
+              (input-scheduler-pending-repeats scheduler))))
+
   (define (input-scheduler-enqueue! scheduler message)
     (unless (input-scheduler? scheduler)
       (assertion-violation
@@ -59,16 +115,36 @@
             ;; this Surface.  Direction changes therefore take effect at the
             ;; next action instead of waiting behind stale repeats.
             [(press)
-             (host-frontend-discard!
-               (input-scheduler-state scheduler)
-               (lambda (candidate)
-                 (pending-repeat-on-surface? candidate surface-id)))]
+             (when (pending-repeat-on-surface-tracked? scheduler surface-id)
+               (host-frontend-discard!
+                 (input-scheduler-state scheduler)
+                 (lambda (candidate)
+                   (pending-repeat-on-surface? candidate surface-id)))
+               (forget-repeats-on-surface! scheduler surface-id))]
+            [(repeat) (remember-repeat! scheduler surface-id event)]
             [(release)
-             (host-frontend-discard!
-               (input-scheduler-state scheduler)
-               (lambda (candidate)
-                 (pending-repeat-for? candidate surface-id event)))]))))
+             (when (pending-repeat-tracked? scheduler surface-id event)
+               (host-frontend-discard!
+                 (input-scheduler-state scheduler)
+                 (lambda (candidate)
+                   (pending-repeat-for? candidate surface-id event)))
+               (let loop ()
+                 (when (pending-repeat-tracked? scheduler surface-id event)
+                   (forget-repeat! scheduler surface-id event)
+                   (loop))))]))))
     (host-frontend-enqueue! (input-scheduler-state scheduler) message))
+
+  ;; Frontend invokes this exactly when an input message leaves Runtime.  The
+  ;; count stays accurate across partial drains, so a later press or release
+  ;; still cancels only repeat messages that are genuinely queued.
+  (define (input-scheduler-consume! scheduler message)
+    (unless (input-scheduler? scheduler)
+      (assertion-violation
+        'input-scheduler-consume! "expected an InputScheduler" scheduler))
+    (when (surface-input-message? message)
+      (let ([event (surface-input-message-event message)])
+        (when (and (key-event? event) (eq? (key-event-type event) 'repeat))
+          (forget-repeat! scheduler (surface-input-message-surface-id message) event)))))
 
   ;; The boundary is queued before command dispatch.  Command messages use the
   ;; runtime priority lane, so they execute first and the boundary closes the

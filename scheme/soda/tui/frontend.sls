@@ -453,6 +453,10 @@
          (= (surface-input-message-surface-id message)
             (surface-id (frontend-surface value)))
          (let ([event (surface-input-message-event message)])
+           ;; Repeat tracking describes only messages that remain queued.
+           ;; Consume before routing so a command-triggered input transition
+           ;; observes an accurate cancellation boundary.
+           (input-scheduler-consume! (frontend-input-scheduler value) message)
            ;; Key release reports carry no editor action. Dropping them at the
            ;; frontend boundary also avoids clearing feedback and presenting a
            ;; second frame for one physical key cycle.
