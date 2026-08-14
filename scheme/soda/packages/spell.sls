@@ -35,7 +35,9 @@
   ;; process lifetime, stdin and event delivery.
   (define-record-type
     (spell-service %make-spell-service spell-service?)
-    (fields host owner processes keymap result-keymap result-mode))
+    (fields host owner processes keymap result-keymap result-mode authority
+            (mutable generation spell-service-generation
+                     spell-service-generation-set!)))
 
   (define-record-type spell-request
     (fields context buffer-id buffer-name buffer-generation source input))
@@ -231,6 +233,9 @@
     (make-configuration
       (make-buffer-modes-extension (spell-service-result-mode service) '())))
 
+  (define (spell-result-key request)
+    (make-buffer-key 'spell (spell-request-buffer-id request)))
+
   (define (source-selection offset)
     (make-selection (list (make-selection-range offset offset))))
 
@@ -311,16 +316,27 @@
            [layout (report-layout request status output)]
            [configuration (spell-result-configuration service)]
            [buffer
-            (package-host-create-buffer!
-              host (spell-service-owner service)
-              (string-append "*Spelling: " (spell-request-buffer-name request) "*")
-              (make-document (car layout))
-              configuration)])
-      (package-host-dispatch! host
-        (make-transaction-spec
-          (buffer-id buffer) #f (buffer-state-generation (buffer-state buffer))
-          (make-change-set (snapshot-byte-size (buffer-state-document (buffer-state buffer))) '())
-          #f (list (make-buffer-items-effect (cdr layout))) '()))
+            (package-host-open-or-create-buffer!
+              host (spell-service-owner service) (spell-result-key request)
+              (lambda ()
+                (package-host-create-buffer!
+                  host (spell-service-owner service)
+                  (string-append "*Spelling: " (spell-request-buffer-name request) "*")
+                  (make-document "") configuration)))]
+           [generation (+ (spell-service-generation service) 1)]
+           [update
+            (make-projection-update generation (car layout) (cdr layout) '() '())]
+           [published
+            (package-host-dispatch! host
+              (make-projection-transaction-spec
+                (buffer-id buffer) #f (buffer-state buffer) update
+                (list
+                  (make-edit-authority-annotation
+                    (spell-service-authority service)))))])
+      (unless published
+        (assertion-violation 'spell.publish-report
+                             "spell projection was not published" request))
+      (spell-service-generation-set! service generation)
       (package-host-present-buffer-if-current!
         host (spell-service-owner service) buffer context configuration)
       buffer))
@@ -370,9 +386,10 @@
     (let* ([runtime (package-host-command-runtime host)]
            [keymap (make-keymap 'spell)]
            [result-keymap (make-keymap 'spell-result)]
+           [authority (make-edit-authority owner 'spell-report)]
            [profile
             (make-generated-buffer-profile
-              #f #f #t
+              #t authority #t
               (list (make-input-layer 'buffer result-keymap #f 'ignore)
                     (buffer-item-input-layer actions)))]
            [result-mode
@@ -384,7 +401,7 @@
               "Spell")]
            [service
             (%make-spell-service
-              host owner processes keymap result-keymap result-mode)])
+              host owner processes keymap result-keymap result-mode authority 0)])
       (package-host-register-mode! host owner result-mode)
       (keymap-bind! result-keymap (list (control-stroke #\r)) 'spell.correct-item)
       (buffer-item-action-register!
