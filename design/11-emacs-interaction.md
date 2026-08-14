@@ -97,6 +97,8 @@ Emacs 交互基线使用以下可观察条件：
   生命周期；
 - 普通编辑状态保留正文、mode line 与 echo area；键位提示由 prefix 或显式帮助命令触发；
 - echo area 不保存会在临时交互结束后重新出现的后台消息；
+- minibuffer 组合 request-local、minibuffer 与基础文本编辑 keymap，并保留 application-wide
+  interrupt；file、Window、history 与 extended-command 工作流不进入 prompt 输入上下文；
 - `C-g` 与 `ESC ESC ESC` 进入 application-wide quit；单次 `ESC` 保留为 prefix，不由
   minibuffer 解释为取消。取消临时交互后，`Quit` 仅在原始输入目标仍当前时进入 echo area；
 - terminal frontend 在正常退出和 condition unwind 时恢复 terminal session；
