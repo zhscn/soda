@@ -322,6 +322,11 @@ View selection 下的 item，不解析显示字符串。改变 point 的通用 i
 Dispatcher 为未显式指定 viewport 的 selection transaction 发布 `reveal-point`，由 frontend
 使用当前 DisplayMap 解析 viewport。
 
+generated Buffer 的通用行移动、分页和关闭声明 `generated-buffer` command category。只有提供
+`buffer-item-ranges` 的 mode 才额外声明 `buffer-item`，并安装 semantic item 的键图与 command。
+Help、普通结果和其他没有可操作条目的 generated Buffer 因此不会将 item activation 或 item motion
+呈现为可用命令。
+
 action 以 `(provider_id, symbol)` 标识，并通过 owner-scoped action registry 解析。StateField 和
 RangeSet 不保存可失效的 procedure closure。action 收到稳定 `BufferItem`、CommandContext 和
 producer generation，再产生普通 command outcome。

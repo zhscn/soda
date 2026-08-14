@@ -360,20 +360,38 @@
                     (unless (symbol? name)
                       (assertion-violation 'frontend-dispatch-input!
                                            "keymap command binding must be a symbol" name))
-                    (command-runtime-enqueue!
-                      (host-state-command-runtime (frontend-host-state value))
-                      ;; Keymap bindings preserve the command declaration:
-                      ;; commands with an InteractivePlan (save, close,
-                      ;; search, quit) collect their arguments through the
-                      ;; interaction service; primitive edit commands run
-                      ;; immediately with no synthetic reader.
-                      (make-command-invoke-message
-                        name command-context '()
-                        (command-runtime-command-interactive?
-                          (host-state-command-runtime (frontend-host-state value))
-                          name)
-                        (or (input-disposition-requested-command disposition)
-                            name))))]
+                    (let ([runtime
+                           (host-state-command-runtime (frontend-host-state value))])
+                      ;; Keymaps compose independently of mode ownership, so
+                      ;; an optional or configured binding can resolve before
+                      ;; its command applies to this Buffer.  Treat that as a
+                      ;; normal input result instead of queueing an invocation
+                      ;; that will only fail at the runtime boundary.  The
+                      ;; runtime retains its own availability check for queued
+                      ;; and asynchronous invocations.
+                      (if (command-runtime-command-available?
+                            runtime name command-context)
+                          (command-runtime-enqueue!
+                            runtime
+                            ;; Keymap bindings preserve the command declaration:
+                            ;; commands with an InteractivePlan (save, close,
+                            ;; search, quit) collect their arguments through the
+                            ;; interaction service; primitive edit commands run
+                            ;; immediately with no synthetic reader.
+                            (make-command-invoke-message
+                              name command-context '()
+                              (command-runtime-command-interactive? runtime name)
+                              (or (input-disposition-requested-command disposition)
+                                  name)))
+                          (host-frontend-dispatch-host!
+                            (frontend-host-state value)
+                            (make-set-surface-feedback-operation
+                              (surface-id (frontend-surface value))
+                              (make-user-feedback
+                                (string-append
+                                  (key-sequence-label sequence)
+                                  " is not available in this context")
+                                'warning))))))]
                  [else
                   (let ([result
                          ((frontend-handle-disposition value)

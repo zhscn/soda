@@ -144,6 +144,8 @@ mode-scoped definition 的 class 必须出现在活动 major/minor mode 的有�
 registry 保存全局可发现的 definition。执行入口使用 active-context availability 查询；M-x、
 describe-command 与 where-is 进一步只读取 `user_visible?` definition。effect continuation、
 frontend adapter 和需要运行时参数的内部 command 仍可由 runtime 排队，但不进入用户命令选择器。
+键图解析到当前 context 不可用的 mode command 时，frontend 不创建 invocation，而是在 echo area
+发布短暂反馈；runtime 对所有直接、队列和异步入口再次执行同一检查。
 
 M-x 的 command reader 产生 must-match completion request，接受后把选择排入 runtime queue，
 不递归调用另一条 command。describe-command 读取 CommandDefinition metadata。where-is 对当前

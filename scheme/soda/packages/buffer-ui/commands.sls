@@ -93,22 +93,22 @@
     (define-command
       runtime owner 'buffer.next-line (context)
       (documentation "Move to the next logical line in a special Buffer.")
-      (class 'buffer-item) (scope 'mode) (repeatable #t) (undo 'ignore)
+      (class 'generated-buffer) (scope 'mode) (repeatable #t) (undo 'ignore)
       (move-line context 1))
     (define-command
       runtime owner 'buffer.previous-line (context)
       (documentation "Move to the previous logical line in a special Buffer.")
-      (class 'buffer-item) (scope 'mode) (repeatable #t) (undo 'ignore)
+      (class 'generated-buffer) (scope 'mode) (repeatable #t) (undo 'ignore)
       (move-line context -1))
     (define-command
       runtime owner 'buffer.page-up (context)
       (documentation "Scroll a special Buffer toward its beginning.")
-      (class 'buffer-item) (scope 'mode) (repeatable #t) (undo 'ignore)
+      (class 'generated-buffer) (scope 'mode) (repeatable #t) (undo 'ignore)
       (scroll-page context -1))
     (define-command
       runtime owner 'buffer.page-down (context)
       (documentation "Scroll a special Buffer toward its end.")
-      (class 'buffer-item) (scope 'mode) (repeatable #t) (undo 'ignore)
+      (class 'generated-buffer) (scope 'mode) (repeatable #t) (undo 'ignore)
       (scroll-page context 1))
     (define-command
       runtime owner 'buffer.next-item (context)
@@ -150,7 +150,7 @@
     (define-command
       runtime owner 'buffer.close (context)
       (documentation "Close the active special Buffer.")
-      (class 'buffer-item) (scope 'mode) (undo 'ignore)
+      (class 'generated-buffer) (scope 'mode) (undo 'ignore)
       (package-host-close-buffer-with-fallback!
         host owner (command-context-buffer-id context))
       (command-handled)))

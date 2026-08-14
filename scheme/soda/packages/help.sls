@@ -114,10 +114,10 @@
                 (list
                   (make-buffer-input-layer-extension
                     (list (make-input-layer 'buffer keymap #f 'ignore)
-                          (buffer-item-input-layer actions)))
+                          (generated-buffer-input-layer actions)))
                   (make-buffer-edit-policy-extension
                     (make-buffer-edit-policy 'reject #f authority))))
-              '(help buffer-item) "Help")]
+              '(help generated-buffer) "Help")]
            [service
             (make-help-service
               host owner keymap mode fallback-keymaps authority 0)])

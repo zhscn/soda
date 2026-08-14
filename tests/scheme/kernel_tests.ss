@@ -4589,7 +4589,9 @@
        [runtime (host-state-command-runtime host)]
        [keymap (make-keymap 'frontend-test)]
        [key (make-key-stroke 'character (char->integer #\f) 4)]
+       [unavailable-key (make-key-stroke 'character (char->integer #\u) 4)]
        [observed #f]
+       [unavailable-ran? #f]
        [pointer-observed #f]
        [renders 0]
        [presented-theme #f]
@@ -4610,6 +4612,18 @@
                   (make-interactive-ready (list 'frontend)))))))]
        [_command (command-runtime-register-command! runtime definition)]
        [_binding (keymap-bind! keymap (list key) 'command.frontend-test)]
+       [unavailable-definition
+        (make-command-definition
+          'command.frontend-unavailable
+          (lambda (context)
+            (set! unavailable-ran? #t)
+            (command-handled))
+          package-owner "Only valid in a capability this Buffer does not provide."
+          'frontend-unavailable #f 'mode)]
+       [_unavailable-command
+        (command-runtime-register-command! runtime unavailable-definition)]
+       [_unavailable-binding
+        (keymap-bind! keymap (list unavailable-key) 'command.frontend-unavailable)]
        [frontend
         (make-frontend
           host surface
@@ -4638,7 +4652,31 @@
   (unless (hashtable-contains?
             (host-state-frontend-handlers host) (surface-id surface))
     (error 'kernel-tests "frontend did not register its Surface input route"))
+  (let ([rejected?
+         (guard (condition [else #t])
+           (command-runtime-start!
+             runtime 'command.frontend-unavailable
+             (make-command-context
+               #f (surface-id surface) (window-id leaf) (view-id view)
+               (buffer-id buffer) (buffer-state buffer) (view-state view)
+               #f '() #f #f 'frontend-test))
+           #f)])
+    (unless rejected?
+      (error 'kernel-tests
+             "runtime accepted a mode-scoped command without its capability")))
   (frontend-step! frontend)
+  (dispatch-input!
+    (make-key-event
+      'character (char->integer #\u) #f #f 4 'press (make-bytevector 0)))
+  (unless (and (not unavailable-ran?)
+               (let ([feedback (surface-feedback surface)])
+                 (and feedback
+                      (string=? (user-feedback-text feedback)
+                                "C-u is not available in this context"))))
+    (error 'kernel-tests
+           "frontend queued a command unavailable in the active mode"
+           unavailable-ran?
+           (surface-feedback surface)))
   (dispatch-input! (make-pointer-event 0 1 'left 0 1 'press))
   (unless (and pointer-observed
                (surface-hit? (command-context-target pointer-observed))

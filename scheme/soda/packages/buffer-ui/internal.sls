@@ -74,6 +74,7 @@
           make-semantic-position-restore-effect
           make-buffer-item-action-service
           buffer-item-action-service?
+          generated-buffer-input-layer
           buffer-item-input-layer
           buffer-item-action-register!
           buffer-item-action-invoke

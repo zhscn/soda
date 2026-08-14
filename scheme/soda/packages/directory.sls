@@ -359,10 +359,11 @@
                 (list
                   (make-buffer-input-layer-extension
                     (list (make-input-layer 'buffer result-keymap #f 'ignore)
-                          (buffer-item-input-layer actions)))
+                          (buffer-item-input-layer actions)
+                          (generated-buffer-input-layer actions)))
                   (make-buffer-edit-policy-extension
                     (make-buffer-edit-policy 'reject #f authority))))
-              '(directory buffer-item) "Directory")]
+              '(directory generated-buffer buffer-item) "Directory")]
            [service
             (%make-directory-service
               host owner files actions keymap result-keymap authority mode

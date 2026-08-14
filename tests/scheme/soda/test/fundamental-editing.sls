@@ -917,9 +917,11 @@
                         (command-context-buffer-id
                           (application-command-context application)))
                      (string-contains?
-                       (buffer-string help-buffer) "buffer.close"))
+                       (buffer-string help-buffer) "buffer.close")
+                     (not (string-contains?
+                            (buffer-string help-buffer) "buffer.next-item")))
           (error 'fundamental-editing-tests
-                 "reused help Buffer retained stale source-context bindings")))
+                 "help Buffer exposed item commands without item capability")))
       (soda-application-close! application))
 
     (let* ([application (make-soda-application)]

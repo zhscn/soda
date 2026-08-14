@@ -31,7 +31,7 @@
           semantic-position-fallback-offset semantic-position-desired-column
           semantic-position-at-point make-semantic-position-restore-effect
           make-buffer-item-action-service buffer-item-action-service?
-          buffer-item-input-layer buffer-item-action-register!
+          generated-buffer-input-layer buffer-item-input-layer buffer-item-action-register!
           buffer-item-action-invoke install-buffer-item-commands!)
   (import (soda packages buffer-mode)
           (soda packages edit-policy)

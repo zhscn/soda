@@ -654,13 +654,13 @@
     (let* ([definition (lookup-definition service name)]
            [_available
             (when (and (eq? (command-definition-scope definition) 'mode)
-                       (context-major-mode context)
                        (not (command-runtime-command-available?
                               service definition context)))
               (assertion-violation 'command-runtime-start!
-                                   "command is unavailable in the active Buffer mode"
+                                   "command is unavailable in the active context"
                                    name
-                                   (mode-spec-id (context-major-mode context))))]
+                                   (let ([mode (context-major-mode context)])
+                                     (and mode (mode-spec-id mode)))))]
            [invocation
              (if (and interactive? (command-definition-interactive? definition))
                  (make-interactive-command-invocation definition context arguments)

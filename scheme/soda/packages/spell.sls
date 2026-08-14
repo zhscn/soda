@@ -375,10 +375,11 @@
                 (buffer-item-field-extension)
                 (make-buffer-input-layer-extension
                   (list (make-input-layer 'buffer result-keymap #f 'ignore)
-                        (buffer-item-input-layer actions)))
+                        (buffer-item-input-layer actions)
+                        (generated-buffer-input-layer actions)))
                 (make-buffer-edit-policy-extension
                   (make-buffer-edit-policy 'reject)))
-              '(spell buffer-item) "Spell")]
+              '(spell generated-buffer buffer-item) "Spell")]
            [service
             (%make-spell-service
               host owner processes keymap result-keymap result-mode)])

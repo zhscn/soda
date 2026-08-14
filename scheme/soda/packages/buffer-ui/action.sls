@@ -1,6 +1,7 @@
 (library (soda packages buffer-ui action)
   (export make-buffer-item-action-service
           buffer-item-action-service?
+          generated-buffer-input-layer
           buffer-item-input-layer
           buffer-item-action-register!
           buffer-item-action-invoke)
@@ -18,37 +19,50 @@
   (define-record-type
     (buffer-item-action-service %make-buffer-item-action-service buffer-item-action-service?)
     (fields (immutable table buffer-item-action-service-table)
-            (immutable keymap buffer-item-action-service-keymap)))
+            (immutable generated-keymap buffer-item-action-service-generated-keymap)
+            (immutable item-keymap buffer-item-action-service-item-keymap)))
   (define-record-type buffer-item-action-entry
     (fields owner procedure))
 
   (define (make-buffer-item-action-service)
-    (let ([keymap (make-keymap 'buffer-item)])
-      (define (bind key command)
-        (keymap-bind! keymap (list (make-key-stroke key #f 0)) command))
-      (bind 'up 'buffer.previous-line)
-      (bind 'down 'buffer.next-line)
-      (bind 'page-up 'buffer.page-up)
-      (bind 'page-down 'buffer.page-down)
-      (bind 'home 'buffer.first-item)
-      (bind 'end 'buffer.last-item)
-      (bind 'enter 'buffer.activate-item)
-      (keymap-bind! keymap
+    (let ([generated-keymap (make-keymap 'generated-buffer)]
+          [item-keymap (make-keymap 'buffer-item)])
+      (define (bind-generated key command)
+        (keymap-bind! generated-keymap (list (make-key-stroke key #f 0)) command))
+      (define (bind-item key command)
+        (keymap-bind! item-keymap (list (make-key-stroke key #f 0)) command))
+      (bind-generated 'up 'buffer.previous-line)
+      (bind-generated 'down 'buffer.next-line)
+      (bind-generated 'page-up 'buffer.page-up)
+      (bind-generated 'page-down 'buffer.page-down)
+      (bind-item 'home 'buffer.first-item)
+      (bind-item 'end 'buffer.last-item)
+      (bind-item 'enter 'buffer.activate-item)
+      (keymap-bind! item-keymap
                     (list (make-key-stroke 'character (char->integer #\p) 4))
                     'buffer.previous-item)
-      (keymap-bind! keymap
+      (keymap-bind! item-keymap
                     (list (make-key-stroke 'character (char->integer #\n) 4))
                     'buffer.next-item)
-      (keymap-bind! keymap
+      (keymap-bind! generated-keymap
                     (list (make-key-stroke 'character (char->integer #\g) 4))
                     'buffer.close)
-      (%make-buffer-item-action-service (make-hashtable equal-hash equal?) keymap)))
+      (%make-buffer-item-action-service
+        (make-hashtable equal-hash equal?) generated-keymap item-keymap)))
+
+  (define (generated-buffer-input-layer service)
+    (unless (buffer-item-action-service? service)
+      (assertion-violation 'generated-buffer-input-layer
+                           "expected a BufferItem action service" service))
+    (make-input-layer
+      'buffer (buffer-item-action-service-generated-keymap service) #f 'ignore))
 
   (define (buffer-item-input-layer service)
     (unless (buffer-item-action-service? service)
       (assertion-violation 'buffer-item-input-layer
                            "expected a BufferItem action service" service))
-    (make-input-layer 'buffer (buffer-item-action-service-keymap service) #f 'ignore))
+    (make-input-layer
+      'buffer (buffer-item-action-service-item-keymap service) #f 'ignore))
 
   (define (buffer-item-action-key provider-id name)
     (list (stable-buffer-item-identity provider-id) name))
