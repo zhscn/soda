@@ -33,6 +33,7 @@
           configuration-source-layer
           configuration-source-target
           configuration-source-declarations
+          configuration-source-key-bindings
           configuration-source-generation
           make-configuration-context
           configuration-context?
@@ -45,7 +46,8 @@
           resolved-setting-layer)
   (import (rnrs)
           (soda kernel location)
-          (soda kernel resource))
+          (soda kernel resource)
+          (soda host key-configuration))
 
   (define valid-scopes '(application workspace buffer view))
   (define builtin-types
@@ -193,12 +195,18 @@
 
   (define-record-type
     (configuration-source %make-configuration-source configuration-source?)
-    (fields id layer target declarations generation))
+    (fields id layer target declarations key-bindings generation))
 
-  (define (make-configuration-source id layer target declarations generation)
+  (define make-configuration-source
+    (case-lambda
+      [(id layer target declarations generation)
+       (make-configuration-source id layer target declarations '() generation)]
+      [(id layer target declarations key-bindings generation)
     (unless (and (symbol? id) (memq layer configuration-layers)
                  (list? declarations)
                  (for-all setting-declaration? declarations)
+                 (list? key-bindings)
+                 (for-all key-binding-declaration? key-bindings)
                  (integer? generation) (exact? generation) (>= generation 0)
                  (case layer
                    [(application user) (not target)]
@@ -206,9 +214,9 @@
                    [(file-local) (resource? target)]))
       (assertion-violation
         'make-configuration-source "invalid ConfigurationSource"
-        id layer target declarations generation))
+        id layer target declarations key-bindings generation))
     (%make-configuration-source
-      id layer target (copy-list declarations) generation))
+      id layer target (copy-list declarations) (copy-list key-bindings) generation)]))
 
   (define-record-type
     (configuration-context %make-configuration-context configuration-context?)

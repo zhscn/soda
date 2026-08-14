@@ -12,6 +12,7 @@
           package-host-parse-setting
           package-host-reload-configuration-source!
           package-host-configuration-source
+          package-host-key-binding-layers
           package-host-resolve-setting
           package-host-configuration-extensions
           package-host-register-mode!
@@ -142,6 +143,17 @@
       name input scope source))
 
   (define (package-host-reload-configuration-source! host owner source)
+    (unless (and (package-host? host) (owner? owner)
+                 (configuration-source? source))
+      (assertion-violation 'package-host-reload-configuration-source!
+                           "expected a PackageHost, Owner, and ConfigurationSource"
+                           host owner source))
+    ;; Validate key declarations before submitting the source replacement.
+    ;; The setting service already parses all setting declarations before it
+    ;; changes its source table, so either half failing preserves the prior
+    ;; observable configuration generation.
+    (package-host-validate-key-bindings!
+      host (configuration-source-key-bindings source))
     (let ([state (package-host-state host)])
       (dispatcher-dispatch-host!
         (host-state-dispatch state)
@@ -151,6 +163,23 @@
   (define (package-host-configuration-source host id . default)
     (apply setting-service-source
            (host-state-settings (package-host-state host)) id default))
+
+  (define (package-host-key-binding-layers host context mode)
+    (unless (and (package-host? host) (symbol? context)
+                 (or (not mode) (symbol? mode) (mode-spec? mode)))
+      (assertion-violation 'package-host-key-binding-layers
+                           "expected a PackageHost, context, and optional mode" host context mode))
+    (let* ([sources
+            (setting-service-configuration-sources
+              (host-state-settings (package-host-state host)))]
+           [declarations
+            (apply append
+              (map configuration-source-key-bindings
+                   (filter
+                     (lambda (source)
+                       (memq (configuration-source-layer source) '(application user)))
+                     sources)))])
+      (package-host-materialize-key-bindings host declarations context mode)))
 
   (define (package-host-resolve-setting host name scope context)
     (setting-service-resolve

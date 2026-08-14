@@ -9,6 +9,7 @@
           setting-service-apply-reload!
           setting-service-apply-reload-request!
           setting-service-source
+          setting-service-configuration-sources
           setting-service-resolve
           setting-service-resolved-settings
           setting-service-extensions)
@@ -173,9 +174,22 @@
       (assertion-violation
         'setting-service-source "invalid ConfigurationSource lookup" service id))
     (let ([entry (hashtable-ref (setting-service-sources service) id #f)])
-      (if entry
-          (source-entry-source entry)
-          (if (null? default) #f (car default)))))
+        (if entry
+            (source-entry-source entry)
+            (if (null? default) #f (car default)))))
+
+  (define (setting-service-configuration-sources service)
+    (unless (setting-service? service)
+      (assertion-violation 'setting-service-configuration-sources
+                           "expected a SettingService" service))
+    (let ([entries
+           (call-with-values
+             (lambda () (hashtable-entries (setting-service-sources service)))
+             (lambda (ignored entries) (vector->list entries)))])
+      (map source-entry-source
+           (list-sort (lambda (left right) (< (source-entry-order left)
+                                               (source-entry-order right)))
+                      entries))))
 
   (define (source-applies? source context)
     (case (configuration-source-layer source)

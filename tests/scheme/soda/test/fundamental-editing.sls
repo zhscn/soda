@@ -10,6 +10,8 @@
           (soda host frontend)
           (soda host feedback)
           (soda host input)
+          (soda host key-configuration)
+          (soda host setting)
           (soda host input-event)
           (soda host analysis)
           (soda host location)
@@ -177,6 +179,60 @@
       (unless (equal? (input-history-entries history) '("third" "first"))
         (error 'fundamental-editing-tests
                "InputHistory did not bound and promote accepted values")))
+    ;; A declarative key source is validated before its generation replaces
+    ;; the active input composition.  A rejected replacement leaves the
+    ;; previous binding observable through the normal application resolver.
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [host (make-package-host state)]
+           [owner (make-owner 'configured-key-source-test)]
+           [stroke (make-key-stroke 'character (char->integer #\q) 0)]
+           [binding
+            (make-key-binding-declaration
+              'editing #f (list stroke) 'message.show-position 'global #f)]
+           [source
+            (make-configuration-source
+              'test.keys 'application #f '() (list binding) 0)])
+      (package-host-reload-configuration-source! host owner source)
+      (let* ([surface (soda-application-surface application)]
+             [active (surface-active-context surface (host-state-views state))]
+             [view (view-service-ref (host-state-views state)
+                                     (active-context-view-id active))]
+             [context (soda-application-resolve-input-context application active view)]
+             [disposition
+              (input-dispatch context
+                              (make-key-event 'character (char->integer #\q) #f #f 0
+                                              'press (make-bytevector 0)))])
+        (unless (and (eq? (input-disposition-kind disposition) 'command)
+                     (eq? (input-disposition-value disposition) 'message.show-position))
+          (error 'fundamental-editing-tests
+                 "published key source did not enter application input composition")))
+      (unless
+        (guard (condition [else #t])
+          (package-host-reload-configuration-source!
+            host owner
+            (make-configuration-source
+              'test.keys 'application #f '()
+              (list (make-key-binding-declaration
+                      'editing #f (list stroke) 'missing.command 'global #f))
+              1))
+          #f)
+        (error 'fundamental-editing-tests
+               "invalid key source generation was accepted"))
+      (let* ([surface (soda-application-surface application)]
+             [active (surface-active-context surface (host-state-views state))]
+             [view (view-service-ref (host-state-views state)
+                                     (active-context-view-id active))]
+             [context (soda-application-resolve-input-context application active view)]
+             [disposition
+              (input-dispatch context
+                              (make-key-event 'character (char->integer #\q) #f #f 0
+                                              'press (make-bytevector 0)))])
+        (unless (eq? (input-disposition-value disposition) 'message.show-position)
+          (error 'fundamental-editing-tests
+                 "invalid key source replacement discarded the active generation")))
+      (owner-close! owner)
+      (soda-application-close! application))
     ;; A frontend CommandContext retains the exact composed InputLayers.  Help
     ;; and M-x must describe that snapshot rather than recomposing fallback
     ;; layers and accidentally omitting a transient interaction binding.

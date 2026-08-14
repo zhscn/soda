@@ -28,6 +28,7 @@
   (import (rnrs)
           (soda kernel document)
           (soda kernel extension)
+          (soda kernel view-state)
           (soda host command)
           (soda host command-runtime)
           (soda host dispatch)
@@ -458,6 +459,13 @@
   ;; Application composition is a named boundary so frontends and contract
   ;; tests use the same layer stack.  It remains a pure projection of the
   ;; active context and View.
+  (define (configured-editing-layers application view)
+    (let* ([configuration (view-state-configuration (view-state view))]
+           [mode (configuration-facet configuration buffer-mode-facet 'buffer)])
+      (package-host-key-binding-layers
+        (make-package-host (soda-application-state application))
+        'editing (and mode (mode-spec-id mode)))))
+
   (define (soda-application-resolve-input-context application active view)
     (input-context-with-translation
       (or (minibuffer-input-context
@@ -471,7 +479,9 @@
                   (soda-application-editing application))))
             (buffer-input-context
               active view
-              (soda-application-input-layers application)))
+              (append
+                (configured-editing-layers application view)
+                (soda-application-input-layers application))))
       emacs-input-translation))
 
   (define (make-disposition-handler application)
