@@ -1597,7 +1597,7 @@
         (dispatcher-dispatch-host!
           (host-state-dispatch host)
           (make-push-interaction-operation
-            (surface-id split-surface) (view-id other-view) '(0 2 4 1)))]
+            (surface-id split-surface) (view-id other-view) 1))]
        [interaction-render (render-surface split-surface (host-state-views host))]
        [pop-update
         (dispatcher-dispatch-host!
@@ -1652,9 +1652,9 @@
                             (host-update-new-context interaction-update)))
                   1)
                (string=? (frame-cell-grapheme
-                           (frame-cell-at (surface-render-frame interaction-render) 0 2))
+                           (frame-cell-at (surface-render-frame interaction-render) 0 0))
                          "o")
-               (= (surface-render-cursor-column interaction-render) 2)
+               (= (surface-render-cursor-column interaction-render) 0)
                (host-update? pop-update)
                (= (active-context-view-id (host-update-new-context pop-update)) (view-id view))
                (host-update? resize-update)
@@ -1686,7 +1686,7 @@
          [stale-hit (surface-render-hit-test stale-render 0 6)])
     (surface-service-register! (host-state-surfaces host) prune-surface)
     (surface-service-register! (host-state-surfaces host) lone-surface)
-    (surface-push-interaction! prune-surface (view-id other-view) '(0 2 4 1))
+    (surface-push-interaction! prune-surface (view-id other-view) 1)
     (view-service-close-view! (host-state-views host) (view-id other-view))
     (unless (and (surface-service-ref (host-state-surfaces host)
                                      (surface-id prune-surface) #f)
@@ -1882,7 +1882,7 @@
        [_chrome-update
         (surface-set-feedback! surface (make-user-feedback "cache status"))]
        [after-chrome (render-service-render! service surface (host-state-views host))]
-       [_layout-update (surface-push-interaction! surface (view-id view) '(0 0 1 1))]
+       [_layout-update (surface-push-interaction! surface (view-id view) 1)]
        [after-layout (render-service-render! service surface (host-state-views host))])
   (unless (and (eq? initial after-input)
                (not (eq? after-input after-selection))
@@ -1926,7 +1926,7 @@
           (make-leaf-window (view-id root-view) #f) '(10 . 6))]
        [interaction
         (surface-push-interaction!
-          surface (view-id prompt-view) '(5 0 10 1))]
+          surface (view-id prompt-view) 1)]
        [render (render-surface surface (host-state-views host))]
        [root-rendered
         (find
@@ -1946,10 +1946,21 @@
                          'mode-line)))
     (error 'kernel-tests
            "interaction Window did not reserve root, mode-line, and echo rows"))
+  (surface-resize! surface '(14 . 6))
+  (let* ([resized-render (render-surface surface (host-state-views host))]
+         [resized-prompt
+          (find
+            (lambda (item) (= (rendered-view-view-id item) (view-id prompt-view)))
+            (surface-render-rendered-views resized-render))])
+    (unless (and resized-prompt
+                 (equal? (rendered-view-rectangle resized-prompt) '(4 0 14 1)))
+      (error 'kernel-tests
+             "interaction Window did not follow the resized Surface width")))
+  (surface-resize! surface '(10 . 6))
   (surface-set-feedback!
     surface (make-user-feedback "older feedback" 'warning 'sticky))
   (surface-push-interaction!
-    surface (view-id root-view) '(5 0 10 1))
+    surface (view-id root-view) 1)
   (unless (surface-remove-interaction! surface (view-id prompt-view))
     (error 'kernel-tests "specific interaction View was not removed"))
   (let* ([interactions (surface-interaction-windows surface)]

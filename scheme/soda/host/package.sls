@@ -425,9 +425,9 @@
                  (make-replace-window-view-operation surface-id window-id view-id)
                  view-id))
 
-  (define (package-host-push-interaction-view! host surface-id view-id rectangle)
+  (define (package-host-push-interaction-view! host surface-id view-id height)
     (place-view! host
-                 (make-push-interaction-operation surface-id view-id rectangle)
+                 (make-push-interaction-operation surface-id view-id height)
                  view-id))
 
   (define (package-host-pop-interaction-view! host surface-id)

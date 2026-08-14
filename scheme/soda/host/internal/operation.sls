@@ -72,15 +72,12 @@
                            surface-id window-id))
     (%make-host-operation 'remove-window surface-id window-id))
 
-  (define (rectangle? value)
-    (and (list? value) (= (length value) 4)
-         (for-all (lambda (cell) (identity? cell)) value)))
-
-  (define (make-push-interaction-operation surface-id view-id rectangle)
-    (unless (and (identity? surface-id) (identity? view-id) (rectangle? rectangle))
+  (define (make-push-interaction-operation surface-id view-id height)
+    (unless (and (identity? surface-id) (identity? view-id)
+                 (identity? height) (> height 0))
       (assertion-violation 'make-push-interaction-operation
-                           "invalid interaction operation" surface-id view-id rectangle))
-    (%make-host-operation 'push-interaction surface-id (list view-id rectangle)))
+                           "invalid interaction operation" surface-id view-id height))
+    (%make-host-operation 'push-interaction surface-id (list view-id height)))
 
   (define (make-pop-interaction-operation surface-id)
     (unless (identity? surface-id)

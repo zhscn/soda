@@ -225,18 +225,15 @@
 
   (define view-id? nonnegative-exact-integer?)
 
-  (define (rectangle? value)
-    (and (list? value) (= (length value) 4)
-         (for-all nonnegative-exact-integer?
-                  value)))
-
-  (define (surface-push-interaction! surface view-id rectangle)
-    (unless (and (surface? surface) (view-id? view-id) (rectangle? rectangle))
+  (define (surface-push-interaction! surface view-id height)
+    (unless (and (surface? surface) (view-id? view-id)
+                 (integer? height) (exact? height) (> height 0))
       (assertion-violation 'surface-push-interaction!
-                           "invalid Surface interaction request" surface view-id rectangle))
-    (let ([window (make-leaf-window view-id rectangle)])
-      (window-layout! window (car rectangle) (cadr rectangle)
-                      (caddr rectangle) (cadddr rectangle))
+                           "invalid Surface interaction request" surface view-id height))
+    ;; Interaction placement belongs to the Surface projection.  The Window
+    ;; retains only its requested height; row and width follow the current
+    ;; Surface size at render time.
+    (let ([window (make-leaf-window view-id (list 0 0 0 height))])
       (surface-interaction-windows-set!
         surface (cons window (surface-interaction-windows surface)))
       (surface-generation-set! surface (+ 1 (surface-generation surface)))

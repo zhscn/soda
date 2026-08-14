@@ -49,11 +49,11 @@
           (soda view display)
           (soda view plugin))
 
-  ;; Prompt buffers are ordinary transient buffers.  The service owns only
-  ;; their session stack and its interaction overlay placement.
+  ;; Prompt buffers are ordinary transient buffers.  The service owns their
+  ;; session stack and requested row count; the Surface owns placement.
   (define-record-type
     (minibuffer-session %make-minibuffer-session minibuffer-session?)
-    (fields interaction buffer-id view-id origin-view-id surface-id rectangle
+    (fields interaction buffer-id view-id origin-view-id surface-id height
             (mutable completion minibuffer-session-completion minibuffer-session-completion-set!)))
   (define-record-type minibuffer-hook
     (fields owner procedure))
@@ -167,7 +167,7 @@
         (if controller (completion-controller-generation controller) 0)
         (list (cons 'surface-id (minibuffer-session-surface-id session))
               (cons 'surface-size surface-size)
-              (cons 'overlay-rectangle (minibuffer-session-rectangle session))))))
+              (cons 'interaction-height (minibuffer-session-height session))))))
   (define (notify-hooks! hooks snapshot)
     (for-each
       (lambda (hook)
@@ -237,14 +237,13 @@
                [buffer (package-host-create-buffer! host (minibuffer-service-owner service)
                                                     " *minibuffer*" document configuration)]
                [view (package-host-create-view! host (minibuffer-service-owner service)
-                                                buffer configuration)]
-               [rectangle (list (max 0 (- (cdr size) 1)) 0 (car size) 1)])
+                                                buffer configuration)])
           (if (package-host-push-interaction-view!
-                host (command-context-surface-id context) (view-id view) rectangle)
+                host (command-context-surface-id context) (view-id view) 1)
               (let ([session
                      (%make-minibuffer-session interaction (buffer-id buffer) (view-id view)
                                                 (view-id origin) (command-context-surface-id context)
-                                                rectangle #f)])
+                                                1 #f)])
                 (minibuffer-service-sessions-set!
                   service (cons session (minibuffer-service-sessions service)))
                 (notify-hooks! (minibuffer-service-setup-hooks service)

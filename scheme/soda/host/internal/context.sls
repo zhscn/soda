@@ -136,12 +136,12 @@
     (let ([selected (surface-remove-window! surface window-id)])
       (and selected (context-for-window surface views selected))))
 
-  (define (surface-push-interaction-view! surface views view-id rectangle)
+  (define (surface-push-interaction-view! surface views view-id height)
     (unless (and (surface? surface) (view-service? views) (identity? view-id))
       (assertion-violation 'surface-push-interaction-view!
-                           "invalid Surface interaction View request" surface views view-id rectangle))
+                           "invalid Surface interaction View request" surface views view-id height))
     (and (view-service-ref views view-id #f)
-         (let ([window (surface-push-interaction! surface view-id rectangle)])
+         (let ([window (surface-push-interaction! surface view-id height)])
            (surface-active-context surface views))))
 
   (define (surface-pop-interaction-view! surface views)

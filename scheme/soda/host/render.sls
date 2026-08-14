@@ -234,10 +234,8 @@
                  [height (min requested-height remaining)])
             (if (eq? window leaf)
                 (list (max 0 (- (surface-editor-height surface) used height))
-                      (cadr rectangle)
-                      (min (caddr rectangle)
-                           (max 0 (- (car (surface-size surface))
-                                     (cadr rectangle))))
+                      0
+                      (car (surface-size surface))
                       height)
                 (loop (cdr windows) (+ used height)))))))
 
