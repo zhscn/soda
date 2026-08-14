@@ -19,7 +19,6 @@
           (soda host feedback)
           (soda host input)
           (soda host input-event)
-          (soda host operation)
           (soda host package)
           (soda host setting)
           (soda host value)
@@ -40,14 +39,10 @@
       (buffer-state-document (command-context-buffer-state context))))
 
   (define (option-message context text)
-    (let ([surface-id (command-context-surface-id context)])
-      (and (integer? surface-id) (exact? surface-id) (>= surface-id 0)
-           (make-set-surface-feedback-operation
-             surface-id (make-user-feedback text 'info)))))
+    (make-user-feedback text 'info))
 
   (define (result-with-message result context message)
-    (let ([operation (option-message context message)])
-      (if operation (list result operation) result)))
+    (list result (option-message context message)))
 
   (define (reconfigure-auto-indent context)
     (let* ([configuration

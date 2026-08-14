@@ -74,11 +74,14 @@ command 返回一个 outcome 或有序 outcome 列表：
 handled
 TransactionSpec
 ViewTransactionSpec
+UserFeedback
 HostOperation
 CommandEffect(kind, payload)
 ```
 
-runtime 规范化为 `CommandResult`，依次提交 transaction、View update 和 host operation。
+runtime 规范化为 `CommandResult`，依次提交 transaction、View update、语义 feedback 和 host
+operation。`UserFeedback` 绑定 invocation 的输入上下文；仅当同一 View 仍是当前输入目标时才进入
+echo area。package 以它声明同步命令结果，不构造 Surface feedback operation。
 I/O、process、clipboard、producer refresh 等 package 行为使用 `CommandEffect`；effect handler
 按 kind 和 owner 注册。command procedure 不直接调用 terminal 或修改 service table。
 

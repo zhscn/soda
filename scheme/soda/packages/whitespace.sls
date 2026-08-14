@@ -16,7 +16,6 @@
           (soda host feedback)
           (soda host input)
           (soda host input-event)
-          (soda host operation)
           (soda host package)
           (soda host setting)
           (soda host value)
@@ -173,15 +172,10 @@
               (list
                 (make-compartment-reconfigure-effect
                   whitespace-compartment (policy-extension next)))
-              '() #f)]
-           [surface-id (command-context-surface-id context)])
-      (if (and (integer? surface-id) (exact? surface-id) (>= surface-id 0))
-          (list transaction
-                (make-set-surface-feedback-operation
-                  surface-id
-                  (make-user-feedback
-                    (string-append "Whitespace display: " (symbol->string next)) 'info)))
-          transaction)))
+              '() #f)])
+      (list transaction
+            (make-user-feedback
+              (string-append "Whitespace display: " (symbol->string next)) 'info))))
 
   (define (make-whitespace-service! host owner)
     (unless (and (package-host? host) (owner? owner))

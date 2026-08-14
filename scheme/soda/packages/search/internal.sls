@@ -18,7 +18,6 @@
           (soda host command-runtime)
           (soda host buffer)
           (soda host feedback)
-          (soda host operation)
           (soda host package)
           (soda host value)
           (soda host view)
@@ -46,16 +45,11 @@
            [update
             (make-view-transaction-spec
               (command-context-view-id context) (view-state-generation state)
-              #f #f #f (list effect) '() #f)]
-           [surface-id (command-context-surface-id context)])
-      (if (and (integer? surface-id) (exact? surface-id) (>= surface-id 0))
-          (list update
-                (make-set-surface-feedback-operation
-                  surface-id
-                  (make-user-feedback
-                    (string-append "Search is "
-                                   (if enabled? "case-insensitive" "case-sensitive")) 'info)))
-          update)))
+              #f #f #f (list effect) '() #f)])
+      (list update
+            (make-user-feedback
+              (string-append "Search is "
+                             (if enabled? "case-insensitive" "case-sensitive")) 'info))))
 
   (define (toggle-whole-word context)
     (let* ([state (command-context-view-state context)]
@@ -67,16 +61,11 @@
            [update
             (make-view-transaction-spec
               (command-context-view-id context) (view-state-generation state)
-              #f #f #f (list effect) '() #f)]
-           [surface-id (command-context-surface-id context)])
-      (if (and (integer? surface-id) (exact? surface-id) (>= surface-id 0))
-          (list update
-                (make-set-surface-feedback-operation
-                  surface-id
-                  (make-user-feedback
-                    (string-append "Search whole-word matching "
-                                   (if enabled? "disabled" "enabled")) 'info)))
-          update)))
+              #f #f #f (list effect) '() #f)])
+      (list update
+            (make-user-feedback
+              (string-append "Search whole-word matching "
+                             (if enabled? "disabled" "enabled")) 'info))))
 
   (define (toggle-regular-expression context)
     (let* ([state (command-context-view-state context)]
@@ -88,16 +77,11 @@
            [update
             (make-view-transaction-spec
               (command-context-view-id context) (view-state-generation state)
-              #f #f #f (list effect) '() #f)]
-           [surface-id (command-context-surface-id context)])
-      (if (and (integer? surface-id) (exact? surface-id) (>= surface-id 0))
-          (list update
-                (make-set-surface-feedback-operation
-                  surface-id
-                  (make-user-feedback
-                    (string-append "Search regular-expression matching "
-                                   (if enabled? "disabled" "enabled")) 'info)))
-          update)))
+              #f #f #f (list effect) '() #f)])
+      (list update
+            (make-user-feedback
+              (string-append "Search regular-expression matching "
+                             (if enabled? "disabled" "enabled")) 'info))))
 
   (define (make-search-service! host owner)
     (unless (and (package-host? host) (owner? owner))

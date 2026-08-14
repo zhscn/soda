@@ -480,8 +480,9 @@
     (%make-interactive-suspend request decoder))
 
   ;; Result values are deliberately small.  The runtime recognizes kernel
-  ;; transaction specs and HostOperation values, while package-defined I/O
-  ;; travels as CommandEffect and is handled through an explicit registration.
+  ;; transaction specs, semantic UserFeedback, and HostOperation values,
+  ;; while package-defined I/O travels as CommandEffect and is handled through
+  ;; an explicit registration.
   (define-record-type
     (command-result %make-command-result command-result?)
     (fields (immutable outcomes command-result-outcomes)

@@ -274,8 +274,8 @@
     (make-selection (list (make-selection-range offset offset))))
 
   (define (show-stale-source-message! service context)
-    (package-host-publish-feedback!
-      (spell-service-host service) (command-context-surface-id context)
+    (package-host-publish-feedback-if-current!
+      (spell-service-host service) context
       (make-user-feedback
         "Spelling result is stale; run spell check again." 'warning)))
 

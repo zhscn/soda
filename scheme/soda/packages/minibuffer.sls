@@ -352,6 +352,10 @@
   (define (fail-open! service interaction)
     (let ([context (interaction-session-context interaction)])
       (guard (ignored [else #f])
+        ;; Prompt setup may fail because its initiating context is no longer
+        ;; routable.  This is presentation failure feedback, not a command
+        ;; outcome: report it through the explicit PackageHost capability on
+        ;; the initiating Surface so the user is not left without an error.
         (package-host-publish-feedback!
           (minibuffer-service-host service)
           (command-context-surface-id context)

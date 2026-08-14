@@ -4534,6 +4534,45 @@
         (error 'kernel-tests "current message effect did not publish feedback")))
     (lambda () (soda-application-close! application))))
 
+;; A synchronous command returns UserFeedback as a semantic outcome.  The
+;; runtime, rather than the package, decides whether that outcome can occupy
+;; the echo area of the command's original input target.
+(let* ([application (make-soda-application)]
+       [state (soda-application-state application)]
+       [runtime (host-state-command-runtime state)]
+       [surface (soda-application-surface application)]
+       [owner (make-owner 'command-feedback-outcome-test)]
+       [active (surface-active-context surface (host-state-views state))]
+       [view (view-service-ref (host-state-views state) (active-context-view-id active))]
+       [buffer (view-buffer view)]
+       [stale-context
+        (make-command-context
+          #f (surface-id surface) (active-context-window-id active)
+          (+ 1000 (view-id view)) (buffer-id buffer)
+          (buffer-state buffer) (view-state view)
+          #f '() #f active 'stale-command-feedback)])
+  (dynamic-wind
+    (lambda () #f)
+    (lambda ()
+      (define-command
+        runtime owner 'test.command-feedback-outcome (context)
+        (documentation "Publish test feedback through a command outcome.")
+        (visible #f)
+        (undo 'ignore)
+        (make-user-feedback "Command feedback" 'info))
+      (command-runtime-start! runtime 'test.command-feedback-outcome stale-context)
+      (unless (not (surface-feedback surface))
+        (error 'kernel-tests "stale command feedback occupied the echo area"))
+      (command-runtime-start!
+        runtime 'test.command-feedback-outcome (application-command-context application))
+      (unless (and (surface-feedback surface)
+                   (string=? (user-feedback-text (surface-feedback surface))
+                             "Command feedback"))
+        (error 'kernel-tests "current command feedback outcome was not published")))
+    (lambda ()
+      (owner-close! owner)
+      (soda-application-close! application))))
+
 ;; Command failures retain a ConditionService diagnostic, while their echo
 ;; feedback follows the same current-View rule as delayed command results.
 (let* ([application (make-soda-application)]

@@ -14,7 +14,6 @@
           (soda host buffer)
           (soda host command)
           (soda host feedback)
-          (soda host operation)
           (soda host package)
           (soda packages base history)
           (soda packages file-format)
@@ -58,16 +57,11 @@
               (buffer-state-generation buffer-state)
               (make-change-set
                 (snapshot-byte-size (buffer-state-document buffer-state)) '())
-              #f (list effect) '())]
-           [surface-id (command-context-surface-id context)])
-      (if (and (integer? surface-id) (exact? surface-id) (>= surface-id 0))
-          (list update
-                (make-set-surface-feedback-operation
-                  surface-id
-                  (make-user-feedback
-                    (string-append "File backups "
-                                   (if enabled? "disabled" "enabled")) 'info)))
-          update)))
+              #f (list effect) '())])
+      (list update
+            (make-user-feedback
+              (string-append "File backups "
+                             (if enabled? "disabled" "enabled")) 'info))))
 
   (define (modified-file-buffer? service buffer)
     (and buffer

@@ -318,6 +318,7 @@
            (command-effect? value)
            (transaction-spec? value)
            (view-transaction-spec? value)
+           (user-feedback? value)
            (host-operation? value))
        (make-command-result (list value))]
       [(list? value) (make-command-result value)]
@@ -483,6 +484,12 @@
          (transaction-with-command-metadata outcome invocation transition))]
       [(view-transaction-spec? outcome)
        (dispatcher-dispatch-view! (command-runtime-dispatcher service) outcome)]
+      ;; Command feedback is a semantic result rather than a package-created
+      ;; Surface mutation.  The runtime owns the current-context predicate so
+      ;; every synchronous command follows the same echo-area contract.
+      [(user-feedback? outcome)
+       (publish-feedback-if-current!
+         service (command-invocation-context invocation) outcome)]
       [(host-operation? outcome)
        (dispatcher-dispatch-host! (command-runtime-dispatcher service) outcome)]
       [(command-effect? outcome) (apply-effect! service invocation outcome)]
@@ -615,23 +622,27 @@
             "Command failed"))
       'error))
 
+  (define (publish-feedback-if-current! service context feedback)
+    ;; Runtime-owned maintenance commands can use a non-routed context.  They
+    ;; retain their result without inventing terminal chrome.
+    (and (exact-integer-value? (command-context-surface-id context))
+         (>= (command-context-surface-id context) 0)
+         (exact-integer-value? (command-context-window-id context))
+         (>= (command-context-window-id context) 0)
+         (exact-integer-value? (command-context-view-id context))
+         (>= (command-context-view-id context) 0)
+         (dispatcher-dispatch-host!
+           (command-runtime-dispatcher service)
+           (make-set-surface-feedback-if-current-operation
+             (command-context-surface-id context)
+             (command-context-window-id context)
+             (command-context-view-id context)
+             feedback))))
+
   (define (publish-command-condition! service invocation condition)
-    (let ([context (command-invocation-context invocation)])
-      ;; Runtime-owned maintenance commands can use a non-routed context.
-      ;; They retain their diagnostic without inventing terminal chrome.
-      (and (exact-integer-value? (command-context-surface-id context))
-           (>= (command-context-surface-id context) 0)
-           (exact-integer-value? (command-context-window-id context))
-           (>= (command-context-window-id context) 0)
-           (exact-integer-value? (command-context-view-id context))
-           (>= (command-context-view-id context) 0)
-           (dispatcher-dispatch-host!
-             (command-runtime-dispatcher service)
-             (make-set-surface-feedback-if-current-operation
-               (command-context-surface-id context)
-               (command-context-window-id context)
-               (command-context-view-id context)
-               (command-condition-feedback condition))))))
+    (publish-feedback-if-current!
+      service (command-invocation-context invocation)
+      (command-condition-feedback condition)))
 
   (define (capture-command-condition! service invocation condition)
     (let* ([entry

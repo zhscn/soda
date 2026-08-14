@@ -159,8 +159,8 @@
                   (begin (directory-state-generation-set! state generation) published))))))
 
   (define (show-directory-error! service context path)
-    (package-host-publish-feedback!
-      (directory-service-host service) (command-context-surface-id context)
+    (package-host-publish-feedback-if-current!
+      (directory-service-host service) context
       (make-user-feedback
         (string-append "Not a readable directory: " path) 'error)))
 
