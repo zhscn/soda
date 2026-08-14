@@ -1,11 +1,7 @@
 (library (soda packages message)
   (export make-message-service!
           message-service?
-          message-keymap
-          make-message-request
-          message-request?
-          message-request-context
-          message-request-text)
+          message-keymap)
   (import (rnrs)
           (soda kernel document)
           (soda kernel state)
@@ -20,22 +16,11 @@
           (soda host package)
           (soda host value))
 
-  ;; MessageService turns informational commands into semantic echo-area
-  ;; feedback. Feedback is neither Buffer text nor a minibuffer interaction.
+  ;; MessageService owns informational commands and their keymap.  A command
+  ;; returns UserFeedback directly; CommandRuntime owns echo-area placement.
   (define-record-type
     (message-service %make-message-service message-service?)
-    (fields host owner keymap))
-
-  (define-record-type
-    (message-request %make-message-request message-request?)
-    (fields (immutable context message-request-context)
-            (immutable text message-request-text)))
-
-  (define (make-message-request context text)
-    (unless (and (command-context? context) (string? text))
-      (assertion-violation 'make-message-request
-                           "expected a CommandContext and text" context text))
-    (%make-message-request context text))
+    (fields keymap))
 
   (define (control-stroke character)
     (make-key-stroke 'character (char->integer character) 4))
@@ -101,41 +86,24 @@
                           (+ characters 1)))))))
         (lambda () (text-close! text)))))
 
-  (define (show-message! service request)
-    (unless (message-request? request)
-      (assertion-violation 'message.show "invalid message request" request))
-    ;; Message effects retain their initiating CommandContext.  They can run
-    ;; after focus has changed, in which case echo feedback would otherwise
-    ;; overwrite the active user's newer interaction.
-    (package-host-publish-feedback-if-current!
-      (message-service-host service)
-      (message-request-context request)
-      (make-user-feedback (message-request-text request) 'info)))
-
   (define (make-message-service! host owner)
     (unless (and (package-host? host) (owner? owner))
       (assertion-violation 'make-message-service! "expected package host and owner" host owner))
     (let* ([runtime (package-host-command-runtime host)]
            [keymap (make-keymap 'message)]
-           [service (%make-message-service host owner keymap)])
-      (command-runtime-register-effect-handler!
-        runtime 'message.show owner 'show-surface-message
-        (lambda (ignored invocation effect)
-          (show-message! service (command-effect-payload effect))))
+           [service (%make-message-service keymap)])
       (define-command
         runtime owner 'message.show-position (context)
         (documentation "Show the active selection's one-based line and grapheme column.")
         (class 'message)
         (undo 'ignore)
-        (make-command-effect
-          'message.show (make-message-request context (position-message context))))
+        (make-user-feedback (position-message context) 'info))
       (define-command
         runtime owner 'message.count-words (context)
         (documentation "Show line, Unicode word, and grapheme counts for the region or Buffer.")
         (class 'message)
         (undo 'ignore)
-        (make-command-effect
-          'message.show (make-message-request context (count-range-message context))))
+        (make-user-feedback (count-range-message context) 'info))
       (keymap-bind! keymap (list (control-stroke #\c)) 'message.show-position)
       (keymap-bind! keymap
                     (list (make-key-stroke 'character (char->integer #\d) 3))

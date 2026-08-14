@@ -3,6 +3,7 @@
   (import (rnrs)
           (soda host command)
           (soda host command-runtime)
+          (soda host feedback)
           (soda host input)
           (soda host input-event)
           (soda host value)
@@ -11,8 +12,7 @@
           (soda packages generated-buffer)
           (soda packages buffer-item)
           (soda packages completion)
-          (soda packages interaction)
-          (soda packages message))
+          (soda packages interaction))
 
   (define (string-contains? value needle)
     (let ([limit (- (string-length value) (string-length needle))])
@@ -100,8 +100,7 @@
         (class 'command)
         (interactive (make-interactive-plan (list describe-reader)))
         (undo 'ignore)
-        (make-command-effect
-          'message.show (make-message-request context (description runtime name))))
+        (make-user-feedback (description runtime name) 'info))
       (define-command
         runtime owner 'command.where-is (context name)
         (documentation "Show active key sequences bound to an available command.")
@@ -115,16 +114,14 @@
             (assertion-violation 'command.where-is
                                  "command is not available to the user" name))
           (let ([sequences (command-access-key-sequences access)])
-            (make-command-effect
-              'message.show
-              (make-message-request
-                context
-                (if (null? sequences)
-                    (string-append
-                      (symbol->string name)
-                      " is available through M-x; it has no direct key binding")
-                    (string-append
-                      (symbol->string name) " is on "
-                      (join-strings (map key-sequence-name sequences) ", "))))))))
+            (make-user-feedback
+              (if (null? sequences)
+                  (string-append
+                    (symbol->string name)
+                    " is available through M-x; it has no direct key binding")
+                  (string-append
+                    (symbol->string name) " is on "
+                    (join-strings (map key-sequence-name sequences) ", ")))
+              'info))))
       #t))
 )
