@@ -4481,6 +4481,33 @@
 
 (let* ([application (make-soda-application)]
        [state (soda-application-state application)]
+       [surface (soda-application-surface application)]
+       [buffers (buffer-service-buffers (host-state-buffers state))]
+       [active (surface-active-context surface (host-state-views state))]
+       [current
+        (buffer-service-ref
+          (host-state-buffers state) (active-context-buffer-id active) #f)])
+  ;; A parameterless application starts as an ordinary editing session, not
+  ;; as a recovery, help, shortcut, or prompt UI. Recovery artifacts may be
+  ;; discovered by the file service, but stay inert until their command is
+  ;; explicitly invoked.
+  (dynamic-wind
+    (lambda () #f)
+    (lambda ()
+      (unless (and (= (length buffers) 1)
+                   current
+                   (string=? (buffer-name current) "*scratch*")
+                   (= (length (surface-windows surface)) 1)
+                   (null? (surface-interaction-windows surface))
+                   (not (surface-feedback surface))
+                   (not (interaction-service-current
+                          (soda-application-interaction application))))
+        (error 'kernel-tests
+               "parameterless application startup did not remain an empty Emacs-style editing session")))
+    (lambda () (soda-application-close! application))))
+
+(let* ([application (make-soda-application)]
+       [state (soda-application-state application)]
        [buffer (soda-application-buffer application)]
        [view (soda-application-view application)]
        [secondary-owner (make-owner 'mode-secondary-view)]
