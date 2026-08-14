@@ -164,38 +164,33 @@
     (apply setting-service-source
            (host-state-settings (package-host-state host)) id default))
 
-  (define (package-host-key-binding-layers host context mode)
+  (define package-host-key-binding-layers
+    (case-lambda
+      [(host context mode)
+       (package-host-key-binding-layers
+         host context mode (make-configuration-context #f #f))]
+      [(host context mode configuration-context)
     (unless (and (package-host? host) (symbol? context)
-                 (or (not mode) (symbol? mode) (mode-spec? mode)))
+                 (or (not mode) (symbol? mode) (mode-spec? mode))
+                 (configuration-context? configuration-context))
       (assertion-violation 'package-host-key-binding-layers
-                           "expected a PackageHost, context, and optional mode" host context mode))
-    ;; Input resolution stops at the first matching layer.  The setting
-    ;; service exposes sources in registration order, while its configuration
-    ;; semantics let later sources in a layer override earlier sources and
-    ;; let user configuration override application defaults.  Preserve the
-    ;; same contract by materializing each source separately and placing the
-    ;; higher-precedence source layers first.
+                           "expected a PackageHost, context, optional mode, and ConfigurationContext"
+                           host context mode configuration-context))
+    ;; Input resolution stops at the first matching layer.  SettingService
+    ;; selects the sources that apply to this ConfigurationContext and orders
+    ;; them from lower to higher configuration precedence.  Materialize each
+    ;; source separately and reverse that order for input resolution.
     (let* ([sources
-            (setting-service-configuration-sources
-              (host-state-settings (package-host-state host)))]
+            (setting-service-configuration-sources-for
+              (host-state-settings (package-host-state host)) configuration-context)]
            [sources-by-precedence
-            (append
-              (reverse
-                (filter
-                  (lambda (source)
-                    (eq? (configuration-source-layer source) 'user))
-                  sources))
-              (reverse
-                (filter
-                  (lambda (source)
-                    (eq? (configuration-source-layer source) 'application))
-                  sources)))])
+            (reverse sources)])
       (apply append
              (map
                (lambda (source)
                  (package-host-materialize-key-bindings
                    host (configuration-source-key-bindings source) context mode))
-               sources-by-precedence))))
+               sources-by-precedence)))]))
 
   (define (package-host-resolve-setting host name scope context)
     (setting-service-resolve

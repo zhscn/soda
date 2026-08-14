@@ -187,6 +187,7 @@
            [state (soda-application-state application)]
            [host (make-package-host state)]
            [owner (make-owner 'configured-key-source-test)]
+           [resource (make-resource 'file "/tmp/configured-key-source.sls")]
            [stroke (make-key-stroke 'character (char->integer #\q) 0)]
            [binding
             (make-key-binding-declaration
@@ -222,6 +223,35 @@
                      (eq? (input-disposition-value disposition) 'buffer.list))
           (error 'fundamental-editing-tests
                  "later user key source did not override lower-precedence sources")))
+      (package-host-reload-configuration-source!
+        host owner
+        (make-configuration-source
+          'test.file-keys 'file-local resource '()
+          (list (make-key-binding-declaration
+                  'editing #f (list stroke) 'message.count-words 'global #f))
+          0))
+      (let* ([file-layers
+              (package-host-key-binding-layers
+                host 'editing 'fundamental-mode
+                (make-configuration-context #f resource))]
+             [other-layers
+              (package-host-key-binding-layers
+                host 'editing 'fundamental-mode
+                (make-configuration-context #f
+                                            (make-resource 'file "/tmp/other.sls")))]
+             [event
+              (make-key-event 'character (char->integer #\q) #f #f 0
+                              'press (make-bytevector 0))])
+        (unless (and (eq? (input-disposition-value
+                            (input-dispatch
+                              (make-input-context 0 0 file-layers) event))
+                          'message.count-words)
+                     (eq? (input-disposition-value
+                            (input-dispatch
+                              (make-input-context 0 0 other-layers) event))
+                          'buffer.list))
+          (error 'fundamental-editing-tests
+                 "file-local key source did not follow configuration target precedence")))
       (unless
         (guard (condition [else #t])
           (package-host-reload-configuration-source!

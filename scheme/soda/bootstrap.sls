@@ -35,6 +35,7 @@
           (soda host feedback)
           (soda host input)
           (soda host input-event)
+          (soda host setting)
           (soda host internal buffer)
           (soda host internal context)
           (soda host internal state)
@@ -461,10 +462,15 @@
   ;; active context and View.
   (define (configured-editing-layers application view)
     (let* ([configuration (view-state-configuration (view-state view))]
-           [mode (configuration-facet configuration buffer-mode-facet 'buffer)])
+           [mode (configuration-facet configuration buffer-mode-facet 'buffer)]
+           [resource
+            (file-service-resource
+              (soda-application-files application)
+              (view-state-buffer-id (view-state view)) #f)])
       (package-host-key-binding-layers
         (make-package-host (soda-application-state application))
-        'editing (and mode (mode-spec-id mode)))))
+        'editing (and mode (mode-spec-id mode))
+        (make-configuration-context #f resource))))
 
   (define (soda-application-resolve-input-context application active view)
     (input-context-with-translation

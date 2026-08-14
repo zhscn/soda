@@ -10,6 +10,7 @@
           setting-service-apply-reload-request!
           setting-service-source
           setting-service-configuration-sources
+          setting-service-configuration-sources-for
           setting-service-resolve
           setting-service-resolved-settings
           setting-service-extensions)
@@ -190,6 +191,16 @@
            (list-sort (lambda (left right) (< (source-entry-order left)
                                                (source-entry-order right)))
                       entries))))
+
+  ;; Configuration consumers that need source declarations rather than parsed
+  ;; setting values use this projection so source target matching and
+  ;; precedence are never reimplemented by an input or package layer.
+  (define (setting-service-configuration-sources-for service context)
+    (unless (and (setting-service? service) (configuration-context? context))
+      (assertion-violation 'setting-service-configuration-sources-for
+                           "expected a SettingService and ConfigurationContext"
+                           service context))
+    (map source-entry-source (applicable-entries service context)))
 
   (define (source-applies? source context)
     (case (configuration-source-layer source)

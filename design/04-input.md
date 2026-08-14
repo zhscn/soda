@@ -96,10 +96,11 @@ Buffer mode 与 application fallback 重建等价层。
 
 声明式键位属于 `ConfigurationSource`。每个 source 独立验证和 materialize 为 InputLayer；同一
 source 内相同 context、mode、semantic rank 与 sequence 的重复声明是配置错误。编辑 context
-按 source 的配置优先级组合：较晚注册的 user source 覆盖较早的 user source，user source 覆盖
-application source。source 的一次 reload 在 settings 和键位声明均通过验证后才替换活动 generation，
-失败时保留先前的 input composition。诊断保留 binding 的 source location，并区分未知 command、
-未知 mode 与 mode capability 不匹配。
+通过同一 `ConfigurationContext` 选择 settings 与键位 source：较晚注册的同层 source 覆盖较早的
+source，file-local、workspace、user、application 依次降低优先级。当前 Buffer 的 file resource
+进入该 context，因此 file-local key binding 只作用于匹配 resource。source 的一次 reload 在 settings
+和键位声明均通过验证后才替换活动 generation，失败时保留先前的 input composition。诊断保留 binding
+的 source location，并区分未知 command、未知 mode 与 mode capability 不匹配。
 
 layer 按高到低组合：
 
