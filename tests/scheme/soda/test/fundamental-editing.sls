@@ -5345,6 +5345,55 @@
           (error 'fundamental-editing-tests
                  "input burst presented intermediate movement Frames"
                  presented-rows)))
+      ;; A burst that crosses the visible edge performs one final reveal.  It
+      ;; must not rebuild and publish a new viewport for every C-n in the
+      ;; terminal read; the last point is the only one the user can observe.
+      (dispatcher-dispatch-view!
+        (host-state-dispatch state)
+        (make-view-transaction-spec
+          (view-id view) (view-state-generation (view-state view))
+          (make-selection (list (make-selection-range 0 0)))
+          #f #f '() '() #f))
+      (frontend-resize! frontend '(20 . 3))
+      (frontend-step! frontend)
+      (let* ([viewport-updates 0]
+             [registration
+             (dispatcher-add-listener!
+               (host-state-dispatch state) (host-state-owner state)
+               (lambda (update)
+                 (for-each
+                   (lambda (state-update)
+                     (when (not (viewport=?
+                                  (view-state-viewport
+                                    (view-state-update-old-state state-update))
+                                  (view-state-viewport
+                                    (view-state-update-new-state state-update))))
+                       (set! viewport-updates (+ viewport-updates 1))))
+                   (editor-update-views update))))])
+        (let ([decoder (make-terminal-input-decoder)])
+          (for-each
+            (lambda (event)
+              (frontend-enqueue!
+                frontend
+                (make-surface-input-message (surface-id surface) event)))
+            (terminal-input-decoder-feed! decoder (make-bytevector 4 14)))
+          (set! presented-rows '())
+          (frontend-step-input-burst! frontend 4)
+          (unless (and (= (selection-range-head
+                            (selection-primary-range
+                              (view-state-selection (view-state view))))
+                          6)
+                       (> (viewport-visual-row
+                            (view-state-viewport (view-state view)))
+                          0)
+                       (= viewport-updates 1)
+                       (<= (length presented-rows) 2))
+            (error 'fundamental-editing-tests
+                   "input burst did not coalesce off-screen point reveals"
+                   viewport-updates
+                   (view-state-viewport (view-state view))
+                   presented-rows)))
+        (registration-close! registration))
       (frontend-close! frontend)
       (soda-application-close! application))
 

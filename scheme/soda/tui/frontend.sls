@@ -106,8 +106,7 @@
             (frontend-reconcile-pointer-capture! value)
             (let ([request (editor-update-scroll-request update)])
               (when (scroll-request? request)
-                (frontend-pending-scroll-set! value request)))
-            (frontend-resolve-scroll-request! value))))
+                (frontend-handle-scroll-request! value request))))))
       (frontend-host-update-registration-set!
         value
         (host-frontend-add-host-listener!
@@ -249,6 +248,23 @@
   ;; state and before the next presentation.  This boundary has both the
   ;; command's window identity and the last compatible TextLayout, while
   ;; command packages remain independent of viewport measurement.
+  (define (deferred-reveal-request? value request)
+    (and (frontend-defer-presentation? value)
+         (eq? (scroll-request-kind request) 'reveal-point)))
+
+  ;; Point motion publishes reveal-point after every command.  During one
+  ;; terminal input burst only its final selection can affect the committed
+  ;; viewport, so retain that last intent until the batch is rendered.  Other
+  ;; scroll requests are barriers: page and explicit scrolling remain ordered
+  ;; relative to the next input action.
+  (define (frontend-handle-scroll-request! value request)
+    (when (and (not (deferred-reveal-request? value request))
+               (frontend-pending-scroll value))
+      (frontend-resolve-scroll-request! value))
+    (frontend-pending-scroll-set! value request)
+    (unless (deferred-reveal-request? value request)
+      (frontend-resolve-scroll-request! value)))
+
   (define (frontend-resolve-scroll-request! value)
     (let ([request (frontend-pending-scroll value)])
       (when request
