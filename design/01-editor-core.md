@@ -1087,6 +1087,8 @@ wrap policy 和 display facet generation。
 presenter 的 provisional SurfaceRender，以其 DisplayMap 解析并发布目标 viewport；viewport
 变化后重新构造 SurfaceRender，只有最终 Frame 成为 desired frame。首次 placement、resize 与
 普通 point motion 因此不会暴露 point 尚未 reveal 的中间帧。
+Surface resize 使旧 layout 下的 scroll intent 失效；frontend 使用带 Surface、Window 和 View
+identity 的 `reveal-point` 替换它，并针对新尺寸解析 active View 的可见 viewport。
 
 ### Frame 与 presenter
 

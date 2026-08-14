@@ -1480,12 +1480,15 @@
                 (lambda (render theme)
                   (set! presented (cons render presented)))
                 (make-render-service) default-theme)])
-        (frontend-resize! frontend '(12 . 5))
+        (frontend-resize! frontend '(80 . 5))
         (frontend-step! frontend)
         (set! presented '())
         (command-runtime-start-interactive!
           runtime 'interaction.long-initial-test
           (application-command-context application))
+        (frontend-step! frontend)
+        (set! presented '())
+        (frontend-resize! frontend '(12 . 5))
         (frontend-step! frontend)
         (let* ([prompt-session (minibuffer-service-current minibuffer)]
                [prompt-view
@@ -1516,6 +1519,45 @@
                    (length presented) cursor-row)))
         (minibuffer-service-cancel! minibuffer)
         (host-state-run! state)
+        (frontend-resize! frontend '(80 . 5))
+        (frontend-step! frontend)
+        (command-runtime-start!
+          runtime 'fundamental.insert-text
+          (application-command-context application)
+          (list (string->utf8 long-value)))
+        (frontend-step! frontend)
+        (set! presented '())
+        (frontend-resize! frontend '(12 . 5))
+        (frontend-step! frontend)
+        (let* ([root-view (soda-application-view application)]
+               [render (and (pair? presented) (car presented))]
+               [rendered
+                (and render
+                     (find
+                       (lambda (item)
+                         (= (rendered-view-view-id item) (view-id root-view)))
+                       (surface-render-rendered-views render)))]
+               [cursor-row (and render (surface-render-cursor-row render))])
+          (unless (and (= (length presented) 1)
+                       rendered cursor-row
+                       (<= (car (rendered-view-rectangle rendered))
+                           cursor-row
+                           (- (+ (car (rendered-view-rectangle rendered))
+                                 (cadddr (rendered-view-rectangle rendered)))
+                              1))
+                       (positive?
+                         (viewport-visual-row
+                           (view-state-viewport (view-state root-view)))))
+            (error 'fundamental-editing-tests
+                   "root View resize did not reveal its active point"
+                   (length presented) cursor-row)))
+        (command-runtime-start!
+          runtime 'fundamental.mark-whole-buffer
+          (application-command-context application))
+        (command-runtime-start!
+          runtime 'fundamental.delete-backward
+          (application-command-context application))
+        (frontend-step! frontend)
         (frontend-resize! frontend '(80 . 24))
         (frontend-close! frontend))
       (let* ([source

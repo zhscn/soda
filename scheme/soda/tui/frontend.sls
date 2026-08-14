@@ -515,9 +515,25 @@
 
   (define (frontend-resize! value size)
     (require-open 'frontend-resize! value)
-    (host-frontend-dispatch-host!
-      (frontend-host-state value)
-      (make-resize-surface-operation (surface-id (frontend-surface value)) size)))
+    (let ([changed
+           (host-frontend-dispatch-host!
+             (frontend-host-state value)
+             (make-resize-surface-operation
+               (surface-id (frontend-surface value)) size))])
+      (when changed
+        (let ([current (active-view value)])
+          (when current
+            (let ([active (car current)] [view (cdr current)])
+              ;; Resize invalidates the geometry used by any older scroll
+              ;; intent. Reveal the active point against the new layout.
+              (frontend-pending-scroll-set!
+                value
+                (make-scroll-request
+                  'reveal-point
+                  (active-context-surface-id active)
+                  (active-context-window-id active)
+                  (view-id view)))))))
+      changed))
 
   (define (frontend-set-theme! value theme)
     (require-open 'frontend-set-theme! value)
