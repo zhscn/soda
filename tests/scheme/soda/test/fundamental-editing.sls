@@ -87,7 +87,9 @@
               [view (view-service-ref (host-state-views state)
                                       (active-context-view-id active))]
               [buffer (buffer-service-ref (host-state-buffers state)
-                                          (active-context-buffer-id active))])
+                                          (active-context-buffer-id active))]
+              [input-context
+               (soda-application-resolve-input-context application active view)])
          (make-command-context
            #f
            (active-context-surface-id active)
@@ -96,7 +98,8 @@
            (buffer-id buffer)
            (buffer-state buffer)
            (view-state view)
-           #f '() #f active 'fundamental-test layout))]))
+           #f '() #f active 'fundamental-test layout
+           (input-layers-snapshot (input-context-layers input-context))))]))
 
   (define (buffer-string buffer)
     (snapshot-string (buffer-state-document (buffer-state buffer))))
@@ -218,11 +221,19 @@
              [disposition
               (input-dispatch context
                               (make-key-event 'character (char->integer #\q) #f #f 0
-                                              'press (make-bytevector 0)))])
+                                              'press (make-bytevector 0)))]
+             [access
+              (command-context-command-access
+                (host-state-command-runtime state)
+                (application-command-context application) '() 'buffer.list)])
         (unless (and (eq? (input-disposition-kind disposition) 'command)
-                     (eq? (input-disposition-value disposition) 'buffer.list))
+                     (eq? (input-disposition-value disposition) 'buffer.list)
+                     access
+                     (member "q"
+                             (map key-sequence-name
+                                  (command-access-key-sequences access))))
           (error 'fundamental-editing-tests
-                 "later user key source did not override lower-precedence sources")))
+                 "configured key binding diverged from command presentation")))
       (package-host-reload-configuration-source!
         host owner
         (make-configuration-source

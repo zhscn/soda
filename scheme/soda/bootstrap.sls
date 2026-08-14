@@ -369,7 +369,9 @@
            [active (surface-active-context surface (host-state-views state))]
            [view (view-service-ref (host-state-views state)
                                    (active-context-view-id active))]
-           [buffer (view-buffer view)])
+           [buffer (view-buffer view)]
+           [input-context
+            (soda-application-resolve-input-context application active view)])
       (make-command-context
         #f
         (active-context-surface-id active)
@@ -378,7 +380,8 @@
         (buffer-id buffer)
         (buffer-state buffer)
         (view-state view)
-        #f '() #f active source)))
+        #f '() #f active source #f
+        (input-layers-snapshot (input-context-layers input-context)))))
 
   (define-record-type startup-position
     (fields line column))

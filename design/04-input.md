@@ -92,7 +92,8 @@ dispatch、prefix guidance 和 command lookup 使用同一个 translation。Emac
 frontend 生成的 `CommandContext` 保留触发该 command 的有序 InputLayer 与 Keymap 快照。`M-x`、Help、
 `describe-command` 与 `where-is` 使用该快照构造用户命令可达性投影；临时 interaction keymap
 因此与实际 dispatch 一致，且不会由后续的配置重组替代。没有 frontend 快照的直接或测试调用使用
-Buffer mode 与 application fallback 重建等价层。
+Buffer mode 与 application fallback 重建基础层；由 application 创建的直接 command context 同样保留
+当前 InputLayer 快照。
 
 声明式键位属于 `ConfigurationSource`。每个 source 独立验证和 materialize 为 InputLayer；同一
 source 内相同 context、mode、semantic rank 与 sequence 的重复声明是配置错误。编辑 context
