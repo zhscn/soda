@@ -485,7 +485,14 @@
                       (and default-action (string=? raw "")
                            (choice-action-id default-action))]
                      [else raw])])
-             (if (and value
+             (cond
+               [(and candidate
+                     (eq? (completion-candidate-accept-behavior candidate)
+                          'continue))
+                (and context
+                     (replace-prompt-input
+                       context (completion-candidate-insert-text candidate)))]
+               [(and value
                       (or (eq? policy 'free)
                           (and (eq? policy 'choice) (symbol? value))
                           candidate
@@ -497,8 +504,8 @@
                  (begin
                    (minibuffer-session-submitted-value-set! session value)
                    (interaction-service-submit!
-                     (minibuffer-service-interactions service) value))
-                 (and context (invalid-input-feedback context)))))))
+                     (minibuffer-service-interactions service) value))]
+               [else (and context (invalid-input-feedback context))])))))
 
   (define minibuffer-service-submit!
     (case-lambda

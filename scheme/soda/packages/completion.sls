@@ -1,8 +1,10 @@
 (library (soda packages completion)
-  (export make-completion-candidate completion-candidate?
+  (export make-completion-candidate make-continuing-completion-candidate
+          completion-candidate?
           completion-candidate-id completion-candidate-insert-text
           completion-candidate-label completion-candidate-annotation
           completion-candidate-group completion-candidate-payload
+          completion-candidate-accept-behavior
           make-prompt-snapshot prompt-snapshot?
           prompt-snapshot-session-id prompt-snapshot-request
           prompt-snapshot-input prompt-snapshot-input-revision
@@ -47,14 +49,28 @@
   ;; may choose its own matching, grouping and rendering without changing it.
   (define-record-type
     (completion-candidate %make-completion-candidate completion-candidate?)
-    (fields id insert-text label annotation group payload))
-  (define (make-completion-candidate id insert-text label annotation group payload)
+    (fields id insert-text label annotation group payload accept-behavior))
+
+  (define (make-completion-candidate* who id insert-text label annotation group
+                                      payload accept-behavior)
     (unless (and (or (symbol? id) (string? id) (integer? id))
                  (string? insert-text) (string? label)
                  (or (not annotation) (string? annotation))
-                 (or (not group) (string? group)))
-      (assertion-violation 'make-completion-candidate "invalid completion candidate" id))
-    (%make-completion-candidate id insert-text label annotation group payload))
+                 (or (not group) (string? group))
+                 (memq accept-behavior '(final continue)))
+      (assertion-violation who "invalid completion candidate" id accept-behavior))
+    (%make-completion-candidate
+      id insert-text label annotation group payload accept-behavior))
+
+  (define (make-completion-candidate id insert-text label annotation group payload)
+    (make-completion-candidate*
+      'make-completion-candidate id insert-text label annotation group payload 'final))
+
+  (define (make-continuing-completion-candidate
+            id insert-text label annotation group payload)
+    (make-completion-candidate*
+      'make-continuing-completion-candidate
+      id insert-text label annotation group payload 'continue))
 
   ;; Source callbacks receive a PromptSnapshot from the active prompt
   ;; frontend. Preview is reversible; accept is final and only runs after a

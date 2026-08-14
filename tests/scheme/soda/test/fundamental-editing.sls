@@ -2048,6 +2048,85 @@
           (when (file-exists? directory-target) (delete-directory directory-target))
           (when (file-exists? root) (delete-directory root)))))
 
+    (let* ([root (string-append "/tmp/soda-file-completion-"
+                                (number->string (get-process-id)))]
+           [directory (string-append root "/sub")]
+           [path (string-append directory "/target.txt")]
+           [application #f])
+      (dynamic-wind
+        (lambda ()
+          (when (file-exists? root) (delete-directory root))
+          (mkdir root)
+          (mkdir directory)
+          (vfs-write-file path (string->utf8 "nested"))
+          (set! application (make-soda-application)))
+        (lambda ()
+          (let* ([state (soda-application-state application)]
+                 [runtime (host-state-command-runtime state)]
+                 [minibuffer (soda-application-minibuffer application)])
+            (command-runtime-start-interactive!
+              runtime 'file.visit (application-command-context application))
+            (command-runtime-start!
+              runtime 'fundamental.insert-text
+              (application-command-context application)
+              (list (string->utf8 (string-append root "/s"))))
+            (let* ([controller (minibuffer-service-refresh-completion! minibuffer)]
+                   [candidates (completion-controller-candidates controller)]
+                   [index
+                    (let find ([items candidates] [position 0])
+                      (cond
+                        [(null? items) #f]
+                        [(string=?
+                           (completion-candidate-insert-text (car items))
+                           (vfs-directory-path directory))
+                         position]
+                        [else (find (cdr items) (+ position 1))]))])
+              (unless (and index
+                           (eq? (completion-candidate-accept-behavior
+                                  (list-ref candidates index))
+                                'continue))
+                (error 'fundamental-editing-tests
+                       "file completion did not mark a directory as continuing"))
+              (minibuffer-service-select-completion! minibuffer index)
+              (command-runtime-start!
+                runtime 'minibuffer.accept
+                (application-command-context application)))
+            (let* ([session (minibuffer-service-current minibuffer)]
+                   [prompt-buffer
+                    (and session
+                         (buffer-service-ref
+                           (host-state-buffers state)
+                           (minibuffer-session-buffer-id session)))])
+              (unless (and session prompt-buffer
+                           (string=? (buffer-string prompt-buffer)
+                                     (vfs-directory-path directory)))
+                (error 'fundamental-editing-tests
+                       "accepting a directory ended the file-name interaction"))
+              (command-runtime-start!
+                runtime 'fundamental.insert-text
+                (application-command-context application)
+                (list (string->utf8 "target.txt")))
+              (command-runtime-start!
+                runtime 'minibuffer.accept
+                (application-command-context application))
+              (host-state-run! state)
+              (unless (and (not (minibuffer-service-current minibuffer))
+                           (string=?
+                             (buffer-string
+                               (view-buffer
+                                 (view-service-ref
+                                   (host-state-views state)
+                                   (command-context-view-id
+                                     (application-command-context application)))))
+                             "nested"))
+                (error 'fundamental-editing-tests
+                       "file-name continuation did not visit the nested file")))))
+        (lambda ()
+          (when application (soda-application-close! application))
+          (when (file-exists? path) (delete-file path))
+          (when (file-exists? directory) (delete-directory directory))
+          (when (file-exists? root) (delete-directory root)))))
+
     (let* ([path (string-append "/tmp/soda-file-package-"
                                 (number->string (get-process-id)) ".txt")]
            [second-path (string-append path ".second")]

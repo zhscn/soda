@@ -121,7 +121,9 @@ CompletionController {
 
 source 可以同步或异步地产生结构化 candidate。异步回复必须携带 session id、input
 revision 和 generation；任一值不匹配时丢弃。candidate 保存稳定 identity、insert text、
-label、annotation、group、payload 与可选 preview target。controller 负责筛选、排序、
+label、annotation、group、payload、accept behavior 与可选 preview target。accept behavior
+为 `final` 或 `continue`：前者结束读取，后者用 insert text 更新 prompt 并开始下一段读取。
+controller 负责筛选、排序、
 候选选择和接受策略，presenter 只读取其已发布快照。
 
 minibuffer candidate adapter 接收 controller snapshot，负责固定候选高度、scroll/index
@@ -203,7 +205,7 @@ Scheme binding 等离散集合通过 choice source 归一化成相同的候选�
 和 context 都未改变时，重复 refresh 不会取消或重启 provider。
 
 choice source 显式提供 metadata、boundaries、candidates、validate 和 cancel 操作。
-候选分别保存 insert text、label、annotation、group、source 和 payload，显示文本
+候选分别保存 insert text、label、annotation、group、source、payload 和 accept behavior，显示文本
 不承担返回值或对象身份。
 
 `boundaries(input, point)` 使用字符索引返回当前 field 的 `[start, end)`。completion

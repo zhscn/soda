@@ -91,7 +91,9 @@
                          [directory? (eq? (vfs-entry-kind entry) 'directory)]
                          [label (if directory? (vfs-directory-path name) name)]
                          [insert-text (string-append directory-prefix label)])
-                    (make-completion-candidate
+                    ((if directory?
+                         make-continuing-completion-candidate
+                         make-completion-candidate)
                       (vfs-path-join directory name) insert-text label
                       (if directory? "directory" "file") "file" entry)))
                 (filter
