@@ -183,48 +183,80 @@
                                               (status-frame width message face))))
           placements)))
 
-  (define (content-rectangle surface leaf content-height)
-    (let* ([rectangle (window-rectangle leaf)]
-           [row (car rectangle)]
-           [column (cadr rectangle)]
-           [width (caddr rectangle)]
-           [requested-height (cadddr rectangle)]
-           [interaction?
-            (memq leaf (surface-interaction-windows surface))]
-           [next-row
-            (if interaction?
-                (min row (max 0 (- content-height requested-height)))
-                row)]
-           [height
-            (max 0 (min requested-height (- content-height next-row)))])
-      (list next-row column width height)))
+  (define (surface-editor-height surface)
+    (let ([height (cdr (surface-size surface))])
+      (if (and (> height 1)
+               (memq 'echo-area (surface-capabilities surface)))
+          (- height 1)
+          height)))
+
+  (define (surface-interaction-height surface)
+    (fold-left
+      (lambda (height window) (+ height (cadddr (window-rectangle window))))
+      0 (surface-interaction-windows surface)))
+
+  (define (surface-root-height surface)
+    (max 0 (- (surface-editor-height surface)
+              (surface-interaction-height surface))))
+
+  ;; Root Window geometry is projected proportionally into the rows left by
+  ;; stable chrome and temporary interaction Windows.  Split weights remain
+  ;; authoritative; opening a minibuffer does not merely truncate the lowest
+  ;; leaf or cover its mode line.
+  (define (root-content-rectangle surface leaf)
+    (let* ([root-rectangle (window-rectangle (surface-root-window surface))]
+           [root-row (car root-rectangle)]
+           [root-height (cadddr root-rectangle)]
+           [available (surface-root-height surface)]
+           [rectangle (window-rectangle leaf)]
+           [relative-row (- (car rectangle) root-row)]
+           [relative-end (+ relative-row (cadddr rectangle))]
+           [row
+            (if (zero? root-height)
+                0
+                (floor (/ (* relative-row available) root-height)))]
+           [end
+            (if (zero? root-height)
+                0
+                (floor (/ (* relative-end available) root-height)))])
+      (list row (cadr rectangle) (caddr rectangle) (max 0 (- end row)))))
+
+  ;; Interaction Windows are stacked immediately above the echo area.  The
+  ;; newest interaction is bottommost and therefore remains the active prompt.
+  (define (interaction-content-rectangle surface leaf)
+    (let loop ([windows (surface-interaction-windows surface)] [used 0])
+      (if (null? windows)
+          (list 0 0 0 0)
+          (let* ([window (car windows)]
+                 [rectangle (window-rectangle window)]
+                 [requested-height (cadddr rectangle)]
+                 [remaining (max 0 (- (surface-editor-height surface) used))]
+                 [height (min requested-height remaining)])
+            (if (eq? window leaf)
+                (list (max 0 (- (surface-editor-height surface) used height))
+                      (cadr rectangle)
+                      (min (caddr rectangle)
+                           (max 0 (- (car (surface-size surface))
+                                     (cadr rectangle))))
+                      height)
+                (loop (cdr windows) (+ used height)))))))
+
+  (define (surface-window-base-rectangle surface leaf)
+    (if (memq leaf (surface-interaction-windows surface))
+        (interaction-content-rectangle surface leaf)
+        (root-content-rectangle surface leaf)))
 
   (define (surface-window-content-rectangle surface views leaf)
-    (let* ([height (cdr (surface-size surface))]
-           ;; The echo area is stable chrome. Reserving it independently of
-           ;; current content prevents feedback and prefix guidance from
-           ;; changing the editor viewport height or covering document cells.
-           [content-height
-            (if (and (> height 1)
-                     (memq 'echo-area (surface-capabilities surface)))
-                (- height 1)
-                height)])
-      (let ([rectangle (content-rectangle surface leaf content-height)])
+    (let ([rectangle (surface-window-base-rectangle surface leaf)])
         (if (and (> (cadddr rectangle) 1)
                  (not (memq leaf (surface-interaction-windows surface)))
                  (memq 'mode-line (surface-capabilities surface)))
             (list (car rectangle) (cadr rectangle) (caddr rectangle)
                   (- (cadddr rectangle) 1))
-            rectangle))))
+            rectangle)))
 
   (define (surface-window-mode-line-rectangle surface leaf)
-    (let* ([height (cdr (surface-size surface))]
-           [content-height
-            (if (and (> height 1)
-                     (memq 'echo-area (surface-capabilities surface)))
-                (- height 1)
-                height)]
-           [rectangle (content-rectangle surface leaf content-height)])
+    (let ([rectangle (surface-window-base-rectangle surface leaf)])
       (and (> (cadddr rectangle) 1)
            (not (memq leaf (surface-interaction-windows surface)))
            (memq 'mode-line (surface-capabilities surface))

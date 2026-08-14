@@ -1887,6 +1887,51 @@
                (not (eq? after-chrome after-layout)))
     (error 'kernel-tests "RenderService invalidation matrix differs")))
 
+;; Temporary interaction Windows consume dedicated rows between root Window
+;; mode lines and the echo area. They do not cover either stable chrome layer.
+(let* ([root-document (make-document "root")]
+       [root-buffer
+        (buffer-service-create!
+          (host-state-buffers host) owner "*chrome-root*"
+          root-document configuration)]
+       [root-view
+        (view-service-create!
+          (host-state-views host) owner root-buffer configuration)]
+       [prompt-document (make-document "prompt")]
+       [prompt-buffer
+        (buffer-service-create!
+          (host-state-buffers host) owner " *chrome-prompt*"
+          prompt-document configuration)]
+       [prompt-view
+        (view-service-create!
+          (host-state-views host) owner prompt-buffer configuration)]
+       [surface
+        (make-surface
+          'terminal '(mode-line echo-area)
+          (make-leaf-window (view-id root-view) #f) '(10 . 6))]
+       [interaction
+        (surface-push-interaction!
+          surface (view-id prompt-view) '(5 0 10 1))]
+       [render (render-surface surface (host-state-views host))]
+       [root-rendered
+        (find
+          (lambda (item) (= (rendered-view-view-id item) (view-id root-view)))
+          (surface-render-rendered-views render))]
+       [prompt-rendered
+        (find
+          (lambda (item) (= (rendered-view-view-id item) (view-id prompt-view)))
+          (surface-render-rendered-views render))]
+       [frame (surface-render-frame render)])
+  (unless (and root-rendered prompt-rendered
+               (= (cadddr (rendered-view-rectangle root-rendered)) 3)
+               (= (car (rendered-view-rectangle prompt-rendered)) 4)
+               (= (cadddr (rendered-view-rectangle prompt-rendered)) 1)
+               (eq? (frame-cell-face (frame-cell-at frame 3 0)) 'mode-line)
+               (not (eq? (frame-cell-face (frame-cell-at frame 4 0))
+                         'mode-line)))
+    (error 'kernel-tests
+           "interaction Window did not reserve root, mode-line, and echo rows")))
+
 ;; A ViewPlugin may project InputState even though core rendering does not.
 ;; Its published projection generation must invalidate only that View's render
 ;; token, leaving sibling Views of the same Buffer untouched.
