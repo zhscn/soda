@@ -254,7 +254,47 @@
               (host-state-run! state)
               (unless (= (command-context-buffer-id (current-context)) (buffer-id target))
                 (error 'host-integration-tests
-                       "deferred Location follow did not resume after open completion")))))
+                       "deferred Location follow did not resume after open completion"))
+              ;; A later user navigation supersedes the initiating context.
+              ;; Completion still retires the retained request, but cannot
+              ;; replace the View that the user selected in the meantime.
+              (let ([stale-location
+                     (make-location
+                       (make-resource 'deferred "stale-target")
+                       (make-byte-position 0) (make-byte-position 0)
+                       #f 'after '())])
+                (set! opened-buffer-id #f)
+                (set! opened-location #f)
+                (command-runtime-start!
+                  runtime 'test.deferred-location-follow
+                  (current-context) (list stale-location))
+                (unless (location? opened-location)
+                  (error 'host-integration-tests
+                         "deferred Location provider did not receive the stale target"))
+                (let* ([stale-target
+                        (package-host-create-buffer!
+                          host owner " *deferred-stale-target*" (make-document "stale")
+                          (buffer-state-configuration (buffer-state target)))]
+                       [diverted
+                        (package-host-create-buffer!
+                          host owner " *deferred-diverted*" (make-document "diverted")
+                          (buffer-state-configuration (buffer-state target)))]
+                       [origin (current-context)])
+                  (set! opened-buffer-id (buffer-id stale-target))
+                  (unless
+                    (package-host-present-buffer!
+                      host owner diverted
+                      (command-context-surface-id origin)
+                      (command-context-window-id origin)
+                      (buffer-state-configuration (buffer-state diverted)))
+                    (error 'host-integration-tests
+                           "could not divert the deferred Location test View"))
+                  (package-host-location-opened! host opened-location)
+                  (host-state-run! state)
+                  (unless (= (command-context-buffer-id (current-context))
+                             (buffer-id diverted))
+                    (error 'host-integration-tests
+                           "stale deferred Location follow replaced the current View")))))))
         (lambda ()
           (owner-close! owner)
           (soda-application-close! application)))))
