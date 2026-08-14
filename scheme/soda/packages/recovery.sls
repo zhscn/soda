@@ -46,6 +46,12 @@
   (define-record-type recovery-snapshot
     (fields buffer-id generation resource contents))
 
+  ;; A clear captures the Buffer's resource while the binding still exists.
+  ;; Buffer ids are process-local, whereas discovered artifacts survive a
+  ;; restart and can only be matched reliably by their resource identity.
+  (define-record-type recovery-clear
+    (fields resource))
+
   (define-record-type
     (recovery-service %make-recovery-service recovery-service?)
     (fields host owner history resource-for-buffer directory pending queued live-artifacts
@@ -195,20 +201,40 @@
     (queue-flush! service buffer-id)
     #t)
 
-  (define (queue-clear! service buffer-id)
-    (hashtable-set! (recovery-service-pending service) buffer-id 'clear)
+  (define (queue-clear! service buffer-id resource)
+    (hashtable-set!
+      (recovery-service-pending service) buffer-id (make-recovery-clear resource))
     (queue-flush! service buffer-id))
 
   (define (delete-artifact! path)
     (when (and path (vfs-file-exists? path)) (delete-file path)))
 
-  (define (clear-buffer-now! service buffer-id)
+  (define (clear-discovered-artifacts! service resource)
+    (when resource
+      (let* ([artifacts (recovery-service-pending-artifacts service)]
+             [discarded
+              (filter
+                (lambda (artifact)
+                  (resource=? (recovery-artifact-resource artifact) resource))
+                artifacts)])
+        (recovery-service-pending-artifacts-set!
+          service
+          (filter
+            (lambda (artifact)
+              (not (resource=? (recovery-artifact-resource artifact) resource)))
+            artifacts))
+        (for-each
+          (lambda (artifact) (delete-artifact! (recovery-artifact-path artifact)))
+          discarded))))
+
+  (define (clear-buffer-now! service buffer-id resource)
     (hashtable-delete! (recovery-service-pending service) buffer-id)
     (hashtable-delete! (recovery-service-queued service) buffer-id)
     (let ([path
            (hashtable-ref (recovery-service-live-artifacts service) buffer-id #f)])
       (hashtable-delete! (recovery-service-live-artifacts service) buffer-id)
       (delete-artifact! path))
+    (clear-discovered-artifacts! service resource)
     #t)
 
   (define (recovery-service-clear-buffer! service buffer-id)
@@ -219,7 +245,8 @@
                            service buffer-id))
     ;; Callers may be Dispatcher or lifecycle listeners.  Keep filesystem I/O
     ;; at the command-loop effect boundary even when the Buffer has closed.
-    (queue-clear! service buffer-id)
+    (queue-clear! service buffer-id
+                  ((recovery-service-resource-for-buffer service) buffer-id))
     #t)
 
   (define (flush-pending! service buffer-id)
@@ -245,8 +272,9 @@
                      (recovery-snapshot-resource pending)
                      (recovery-snapshot-contents pending)))
                  (chmod path #o600))
-               (clear-buffer-now! service buffer-id)))]
-        [(eq? pending 'clear) (clear-buffer-now! service buffer-id)]
+               (clear-buffer-now! service buffer-id #f)))]
+        [(recovery-clear? pending)
+         (clear-buffer-now! service buffer-id (recovery-clear-resource pending))]
         [else #f])))
 
   (define (make-recovery-target-reader service)
@@ -425,6 +453,6 @@
                     (recovery-service-snapshot!
                       service buffer-id (buffer-state-generation state) resource
                       (snapshot-bytevector (buffer-state-document state)))]
-                   [resource (queue-clear! service buffer-id)])))))
+                   [resource (queue-clear! service buffer-id resource)])))))
          service)]))
 )

@@ -67,6 +67,7 @@
           (soda packages input-history)
           (soda packages keyboard-macro)
           (soda packages minibuffer)
+          (soda packages recovery)
           (soda packages resource)
           (soda support vfs)
           (prefix (soda ffi runtime) native:)
@@ -5406,6 +5407,50 @@
         (registration-close! registration))
       (frontend-close! frontend)
       (soda-application-close! application))
+
+    ;; Recovery artifacts outlive a process, while Buffer ids do not.  Opening
+    ;; and saving the same resource must retire its discovered artifact rather
+    ;; than leaving an ever-growing startup recovery catalog.
+    (let* ([directory (string-append "/tmp/soda-recovery-prune-"
+                                     (number->string (get-process-id)))]
+           [path (string-append directory "/source.txt")]
+           [artifact-path (string-append directory "/stale.soda-recovery")]
+           [resource (make-resource 'file path)]
+           [state (make-host-state)]
+           [host (make-package-host state)]
+           [owner (make-owner 'recovery-prune-test)]
+           [history (make-history! host owner)]
+           [service #f])
+      (dynamic-wind
+        (lambda ()
+          (when (file-exists? artifact-path) (delete-file artifact-path))
+          (when (file-exists? directory) (delete-directory directory))
+          (mkdir directory)
+          (let ([encoded-path (string->utf8 path)])
+            (vfs-write-file
+              artifact-path
+              (string->utf8
+                (string-append "SODA-RECOVERY-1 "
+                               (number->string (bytevector-length encoded-path))
+                               "\n" path "unsaved")))))
+        (lambda ()
+          (set! service
+            (make-recovery-service!
+              host owner history (lambda (ignored) resource) directory))
+          (unless (= (length (recovery-service-pending-artifacts service)) 1)
+            (error 'fundamental-editing-tests
+                   "recovery service did not discover its persisted artifact"))
+          (recovery-service-clear-buffer! service 42)
+          (host-state-run! state)
+          (unless (and (null? (recovery-service-pending-artifacts service))
+                       (not (file-exists? artifact-path)))
+            (error 'fundamental-editing-tests
+                   "saving a resource did not retire its discovered recovery artifact")))
+        (lambda ()
+          (when (owner-active? owner) (owner-close! owner))
+          (host-state-close! state)
+          (when (file-exists? artifact-path) (delete-file artifact-path))
+          (when (file-exists? directory) (delete-directory directory)))))
 
     ;; Terminal input is a latency-sensitive lane.  A background completion
     ;; already queued by analysis or a process must not delay the next user
