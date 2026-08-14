@@ -376,7 +376,7 @@
                 (make-buffer-input-layer-extension
                   (list (make-input-layer 'buffer result-keymap #f 'ignore)
                         (buffer-item-input-layer actions)
-                        (generated-buffer-input-layer actions)))
+                        (generated-buffer-input-layer)))
                 (make-buffer-edit-policy-extension
                   (make-buffer-edit-policy 'reject)))
               '(spell generated-buffer buffer-item) "Spell")]

@@ -12,6 +12,7 @@
           (prefix (soda ffi runtime) native:)
           (soda kernel change)
           (soda kernel document)
+          (soda kernel extension)
           (soda kernel state)
           (soda kernel view-state)
           (soda host command)
@@ -22,6 +23,9 @@
           (soda host package)
           (soda host value)
           (soda host view)
+          (soda packages buffer-mode)
+          (soda packages edit-policy)
+          (soda packages generated-buffer)
           (soda packages interaction))
 
   ;; ProcessService owns package-level process identity and output Buffer
@@ -29,7 +33,7 @@
   ;; time; commands do not otherwise depend on terminal implementation.
   (define-record-type
     (process-service %make-process-service process-service?)
-    (fields host owner keymap processes
+    (fields host owner keymap authority mode processes
             (mutable runtime process-service-runtime process-service-runtime-set!)))
 
   ;; A ProcessJob is the package boundary for a finite, pipe-backed external
@@ -90,26 +94,31 @@
   (define (make-process-request-reader)
     (make-interaction-string-reader 'shell-command "Execute command: "))
 
-  (define (process-output-transaction buffer data)
+  (define (process-output-transaction service buffer data)
     (let* ([state (buffer-state buffer)]
            [length (snapshot-byte-size (buffer-state-document state))])
       (make-transaction-spec
-        (buffer-id buffer) (buffer-state-generation state)
-        (make-change-set length (list (make-text-change length length data))))))
+        (buffer-id buffer) #f (buffer-state-generation state)
+        (make-change-set length (list (make-text-change length length data)))
+        #f '()
+        (list
+          (make-edit-authority-annotation
+            (process-service-authority service))))))
 
   (define (append-output! service buffer-id bytes)
     (let ([buffer
            (package-host-buffer-ref (process-service-host service) buffer-id #f)])
       (if buffer
           (package-host-dispatch! (process-service-host service)
-            (process-output-transaction buffer bytes))
+            (process-output-transaction service buffer bytes))
           #f)))
 
   (define (open-output-buffer! service request)
     (let* ([host (process-service-host service)]
            [context (process-request-context request)]
            [configuration
-            (buffer-state-configuration (command-context-buffer-state context))]
+            (make-configuration
+              (make-buffer-modes-extension (process-service-mode service) '()))]
            [buffer
             (package-host-create-buffer!
               host (process-service-owner service)
@@ -211,7 +220,19 @@
                            host owner))
     (let* ([runtime (package-host-command-runtime host)]
            [keymap (make-keymap 'process)]
-           [service (%make-process-service host owner keymap (make-eqv-hashtable) #f)])
+           [authority (make-edit-authority owner 'process-output)]
+           [mode
+            (make-mode-spec
+              'process-mode 'major "Process" #f
+              (list
+                (make-buffer-input-layer-extension
+                  (list (generated-buffer-input-layer)))
+                (make-buffer-edit-policy-extension
+                  (make-buffer-edit-policy 'reject #f authority)))
+              '(process generated-buffer) "Process")]
+           [service
+            (%make-process-service
+              host owner keymap authority mode (make-eqv-hashtable) #f)])
       (command-runtime-register-effect-handler!
         runtime 'process.spawn owner 'native-process-spawn
         (lambda (ignored invocation effect)

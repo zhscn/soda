@@ -113,8 +113,8 @@
                 (generated-projection-extension)
                 (list
                   (make-buffer-input-layer-extension
-                    (list (make-input-layer 'buffer keymap #f 'ignore)
-                          (generated-buffer-input-layer actions)))
+                  (list (make-input-layer 'buffer keymap #f 'ignore)
+                          (generated-buffer-input-layer)))
                   (make-buffer-edit-policy-extension
                     (make-buffer-edit-policy 'reject #f authority))))
               '(help generated-buffer) "Help")]

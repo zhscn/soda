@@ -4817,6 +4817,31 @@
                   (string=? (buffer-name buffer) "*command: printf soda-process-output*")
                   (string=? output
                             "soda-process-output\n[Process exited with status 0]\n"))
+             ;; A process result is a generated, read-only presentation: it
+             ;; retains generic generated-buffer commands but never inherits
+             ;; the editable source Buffer's command categories.
+             (let ([context (application-command-context application)]
+                   [mode
+                    (configuration-facet
+                      (buffer-state-configuration (buffer-state buffer))
+                      buffer-mode-facet 'buffer)])
+               (unless (and (mode-spec? mode)
+                            (eq? (mode-spec-id mode) 'process-mode)
+                            (command-runtime-command-available?
+                              runtime 'buffer.close context)
+                            (not (command-runtime-command-available?
+                                   runtime 'fundamental.insert-text context)))
+                 (error 'kernel-tests
+                        "process output Buffer did not use the generated read-only profile"))
+               (let ([rejected?
+                      (guard (condition [else #t])
+                        (command-runtime-start!
+                          runtime 'fundamental.insert-text context
+                          (list (string->utf8 "must-not-edit")))
+                        #f)])
+                 (unless (and rejected? (string=? output (buffer-string buffer)))
+                   (error 'kernel-tests
+                          "process output Buffer accepted ordinary editing"))))
              #t]
             [(zero? remaining)
              (error 'kernel-tests "process output Buffer did not receive complete process output"

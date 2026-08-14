@@ -5,6 +5,6 @@
           buffer-item-field buffer-item-field-extension make-buffer-items-effect
           buffer-item-ranges buffer-items-at-point buffer-item-at-point
           make-buffer-item-action-service buffer-item-action-service?
-          generated-buffer-input-layer buffer-item-input-layer buffer-item-action-register!
+          buffer-item-input-layer buffer-item-action-register!
           buffer-item-action-invoke install-buffer-item-commands!)
   (import (soda packages buffer-ui internal)))
