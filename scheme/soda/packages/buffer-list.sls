@@ -34,7 +34,11 @@
 
   (define-record-type buffer-list-state
     (fields (mutable generation buffer-list-state-generation
-                     buffer-list-state-generation-set!)))
+                     buffer-list-state-generation-set!)
+            (mutable surface-id buffer-list-state-surface-id
+                     buffer-list-state-surface-id-set!)
+            (mutable selected-buffer-id buffer-list-state-selected-buffer-id
+                     buffer-list-state-selected-buffer-id-set!)))
 
   (define-record-type buffer-list-open-request
     (fields context))
@@ -53,16 +57,26 @@
   (define (generated-buffer? buffer)
     (buffer-state-field (buffer-state buffer) generated-projection-field #f))
 
-  ;; Deterministic ordering keeps a refreshed list stable for keyboard and
-  ;; programmatic navigation.
-  (define (listed-buffers service)
-    (list-sort
-      (lambda (left right) (< (buffer-id left) (buffer-id right)))
-      (filter
-        (lambda (buffer)
-          (not (hashtable-contains? (buffer-list-service-lists service)
-                                    (buffer-id buffer))))
-        (package-host-buffers (buffer-list-service-host service)))))
+  ;; Ordering is Surface-relative MRU.  The Buffer List itself is an interface
+  ;; Buffer and never appears as an item in its own projection.
+  (define (listed-buffers service list-state)
+    (let* ([buffers
+            (filter
+              (lambda (buffer)
+                (not (hashtable-contains? (buffer-list-service-lists service)
+                                          (buffer-id buffer))))
+              (package-host-buffers-for-surface
+                (buffer-list-service-host service)
+                (buffer-list-state-surface-id list-state)))]
+           [selected-id (buffer-list-state-selected-buffer-id list-state)]
+           [selected
+            (find (lambda (buffer) (= (buffer-id buffer) selected-id)) buffers)])
+      (if selected
+          (cons selected
+                (filter
+                  (lambda (buffer) (not (= (buffer-id buffer) selected-id)))
+                  buffers))
+          buffers)))
 
   (define (modified-marker service buffer)
     (if (and (not (generated-buffer? buffer))
@@ -70,18 +84,35 @@
         "*"
         " "))
 
-  (define (buffer-list-layout service)
-    (let loop ([buffers (listed-buffers service)]
-               [text "Buffers:\n\n"]
+  (define (buffer-mode-name buffer)
+    (let ([mode
+           (configuration-facet
+             (buffer-state-configuration (buffer-state buffer))
+             buffer-mode-facet 'buffer)])
+      (if mode (mode-spec-display-name mode) "Fundamental")))
+
+  (define (buffer-list-layout service list-state)
+    (let loop ([buffers (listed-buffers service list-state)]
+               [text "Buffers  (* modified, % read-only)\n\n"]
                [ranges '()])
       (if (null? buffers)
           (cons text (make-range-set (reverse ranges)))
           (let* ([buffer (car buffers)]
                  [row
                   (string-append
-                    (modified-marker service buffer) " "
-                    (number->string (buffer-id buffer)) "  "
-                    (buffer-name buffer) "\n")]
+                    (if (= (buffer-id buffer)
+                           (buffer-list-state-selected-buffer-id list-state))
+                        ">" " ")
+                    (modified-marker service buffer)
+                    (if (buffer-read-only?
+                          (buffer-state-configuration (buffer-state buffer)))
+                        "%" " ")
+                    " " (buffer-name buffer)
+                    "  "
+                    (number->string
+                      (snapshot-byte-size
+                        (buffer-state-document (buffer-state buffer))))
+                    " bytes  " (buffer-mode-name buffer) "\n")]
                  [start (bytevector-length (string->utf8 text))]
                  [end (+ start (bytevector-length (string->utf8 row)))]
                  [item
@@ -100,7 +131,7 @@
            (hashtable-ref (buffer-list-service-lists service) (buffer-id buffer) #f)])
       (and list-state
            (let* ([generation (+ (buffer-list-state-generation list-state) 1)]
-                  [layout (buffer-list-layout service)]
+                  [layout (buffer-list-layout service list-state)]
                   [update
                    (make-projection-update generation (car layout) (cdr layout) '() '())]
                   [published
@@ -126,9 +157,21 @@
                 (package-host-create-buffer!
                   host (buffer-list-service-owner service) "*Buffer List*"
                   (make-document "") (buffer-list-configuration service))))])
-      (unless (hashtable-ref (buffer-list-service-lists service) (buffer-id buffer) #f)
-        (hashtable-set! (buffer-list-service-lists service) (buffer-id buffer)
-                        (make-buffer-list-state 0)))
+      (let ([list-state
+             (hashtable-ref
+               (buffer-list-service-lists service) (buffer-id buffer) #f)])
+        (unless list-state
+          (set! list-state
+                (make-buffer-list-state
+                  0 (command-context-surface-id context)
+                  (command-context-buffer-id context)))
+          (hashtable-set! (buffer-list-service-lists service) (buffer-id buffer)
+                          list-state))
+        (unless (= (command-context-buffer-id context) (buffer-id buffer))
+          (buffer-list-state-surface-id-set!
+            list-state (command-context-surface-id context))
+          (buffer-list-state-selected-buffer-id-set!
+            list-state (command-context-buffer-id context))))
       (publish-buffer-list! service buffer)
       (if (= (buffer-id buffer) (command-context-buffer-id context))
           buffer

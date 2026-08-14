@@ -465,14 +465,13 @@
                 (unless (and (string-contains? content (buffer-name scratch))
                              (string-contains? content path)
                              (string-contains?
-                               content (string-append "* " (number->string file-id))))
+                               content (string-append ">*  " path))
+                             (string-contains? content " bytes  Fundamental"))
                   (error 'fundamental-editing-tests
                          "buffer.list did not project live Buffer metadata" content))
-                ;; IDs increase with creation: scratch is the first row and
-                ;; the visited file is the second.  Item activation must
-                ;; replace the list View with the actual target Buffer.
-                (command-runtime-start! runtime 'buffer.next-item
-                                        (application-command-context application))
+                ;; The current file is first in Surface-relative MRU order.
+                ;; Item activation replaces the list View with that Buffer's
+                ;; previously used View.
                 (command-runtime-start! runtime 'buffer.next-item
                                         (application-command-context application))
                 (command-runtime-start! runtime 'buffer.activate-item
@@ -495,9 +494,9 @@
                   (error 'fundamental-editing-tests
                          "buffer.list did not reuse its canonical generated Buffer"))
                 ;; `d` retains the Buffer List as the active context and
-                ;; passes the selected row as an explicit close target.  The
-                ;; Select the file row explicitly; the normal File package
-                ;; still owns its save/discard prompt.
+                ;; passes the selected row as an explicit close target. Select
+                ;; the file row explicitly; the normal File package still
+                ;; owns its save/discard prompt.
                 (let* ([context (application-command-context application)]
                        [view (view-service-ref
                                (host-state-views state)
@@ -508,8 +507,6 @@
                       (view-id view) (view-state-generation (view-state view))
                       (make-selection (list (make-selection-range 0 0)))
                       #f #f '() '() #f)))
-                (command-runtime-start! runtime 'buffer.next-item
-                                        (application-command-context application))
                 (command-runtime-start! runtime 'buffer.next-item
                                         (application-command-context application))
                 (command-runtime-start! runtime 'buffer-list.close-item

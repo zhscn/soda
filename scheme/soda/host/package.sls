@@ -27,6 +27,7 @@
           package-host-add-update-listener!
           package-host-buffer-ref
           package-host-buffers
+          package-host-buffers-for-surface
           package-host-open-or-create-buffer!
           package-host-create-buffer!
           package-host-close-buffer!
@@ -200,6 +201,48 @@
 
   (define (package-host-buffers host)
     (buffer-service-buffers (host-state-buffers (package-host-state host))))
+
+  ;; Buffer catalogs are unordered registries.  User-facing switchers consume
+  ;; a Surface-relative order: recently replaced Views first, followed by the
+  ;; remaining live Buffers in a deterministic name order.
+  (define (package-host-buffers-for-surface host surface-id)
+    (unless (and (package-host? host) (integer? surface-id)
+                 (exact? surface-id) (>= surface-id 0))
+      (assertion-violation 'package-host-buffers-for-surface
+                           "invalid PackageHost or Surface identity"
+                           host surface-id))
+    (let* ([state (package-host-state host)]
+           [buffers (host-state-buffers state)]
+           [views (host-state-views state)]
+           [surface
+            (surface-service-ref (host-state-surfaces state) surface-id #f)]
+           [catalog (buffer-service-buffers buffers)])
+      (define (seen? buffer result)
+        (exists
+          (lambda (candidate) (= (buffer-id candidate) (buffer-id buffer)))
+          result))
+      (define (append-buffer result buffer)
+        (if (or (not buffer) (seen? buffer result))
+            result
+            (append result (list buffer))))
+      (let* ([recent
+              (if (not surface)
+                  '()
+                  (fold-left
+                    (lambda (result view-id)
+                      (let ([view (view-service-ref views view-id #f)])
+                        (append-buffer result (and view (view-buffer view)))))
+                    '() (surface-view-history surface)))]
+             [remaining
+              (list-sort
+                (lambda (left right)
+                  (let ([left-name (buffer-name left)]
+                        [right-name (buffer-name right)])
+                    (or (string<? left-name right-name)
+                        (and (string=? left-name right-name)
+                             (< (buffer-id left) (buffer-id right))))))
+                (filter (lambda (buffer) (not (seen? buffer recent))) catalog))])
+        (append recent remaining))))
 
   (define (package-host-open-or-create-buffer! host owner key builder)
     (buffer-service-open-or-create!
