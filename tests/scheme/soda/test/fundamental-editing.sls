@@ -1388,6 +1388,33 @@
                    (string=? exit-input "acceptedé")
                    (equal? (reverse events) '(opened accepted)))
         (error 'fundamental-editing-tests "interaction submission did not resume through the queue"))
+      ;; A required prompt adapter must not leave an invocation suspended when
+      ;; its presentation target is unavailable.
+      (let* ([root-view (soda-application-view application)]
+             [root-buffer (soda-application-buffer application)]
+             [surface (soda-application-surface application)]
+             [active (surface-active-context surface (host-state-views state))]
+             [invalid-context
+              (make-command-context
+                #f (surface-id surface)
+                (active-context-window-id active)
+                (+ 1000 (view-id root-view)) (buffer-id root-buffer)
+                (buffer-state root-buffer) (view-state root-view)
+                #f '() #f active 'missing-prompt-surface)]
+             [failed-invocation
+              (command-runtime-start-interactive!
+                runtime 'interaction.package-test invalid-context)])
+        (host-state-run! state)
+        (unless (and (not (interaction-service-current interaction))
+                     (not (minibuffer-service-current minibuffer))
+                     (string=? (surface-feedback-text surface)
+                               "Unable to open minibuffer")
+                     (not (command-runtime-invocation
+                            runtime
+                            (command-invocation-id failed-invocation)
+                            #f)))
+          (error 'fundamental-editing-tests
+                 "failed prompt presentation left an invocation suspended")))
       (let* ([unicode-reader
               (make-interactive-reader
                 'file-name

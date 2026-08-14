@@ -88,6 +88,11 @@ session 状态沿 `open → submitting → accepted` 或
 `cancelled`。批量取消按 session 栈从内向外执行，使每个内层 prompt 在其 origin View
 仍有效时完成关闭和焦点恢复。
 
+minibuffer 是终端应用的 required interaction adapter。创建 transient Document、Buffer、
+View 与 Surface placement 构成一个可回滚资源事务；placement 成功后才发布 minibuffer
+session。origin 或 Surface 不可用、资源创建失败或 placement 失败时，adapter 回收本次创建
+的资源、取消对应 interaction，并发布单行错误反馈，不留下无法回答的 suspended invocation。
+
 `minibuffer.accept` 与 `minibuffer.cancel` 是普通 command。minibuffer keymap 只绑定
 这两个命令，frontend 按所有其他 command 相同的队列路径投递它们。`setup` 和 `exit`
 hook 以 owner-scoped registration 安装，回调只接收 `PromptSnapshot`；hook 不能持有或

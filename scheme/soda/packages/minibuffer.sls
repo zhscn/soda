@@ -38,6 +38,7 @@
           (soda host command-runtime)
           (soda host context)
           (soda host dispatch)
+          (soda host feedback)
           (soda host input)
           (soda host input-event)
           (soda host buffer)
@@ -270,46 +271,89 @@
            [context (interaction-session-context interaction)]
            [origin (package-host-view-ref host (command-context-view-id context) #f)]
            [size (package-host-surface-size host (command-context-surface-id context))])
-      (when (and origin size)
-        (let* ([request (interaction-session-request interaction)]
-               [configuration
-                (minibuffer-configuration service
-                  (view-state-configuration (view-state origin)) request)]
-               [document (make-document (or (interaction-request-initial-value request) ""))]
-               [buffer (package-host-create-buffer! host (minibuffer-service-owner service)
-                                                    " *minibuffer*" document configuration)]
-               [view (package-host-create-view! host (minibuffer-service-owner service)
-                                                buffer configuration)])
-          ;; Initial prompt contents are ready for continuation. Establish the
-          ;; point before placement so every frontend observes the same first
-          ;; Frame and no reader needs a follow-up motion command.
-          (let ([end
-                 (snapshot-byte-size
-                   (buffer-state-document (buffer-state buffer)))])
-            (when (positive? end)
-              (let ([state (view-state view)])
-                (package-host-dispatch-view!
-                  host
-                  (make-view-transaction-spec
-                    (view-id view) (view-state-generation state)
-                    (make-selection (list (make-selection-range end end)))
-                    (view-state-viewport state)
-                    #f '() '() #f)))))
-          (if (package-host-push-interaction-view!
-                host (command-context-surface-id context) (view-id view) 1)
-              (let ([session
-                     (%make-minibuffer-session interaction (buffer-id buffer) (view-id view)
-                                                (view-id origin) (command-context-surface-id context)
-                                                1 #f #f
-                                                (make-list-viewport 0 completion-window-height)
-                                                #f
-                                                (or (interaction-request-initial-value request) "")
-                                                #f #f)])
-                (minibuffer-service-sessions-set!
-                  service (cons session (minibuffer-service-sessions service)))
-                (notify-hooks! (minibuffer-service-setup-hooks service)
-                               (minibuffer-session-snapshot service session)))
-              (package-host-close-buffer! host (buffer-id buffer)))))))
+      (and origin size
+           (let ([document #f] [buffer #f] [view #f]
+                 [placed? #f] [committed? #f])
+             (dynamic-wind
+               (lambda () #f)
+               (lambda ()
+                 (let* ([request (interaction-session-request interaction)]
+                        [configuration
+                         (minibuffer-configuration service
+                           (view-state-configuration (view-state origin)) request)])
+                   (set! document
+                         (make-document
+                           (or (interaction-request-initial-value request) "")))
+                   (set! buffer
+                         (package-host-create-buffer!
+                           host (minibuffer-service-owner service)
+                           " *minibuffer*" document configuration))
+                   ;; The Buffer owns the Document after successful creation.
+                   (set! document #f)
+                   (set! view
+                         (package-host-create-view!
+                           host (minibuffer-service-owner service)
+                           buffer configuration))
+                   ;; Initial prompt contents are ready for continuation.
+                   ;; Establish point before placement so every frontend sees
+                   ;; the same first Frame.
+                   (let ([end
+                          (snapshot-byte-size
+                            (buffer-state-document (buffer-state buffer)))])
+                     (when (positive? end)
+                       (let ([state (view-state view)])
+                         (package-host-dispatch-view!
+                           host
+                           (make-view-transaction-spec
+                             (view-id view) (view-state-generation state)
+                             (make-selection
+                               (list (make-selection-range end end)))
+                             (view-state-viewport state)
+                             #f '() '() #f)))))
+                   (set! placed?
+                         (and
+                           (package-host-push-interaction-view!
+                             host (command-context-surface-id context)
+                             (view-id view) 1)
+                           #t))
+                   (and placed?
+                        (let ([session
+                               (%make-minibuffer-session
+                                 interaction (buffer-id buffer) (view-id view)
+                                 (view-id origin)
+                                 (command-context-surface-id context)
+                                 1 #f #f
+                                 (make-list-viewport
+                                   0 completion-window-height)
+                                 #f
+                                 (or (interaction-request-initial-value request) "")
+                                 #f #f)])
+                          (minibuffer-service-sessions-set!
+                            service
+                            (cons session (minibuffer-service-sessions service)))
+                          (set! committed? #t)
+                          (notify-hooks!
+                            (minibuffer-service-setup-hooks service)
+                            (minibuffer-session-snapshot service session))
+                          session))))
+               (lambda ()
+                 (unless committed?
+                   (when placed?
+                     (package-host-remove-interaction-view!
+                       host (command-context-surface-id context) (view-id view)))
+                   (when buffer
+                     (package-host-close-buffer! host (buffer-id buffer)))
+                   (when document (document-close! document)))))))))
+
+  (define (fail-open! service interaction)
+    (let ([context (interaction-session-context interaction)])
+      (guard (ignored [else #f])
+        (package-host-publish-feedback!
+          (minibuffer-service-host service)
+          (command-context-surface-id context)
+          (make-user-feedback "Unable to open minibuffer" 'error)))
+      (interaction-service-cancel!
+        (minibuffer-service-interactions service))))
 
   (define completion-window-height 6)
 
@@ -782,7 +826,10 @@
         (interaction-service-add-listener!
           interactions owner
           (lambda (kind interaction)
-            (cond [(eq? kind 'opened) (open! service interaction)]
+            (cond [(eq? kind 'opened)
+                   (guard (ignored [else (fail-open! service interaction)])
+                     (or (open! service interaction)
+                         (fail-open! service interaction)))]
                   [(memq kind '(accepted cancelled))
                    (close! service interaction kind)]))))
       (package-host-add-update-listener!
