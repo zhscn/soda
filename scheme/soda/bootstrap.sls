@@ -263,10 +263,18 @@
       (documentation "Cancel the active interaction or pending input state.")
       (class 'application)
       (undo 'ignore)
-      (interaction-service-cancel! interactions)
-      (package-host-publish-feedback!
-        host (command-context-surface-id context)
-        (make-user-feedback "Quit" 'info))
+      (let ([cancelled
+             (interaction-service-cancel!
+               interactions
+               (lambda (interaction)
+                 (package-host-publish-feedback-if-current!
+                   host (interaction-session-context interaction)
+                   (make-user-feedback "Quit" 'info))))])
+        ;; Outside an interaction there is no temporary View to retire, so
+        ;; the current command context is the proper echo target directly.
+        (unless cancelled
+          (package-host-publish-feedback-if-current!
+            host context (make-user-feedback "Quit" 'info))))
       (command-handled)))
 
   ;; Application policy belongs to composition.  Fundamental editing exports

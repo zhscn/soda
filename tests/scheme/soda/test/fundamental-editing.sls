@@ -2005,12 +2005,19 @@
                      (= (prompt-pending-length) 2))
           (error 'fundamental-editing-tests
                  "second ESC did not continue the application quit prefix"))
-        (send-escape!)
-        (unless (and (not (minibuffer-service-current minibuffer))
-                     (not (interaction-service-current interaction))
-                     (string=? (surface-feedback-text surface) "Quit"))
-          (error 'fundamental-editing-tests
-                 "ESC ESC ESC did not run the application-wide quit command"))
+        (let ([feedback-during-close #f])
+          (interaction-service-add-listener!
+            interaction owner
+            (lambda (kind ignored)
+              (when (eq? kind 'cancelled)
+                (set! feedback-during-close (surface-feedback-text surface)))))
+          (send-escape!)
+          (unless (and (not (minibuffer-service-current minibuffer))
+                       (not (interaction-service-current interaction))
+                       (not feedback-during-close)
+                       (string=? (surface-feedback-text surface) "Quit"))
+            (error 'fundamental-editing-tests
+                   "application quit published feedback before closing its interaction")))
         (frontend-resize! frontend '(80 . 5))
         (frontend-step! frontend)
         (command-runtime-start!

@@ -56,7 +56,14 @@
       (immutable reader-name interaction-session-reader-name)
       (mutable status interaction-session-status interaction-session-status-set!)
       (immutable request interaction-session-request)
-      (immutable context interaction-session-context)))
+      (immutable context interaction-session-context)
+      ;; A cancellation completion is attached to the suspended interaction,
+      ;; not to the input event that requested its cancellation.  The service
+      ;; invokes it only after every presentation listener has retired the
+      ;; temporary interface.
+      (mutable cancellation-completion
+               interaction-session-cancellation-completion
+               interaction-session-cancellation-completion-set!)))
 
   (define-record-type interaction-listener
     (fields owner procedure))
@@ -151,7 +158,8 @@
               (command-definition-name (command-invocation-definition invocation))
               (reader-name invocation)
               'open request
-              (command-invocation-context invocation))])
+              (command-invocation-context invocation)
+              #f)])
         (interaction-service-sessions-set!
           service (cons session (interaction-service-sessions service)))
         (notify! service 'opened session)
@@ -334,18 +342,29 @@
                (transition-session! session 'submitting)
                session)))))
 
-  (define (interaction-service-cancel! service)
-    (unless (interaction-service? service)
-      (assertion-violation 'interaction-service-cancel! "expected an interaction service" service))
-    (let ([session (interaction-service-current service)])
-      (and session (eq? (interaction-session-status session) 'open)
-           (begin
-             (command-runtime-enqueue!
-               (interaction-service-runtime service)
-               (make-command-cancel-message
-                 (interaction-session-invocation-id session)))
-             (transition-session! session 'cancelling)
-             session))))
+  ;; A completion belongs to the interaction's close boundary.  It is useful
+  ;; for feedback such as `Quit`, which must reach the echo area only after a
+  ;; minibuffer or another temporary presentation is gone.
+  (define interaction-service-cancel!
+    (case-lambda
+      [(service) (interaction-service-cancel! service #f)]
+      [(service completion)
+       (unless (and (interaction-service? service)
+                    (or (not completion) (procedure? completion)))
+         (assertion-violation
+           'interaction-service-cancel!
+           "expected an interaction service and optional cancellation completion"
+           service completion))
+       (let ([session (interaction-service-current service)])
+         (and session (eq? (interaction-session-status session) 'open)
+              (begin
+                (interaction-session-cancellation-completion-set! session completion)
+                (command-runtime-enqueue!
+                  (interaction-service-runtime service)
+                  (make-command-cancel-message
+                    (interaction-session-invocation-id session)))
+                (transition-session! session 'cancelling)
+                session)))]))
 
   (define (interaction-service-cancel-all! service)
     (unless (interaction-service? service)
@@ -417,6 +436,15 @@
           (let ([session
                  (interaction-service-session-for-id
                    service (command-invocation-id invocation))])
-            (when session (remove-session! service session 'cancelled)))))
+            (when session
+              (let ([completion
+                     (interaction-session-cancellation-completion session)])
+                (remove-session! service session 'cancelled)
+                ;; Listeners synchronously retire the temporary presentation
+                ;; while handling `cancelled`; publish any deferred outcome
+                ;; only after that lifecycle boundary has completed.
+                (when completion
+                  (guard (ignored [else #f])
+                    (completion session))))))))
       service))
 )
