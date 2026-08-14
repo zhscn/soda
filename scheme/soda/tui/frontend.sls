@@ -6,6 +6,7 @@
           frontend-dirty?
           frontend-enqueue!
           frontend-pending?
+          frontend-discard-stale-legacy-repeats!
           frontend-step-action!
           frontend-step!
           frontend-resize!
@@ -86,7 +87,8 @@
     (let* ([owner (make-owner 'frontend)]
            [value
             (%make-frontend owner state surface resolve-input-context handle-disposition
-                            present! render-service (make-input-scheduler state)
+                            present! render-service
+                            (make-input-scheduler state (surface-id surface))
                             theme #t #f #f #f #f #f #f #f)])
       (frontend-routing-registration-set!
         value
@@ -146,6 +148,14 @@
   (define (frontend-pending? value)
     (require-open 'frontend-pending? value)
     (host-frontend-pending? (frontend-host-state value)))
+
+  ;; TerminalFrontend calls this after a poll with no input.  Keeping the
+  ;; protocol-specific timing decision at the terminal boundary avoids making
+  ;; generic frontend callers guess whether a key-up event is observable.
+  (define (frontend-discard-stale-legacy-repeats! value)
+    (require-open 'frontend-discard-stale-legacy-repeats! value)
+    (input-scheduler-discard-stale-legacy-repeats!
+      (frontend-input-scheduler value)))
 
   (define (active-view value)
     (host-frontend-active-view

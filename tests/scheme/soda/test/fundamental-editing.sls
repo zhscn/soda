@@ -5317,6 +5317,38 @@
                  0)
         (error 'fundamental-editing-tests
                "C-p did not preempt queued C-n action turns"))
+      ;; A non-Kitty terminal has no key-up report.  A raw read can therefore
+      ;; contain several indistinguishable C-n presses after the user has
+      ;; released the key.  Infer repeat at decoding and retain only the
+      ;; newest deferred repeat, so draining the frontend cannot continue
+      ;; moving through the entire stale read burst.
+      (let ([legacy-decoder (make-terminal-input-decoder)])
+        (dispatcher-dispatch-view!
+          (host-state-dispatch state)
+          (make-view-transaction-spec
+            (view-id view) (view-state-generation (view-state view))
+            (make-selection (list (make-selection-range 0 0)))
+            #f #f '() '() #f))
+        (for-each
+          (lambda (event)
+            (frontend-enqueue!
+              frontend
+              (make-surface-input-message (surface-id surface) event)))
+          (terminal-input-decoder-feed!
+            legacy-decoder (make-bytevector 4 14)))
+        ;; This is the terminal turn after the source read.  With no further
+        ;; input event, inferred repeat debt must not become post-release
+        ;; motion when the frontend drains its queue.
+        (frontend-discard-stale-legacy-repeats! frontend)
+        (let drain ([remaining 8])
+          (when (and (> remaining 0) (frontend-pending? frontend))
+            (frontend-step-action! frontend)
+            (drain (- remaining 1))))
+        (unless (= (selection-range-head
+                     (selection-primary-range (view-state-selection (view-state view))))
+                   2)
+          (error 'fundamental-editing-tests
+                 "legacy C-n repeat debt outlived its input burst")))
       (frontend-close! frontend)
       (soda-application-close! application))
 

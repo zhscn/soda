@@ -2732,6 +2732,18 @@
            "Kitty legacy functional event types differ" events)))
 (let ([events
         (terminal-input-decoder-feed!
+          terminal-decoder
+          (string->utf8 "\x1b;[B\x1b;[B\x1b;[B"))])
+  (unless (and (= (length events) 3)
+               (eq? (key-event-key (car events)) 'down)
+               (eq? (key-event-type (car events)) 'press)
+               (for-all (lambda (event)
+                          (eq? (key-event-type event) 'legacy-repeat))
+                        (cdr events)))
+    (error 'kernel-tests
+           "legacy terminal repeat classification differs" events)))
+(let ([events
+        (terminal-input-decoder-feed!
           terminal-decoder (input-bytes 8 27 127))])
   (unless (and (= (length events) 2)
                (= (key-event-codepoint (car events)) (char->integer #\h))

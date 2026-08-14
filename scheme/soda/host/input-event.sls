@@ -113,7 +113,11 @@
                  (optional-codepoint? shifted)
                  (optional-codepoint? base-layout)
                  (valid-modifiers? modifiers)
-                 (memq type '(press repeat release))
+                 ;; `legacy-repeat` is an inferred repeat from terminals that
+                 ;; cannot report key lifecycle events.  It remains distinct
+                 ;; from protocol-confirmed `repeat`, allowing the frontend to
+                 ;; bound only the unobservable legacy repeat debt.
+                 (memq type '(press repeat legacy-repeat release))
                  (bytevector? text))
       (assertion-violation
         'make-key-event
