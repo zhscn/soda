@@ -1976,7 +1976,16 @@
          (surface-render-frame (render-surface surface (host-state-views host)))])
     (unless (string=? (frame-cell-grapheme (frame-cell-at restored 5 0)) "o")
       (error 'kernel-tests
-             "feedback did not return after the interaction closed"))))
+             "feedback did not return after the interaction closed")))
+  (surface-resize! surface '(10 . 1))
+  (let ([minimal (render-surface surface (host-state-views host))])
+    (unless (and
+              (string=?
+                (frame-cell-grapheme (frame-cell-at (surface-render-frame minimal) 0 0))
+                "r")
+              (= (surface-render-cursor-row minimal) 0))
+      (error 'kernel-tests
+             "one-row Surface let echo feedback replace editable content"))))
 
 ;; A ViewPlugin may project InputState even though core rendering does not.
 ;; Its published projection generation must invalidate only that View's render

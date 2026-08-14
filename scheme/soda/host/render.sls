@@ -183,12 +183,13 @@
                                               (status-frame width message face))))
           placements)))
 
+  (define (surface-echo-area-visible? surface)
+    (and (> (cdr (surface-size surface)) 1)
+         (memq 'echo-area (surface-capabilities surface))))
+
   (define (surface-editor-height surface)
     (let ([height (cdr (surface-size surface))])
-      (if (and (> height 1)
-               (memq 'echo-area (surface-capabilities surface)))
-          (- height 1)
-          height)))
+      (if (surface-echo-area-visible? surface) (- height 1) height)))
 
   (define (surface-interaction-height surface)
     (fold-left
@@ -578,10 +579,12 @@
             ;; Active input guidance owns the echo area. A sticky feedback
             ;; value may survive input, but it must not obscure a prefix,
             ;; argument, minibuffer hint, or current shortcut guidance.
-            (or input-message
-                (and (not interaction-active?) feedback
-                     (user-feedback-text feedback))
-                (and (not interaction-active?) position-message))]
+            (and
+              (surface-echo-area-visible? surface)
+              (or input-message
+                  (and (not interaction-active?) feedback
+                       (user-feedback-text feedback))
+                  (and (not interaction-active?) position-message)))]
            [message-face (if input-message 'message (feedback-face feedback))])
       (unless (and (nonnegative-exact-integer? width)
                    (nonnegative-exact-integer? height))
