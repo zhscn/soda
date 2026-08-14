@@ -288,15 +288,6 @@
                     'command.where-is)
       keymap))
 
-  (define (shutdown-decision value)
-    (cond
-      [(and (string? value) (string-ci=? value "save")) 'save]
-      [(and (string? value) (string-ci=? value "discard")) 'discard]
-      [(and (string? value) (string-ci=? value "cancel")) 'cancel]
-      [else
-       (assertion-violation 'application.quit
-                            "expected save, discard, or cancel" value)]))
-
   (define (make-application-quit-reader files)
     (make-interactive-reader
       'save-decision
@@ -305,20 +296,19 @@
           (if (zero? count)
               (make-interactive-ready (list 'discard))
               (make-interactive-suspend
-                (make-interaction-request
+                (make-choice-interaction-request
                   'save-decision
                   (string-append "Save " (number->string count)
                                  " modified file buffer"
                                  (if (= count 1) "" "s")
-                                 "? (save/discard/cancel) ")
-                  #f #f 'free
-                  (lambda (value ignored)
-                    (and (string? value)
-                         (or (string-ci=? value "save")
-                             (string-ci=? value "discard")
-                             (string-ci=? value "cancel")))))
+                                 "?")
+                  (list
+                    (make-choice-action 'save "Save" (list #\s) 'normal #f)
+                    (make-choice-action
+                      'discard "Discard" (list #\d) 'destructive #f)
+                    (make-choice-action 'cancel "Cancel" (list #\c) 'cancel #t)))
                 (lambda (value)
-                  (make-interactive-ready (list (shutdown-decision value))))))))))
+                  (make-interactive-ready (list value)))))))))
 
   (define (install-application-quit-command! runtime owner files)
     (define-command

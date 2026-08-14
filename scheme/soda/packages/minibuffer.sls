@@ -108,7 +108,7 @@
       (make-facet-provider
         view-plugins-facet
         (list (make-minibuffer-prompt-plugin
-                (interaction-request-prompt request))))))
+                (interaction-request-display-prompt request))))))
 
   (define (session-for service interaction)
     (let loop ([sessions (minibuffer-service-sessions service)])
@@ -292,9 +292,18 @@
                   [request (interaction-session-request (minibuffer-session-interaction session))]
                   [policy (interaction-request-selection-policy
                             request)]
-                  [value (if candidate (completion-candidate-insert-text candidate) raw)])
+                  [default-action (interaction-request-default-action request)]
+                  [value
+                   (cond
+                     [candidate (completion-candidate-insert-text candidate)]
+                     [(eq? policy 'choice)
+                      (and default-action (string=? raw "")
+                           (choice-action-id default-action))]
+                     [else raw])])
              (if (and value
-                      (or (eq? policy 'free) candidate
+                      (or (eq? policy 'free)
+                          (and (eq? policy 'choice) (symbol? value))
+                          candidate
                           (let ([validator (interaction-request-validator request)])
                             (or (and validator (validator value snapshot))
                                 (and controller

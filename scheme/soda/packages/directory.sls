@@ -249,9 +249,6 @@
                 (and (string? value) (positive? (string-length value)))))
             (lambda (value) (make-interactive-ready (list value))))))))
 
-  (define (delete-decision value)
-    (and (string? value) (string-ci=? value "yes")))
-
   (define (make-delete-reader)
     (make-interactive-reader
       'directory-delete-confirmation
@@ -260,16 +257,14 @@
           (unless (directory-target? target)
             (assertion-violation 'directory.delete "missing target path"))
           (make-interactive-suspend
-            (make-interaction-request
+            (make-choice-interaction-request
               'confirmation
-              (string-append "Delete " (directory-target-path target) "? (yes/no) ")
-              #f #f 'free
-              (lambda (value ignored)
-                (and (string? value)
-                     (or (string-ci=? value "yes")
-                         (string-ci=? value "no")))))
+              (string-append "Delete " (directory-target-path target) "?")
+              (list
+                (make-choice-action 'delete "Delete" (list #\d) 'destructive #f)
+                (make-choice-action 'cancel "Cancel" (list #\c) 'cancel #t)))
             (lambda (value)
-              (make-interactive-ready (list (delete-decision value)))))))))
+              (make-interactive-ready (list value))))))))
 
   (define (mutate-directory! service request)
     (let ([kind (directory-mutation-request-kind request)]
@@ -462,7 +457,7 @@
               'rename context (capture-directory-target 'directory.rename source)
               (vfs-resolve-path base destination)))))
       (define-command
-        runtime owner 'directory.delete (context path confirmed?)
+        runtime owner 'directory.delete (context path decision)
         (documentation "Delete the entry at point after confirmation.")
         (class 'directory)
         (interactive
@@ -470,7 +465,7 @@
             (list (make-selected-path-reader 'directory.delete)
                   (make-delete-reader))))
         (undo 'ignore)
-        (if confirmed?
+        (if (eq? decision 'delete)
             (make-command-effect
               'directory.mutate
               (make-directory-mutation-request

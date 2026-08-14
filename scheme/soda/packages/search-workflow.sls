@@ -303,20 +303,26 @@
       'query-replace-decision
       (lambda (context arguments)
         (make-interactive-suspend
-          (make-interaction-request
-            'query-replace-decision "Replace? (y/n/!/q) " #f #f 'free #f
-            (list #\y #\n #\q #\! #\space))
+          (make-choice-interaction-request
+            'query-replace-decision "Replace?"
+            (list
+              (make-choice-action
+                'replace "Replace" (list #\y #\space) 'normal #f)
+              (make-choice-action 'skip "Skip" (list #\n) 'normal #f)
+              (make-choice-action
+                'replace-all "Replace all" (list #\!) 'destructive #f)
+              (make-choice-action 'quit "Quit" (list #\q) 'cancel #f)))
           (lambda (value) (make-interactive-ready (list value)))))))
 
   (define (query-replace-decision! service context value)
     (let ([session (query-replace-session-for-context service context)])
       (if (not session)
           (command-handled)
-          (cond
-            [(or (string-ci=? value "y") (string=? value " "))
+          (case value
+            [(replace)
              (list (replace-query-replace-match context session)
                    (make-command-effect 'search.query-replace.advance session))]
-            [(string-ci=? value "n")
+            [(skip)
              (query-replace-session-scan-set!
                session
                (context-text
@@ -327,14 +333,14 @@
                      (cons (query-replace-session-match-start session)
                            (query-replace-session-match-end session))))))
              (make-command-effect 'search.query-replace.advance session)]
-            [(string=? value "!")
+            [(replace-all)
              (let ([result (replace-all-query-replace-matches context session)])
                (finish-query-replace! service session)
                result)]
-            [(or (string-ci=? value "q") (string-ci=? value "quit"))
+            [(quit)
              (finish-query-replace! service session)
              (command-handled)]
             [else
-             (make-command-effect 'search.query-replace.advance session)]))))
+             (assertion-violation
+               'search.query-replace.decision "unknown choice action" value)]))))
 )
-

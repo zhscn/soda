@@ -407,7 +407,7 @@
                 ;; Replacing that name must not delete the replacement.
                 (delete-file renamed-note)
                 (vfs-write-file renamed-note (string->utf8 "replacement"))
-                (interaction-service-submit! interaction "yes")
+                (interaction-service-submit! interaction 'delete)
                 (host-state-run! state))
               (unless (and (vfs-file-exists? renamed-note)
                            (bytevector=? (vfs-read-file renamed-note)
@@ -417,7 +417,7 @@
               (command-runtime-start!
                 runtime 'directory.delete
                 (application-command-context application)
-                (list renamed-note #t))
+                (list renamed-note 'delete))
               (unless (and (not (vfs-file-exists? renamed-note))
                            (not (string-contains? (buffer-string refreshed-buffer)
                                                   "renamed.txt")))
@@ -502,10 +502,34 @@
                   (unless (and (eq? (interaction-request-kind request) 'save-decision)
                                (string=? (interaction-request-prompt request)
                                          (string-append "Save changes to " path
-                                                        "? (save/discard/cancel) ")))
+                                                        "?"))
+                               (= (length (interaction-request-actions request)) 3)
+                               (eq? (choice-action-id
+                                      (interaction-request-default-action request))
+                                    'cancel)
+                               (eq? (choice-action-role
+                                      (cadr (interaction-request-actions request)))
+                                    'destructive))
                     (error 'fundamental-editing-tests
                            "buffer.list close did not preserve the file save decision")))
-                (interaction-service-submit! interaction "discard")
+                (unless
+                  (guard (condition [else #t])
+                    (interaction-service-submit! interaction 'unknown-action)
+                    #f)
+                  (error 'fundamental-editing-tests
+                         "choice interaction accepted an undeclared action"))
+                (minibuffer-service-submit!
+                  (soda-application-minibuffer application))
+                (host-state-run! state)
+                (unless (and (buffer-service-ref
+                               (host-state-buffers state) file-id #f)
+                             (not (interaction-service-current interaction)))
+                  (error 'fundamental-editing-tests
+                         "default close action did not cancel safely"))
+                (command-runtime-start! runtime 'buffer-list.close-item
+                                        (application-command-context application))
+                (host-state-run! state)
+                (interaction-service-submit! interaction 'discard)
                 (host-state-run! state)
                 (unless (and (not (buffer-service-ref
                                     (host-state-buffers state) file-id #f))
@@ -994,6 +1018,20 @@
                           (interaction-session-request
                             (interaction-service-current interaction)))
                         'query-replace-decision)
+                   (= (length
+                        (interaction-request-actions
+                          (interaction-session-request
+                            (interaction-service-current interaction))))
+                      4)
+                   (string-contains?
+                     (interaction-request-display-prompt
+                       (interaction-session-request
+                         (interaction-service-current interaction)))
+                     "[y] Replace")
+                   (not
+                     (interaction-request-default-action
+                       (interaction-session-request
+                         (interaction-service-current interaction))))
                    (let ([range (selection-primary-range
                                   (view-state-selection (view-state view)))])
                      (and (= (selection-range-from range) 0)
@@ -1039,7 +1077,7 @@
                      (and (= (selection-range-from range) 2)
                           (= (selection-range-to range) 5))))
         (error 'fundamental-editing-tests "query replace did not advance after replace"))
-      (interaction-service-submit! interaction "n")
+      (interaction-service-submit! interaction 'skip)
       (host-state-run! state)
       (unless (and (string=? (buffer-string buffer) "1 one one")
                    (interaction-service-current interaction)
@@ -1048,7 +1086,7 @@
                      (and (= (selection-range-from range) 6)
                           (= (selection-range-to range) 9))))
         (error 'fundamental-editing-tests "query replace did not advance after skip"))
-      (interaction-service-submit! interaction "!")
+      (interaction-service-submit! interaction 'replace-all)
       (host-state-run! state)
       (unless (and (string=? (buffer-string buffer) "1 one 1")
                    (not (interaction-service-current interaction)))
@@ -1775,10 +1813,11 @@
                   (unless (and (eq? (interaction-request-kind request) 'save-decision)
                                (string=? (interaction-request-prompt request)
                                          (string-append "Save changes to " (buffer-name revisited)
-                                                        "? (save/discard/cancel) ")))
+                                                        "?"))
+                               (= (length (interaction-request-actions request)) 3))
                     (error 'fundamental-editing-tests
                            "file.close did not request a modified-file decision")))
-                (interaction-service-submit! interaction "discard")
+                (interaction-service-submit! interaction 'discard)
                 (host-state-run! state)
                 (unless (and (not (buffer-service-ref
                                     (host-state-buffers state) (buffer-id revisited) #f))
@@ -1804,7 +1843,7 @@
                                       (list (string->utf8 " saved")))
               (command-runtime-start-interactive!
                 runtime 'file.close (application-command-context application))
-              (interaction-service-submit! interaction "save")
+              (interaction-service-submit! interaction 'save)
               (host-state-run! state)
               (unless (and (string=? (utf8->string (vfs-read-file second-path)) "second saved")
                            (not (buffer-service-ref
@@ -1824,10 +1863,11 @@
                              (interaction-service-current interaction))])
               (unless (and (eq? (interaction-request-kind request) 'save-decision)
                            (string=? (interaction-request-prompt request)
-                                     "Save 1 modified file buffer? (save/discard/cancel) "))
+                                     "Save 1 modified file buffer?")
+                           (= (length (interaction-request-actions request)) 3))
                 (error 'fundamental-editing-tests
                        "application.quit did not request a modified-file decision")))
-            (interaction-service-submit! interaction "save")
+            (interaction-service-submit! interaction 'save)
             (host-state-run! state)
             (unless (and (not (interaction-service-current interaction))
                          (string=? (utf8->string (vfs-read-file new-path)) "new quit"))
@@ -1925,7 +1965,7 @@
                            (interaction-service-current interaction))
                 (error 'fundamental-editing-tests
                        "queued automatic reload overwrote an intervening edit"))
-              (interaction-service-submit! interaction "r")
+              (interaction-service-submit! interaction 'reload)
               (host-state-run! state)
               (unless (string=? (buffer-string buffer) "race")
                 (error 'fundamental-editing-tests
@@ -1952,14 +1992,14 @@
 
               ;; A decision for external-one must not load external-two.
               (vfs-write-file path (string->utf8 "external-two"))
-              (interaction-service-submit! interaction "r")
+              (interaction-service-submit! interaction 'reload)
               (host-state-run! state)
               (unless (and (string=? (buffer-string buffer) "race local")
                            (file-service-conflict files (buffer-id buffer) #f))
                 (error 'fundamental-editing-tests
                        "stale reload decision crossed the disk-version boundary"))
               (publish-external! files buffer 'replaced)
-              (interaction-service-submit! interaction "r")
+              (interaction-service-submit! interaction 'reload)
               (host-state-run! state)
               (unless (and (string=? (buffer-string buffer) "external-two")
                            (not (history-modified? history (buffer-id buffer)))
@@ -1975,7 +2015,7 @@
                 (application-command-context application) (list (string->utf8 " keep")))
               (vfs-write-file path (string->utf8 "external-ignore"))
               (publish-external! files buffer 'replaced)
-              (interaction-service-submit! interaction "i")
+              (interaction-service-submit! interaction 'ignore)
               (host-state-run! state)
               (unless (and (string=? (buffer-string buffer) "external-two keep")
                            (eq? (file-conflict-status
@@ -1986,7 +2026,7 @@
 
               (vfs-write-file path (string->utf8 "external-overwrite"))
               (publish-external! files buffer 'replaced)
-              (interaction-service-submit! interaction "o")
+              (interaction-service-submit! interaction 'overwrite)
               (host-state-run! state)
               (unless (and (string=? (utf8->string (vfs-read-file path))
                                      "external-two keep")
@@ -2003,7 +2043,7 @@
                 (application-command-context application) (list (string->utf8 " save-as")))
               (vfs-write-file path (string->utf8 "external-save-as"))
               (publish-external! files buffer 'replaced)
-              (interaction-service-submit! interaction "s")
+              (interaction-service-submit! interaction 'save-as)
               (host-state-run! state)
               (unless (eq? (interaction-request-kind
                              (interaction-session-request
@@ -2020,7 +2060,7 @@
                 (error 'fundamental-editing-tests
                        "conflict save-as did not confirm an existing destination"))
               (vfs-write-file saved-as (string->utf8 "destination-new"))
-              (interaction-service-submit! interaction "yes")
+              (interaction-service-submit! interaction 'overwrite)
               (host-state-run! state)
               (unless (and (string=? (utf8->string (vfs-read-file saved-as))
                                      "destination-new")
@@ -2034,11 +2074,11 @@
                                 'external-file-change))
                 (error 'fundamental-editing-tests
                        "stale save-as confirmation overwrote a newer destination"))
-              (interaction-service-submit! interaction "s")
+              (interaction-service-submit! interaction 'save-as)
               (host-state-run! state)
               (interaction-service-submit! interaction saved-as)
               (host-state-run! state)
-              (interaction-service-submit! interaction "yes")
+              (interaction-service-submit! interaction 'overwrite)
               (host-state-run! state)
               (unless (and (string=? (utf8->string (vfs-read-file path))
                                      "external-save-as")
@@ -2376,10 +2416,11 @@
               (unless (and (eq? (interaction-request-kind request) 'overwrite-decision)
                            (string=? (interaction-request-prompt request)
                                      (string-append "File exists: " path
-                                                    ". Overwrite? (yes/no) ")))
+                                                    ". Overwrite?"))
+                           (= (length (interaction-request-actions request)) 2))
                 (error 'fundamental-editing-tests
                        "file.save-as did not request overwrite confirmation")))
-            (interaction-service-submit! interaction "no")
+            (interaction-service-submit! interaction 'cancel)
             (host-state-run! state)
             (unless (and (string=? (utf8->string (vfs-read-file path)) "original")
                          (not (file-service-resource files (buffer-id buffer) #f)))
@@ -2389,7 +2430,7 @@
               runtime 'file.save-as (application-command-context application))
             (interaction-service-submit! interaction path)
             (host-state-run! state)
-            (interaction-service-submit! interaction "yes")
+            (interaction-service-submit! interaction 'overwrite)
             (host-state-run! state)
             (unless (and (string=? (utf8->string (vfs-read-file path)) "replacement")
                          (let ([resource

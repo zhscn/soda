@@ -247,16 +247,6 @@
         [(eq? pending 'clear) (clear-buffer-now! service buffer-id)]
         [else #f])))
 
-  (define (recovery-decision value)
-    (let ([text (if (string? value) value
-                    (if (symbol? value) (symbol->string value) ""))])
-      (cond [(or (string-ci=? text "r") (string-ci=? text "recover")) 'recover]
-            [(or (string-ci=? text "d") (string-ci=? text "discard")) 'discard]
-            [(or (string-ci=? text "l") (string-ci=? text "later")) 'later]
-            [else
-             (assertion-violation 'recovery.restore
-                                  "expected recover, discard, or later" value)])))
-
   (define (make-recovery-target-reader service)
     (make-interactive-reader
       'recovery-artifact
@@ -313,18 +303,19 @@
             (assertion-violation 'recovery.restore
                                  "invalid recovery artifact" artifact))
           (make-interactive-suspend
-            (make-interaction-request
+            (make-choice-interaction-request
               'recovery-decision
               (string-append
                 "Recover unsaved contents for "
                 (resource-locator (recovery-artifact-resource artifact))
-                "? (recover/discard/later) ")
-              #f #f 'free
-              (lambda (value ignored)
-                (guard (condition [else #f]) (recovery-decision value) #t))
-              (list #\r #\d #\l))
+                "?")
+              (list
+                (make-choice-action 'recover "Recover" (list #\r) 'normal #f)
+                (make-choice-action
+                  'discard "Discard snapshot" (list #\d) 'destructive #f)
+                (make-choice-action 'later "Later" (list #\l) 'cancel #t)))
             (lambda (value)
-              (make-interactive-ready (list (recovery-decision value)))))))))
+              (make-interactive-ready (list value))))))))
 
   (define (remove-pending-artifact! service artifact delete?)
     (recovery-service-pending-artifacts-set!

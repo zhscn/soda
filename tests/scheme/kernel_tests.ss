@@ -2830,7 +2830,7 @@
                          (interaction-service-current interactions)))
                      'recovery-decision)
           (error 'kernel-tests "recovery command did not request a decision"))
-        (interaction-service-submit! interactions "recover")
+        (interaction-service-submit! interactions 'recover)
         (host-state-run! next-state)
         (let* ([active
                 (surface-active-context surface (host-state-views next-state))]
@@ -2855,7 +2855,7 @@
                      'recovery-decision)
           (error 'kernel-tests
                  "explicit recovery of the remaining artifact did not ask"))
-        (interaction-service-submit! interactions "discard")
+        (interaction-service-submit! interactions 'discard)
         (host-state-run! next-state)
         (unless (null? (vfs-list-directory directory))
           (error 'kernel-tests "recovery discard retained the remaining artifact"))

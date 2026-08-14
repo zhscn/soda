@@ -106,7 +106,7 @@
                  (make-interactive-suspend
                    (make-overwrite-request path)
                    (lambda (value)
-                     (make-interactive-ready (list (overwrite-decision value)))))))]
+                     (make-interactive-ready (list value))))))]
           [else
            (assertion-violation 'file.write
                                 "overwrite decision requires zero or one file name"
@@ -135,24 +135,13 @@
       (make-command-definition
         name procedure owner documentation 'file (make-interactive-plan readers))))
 
-  (define (close-decision value)
-    (cond
-      [(and (string? value) (string-ci=? value "save")) 'save]
-      [(and (string? value) (string-ci=? value "discard")) 'discard]
-      [(and (string? value) (string-ci=? value "cancel")) 'cancel]
-      [else
-       (assertion-violation 'file.close
-                            "expected save, discard, or cancel"
-                            value)]))
-
   (define (make-decision-request prompt)
-    (make-interaction-request
-      'save-decision prompt #f #f 'free
-      (lambda (value ignored)
-        (and (string? value)
-             (or (string-ci=? value "save")
-                 (string-ci=? value "discard")
-                 (string-ci=? value "cancel"))))))
+    (make-choice-interaction-request
+      'save-decision prompt
+      (list
+        (make-choice-action 'save "Save" (list #\s) 'normal #f)
+        (make-choice-action 'discard "Discard" (list #\d) 'destructive #f)
+        (make-choice-action 'cancel "Cancel" (list #\c) 'cancel #t))))
 
   ;; The reader evaluates dirty state at command invocation time.  The
   ;; minibuffer is therefore a normal interaction overlay; it does not hold a
@@ -190,9 +179,9 @@
               (make-interactive-suspend
                 (make-decision-request
                   (string-append "Save changes to " (buffer-name buffer)
-                                 "? (save/discard/cancel) "))
+                                 "?"))
                 (lambda (value)
-                  (make-interactive-ready (list (close-decision value)))))
+                  (make-interactive-ready (list value))))
               (make-interactive-ready (list 'discard)))))))
 
   (define (close-buffer! service target-id)

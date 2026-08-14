@@ -23,6 +23,18 @@
           interaction-request-selection-policy
           interaction-request-validator
           interaction-request-keymap
+          interaction-request-actions
+          interaction-request-display-prompt
+          make-choice-action
+          choice-action?
+          choice-action-id
+          choice-action-label
+          choice-action-keys
+          choice-action-role
+          choice-action-default?
+          make-choice-interaction-request
+          interaction-request-action-for-key
+          interaction-request-default-action
           make-interaction-string-reader)
   (import (rnrs)
           (soda host command)
@@ -129,9 +141,9 @@
         (notify! service 'opened session)
         session)))
 
-  ;; Requests are immutable UI contracts.  A completion source is intentionally
-  ;; opaque: the interaction frontend, not CommandRuntime, owns candidate
-  ;; evaluation and presentation.
+  ;; Requests are immutable UI contracts. Completion sources remain opaque,
+  ;; while discrete actions expose stable identity and safety semantics to
+  ;; every frontend.
   (define-record-type
     (interaction-request %make-interaction-request interaction-request?)
     (fields
@@ -141,46 +153,118 @@
       (immutable completion-source interaction-request-completion-source)
       (immutable selection-policy interaction-request-selection-policy)
       (immutable validator interaction-request-validator)
-      ;; A request-specific keymap adds discrete answers without giving the
-      ;; interaction service any knowledge of a particular command.  The
-      ;; minibuffer places it above its ordinary editing keymap.
-      (immutable keymap interaction-request-keymap)))
+      ;; A request-specific keymap routes declared action keys without giving
+      ;; the input layer knowledge of a particular command.
+      (immutable keymap interaction-request-keymap)
+      (immutable actions interaction-request-actions)))
+
+  (define-record-type
+    (choice-action %make-choice-action choice-action?)
+    (fields
+      (immutable id choice-action-id)
+      (immutable label choice-action-label)
+      (immutable keys choice-action-keys)
+      (immutable role choice-action-role)
+      (immutable default? choice-action-default?)))
+
+  (define (make-choice-action id label keys role default?)
+    (unless (and (symbol? id) (string? label) (positive? (string-length label))
+                 (list? keys) (pair? keys) (for-all char? keys)
+                 (memq role '(normal destructive cancel))
+                 (boolean? default?))
+      (assertion-violation 'make-choice-action "invalid choice action"
+                           id label keys role default?))
+    (%make-choice-action id (string-copy label) (list-copy keys) role default?))
+
+  (define (choice-actions-valid? actions)
+    (and (list? actions) (pair? actions) (for-all choice-action? actions)
+         (= (length actions)
+            (length (delete-duplicates (map choice-action-id actions))))
+         (<= (length (filter choice-action-default? actions)) 1)
+         (for-all
+           (lambda (action)
+             (or (not (choice-action-default? action))
+                 (not (eq? (choice-action-role action) 'destructive))))
+           actions)
+         (let ([keys (fold-left append '() (map choice-action-keys actions))])
+           (= (length keys) (length (delete-duplicates keys))))))
+
+  (define (delete-duplicates values)
+    (fold-left
+      (lambda (result value)
+        (if (member value result) result (append result (list value))))
+      '() values))
+
+  (define (make-answer-keymap characters)
+    (let ([result (make-keymap 'interaction-answers)])
+      (for-each
+        (lambda (character)
+          (keymap-bind!
+            result
+            (list (make-key-stroke 'character (char->integer character) 0))
+            'interaction.submit-key)
+          (keymap-bind!
+            result
+            (list (make-key-stroke 'character (char->integer character) 1))
+            'interaction.submit-key))
+        characters)
+      result))
 
   (define make-interaction-request
     (case-lambda
       [(kind prompt)
-       (make-interaction-request kind prompt #f #f 'free #f #f)]
+       (make-interaction-request kind prompt #f #f 'free #f)]
       [(kind prompt initial-value completion-source selection-policy)
-       (make-interaction-request kind prompt initial-value completion-source selection-policy #f #f)]
+       (make-interaction-request kind prompt initial-value completion-source selection-policy #f)]
       [(kind prompt initial-value completion-source selection-policy validator)
-       (make-interaction-request kind prompt initial-value completion-source selection-policy validator #f)]
-      [(kind prompt initial-value completion-source selection-policy validator answers)
        (unless (and (symbol? kind) (string? prompt)
                     (memq selection-policy '(free must-match))
-                    (or (not validator) (procedure? validator))
-                    (or (not answers)
-                        (and (list? answers) (for-all char? answers))))
+                    (or (not validator) (procedure? validator)))
          (assertion-violation 'make-interaction-request "invalid interaction request"
                               kind prompt selection-policy))
-       (let ([keymap
-              (and answers
-                   (let ([result (make-keymap 'interaction-answers)])
-                     (for-each
-                       (lambda (character)
-                         (keymap-bind!
-                           result
-                           (list (make-key-stroke
-                                   'character (char->integer character) 0))
-                           'interaction.submit-key)
-                         (keymap-bind!
-                           result
-                           (list (make-key-stroke
-                                   'character (char->integer character) 1))
-                           'interaction.submit-key))
-                       answers)
-                     result))])
-         (%make-interaction-request kind prompt initial-value completion-source selection-policy
-                                    validator keymap))]))
+       (%make-interaction-request kind prompt initial-value completion-source selection-policy
+                                  validator #f '())]))
+
+  (define (make-choice-interaction-request kind prompt actions)
+    (unless (and (symbol? kind) (string? prompt) (choice-actions-valid? actions))
+      (assertion-violation 'make-choice-interaction-request
+                           "invalid structured choice request" kind prompt actions))
+    (%make-interaction-request
+      kind prompt #f #f 'choice #f
+      (make-answer-keymap
+        (fold-left append '() (map choice-action-keys actions)))
+      (list-copy actions)))
+
+  (define (interaction-request-action-for-key request character)
+    (unless (and (interaction-request? request) (char? character))
+      (assertion-violation 'interaction-request-action-for-key
+                           "expected an InteractionRequest and character"))
+    (find (lambda (action) (memv character (choice-action-keys action)))
+          (interaction-request-actions request)))
+
+  (define (interaction-request-default-action request)
+    (unless (interaction-request? request)
+      (assertion-violation 'interaction-request-default-action
+                           "expected an InteractionRequest" request))
+    (find choice-action-default? (interaction-request-actions request)))
+
+  (define (interaction-request-display-prompt request)
+    (unless (interaction-request? request)
+      (assertion-violation 'interaction-request-display-prompt
+                           "expected an InteractionRequest" request))
+    (if (null? (interaction-request-actions request))
+        (interaction-request-prompt request)
+        (string-append
+          (interaction-request-prompt request)
+          (apply string-append
+            (map
+              (lambda (action)
+                (string-append
+                  "  [" (string (car (choice-action-keys action))) "] "
+                  (choice-action-label action)
+                  (if (choice-action-default? action) " (default)" "")))
+              (interaction-request-actions request)))
+          ": ")))
 
   ;; The basic string reader provides the common bridge from an ordinary
   ;; command parameter to a frontend request.  Typed readers can use the same
@@ -211,13 +295,23 @@
       (assertion-violation 'interaction-service-submit! "expected an interaction service" service))
     (let ([session (interaction-service-current service)])
       (and session (eq? (interaction-session-status session) 'open)
-           (begin
-             (command-runtime-enqueue!
-               (interaction-service-runtime service)
-               (make-command-resume-message
-                 (interaction-session-invocation-id session) value))
-             (interaction-session-status-set! session 'submitting)
-             session))))
+           (let* ([request (interaction-session-request session)]
+                  [actions (interaction-request-actions request)])
+             (unless (or (null? actions)
+                         (and (symbol? value)
+                              (exists (lambda (action)
+                                        (eq? value (choice-action-id action)))
+                                      actions)))
+               (assertion-violation
+                 'interaction-service-submit!
+                 "choice submission must be an action identifier" value))
+             (begin
+               (command-runtime-enqueue!
+                 (interaction-service-runtime service)
+                 (make-command-resume-message
+                   (interaction-session-invocation-id session) value))
+               (interaction-session-status-set! session 'submitting)
+               session)))))
 
   (define (interaction-service-cancel! service)
     (unless (interaction-service? service)
@@ -263,8 +357,13 @@
         (undo 'ignore)
         (let ([session (interaction-service-current service)])
           (when session
-            (interaction-service-submit! service
-                                         (string (integer->char codepoint))))
+            (let* ([request (interaction-session-request session)]
+                   [action
+                    (interaction-request-action-for-key
+                      request (integer->char codepoint))])
+              (when action
+                (interaction-service-submit!
+                  service (choice-action-id action)))))
           (command-handled)))
       (interaction-service-registration-set!
         service

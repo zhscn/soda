@@ -1,6 +1,5 @@
 (library (soda packages file-conflict-workflow)
-  (export overwrite-decision
-          make-overwrite-request
+  (export make-overwrite-request
           make-external-change-reader
           make-conflict-target-reader
           make-conflict-save-as-reader
@@ -38,36 +37,13 @@
           (soda packages recovery)
           (soda support vfs))
 
-  (define (overwrite-decision value)
-    (cond
-      [(and (string? value) (string-ci=? value "yes")) 'overwrite]
-      [(and (string? value) (string-ci=? value "no")) 'cancel]
-      [else
-       (assertion-violation 'file.write "expected yes or no" value)]))
-
   (define (make-overwrite-request path)
-    (make-interaction-request
+    (make-choice-interaction-request
       'overwrite-decision
-      (string-append "File exists: " path ". Overwrite? (yes/no) ")
-      #f #f 'free
-      (lambda (value ignored)
-        (and (string? value)
-             (or (string-ci=? value "yes") (string-ci=? value "no"))))))
-
-  (define (external-change-decision value)
-    (let ([text
-           (cond [(symbol? value) (symbol->string value)]
-                 [(string? value) value]
-                 [else ""])])
-      (cond
-        [(or (string-ci=? text "r") (string-ci=? text "reload")) 'reload]
-        [(or (string-ci=? text "o") (string-ci=? text "overwrite")) 'overwrite]
-        [(or (string-ci=? text "s") (string-ci=? text "save-as")) 'save-as]
-        [(or (string-ci=? text "i") (string-ci=? text "ignore")) 'ignore]
-        [else
-         (assertion-violation
-           'file.resolve-external-change
-           "expected reload, overwrite, save-as, or ignore" value)])))
+      (string-append "File exists: " path ". Overwrite?")
+      (list
+        (make-choice-action 'overwrite "Overwrite" (list #\o) 'destructive #f)
+        (make-choice-action 'cancel "Cancel" (list #\c) 'cancel #t))))
 
   (define (make-external-change-reader service)
     (make-interactive-reader
@@ -83,20 +59,18 @@
                     (resource-locator (file-binding-resource binding))
                     "file")])
           (make-interactive-suspend
-            (make-interaction-request
+            (make-choice-interaction-request
               'external-file-change
               (string-append
-                "File changed on disk: " path
-                ". Reload, overwrite, save-as, or ignore? (r/o/s/i) ")
-              #f #f 'free
-              (lambda (value ignored)
-                (guard (condition [else #f])
-                  (external-change-decision value)
-                  #t))
-              (list #\r #\o #\s #\i))
+                "File changed on disk: " path ".")
+              (list
+                (make-choice-action 'reload "Reload" (list #\r) 'destructive #f)
+                (make-choice-action
+                  'overwrite "Overwrite" (list #\o) 'destructive #f)
+                (make-choice-action 'save-as "Save as" (list #\s) 'normal #f)
+                (make-choice-action 'ignore "Ignore" (list #\i) 'cancel #t)))
             (lambda (value)
-              (make-interactive-ready
-                (list (external-change-decision value)))))))))
+              (make-interactive-ready (list value))))))))
 
   (define (make-conflict-target-reader service)
     (make-interactive-reader
@@ -148,7 +122,7 @@
                 (make-overwrite-request path)
                 (lambda (value)
                   (make-interactive-ready
-                    (list (overwrite-decision value) version)))))
+                    (list value version)))))
             (make-interactive-ready (list 'overwrite #f))))))
 
   (define (file-service-conflict service buffer-id . default)
