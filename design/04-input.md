@@ -66,6 +66,8 @@ Soda TUI 不实现平台 IME。终端已经提交的 text 进入 `TextInput`；k
 
 keymap 本身不执行 procedure。解析结果是 `InputDisposition`：command、text、consume、pass 或
 pending prefix。command symbol 由 runtime registry 解析，因此 keymap 不持有可失效 closure。
+`where-is` 使用与 dispatch 相同的逐前缀 layer 优先级和 remap 语义；被高优先级 command 截断的
+较低层多键 sequence 不进入用户可达性投影。
 
 ## InputContext 与 layer
 
