@@ -263,6 +263,12 @@
   ;; Resolve a semantic scroll request against the immutable layout last
   ;; presented for its exact Surface/Window/View occurrence.  Host owns the
   ;; resulting View publication; text-layout owns the pure coordinate policy.
+  (define (visible-reveal? layout request selection)
+    (and (eq? (scroll-request-kind request) 'reveal-point)
+         (text-layout-document->point
+           layout
+           (selection-range-head (selection-primary-range selection)))))
+
   (define (resolve-scroll-request! state active layout request cache)
     (unless (and (host-state? state) (active-context? active)
                  (text-layout? layout) (scroll-request? request)
@@ -288,7 +294,10 @@
                [width (frame-width frame)]
                [height (frame-height frame)])
           (and view-state (> width 0) (> height 0)
-               (let* ([options
+               (if (visible-reveal? layout request
+                                    (view-state-selection view-state))
+                   #t
+                   (let* ([options
                        (configuration-facet
                          (view-state-configuration view-state)
                          text-layout-options-facet 'view)]
@@ -405,7 +414,7 @@
                             next-selection)
                        (and (not (viewport=? target current)) target)
                        #f '() '() #f)))
-                 #t)))))
+                 #t))))))
 
   (define host-frontend-resolve-scroll-request!
     (case-lambda
