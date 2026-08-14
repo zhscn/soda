@@ -522,6 +522,13 @@
                           (decoder-pending-set!
                             decoder (bytevector-slice bytes index size))
                           (reverse events)]
+                         ;; Legacy terminals encode Meta as an ESC prefix, but
+                         ;; a following ESC is itself a complete prefix key.
+                         ;; Commit the first one and let the next byte start a
+                         ;; new unit so ESC ESC ESC survives chunk coalescing.
+                         [(= (bytevector-u8-ref bytes (+ index 1)) escape-byte)
+                          (parse-normal
+                            bytes (+ index 1) (cons (escape-event) events))]
                          [(= (bytevector-u8-ref bytes (+ index 1)) #x5b)
                           (let ([end (find-csi-end bytes (+ index 2))])
                             (if (not end)

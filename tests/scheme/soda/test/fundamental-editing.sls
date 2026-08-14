@@ -4275,6 +4275,46 @@
                  "application override layer intercepted committed text")))
       (soda-application-close! application))
 
+    ;; A legacy terminal may deliver repeated Escape bytes in one read or
+    ;; split them across reads.  In both cases the decoder preserves the
+    ;; application-level ESC ESC ESC sequence instead of inventing Alt+ESC.
+    (let ([coalesced (make-terminal-input-decoder)]
+          [chunked (make-terminal-input-decoder)]
+          [escape-bytes (string->utf8 "\x1b;\x1b;\x1b;")])
+      (define (escape-event? event)
+        (and (key-event? event)
+             (eq? (key-event-key event) 'escape)
+             (zero? (key-event-modifiers event))))
+      (let* ([immediate
+              (terminal-input-decoder-feed! coalesced escape-bytes)]
+             [flushed (terminal-input-decoder-flush! coalesced)]
+             [events (append immediate flushed)])
+        (unless (and (= (length immediate) 2)
+                     (= (length flushed) 1)
+                     (for-all escape-event? events)
+                     (not (terminal-input-decoder-pending? coalesced)))
+          (error 'fundamental-editing-tests
+                 "coalesced legacy ESC sequence was not preserved")))
+      (let* ([first
+              (terminal-input-decoder-feed!
+                chunked (string->utf8 "\x1b;"))]
+             [second
+              (terminal-input-decoder-feed!
+                chunked (string->utf8 "\x1b;"))]
+             [third
+              (terminal-input-decoder-feed!
+                chunked (string->utf8 "\x1b;"))]
+             [last (terminal-input-decoder-flush! chunked)]
+             [events (append first second third last)])
+        (unless (and (null? first)
+                     (= (length second) 1)
+                     (= (length third) 1)
+                     (= (length last) 1)
+                     (for-all escape-event? events)
+                     (not (terminal-input-decoder-pending? chunked)))
+          (error 'fundamental-editing-tests
+                 "chunked legacy ESC sequence was not preserved"))))
+
     ;; Terminal protocol reports, scheduling, command execution, and Frame
     ;; presentation form one input contract.  A Kitty Down press followed by
     ;; release produces one motion and exposes no intermediate chrome frame.

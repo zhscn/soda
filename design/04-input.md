@@ -46,6 +46,10 @@ Kitty protocol 保留物理 key、shifted key、modifier 和 press/repeat/releas
 解码明确支持的序列，不恢复 `C-h = Backspace` 等历史兼容。未知或不完整序列由增量 decoder
 保留到后续 bytes；非法序列产生受控 condition，不把半个事件交给 keymap。
 
+legacy `ESC + printable/control` 表示 Meta 修饰键；连续 `ESC` 分别产生 Escape KeyEvent，使
+application-level `ESC ESC ESC` 不受 stdin 分块方式影响。末尾单个 `ESC` 在 escape timer 到期后
+提交。Kitty report 直接携带 modifier，不经过该歧义规则。
+
 Soda TUI 不实现平台 IME。终端已经提交的 text 进入 `TextInput`；key event 与 committed text
 保持不同通道，避免把键帽字符误当作文本提交。
 
