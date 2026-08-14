@@ -1153,6 +1153,7 @@
                (command-context-buffer-id (application-command-context application)))])
         (unless (and (string=? (buffer-name help-buffer) "*help*")
                      (string-contains? (buffer-string help-buffer) "C-x C-f")
+                     (string-contains? (buffer-string help-buffer) "M-x buffer.bury")
                      (not (string-contains?
                             (buffer-string help-buffer) "buffer.quit")))
           (error 'fundamental-editing-tests "help.show did not display contextual command help"))
@@ -2255,6 +2256,11 @@
                          (string=? (completion-candidate-insert-text candidate)
                                    "fundamental.newline"))
                        (completion-controller-candidates controller))
+                     (exists
+                       (lambda (candidate)
+                         (string=? (completion-candidate-insert-text candidate)
+                                  "buffer.bury"))
+                       (completion-controller-candidates controller))
                      (not
                        (exists
                          (lambda (candidate)
@@ -2383,6 +2389,15 @@
       (unless (string-contains?
                 (surface-feedback-text (soda-application-surface application)) "C-c")
         (error 'fundamental-editing-tests "where-is did not reverse-query active keymaps"))
+      (command-runtime-start-interactive!
+        runtime 'command.where-is (application-command-context application))
+      (interaction-service-submit! interaction "buffer.bury")
+      (host-state-run! state)
+      (unless (string-contains?
+                (surface-feedback-text (soda-application-surface application))
+                "available through M-x")
+        (error 'fundamental-editing-tests
+               "where-is did not explain M-x-only command access"))
       (owner-close! owner)
       (soda-application-close! application))
 

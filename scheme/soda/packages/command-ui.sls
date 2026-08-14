@@ -110,7 +110,9 @@
             (make-message-request
               context
               (if (null? sequences)
-                  (string-append (symbol->string name) " is not bound")
+                  (string-append
+                    (symbol->string name)
+                    " is available through M-x; it has no direct key binding")
                   (string-append
                     (symbol->string name) " is on "
                     (join-strings (map key-sequence-name sequences) ", ")))))))

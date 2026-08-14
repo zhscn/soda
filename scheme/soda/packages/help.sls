@@ -32,11 +32,7 @@
            [definitions
             (list-sort
               definition<?
-              (filter
-                (lambda (definition)
-                  (pair? (keymap-where-is
-                           keymaps (command-definition-name definition))))
-                (command-runtime-available-user-command-definitions runtime context)))])
+              (command-runtime-available-user-command-definitions runtime context))])
       (string-append
         "Soda Help\n\n"
         "Commands available in the current context:\n\n"
@@ -44,9 +40,13 @@
           (map
             (lambda (definition)
               (let* ([name (command-definition-name definition)]
-                     [keys (map key-sequence-name (keymap-where-is keymaps name))])
+                     [keys (map key-sequence-name (keymap-where-is keymaps name))]
+                     [access
+                      (if (null? keys)
+                          (string-append "M-x " (symbol->string name))
+                          (join-strings keys ", "))])
                 (string-append
-                  (join-strings keys ", ") "\n  "
+                  access "\n  "
                   (or (command-definition-documentation definition)
                       (symbol->string name))
                   "  [" (symbol->string name) "]\n\n")))
