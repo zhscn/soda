@@ -21,6 +21,7 @@
           package-host-materialize-key-bindings
           package-host-register-location-provider!
           package-host-resolve-location
+          package-host-follow-location!
           package-host-begin-navigation!
           package-host-navigation-back!
           package-host-navigation-forward!
@@ -59,8 +60,12 @@
           package-host-refresh-command-context)
   (import (rnrs)
           (soda kernel document)
+          (soda kernel location)
           (soda kernel mode)
+          (soda kernel resource)
+          (soda kernel selection)
           (soda kernel state)
+          (soda kernel viewport)
           (soda kernel view-state)
           (soda host command)
           (soda host command-runtime)
@@ -72,6 +77,7 @@
           (soda host internal buffer)
           (soda host internal analysis)
           (soda host internal location)
+          (soda host location)
           (soda host internal navigation)
           (soda host internal mode)
           (soda host internal presentation)
@@ -556,6 +562,86 @@
            (command-context-surface-id context)
            (command-context-window-id context)
            configuration)))
+
+  ;; Navigation history records concrete editor state, rather than a command's
+  ;; transient input context.  The current primary point is therefore
+  ;; captured as a revisioned Location immediately before following a target.
+  (define (command-context-location context)
+    (let* ([buffer-state (command-context-buffer-state context)]
+           [view-state (command-context-view-state context)]
+           [selection (and view-state (view-state-selection view-state))]
+           [primary (and selection (selection-primary-range selection))]
+           [document (and buffer-state (buffer-state-document buffer-state))])
+      (and primary document
+           (make-location
+             (make-resource
+               'buffer (number->string (command-context-buffer-id context)))
+             (make-byte-position (selection-range-head primary))
+             (make-byte-position (selection-range-head primary))
+             (snapshot-revision document) 'after '()))))
+
+  ;; Follow an already-resolved Location through the host-owned presentation
+  ;; path.  Providers retain responsibility for a `needs-open` continuation;
+  ;; callers resume this operation with the original Location after opening.
+  ;; A failed resolution or placement leaves the navigation history unchanged.
+  (define (package-host-follow-location! host owner context target)
+    (unless (and (package-host? host) (owner? owner)
+                 (command-context? context) (location? target))
+      (assertion-violation 'package-host-follow-location!
+                           "expected a PackageHost, Owner, CommandContext, and Location"
+                           host owner context target))
+    (and (package-host-command-context-current? host context)
+         (let* ([resolution (package-host-resolve-location host target)]
+                [buffer
+                 (and (eq? (location-resolution-status resolution) 'resolved)
+                      (package-host-buffer-ref
+                        host (location-resolution-buffer-id resolution) #f))]
+                [from (command-context-location context)])
+           (and buffer from
+                (let ([jump (package-host-begin-navigation! host from target)]
+                      [committed? #f])
+                  (dynamic-wind
+                    (lambda () #f)
+                    (lambda ()
+                      (let ([view
+                             (package-host-present-buffer!
+                               host owner buffer
+                               (command-context-surface-id context)
+                               (command-context-window-id context)
+                               (buffer-state-configuration (buffer-state buffer)))])
+                        (and view
+                             (package-host-dispatch-view!
+                               host
+                               (make-view-transaction-spec
+                                 (view-id view)
+                                 (view-state-generation (view-state view))
+                                 (make-selection
+                                   (list
+                                     (make-selection-range
+                                       (location-resolution-from resolution)
+                                       (location-resolution-from resolution))))
+                                 (view-state-viewport (view-state view))
+                                 #f '() '()
+                                 (make-scroll-request
+                                   'reveal-point
+                                   (command-context-surface-id context)
+                                   (command-context-window-id context)
+                                   (view-id view))))
+                             (package-host-commit-navigation! host jump target)
+                             (begin
+                               (set! committed? #t)
+                               (make-command-context
+                                 #f
+                                 (command-context-surface-id context)
+                                 (command-context-window-id context)
+                                 (view-id view)
+                                 (buffer-id buffer)
+                                 (buffer-state buffer)
+                                 (view-state view)
+                                 #f '() #f #f 'location-follow #f)))))
+                    (lambda ()
+                      (unless committed?
+                        (package-host-cancel-navigation! host jump)))))))))
 
   ;; User Window commands operate on the selected editor Window identified by
   ;; their CommandContext.  This rejects interaction overlays and stale

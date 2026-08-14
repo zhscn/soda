@@ -462,9 +462,10 @@ semantic id、location、action 和 face 保存到 package-owned StateField/Rang
 
 跨 Buffer 的目标使用不可变 `Location`：它携带 Resource、显式坐标系、可选 Document
 revision 与 range affinity。Host 解析 `buffer:<id>` 的当前 Buffer identity，并由 Resource
-provider 解析可打开的外部资源。result package 将 Location 放入 item payload；激活、预览和
-编辑前先解析它，再决定 reveal、打开或报告 stale/unavailable，不能保留并直接使用私有
-`(buffer-id, offset)` 对。
+provider 解析可打开的外部资源。result package 将 Location 放入 item payload，激活时调用
+Host 的 follow 操作；Host 解析目标、呈现目标 Buffer、设置 point 并请求 reveal，成功后才提交
+navigation history。stale、unavailable 与 needs-open 结果不会改变当前 View 或 history。包不能
+保留并直接使用私有 `(buffer-id, offset)` 对。
 
 Buffer identity、局部 mode、attachment、semantic item、refresh 和 editable projection 的
 完整合同见 [03-buffer-ui.md](03-buffer-ui.md)。

@@ -30,6 +30,7 @@
         (soda host feedback)
         (soda host location)
         (soda host navigation)
+        (soda host internal navigation)
         (soda host package)
         (soda host internal buffer)
         (soda host input)
@@ -1618,6 +1619,29 @@
                (display-request? request)
                (eq? (display-request-focus-policy request) 'focus))
     (error 'kernel-tests "active context or DisplayRequest differs")))
+
+;; Host-owned Location following must reject stale targets before either View
+;; placement or history changes.  Result packages only observe the #f outcome.
+(let* ([package-host (make-package-host host)]
+       [context
+        (make-command-context
+          #f (surface-id surface) (window-id leaf) (view-id view) (buffer-id buffer)
+          (buffer-state buffer) (view-state view) #f '() #f #f 'test #f)]
+       [document (buffer-state-document (buffer-state buffer))]
+       [stale-target
+        (make-location
+          (make-resource 'buffer (number->string (buffer-id buffer)))
+          (make-byte-position 0) (make-byte-position 0)
+          (+ 1 (snapshot-revision document)) 'after '())]
+       [history (host-state-navigation host)]
+       [entries-before (length (navigation-history-entries history))]
+       [cursor-before (navigation-history-cursor history)])
+  (unless (and (not (package-host-follow-location! package-host owner context stale-target))
+               (= (view-id view) (window-view-id leaf))
+               (= entries-before (length (navigation-history-entries history)))
+               (= cursor-before (navigation-history-cursor history)))
+    (error 'kernel-tests
+           "stale Location follow changed the active View or navigation history")))
 
 (let* ([other-document (make-document "other")]
        [other-buffer
@@ -5441,7 +5465,11 @@
                                 (eq? (scroll-request-kind navigation-scroll)
                                      'reveal-point)
                                 (= (scroll-request-view-id navigation-scroll)
-                                   source-view-id))
+                                   source-view-id)
+                                (= (navigation-history-cursor
+                                    (host-state-navigation state)) 1)
+                                (= (length (navigation-history-entries
+                                             (host-state-navigation state))) 1))
                      (error 'kernel-tests
                             "spell finding activation did not restore the source View and location")))))]
             [(zero? remaining)

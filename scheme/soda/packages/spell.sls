@@ -293,36 +293,14 @@
         "Spelling result is stale; run spell check again." 'warning)))
 
   (define (open-finding! service finding context)
-    (let* ([host (spell-service-host service)]
-           [resolution
-            (and (spell-finding? finding)
-                 (package-host-resolve-location host
-                                                (spell-finding-location finding)))]
-           [source
-            (and resolution
-                 (eq? (location-resolution-status resolution) 'resolved)
-                 (package-host-buffer-ref
-                   host (location-resolution-buffer-id resolution) #f))])
-      (if (not source)
-          (begin (show-stale-source-message! service context) #f)
-          (let ([view
-                 (package-host-present-buffer!
-                   host (spell-service-owner service) source
-                   (command-context-surface-id context)
-                   (command-context-window-id context)
-                   (buffer-state-configuration (buffer-state source)))])
-            (if (not view)
-                #f
-                (begin
-                  (package-host-dispatch-view! host
-                    (make-view-transaction-spec
-                      (view-id view) (view-state-generation (view-state view))
-                      (source-selection (location-resolution-from resolution))
-                      #f #f '() '() #f))
-                  (make-command-context
-                    #f (command-context-surface-id context) (command-context-window-id context)
-                    (view-id view) (buffer-id source) (buffer-state source) (view-state view)
-                    #f '() #f #f 'spell)))))))
+    (let ([target
+           (and (spell-finding? finding)
+                (package-host-follow-location!
+                  (spell-service-host service) (spell-service-owner service)
+                  context (spell-finding-location finding)))])
+      (if target
+          target
+          (begin (show-stale-source-message! service context) #f))))
 
   (define (visit-finding! service item context ignored)
     (let ([finding (buffer-item-payload item)])
