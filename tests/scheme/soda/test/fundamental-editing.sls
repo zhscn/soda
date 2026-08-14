@@ -896,7 +896,9 @@
                (host-state-buffers state)
                (command-context-buffer-id (application-command-context application)))])
         (unless (and (string=? (buffer-name help-buffer) "*help*")
-                     (string-contains? (buffer-string help-buffer) "C-x C-f"))
+                     (string-contains? (buffer-string help-buffer) "C-x C-f")
+                     (not (string-contains?
+                            (buffer-string help-buffer) "buffer.close")))
           (error 'fundamental-editing-tests "help.show did not display contextual command help"))
         (let ([rejected?
                (guard (condition [else #t])
@@ -908,7 +910,16 @@
           (unless (and rejected?
                        (not (string-contains? (buffer-string help-buffer) "mutate")))
             (error 'fundamental-editing-tests
-                   "help mode exposed an ordinary editing command"))))
+                   "help mode exposed an ordinary editing command")))
+        (command-runtime-start!
+          runtime 'help.show (application-command-context application))
+        (unless (and (= (buffer-id help-buffer)
+                        (command-context-buffer-id
+                          (application-command-context application)))
+                     (string-contains?
+                       (buffer-string help-buffer) "buffer.close"))
+          (error 'fundamental-editing-tests
+                 "reused help Buffer retained stale source-context bindings")))
       (soda-application-close! application))
 
     (let* ([application (make-soda-application)]

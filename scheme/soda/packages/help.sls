@@ -4,6 +4,8 @@
           (soda kernel document)
           (soda kernel extension)
           (soda kernel mode)
+          (soda kernel range-set)
+          (soda kernel state)
           (soda host command)
           (soda host command-runtime)
           (soda host buffer)
@@ -51,10 +53,30 @@
             definitions)))))
 
   (define-record-type help-service
-    (fields host owner keymap mode fallback-keymaps))
+    (fields host owner keymap mode fallback-keymaps authority
+            (mutable generation help-service-generation
+                     help-service-generation-set!)))
 
   (define (help-configuration service)
     (make-configuration (make-buffer-modes-extension (help-service-mode service) '())))
+
+  (define (publish-help! service buffer context)
+    (let* ([generation (+ (help-service-generation service) 1)]
+           [update
+            (make-projection-update
+              generation (help-text service context) (make-range-set '()) '() '())]
+           [published
+            (package-host-dispatch!
+              (help-service-host service)
+              (make-projection-transaction-spec
+                (buffer-id buffer) #f (buffer-state buffer) update
+                (list
+                  (make-edit-authority-annotation
+                    (help-service-authority service)))))])
+      (and published
+           (begin
+             (help-service-generation-set! service generation)
+             published))))
 
   (define (open-help! service context)
     (let* ([host (help-service-host service)]
@@ -64,14 +86,18 @@
               host (help-service-owner service) (make-buffer-key 'help 'commands)
               (lambda ()
                 (package-host-create-buffer! host (help-service-owner service) "*help*"
-                                             (make-document (help-text service context))
+                                             (make-document "")
                                              configuration)))])
+      (unless (publish-help! service buffer context)
+        (assertion-violation 'help.show "help projection was not published" context))
       (unless (= (buffer-id buffer) (command-context-buffer-id context))
-        (let ([view (package-host-create-view! host (help-service-owner service) buffer configuration)])
-          (unless (package-host-replace-window-view!
-                    host (command-context-surface-id context)
-                    (command-context-window-id context) (view-id view))
-            (assertion-violation 'help.show "origin Window is no longer available" context))))))
+        (unless
+          (package-host-present-buffer!
+            host (help-service-owner service) buffer
+            (command-context-surface-id context)
+            (command-context-window-id context) configuration)
+          (assertion-violation
+            'help.show "origin Window is no longer available" context)))))
 
   (define (make-help-service! host owner actions fallback-keymaps)
     (unless (and (package-host? host) (owner? owner)
@@ -79,20 +105,22 @@
       (assertion-violation 'make-help-service!
                            "expected a PackageHost, Owner, and application keymaps"))
     (let* ([keymap (make-keymap 'help)]
-           [service #f])
-      (set! service
-            (make-help-service
-              host owner keymap
-              (make-mode-spec
-                'help-mode 'major "Help" #f
+           [authority (make-edit-authority owner 'help-refresh)]
+           [mode
+            (make-mode-spec
+              'help-mode 'major "Help" #f
+              (append
+                (generated-projection-extension)
                 (list
                   (make-buffer-input-layer-extension
                     (list (make-input-layer 'buffer keymap #f 'ignore)
                           (buffer-item-input-layer actions)))
                   (make-buffer-edit-policy-extension
-                    (make-buffer-edit-policy 'reject)))
-                '(help) "Help")
-              fallback-keymaps))
+                    (make-buffer-edit-policy 'reject #f authority))))
+              '(help) "Help")]
+           [service
+            (make-help-service
+              host owner keymap mode fallback-keymaps authority 0)])
       (define-command
         (package-host-command-runtime host) owner 'help.show (context)
         (documentation "Show commands and active key bindings for the current context.")
