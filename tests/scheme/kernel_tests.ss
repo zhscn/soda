@@ -4771,6 +4771,15 @@
        [runtime (host-state-command-runtime state)]
        [processes (soda-application-processes application)]
        [spelling (soda-application-spelling application)]
+       [source-view-id (view-id (soda-application-view application))]
+       [navigation-scroll #f]
+       [_navigation-listener
+        (host-frontend-add-update-listener!
+          state
+          (lambda (update)
+            (when (editor-update-scroll-request update)
+              (set! navigation-scroll
+                    (editor-update-scroll-request update)))))]
        [native-runtime (native:make-runtime)])
   (dynamic-wind
     (lambda () #f)
@@ -4850,8 +4859,15 @@
                            (view-state-selection (view-state source-view)))])
                    (unless (and (= (buffer-id (view-buffer source-view))
                                    (buffer-id (soda-application-buffer application)))
-                                (= (selection-range-head source-selection) 0))
-                     (error 'kernel-tests "spell finding activation did not visit source location")))))]
+                                (= (view-id source-view) source-view-id)
+                                (= (selection-range-head source-selection) 0)
+                                (scroll-request? navigation-scroll)
+                                (eq? (scroll-request-kind navigation-scroll)
+                                     'reveal-point)
+                                (= (scroll-request-view-id navigation-scroll)
+                                   source-view-id))
+                     (error 'kernel-tests
+                            "spell finding activation did not restore the source View and location")))))]
             [(zero? remaining)
              (error 'kernel-tests "spell check did not display a parsed report" output)]
             [else (poll (- remaining 1))]))))

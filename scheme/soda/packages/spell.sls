@@ -12,6 +12,7 @@
           (soda kernel selection)
           (soda kernel state)
           (soda kernel mode)
+          (soda kernel viewport)
           (soda kernel view-state)
           (soda host command)
           (soda host command-runtime)
@@ -248,19 +249,24 @@
                       (spell-finding-buffer-generation finding))))
           (begin (show-stale-source-message! service context) #f)
           (let ([view
-                 (package-host-create-view!
+                 (package-host-present-buffer!
                    host (spell-service-owner service) source
+                   (command-context-surface-id context)
+                   (command-context-window-id context)
                    (buffer-state-configuration (buffer-state source)))])
-            (if (not (package-host-replace-window-view!
-                       host (command-context-surface-id context)
-                       (command-context-window-id context) (view-id view)))
+            (if (not view)
                 #f
                 (begin
                   (package-host-dispatch-view! host
                     (make-view-transaction-spec
                       (view-id view) (view-state-generation (view-state view))
                       (source-selection (spell-finding-offset finding))
-                      #f #f '() '() #f))
+                      #f #f '() '()
+                      (make-scroll-request
+                        'reveal-point
+                        (command-context-surface-id context)
+                        (command-context-window-id context)
+                        (view-id view))))
                   (make-command-context
                     #f (command-context-surface-id context) (command-context-window-id context)
                     (view-id view) (buffer-id source) (buffer-state source) (view-state view)
