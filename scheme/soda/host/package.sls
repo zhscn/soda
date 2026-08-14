@@ -50,6 +50,7 @@
           package-host-bury-window!
           package-host-close-view!
           package-host-surface-size
+          package-host-invalidate-surface!
           package-host-replace-window-view!
           package-host-push-interaction-view!
           package-host-add-interaction-companion-view!
@@ -717,6 +718,14 @@
     (let ([surface
            (surface-service-ref (host-state-surfaces (package-host-state host)) surface-id #f)])
       (and surface (surface-size surface))))
+
+  (define (package-host-invalidate-surface! host surface-id)
+    (unless (package-host? host)
+      (assertion-violation 'package-host-invalidate-surface!
+                           "expected a PackageHost" host))
+    (dispatcher-dispatch-host!
+      (host-state-dispatch (package-host-state host))
+      (make-invalidate-surface-operation surface-id)))
 
   ;; Placement owns rollback of a newly-created View.  Feature packages only
   ;; observe success or failure and never repair the Surface tree directly.

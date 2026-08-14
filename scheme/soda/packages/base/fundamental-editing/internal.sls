@@ -30,7 +30,7 @@
           (soda host context)
           (soda host input)
           (soda host input-event)
-          (soda host operation)
+          (soda host package)
           (soda host render)
           (soda host view)
           (soda host value)
@@ -67,10 +67,11 @@
        (install-command! runtime owner name (context . arguments) documentation class
                          (visible #t) body ...)]))
 
-  (define (make-fundamental-editing! runtime owner)
-    (unless (and (command-runtime? runtime) (owner? owner))
-      (assertion-violation 'make-fundamental-editing! "expected a runtime and owner" runtime owner))
-    (let* ([keymap (make-keymap 'fundamental)]
+  (define (make-fundamental-editing! host owner)
+    (unless (and (package-host? host) (owner? owner))
+      (assertion-violation 'make-fundamental-editing! "expected a PackageHost and owner" host owner))
+    (let* ([runtime (package-host-command-runtime host)]
+           [keymap (make-keymap 'fundamental)]
            [mode
             (make-mode-spec
               'fundamental-mode 'major "Fundamental" #f
@@ -87,6 +88,11 @@
         (lambda (service invocation effect)
           (record-kill! (fundamental-editing-kill-ring editing)
                         (command-effect-payload effect))))
+      (command-runtime-register-effect-handler!
+        runtime 'fundamental.redraw owner 'fundamental-surface-invalidation
+        (lambda (ignored invocation effect)
+          (package-host-invalidate-surface!
+            host (command-effect-payload effect))))
       (install-command!
         runtime owner 'fundamental.insert-text (context inserted)
         "Insert committed text at every selection." 'editing (visible #f)
@@ -234,7 +240,7 @@
         "Request a fresh presentation of the active Surface." 'interface
         (let ([surface-id (command-context-surface-id context)])
           (if (and (integer? surface-id) (exact? surface-id) (>= surface-id 0))
-              (make-invalidate-surface-operation surface-id)
+              (make-command-effect 'fundamental.redraw surface-id)
               (command-handled))))
       (install-command!
         runtime owner 'fundamental.set-mark (context)

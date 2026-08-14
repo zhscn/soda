@@ -41,7 +41,6 @@
           (soda host buffer)
           (soda host package)
           (soda host location)
-          (soda host operation)
           (soda host setting)
           (soda host value)
           (soda host view)

@@ -19,7 +19,6 @@
           (soda host package)
           (soda host input)
           (soda host input-event)
-          (soda host operation)
           (soda host value)
           (soda host view)
           (soda packages buffer-mode)

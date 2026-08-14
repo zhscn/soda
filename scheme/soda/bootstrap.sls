@@ -124,10 +124,10 @@
                    (when (and document document-owned?) (document-close! document)))
                  (lambda () (when (owner-active? owner) (owner-close! owner)))
                  (lambda () (host-state-close! state)))))
-           (raise condition)])
+          (raise condition)])
         (let* ([editing
                 (make-fundamental-editing!
-                  (host-state-command-runtime state) owner)]
+                  host owner)]
                [_fundamental-mode
                 (package-host-register-mode! host owner (fundamental-mode editing))]
                [whitespace
