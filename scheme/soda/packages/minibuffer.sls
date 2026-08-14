@@ -249,24 +249,32 @@
                 (notify-hooks! (minibuffer-service-setup-hooks service)
                                (minibuffer-session-snapshot service session)))
               (package-host-close-buffer! host (buffer-id buffer)))))))
-  (define (close! service interaction)
+  (define (close! service interaction outcome)
     (let ([session (session-for service interaction)])
       (when session
-        (let ([controller (minibuffer-session-completion session)])
-          (when controller
-            (completion-controller-restore! controller
-                                            (minibuffer-session-snapshot service session))))
-        (notify-hooks! (minibuffer-service-exit-hooks service)
-                       (minibuffer-session-snapshot service session))
-        (minibuffer-service-sessions-set!
-          service (filter (lambda (item) (not (eq? item session)))
-                          (minibuffer-service-sessions service)))
-        (package-host-remove-interaction-view!
-          (minibuffer-service-host service)
-          (minibuffer-session-surface-id session)
-          (minibuffer-session-view-id session))
-        (package-host-close-buffer! (minibuffer-service-host service)
-                                    (minibuffer-session-buffer-id session)))))
+        (dynamic-wind
+          (lambda () #f)
+          (lambda ()
+            (let* ([snapshot (minibuffer-session-snapshot service session)]
+                   [controller (minibuffer-session-completion session)])
+              (when controller
+                (if (eq? outcome 'accepted)
+                    (completion-controller-accept! controller snapshot)
+                    (completion-controller-restore! controller snapshot)))
+              (notify-hooks! (minibuffer-service-exit-hooks service) snapshot)))
+          (lambda ()
+            ;; Package callbacks are isolated from Host resource ownership.
+            ;; Even a failed completion finalizer must retire this exact
+            ;; prompt View and Buffer without disturbing another session.
+            (minibuffer-service-sessions-set!
+              service (filter (lambda (item) (not (eq? item session)))
+                              (minibuffer-service-sessions service)))
+            (package-host-remove-interaction-view!
+              (minibuffer-service-host service)
+              (minibuffer-session-surface-id session)
+              (minibuffer-session-view-id session))
+            (package-host-close-buffer! (minibuffer-service-host service)
+                                        (minibuffer-session-buffer-id session)))))))
   (define (invalid-input-feedback context)
     (let ([state (command-context-view-state context)])
       (make-view-transaction-spec
@@ -311,8 +319,6 @@
                                      (completion-controller-valid-input?
                                        controller value snapshot))))))
                  (begin
-                   (when controller
-                     (completion-controller-accept! controller snapshot))
                    (interaction-service-submit!
                      (minibuffer-service-interactions service) value))
                  (and context (invalid-input-feedback context))))))]))
@@ -449,6 +455,7 @@
           interactions owner
           (lambda (kind interaction)
             (cond [(eq? kind 'opened) (open! service interaction)]
-                  [(memq kind '(accepted cancelled)) (close! service interaction)]))))
+                  [(memq kind '(accepted cancelled))
+                   (close! service interaction kind)]))))
       service)))
 )

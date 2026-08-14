@@ -1237,6 +1237,7 @@
            [owner (make-owner 'interaction-package-test)]
            [observed #f]
            [must-match-value #f]
+           [completion-events '()]
            [events '()]
            [setup-input #f]
            [exit-input #f]
@@ -1374,7 +1375,14 @@
               (make-completion-source
                 (lambda (snapshot)
                   (list (make-completion-candidate 'allowed "allowed" "allowed" #f #f #f)))
-                #f #f #f
+                (lambda (candidate snapshot)
+                  (set! completion-events (cons 'preview completion-events)))
+                (lambda (snapshot)
+                  (set! completion-events (cons 'restore completion-events)))
+                (lambda (candidate snapshot)
+                  (set! completion-events (cons 'accept completion-events))
+                  (assertion-violation
+                    'completion-finalizer-test "accept callback failure"))
                 (lambda (input snapshot) (string=? input "allowed")))]
              [match-reader
               (make-interactive-reader
@@ -1426,11 +1434,31 @@
         (command-runtime-start-interactive!
           runtime 'interaction.match-test (application-command-context application))
         (minibuffer-service-refresh-completion! minibuffer)
+        (minibuffer-service-select-completion! minibuffer 0)
         (minibuffer-service-submit! minibuffer)
+        (unless (equal? completion-events '(preview))
+          (error 'fundamental-editing-tests
+                 "completion accept ran before the interaction committed"
+                 completion-events))
         (host-state-run! state)
         (unless (and (string=? must-match-value "allowed")
-                     (not (minibuffer-service-current minibuffer)))
-          (error 'fundamental-editing-tests "must-match source validator did not accept raw input")))
+                     (not (minibuffer-service-current minibuffer))
+                     (equal? (reverse completion-events) '(preview accept)))
+          (error 'fundamental-editing-tests
+                 "completion finalization did not follow interaction acceptance"
+                 completion-events))
+        (set! completion-events '())
+        (command-runtime-start-interactive!
+          runtime 'interaction.match-test (application-command-context application))
+        (minibuffer-service-refresh-completion! minibuffer)
+        (minibuffer-service-select-completion! minibuffer 0)
+        (minibuffer-service-cancel! minibuffer)
+        (host-state-run! state)
+        (unless (and (not (minibuffer-service-current minibuffer))
+                     (equal? (reverse completion-events) '(preview restore)))
+          (error 'fundamental-editing-tests
+                 "completion cancellation did not restore its active preview"
+                 completion-events)))
       (let ([cancelled
              (command-runtime-start-interactive!
                runtime 'interaction.package-test (application-command-context application))])

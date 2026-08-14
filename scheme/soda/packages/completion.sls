@@ -80,18 +80,22 @@
             (mutable generation completion-controller-generation completion-controller-generation-set!)
             (mutable candidates completion-controller-candidates completion-controller-candidates-set!)
             (mutable selected-index completion-controller-selected-index completion-controller-selected-index-set!)
+            (mutable preview-active? completion-controller-preview-active?
+                     completion-controller-preview-active?-set!)
             (immutable selection-policy completion-controller-selection-policy)))
   (define (make-completion-controller source selection-policy)
     (unless (and (completion-source? source) (memq selection-policy '(free must-match)))
       (assertion-violation 'make-completion-controller "invalid completion controller"))
-    (%make-completion-controller source 0 '() #f selection-policy))
+    (%make-completion-controller source 0 '() #f #f selection-policy))
   (define (completion-controller-selected controller)
     (let ([index (completion-controller-selected-index controller)]
           [candidates (completion-controller-candidates controller)])
       (and index (>= index 0) (< index (length candidates)) (list-ref candidates index))))
   (define (completion-controller-restore! controller snapshot)
-    (let ([restore (completion-source-restore (completion-controller-source controller))])
-      (when restore (restore snapshot))))
+    (when (completion-controller-preview-active? controller)
+      (let ([restore (completion-source-restore (completion-controller-source controller))])
+        (when restore (restore snapshot)))
+      (completion-controller-preview-active?-set! controller #f)))
   (define (completion-controller-refresh! controller snapshot)
     (completion-controller-restore! controller snapshot)
     (let* ([selected (completion-controller-selected controller)]
@@ -112,17 +116,23 @@
     (unless (and (integer? index) (exact? index) (>= index -1)
                  (< index (length (completion-controller-candidates controller))))
       (assertion-violation 'completion-controller-select! "invalid candidate index" index))
+    (completion-controller-restore! controller snapshot)
     (completion-controller-selected-index-set! controller (and (>= index 0) index))
     (let ([preview (completion-source-preview (completion-controller-source controller))]
           [candidate (completion-controller-selected controller)])
       (if candidate
-          (when preview (preview candidate snapshot))
-          (completion-controller-restore! controller snapshot)))
+          (when preview
+            (preview candidate snapshot)
+            (completion-controller-preview-active?-set! controller #t))))
     controller)
   (define (completion-controller-accept! controller snapshot)
     (let ([candidate (completion-controller-selected controller)]
           [accept (completion-source-accept (completion-controller-source controller))])
-      (when (and candidate accept) (accept candidate snapshot))
+      (if (and candidate accept)
+          (begin
+            (accept candidate snapshot)
+            (completion-controller-preview-active?-set! controller #f))
+          (completion-controller-restore! controller snapshot))
       candidate))
   (define (completion-controller-valid-input? controller input snapshot)
     (unless (and (completion-controller? controller) (string? input))
