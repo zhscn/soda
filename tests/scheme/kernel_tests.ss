@@ -5165,6 +5165,54 @@
       (native:runtime-close! native-runtime)
       (soda-application-close! application))))
 
+;; A process starts in the foreground, but its later native output is a
+;; background update.  Navigating away before that output arrives preserves
+;; the user's chosen presentation while retaining the completed result Buffer.
+(let* ([application (make-soda-application)]
+       [state (soda-application-state application)]
+       [runtime (host-state-command-runtime state)]
+       [processes (soda-application-processes application)]
+       [native-runtime (native:make-runtime)])
+  (dynamic-wind
+    (lambda () #f)
+    (lambda ()
+      (process-service-attach-runtime! processes native-runtime)
+      (command-runtime-start!
+        runtime 'process.execute (application-command-context application)
+        (list "printf soda-process-background"))
+      (command-runtime-start! runtime 'help.show (application-command-context application))
+      (let poll ([remaining 4])
+        (for-each
+          (lambda (event) (process-service-handle-runtime-event! processes event))
+          (native:runtime-poll! native-runtime))
+        (host-state-run! state)
+        (let* ([surface (soda-application-surface application)]
+               [active (surface-active-context surface (host-state-views state))]
+               [current
+                (buffer-service-ref
+                  (host-state-buffers state) (active-context-buffer-id active) #f)]
+               [result
+                (find
+                  (lambda (buffer)
+                    (string=? (buffer-name buffer)
+                              "*command: printf soda-process-background*"))
+                  (buffer-service-buffers (host-state-buffers state)))])
+          (cond
+            [(and result
+                  (string=? (buffer-string result)
+                            "soda-process-background\n[Process exited with status 0]\n"))
+             (unless (and current
+                          (string=? (buffer-name current) "*help*")
+                          (not (surface-feedback surface)))
+               (error 'kernel-tests
+                      "background process output replaced the user's current presentation"))]
+            [(zero? remaining)
+             (error 'kernel-tests "background process result was not retained")]
+            [else (poll (- remaining 1))]))))
+    (lambda ()
+      (native:runtime-close! native-runtime)
+      (soda-application-close! application))))
+
 (let* ([application (make-soda-application)]
        [state (soda-application-state application)]
        [runtime (host-state-command-runtime state)]
