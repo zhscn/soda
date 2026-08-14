@@ -42,6 +42,7 @@
           package-host-view-ref
           package-host-present-buffer!
           package-host-present-buffer-if-current!
+          package-host-command-context-current?
           package-host-create-interaction-view!
           package-host-create-interaction-companion-view!
           package-host-split-window!

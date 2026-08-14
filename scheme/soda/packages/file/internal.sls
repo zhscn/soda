@@ -432,12 +432,18 @@
                   (vfs-read-file
                     (resource-locator (file-insert-resource request)))))
               (lambda (contents ignored-format)
-                (command-runtime-enqueue!
-                  runtime
-                  (make-command-invoke-message
-                    'fundamental.insert-text
-                    (file-insert-context request)
-                    (list contents) #f)))))))
+                ;; The read completed outside the command turn.  Its bytes
+                ;; belong only to the View that requested insertion; do not
+                ;; turn a stale context into an avoidable transaction error.
+                (when
+                  (package-host-command-context-current?
+                    (file-service-host service) (file-insert-context request))
+                  (command-runtime-enqueue!
+                    runtime
+                    (make-command-invoke-message
+                      'fundamental.insert-text
+                      (file-insert-context request)
+                      (list contents) #f))))))))
       (install-file-command! runtime owner 'file.visit "Visit a file in the active Window."
         (list (make-file-name-reader
                 "Visit file: "
