@@ -226,11 +226,27 @@
       (visual-position-line position) (visual-position-row position)))
 
   (define (text-layout-final-page-start text options width height)
-    (let* ([end
-            (text-layout-document-visual-position
-              text options width (text-size text))]
+    (let* ([size (text-size text)]
+           [end (text-layout-document-visual-position text options width size)]
+           ;; A soft-wrapped EOF caret can occupy an empty row after the last
+           ;; painted glyph.  It remains a valid reveal target, but the final
+           ;; page origin is defined by content so a page command does not
+           ;; replace visible text with that empty row.
+           [content-end
+            (if (zero? size)
+                end
+                (let ([previous
+                       (text-layout-document-visual-position
+                         text options width
+                         (text-previous-grapheme-offset text size))])
+                  (if (and (= (visual-position-line previous)
+                              (visual-position-line end))
+                           (< (visual-position-row previous)
+                              (visual-position-row end)))
+                      previous
+                      end)))]
            [position
-            (text-layout-visual-step text options width end (- 1 height))])
+            (text-layout-visual-step text options width content-end (- 1 height))])
       (visual-row-start text options width position)))
 
   ;; Move a Viewport by DELTA visual rows and clamp it to the last origin that

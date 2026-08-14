@@ -4560,8 +4560,10 @@
       (let ([render
              (render-surface
                surface (host-state-views state))])
-        (unless (and (= (viewport-visual-row
-                          (view-state-viewport (view-state view)))
+        (unless (and (document-viewport?
+                       (view-state-viewport (view-state view)))
+                     (= (viewport-visual-row
+                         (view-state-viewport (view-state view)))
                         1)
                      (string=?
                        (frame-cell-grapheme
