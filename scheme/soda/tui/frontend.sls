@@ -20,6 +20,7 @@
           (soda host buffer)
           (soda host context)
           (soda host dispatch)
+          (soda host feedback)
           (soda host frontend)
           (soda host input)
           (soda host input-event)
@@ -316,9 +317,9 @@
     (unless (input-event? event)
       (assertion-violation 'frontend-dispatch-input! "expected an input event" event))
     (input-scheduler-begin-cycle! (frontend-input-scheduler value))
-    ;; Surface messages are echo-area feedback.  The next user input clears a
-    ;; previous message before dispatching its command, while a command that
-    ;; emits a new message publishes it again at the same boundary.
+    ;; Transient echo-area feedback is cleared by the next user input before
+    ;; dispatch. A command may publish a new semantic feedback value at the
+    ;; same boundary; sticky feedback survives without obscuring input chrome.
     (when (feedback-clearing-event? event)
       (host-frontend-clear-input-feedback!
         (frontend-host-state value) (frontend-surface value)))
@@ -378,12 +379,14 @@
                                (not result))
                       (host-frontend-dispatch-host!
                         (frontend-host-state value)
-                        (make-set-surface-message-operation
+                        (make-set-surface-feedback-operation
                           (surface-id (frontend-surface value))
-                          (string-append
-                            (key-sequence-label
-                              (input-disposition-value disposition))
-                            " is undefined")))))])
+                          (make-user-feedback
+                            (string-append
+                              (key-sequence-label
+                                (input-disposition-value disposition))
+                              " is undefined")
+                            'warning)))))])
                disposition)))))
 
   (define (frontend-handle-message! value message)

@@ -14,6 +14,7 @@
           (soda kernel view-state)
           (soda host command)
           (soda host command-runtime)
+          (soda host feedback)
           (soda host buffer)
           (soda host package)
           (soda host input)
@@ -158,9 +159,10 @@
                   (begin (directory-state-generation-set! state generation) published))))))
 
   (define (show-directory-error! service context path)
-    (package-host-set-surface-message!
+    (package-host-publish-feedback!
       (directory-service-host service) (command-context-surface-id context)
-      (string-append "Not a readable directory: " path)))
+      (make-user-feedback
+        (string-append "Not a readable directory: " path) 'error)))
 
   (define (directory-buffer-key path)
     (make-buffer-key 'directory path))

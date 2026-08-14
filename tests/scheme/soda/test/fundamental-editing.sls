@@ -8,6 +8,7 @@
           (soda host condition)
           (soda host dispatch)
           (soda host frontend)
+          (soda host feedback)
           (soda host input)
           (soda host input-event)
           (soda host analysis)
@@ -90,6 +91,10 @@
 
   (define (buffer-string buffer)
     (snapshot-string (buffer-state-document (buffer-state buffer))))
+
+  (define (surface-feedback-text surface)
+    (let ([feedback (surface-feedback surface)])
+      (and feedback (user-feedback-text feedback))))
 
   (define (invoke-viewport-command! application name layout)
     (let* ([state (soda-application-state application)]
@@ -818,7 +823,7 @@
       (let* ([render (render-surface surface (host-state-views state))]
              [frame (surface-render-frame render)]
              [row (- (frame-height frame) 1)])
-        (unless (and (string=? (surface-status-message surface) "Line 1, column 1")
+        (unless (and (string=? (surface-feedback-text surface) "Line 1, column 1")
                      (eq? (keymap-lookup
                             (message-keymap messages)
                             (list (make-key-stroke 'character (char->integer #\c) 4)))
@@ -826,13 +831,13 @@
                      (string=? (frame-cell-grapheme (frame-cell-at frame row 0)) "L")
                      (eq? (frame-cell-face (frame-cell-at frame row 0)) 'message))
           (error 'fundamental-editing-tests
-                 "position command did not publish a Surface message chrome")))
+                 "position command did not publish echo-area feedback")))
       (command-runtime-start!
         runtime 'fundamental.insert-text (application-command-context application)
         (list (string->utf8 "alpha β\ngamma")))
       (command-runtime-start! runtime 'message.count-words
                               (application-command-context application))
-      (unless (and (string=? (surface-status-message surface)
+      (unless (and (string=? (surface-feedback-text surface)
                            "2 lines, 3 words, 13 characters")
                    (eq? (keymap-lookup
                           (message-keymap messages)
@@ -842,14 +847,15 @@
                "word count did not use the active Buffer's Unicode text"))
       (dispatcher-dispatch-host!
         (host-state-dispatch state)
-        (make-set-surface-message-operation (surface-id surface) "界"))
+        (make-set-surface-feedback-operation
+          (surface-id surface) (make-user-feedback "界")))
       (let* ([frame (surface-render-frame (render-surface surface (host-state-views state)))]
              [row (- (frame-height frame) 1)])
         (unless (and (string=? (frame-cell-grapheme (frame-cell-at frame row 0)) "界")
                      (= (frame-cell-width (frame-cell-at frame row 0)) 2)
                      (frame-cell-continuation? (frame-cell-at frame row 1)))
           (error 'fundamental-editing-tests
-                 "Surface message chrome did not preserve wide grapheme cells")))
+                 "echo-area feedback did not preserve wide grapheme cells")))
       (soda-application-close! application))
 
     (let* ([application (make-soda-application)]
@@ -1288,7 +1294,7 @@
       (interaction-service-submit! interaction "message.show-position")
       (host-state-run! state)
       (host-state-run! state)
-      (let ([message (surface-status-message (soda-application-surface application))])
+      (let ([message (surface-feedback-text (soda-application-surface application))])
         (unless (and message (string=? message "Line 1, column 1"))
           (error 'fundamental-editing-tests "M-x did not enqueue the selected command"
                  message
@@ -1304,7 +1310,7 @@
         runtime 'command.describe (application-command-context application))
       (interaction-service-submit! interaction "message.show-position")
       (host-state-run! state)
-      (let ([message (surface-status-message (soda-application-surface application))])
+      (let ([message (surface-feedback-text (soda-application-surface application))])
         (unless (and message (string-contains? message "Show the active selection"))
           (error 'fundamental-editing-tests
                  "describe-command did not use command metadata" message)))
@@ -1313,7 +1319,7 @@
       (interaction-service-submit! interaction "message.show-position")
       (host-state-run! state)
       (unless (string-contains?
-                (surface-status-message (soda-application-surface application)) "C-c")
+                (surface-feedback-text (soda-application-surface application)) "C-c")
         (error 'fundamental-editing-tests "where-is did not reverse-query active keymaps"))
       (owner-close! owner)
       (soda-application-close! application))
@@ -2736,7 +2742,7 @@
         runtime 'editor.toggle-guide-column (application-command-context application))
       (dispatcher-dispatch-host!
         (host-state-dispatch state)
-        (make-set-surface-message-operation (surface-id surface) #f))
+        (make-set-surface-feedback-operation (surface-id surface) #f))
       (let ([frame (surface-render-frame
                      (render-surface surface (host-state-views state)))])
         (unless (frame-cell-has-face? (frame-cell-at frame 0 79) 'guide-column)
@@ -2747,7 +2753,7 @@
         (application-command-context application))
       (dispatcher-dispatch-host!
         (host-state-dispatch state)
-        (make-set-surface-message-operation (surface-id surface) #f))
+        (make-set-surface-feedback-operation (surface-id surface) #f))
       (command-runtime-start!
         runtime 'fundamental.goto-line
         (application-command-context application) (list 1 41))
@@ -2759,7 +2765,8 @@
                  "constant position did not reflect the active View selection")))
       (dispatcher-dispatch-host!
         (host-state-dispatch state)
-        (make-set-surface-message-operation (surface-id surface) "temporary feedback"))
+        (make-set-surface-feedback-operation
+          (surface-id surface) (make-user-feedback "temporary feedback")))
       (let* ([frame (surface-render-frame
                       (render-surface surface (host-state-views state)))]
              [row (- (frame-height frame) 1)])
@@ -2913,7 +2920,9 @@
                 (fundamental-input-disposition context disposition))
               (lambda (render theme) #f)
               (make-render-service) default-theme)])
-      (frontend-resize! frontend '(4 . 2))
+      ;; The terminal profile reserves one stable echo-area row, leaving the
+      ;; same two document rows that this wrapped-motion scenario exercises.
+      (frontend-resize! frontend '(4 . 3))
       (frontend-step! frontend)
       (command-runtime-start!
         runtime 'fundamental.insert-text (application-command-context application)
@@ -3261,23 +3270,27 @@
         (frontend-step! frontend))
       (dispatcher-dispatch-host!
         (host-state-dispatch state)
-        (make-set-surface-message-operation
-          (surface-id surface) "persistent feedback" 'persistent))
+        (make-set-surface-feedback-operation
+          (surface-id surface)
+          (make-user-feedback "persistent feedback" 'info 'sticky)))
       (send! (make-pointer-event 0 0 'none 0 0 'move))
       (send! (make-key-event 'left #f #f #f 0 'press (make-bytevector 0)))
-      (unless (string=? (surface-status-message surface) "persistent feedback")
+      (unless (and (string=? (surface-feedback-text surface) "persistent feedback")
+                   (eq? (user-feedback-severity (surface-feedback surface)) 'info)
+                   (eq? (user-feedback-lifetime (surface-feedback surface)) 'sticky))
         (error 'fundamental-editing-tests
                "persistent feedback was cleared by unrelated input"))
       (dispatcher-dispatch-host!
         (host-state-dispatch state)
-        (make-set-surface-message-operation (surface-id surface) "previous feedback"))
+        (make-set-surface-feedback-operation
+          (surface-id surface) (make-user-feedback "previous feedback")))
       (send! (make-text-input-event 'text (string->utf8 "a")))
       (send! (make-key-event 'enter 13 #f #f 0 'press (make-bytevector 0)))
       (send! (make-text-input-event 'text (string->utf8 "b")))
       (send! (make-key-event 'backspace 127 #f #f 0 'press (make-bytevector 0)))
       (send! (make-key-event 'tab 9 #f #f 0 'press (make-bytevector 0)))
       (unless (and (string=? (buffer-string buffer) "a\n\t")
-                   (not (surface-status-message surface))
+                   (not (surface-feedback surface))
                    (= (selection-range-head
                         (selection-primary-range (view-state-selection (view-state view))))
                       3))
@@ -3593,6 +3606,11 @@
         (frontend-step! frontend))
       (frontend-resize! frontend '(4 . 4))
       (frontend-step! frontend)
+      (dispatcher-dispatch-host!
+        (host-state-dispatch state)
+        (make-set-surface-feedback-operation
+          (surface-id surface)
+          (make-user-feedback "sticky alert" 'warning 'sticky)))
       (send! (make-key-event 'character (char->integer #\x) #f #f 4 'press
                              (make-bytevector 0)))
       (unless (and
@@ -3606,6 +3624,12 @@
                     (surface-render-frame presented)
                     (- (frame-height (surface-render-frame presented)) 1))
                   "C-x")
+                (not
+                  (string-contains?
+                    (frame-row-string
+                      (surface-render-frame presented)
+                      (- (frame-height (surface-render-frame presented)) 1))
+                    "sticky alert"))
                 (let ([rendered
                        (find
                          (lambda (candidate)

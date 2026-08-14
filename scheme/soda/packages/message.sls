@@ -14,14 +14,14 @@
           (soda packages base text-motion)
           (soda host command)
           (soda host command-runtime)
+          (soda host feedback)
           (soda host input)
           (soda host input-event)
           (soda host package)
           (soda host value))
 
-  ;; MessageService is a command-facing adapter for Surface chrome.  A
-  ;; message is neither Buffer text nor a minibuffer interaction: it is a
-  ;; published, single-line status value rendered above the current Frame.
+  ;; MessageService turns informational commands into semantic echo-area
+  ;; feedback. Feedback is neither Buffer text nor a minibuffer interaction.
   (define-record-type
     (message-service %make-message-service message-service?)
     (fields host owner keymap))
@@ -104,10 +104,10 @@
   (define (show-message! service request)
     (unless (message-request? request)
       (assertion-violation 'message.show "invalid message request" request))
-    (package-host-set-surface-message!
+    (package-host-publish-feedback!
       (message-service-host service)
       (command-context-surface-id (message-request-context request))
-      (message-request-text request)))
+      (make-user-feedback (message-request-text request) 'info)))
 
   (define (make-message-service! host owner)
     (unless (and (package-host? host) (owner? owner))

@@ -25,6 +25,7 @@
         (soda host internal context)
         (soda host dispatch)
         (soda host frontend)
+        (soda host feedback)
         (soda host location)
         (soda host navigation)
         (soda host package)
@@ -1863,7 +1864,8 @@
             (make-change-set 5 (list (make-text-change 5 5 "!")))
             #f '() '()))]
        [after-document (render-service-render! service surface (host-state-views host))]
-       [_chrome-update (surface-set-status-message! surface "cache status")]
+       [_chrome-update
+        (surface-set-feedback! surface (make-user-feedback "cache status"))]
        [after-chrome (render-service-render! service surface (host-state-views host))]
        [_layout-update (surface-push-interaction! surface (view-id view) '(0 0 1 1))]
        [after-layout (render-service-render! service surface (host-state-views host))])
@@ -2807,7 +2809,10 @@
                          (recovery-artifact-contents
                            (car (recovery-service-pending-artifacts reader))))
                        "crash contents"))
-          (error 'kernel-tests "startup recovery discovery differs"))
+          (error 'kernel-tests "recovery discovery differs"))
+        (unless (not (surface-feedback surface))
+          (error 'kernel-tests
+                 "recovery discovery occupied the echo area before user action"))
         (command-runtime-start-interactive!
           (host-state-command-runtime next-state) 'recovery.restore context)
         (unless (eq? (interaction-request-kind
@@ -2824,7 +2829,7 @@
                        (interaction-session-request
                          (interaction-service-current interactions)))
                      'recovery-decision)
-          (error 'kernel-tests "startup recovery did not request a decision"))
+          (error 'kernel-tests "recovery command did not request a decision"))
         (interaction-service-submit! interactions "recover")
         (host-state-run! next-state)
         (let* ([active
@@ -2838,11 +2843,18 @@
                        (= (length (vfs-list-directory directory)) 1))
             (error 'kernel-tests
                    "recovery restore changed the resource or wrong artifact")))
+        (unless (and (not (interaction-service-current interactions))
+                     (= (length (recovery-service-pending-artifacts reader)) 1))
+          (error 'kernel-tests
+                 "one recovery command consumed more than its selected artifact"))
+        (command-runtime-start-interactive!
+          (host-state-command-runtime next-state) 'recovery.restore context)
         (unless (eq? (interaction-request-kind
                        (interaction-session-request
                          (interaction-service-current interactions)))
                      'recovery-decision)
-          (error 'kernel-tests "remaining recovery artifact was not queued"))
+          (error 'kernel-tests
+                 "explicit recovery of the remaining artifact did not ask"))
         (interaction-service-submit! interactions "discard")
         (host-state-run! next-state)
         (unless (null? (vfs-list-directory directory))

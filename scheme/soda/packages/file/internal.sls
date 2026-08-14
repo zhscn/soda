@@ -5,7 +5,6 @@
           file-service-format
           file-service-conflict
           file-service-recovery
-          file-service-start-recovery!
           file-service-watch-service
           file-service-attach-runtime!
           file-service-handle-runtime-event!
@@ -130,13 +129,6 @@
                            "expected a FileService" service))
     (file-watch-service-add-listener!
       (file-service-watch-service service) owner procedure))
-
-  (define (file-service-start-recovery! service context)
-    (unless (file-service? service)
-      (assertion-violation 'file-service-start-recovery!
-                           "expected a FileService" service))
-    (let ([recovery (file-service-recovery service)])
-      (and recovery (recovery-service-start! recovery context))))
 
   (define (install-file-command! runtime owner name documentation readers procedure)
     (command-runtime-register-command! runtime

@@ -45,11 +45,8 @@
             (surface-active-context surface views))]
       [(invalidate-surface)
        (and (surface-invalidate! surface) #t)]
-      [(set-surface-message)
-       (let ([value (host-operation-value operation)])
-         (and (surface-set-status-message!
-                surface (car value) (cadr value))
-              #t))]
+      [(set-surface-feedback)
+       (and (surface-set-feedback! surface (host-operation-value operation)) #t)]
       [(set-surface-shortcut-hints)
        (and (surface-set-shortcut-hints!
               surface (host-operation-value operation))

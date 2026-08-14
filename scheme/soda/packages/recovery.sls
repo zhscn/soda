@@ -5,7 +5,6 @@
           recovery-service-snapshot!
           recovery-service-clear-buffer!
           recovery-service-pending-artifacts
-          recovery-service-start!
           recovery-artifact?
           recovery-artifact-path
           recovery-artifact-resource
@@ -52,9 +51,7 @@
     (recovery-service %make-recovery-service recovery-service?)
     (fields host owner history resource-for-buffer directory pending queued live-artifacts
             (mutable pending-artifacts recovery-service-pending-artifacts-raw
-                                       recovery-service-pending-artifacts-set!)
-            (mutable startup-active? recovery-service-startup-active?
-                                     recovery-service-startup-active?-set!)))
+                                       recovery-service-pending-artifacts-set!)))
 
   (define artifact-magic "SODA-RECOVERY-1 ")
   (define recovery-serial 0)
@@ -366,41 +363,14 @@
         (remove-pending-artifact! service artifact #t)
         buffer)))
 
-  (define (enqueue-next-recovery! service context)
-    (if (pair? (recovery-service-pending-artifacts service))
-        (command-runtime-enqueue!
-          (package-host-command-runtime (recovery-service-host service))
-          (make-command-invoke-message
-            'recovery.restore context
-            (list (car (recovery-service-pending-artifacts service))) #t))
-        (recovery-service-startup-active?-set! service #f)))
-
   (define (handle-recovery-decision! service artifact decision context)
     (case decision
       [(recover) (restore-artifact! service artifact context)]
       [(discard) (remove-pending-artifact! service artifact #t)]
-      [(later)
-       (recovery-service-startup-active?-set! service #f)]
+      [(later) #f]
       [else
        (assertion-violation 'recovery.restore
-                            "unknown recovery decision" decision)])
-    (unless (eq? decision 'later) (enqueue-next-recovery! service context)))
-
-  (define (recovery-service-start! service context)
-    (unless (and (recovery-service? service) (command-context? context))
-      (assertion-violation 'recovery-service-start!
-                           "expected a RecoveryService and CommandContext"
-                           service context))
-    (and (not (recovery-service-startup-active? service))
-         (pair? (recovery-service-pending-artifacts service))
-         (begin
-           (recovery-service-startup-active?-set! service #t)
-           (command-runtime-enqueue!
-             (package-host-command-runtime (recovery-service-host service))
-             (make-command-invoke-message
-               'recovery.restore context
-               (list (car (recovery-service-pending-artifacts service))) #t))
-           #t)))
+                            "unknown recovery decision" decision)]))
 
   (define make-recovery-service!
     (case-lambda
@@ -422,7 +392,7 @@
                (%make-recovery-service
                  host owner history resource-for-buffer resolved
                  (make-eqv-hashtable) (make-eqv-hashtable)
-                 (make-eqv-hashtable) (discover-artifacts resolved) #f)]
+                 (make-eqv-hashtable) (discover-artifacts resolved))]
               [runtime (package-host-command-runtime host)])
          (define-command
            runtime owner 'recovery.flush (context buffer-id)

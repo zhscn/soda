@@ -15,6 +15,7 @@
           (soda kernel view-state)
           (soda host command)
           (soda host command-runtime)
+          (soda host feedback)
           (soda host buffer)
           (soda host input)
           (soda host input-event)
@@ -234,9 +235,10 @@
     (make-selection (list (make-selection-range offset offset))))
 
   (define (show-stale-source-message! service context)
-    (package-host-set-surface-message!
+    (package-host-publish-feedback!
       (spell-service-host service) (command-context-surface-id context)
-      "Spelling result is stale; run spell check again."))
+      (make-user-feedback
+        "Spelling result is stale; run spell check again." 'warning)))
 
   (define (open-finding! service finding context)
     (let* ([host (spell-service-host service)]

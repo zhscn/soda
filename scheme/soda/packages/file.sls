@@ -1,7 +1,7 @@
 (library (soda packages file)
   (export make-file-service! file-service? file-service-resource
           file-service-format file-service-conflict file-service-recovery
-          file-service-start-recovery! file-service-watch-service
+          file-service-watch-service
           file-service-attach-runtime! file-service-handle-runtime-event!
           file-service-handle-state-event! file-service-add-state-listener!
           file-service-register-mode! file-service-modified-count

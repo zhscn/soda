@@ -59,7 +59,8 @@
             (cons 'syntax.definition (make-face-style 4 #f '(bold)))
             (cons 'syntax.symbol (make-face-style #f #f '()))
             (cons 'error (make-face-style 1 #f '()))
-            (cons 'warning (make-face-style 3 #f '())))
+            (cons 'warning (make-face-style 3 #f '()))
+            (cons 'success (make-face-style 2 #f '())))
       (make-face-style #f #f '())))
 
   (define (theme-lookup theme name)

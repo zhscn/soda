@@ -41,7 +41,7 @@
           package-host-replace-window-view!
           package-host-push-interaction-view!
           package-host-pop-interaction-view!
-          package-host-set-surface-message!
+          package-host-publish-feedback!
           package-host-refresh-command-context)
   (import (rnrs)
           (soda kernel document)
@@ -49,6 +49,7 @@
           (soda kernel view-state)
           (soda host command)
           (soda host command-runtime)
+          (soda host feedback)
           (soda host analysis)
           (soda host key-configuration)
           (soda host setting)
@@ -320,10 +321,13 @@
       (host-state-dispatch (package-host-state host))
       (make-pop-interaction-operation surface-id)))
 
-  (define (package-host-set-surface-message! host surface-id message)
+  (define (package-host-publish-feedback! host surface-id feedback)
+    (unless (and (package-host? host) (user-feedback? feedback))
+      (assertion-violation 'package-host-publish-feedback!
+                           "expected a PackageHost and UserFeedback" host feedback))
     (dispatcher-dispatch-host!
       (host-state-dispatch (package-host-state host))
-      (make-set-surface-message-operation surface-id message)))
+      (make-set-surface-feedback-operation surface-id feedback)))
 
   ;; Long-running command compositions refresh state at each queued step.
   ;; Window identity is followed across View replacement, so a file visit or

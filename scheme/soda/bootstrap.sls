@@ -29,6 +29,7 @@
           (soda host command)
           (soda host command-runtime)
           (soda host dispatch)
+          (soda host feedback)
           (soda host input)
           (soda host input-event)
           (soda host internal buffer)
@@ -56,7 +57,6 @@
           (soda packages comment)
           (soda packages keyboard-macro)
           (soda packages repeat)
-          (soda packages recovery)
           (soda packages prefix-argument)
           (soda packages interaction)
           (soda packages buffer-item)
@@ -147,7 +147,7 @@
                   (host-state-views state) owner buffer configuration)]
                [surface
                 (make-surface
-                  'terminal '(kitty color-256 osc52)
+                  'terminal '(kitty color-256 osc52 echo-area)
                   (make-leaf-window (view-id view) '(0 0 80 24))
                   '(80 . 24))]
                [options
@@ -231,8 +231,9 @@
       (class 'application)
       (undo 'ignore)
       (interaction-service-cancel! interactions)
-      (package-host-set-surface-message!
-        host (command-context-surface-id context) "Quit")
+      (package-host-publish-feedback!
+        host (command-context-surface-id context)
+        (make-user-feedback "Quit" 'info))
       (command-handled)))
 
   ;; Application policy belongs to composition.  Fundamental editing exports
@@ -571,25 +572,6 @@
                     (process-service-handle-runtime-event!
                       (soda-application-processes application) event)))))
             (soda-application-effect-registration-set! application registration)
-            (let* ([recovery
-                    (file-service-recovery
-                      (soda-application-files application))]
-                   [count
-                    (if recovery
-                        (length (recovery-service-pending-artifacts recovery))
-                        0)])
-              (when (and (> count 0)
-                         (not (surface-status-message
-                                (soda-application-surface application))))
-                (dispatcher-dispatch-host!
-                  (host-state-dispatch (soda-application-state application))
-                  (make-set-surface-message-operation
-                    (surface-id (soda-application-surface application))
-                    (string-append
-                      (number->string count)
-                      " recovery snapshot"
-                      (if (= count 1) "" "s")
-                      " available (M-x recovery.restore)")))))
             (dynamic-wind
               (lambda () #f)
               (lambda () (terminal-frontend-run! terminal))

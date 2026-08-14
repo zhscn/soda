@@ -13,7 +13,7 @@
           make-display-request-operation
           make-resize-surface-operation
           make-invalidate-surface-operation
-          make-set-surface-message-operation
+          make-set-surface-feedback-operation
           make-set-surface-shortcut-hints-operation
           make-global-host-operation
           make-host-update
@@ -26,7 +26,8 @@
           host-update-damage)
   (import (rnrs)
           (soda kernel value)
-          (soda host context))
+          (soda host context)
+          (soda host feedback))
 
   (define identity? nonnegative-exact-integer?)
 
@@ -111,28 +112,13 @@
                            "invalid Surface identity" surface-id))
     (%make-host-operation 'invalidate-surface surface-id #f))
 
-  ;; A Surface message is chrome, not document content.  It is immutable
-  ;; operation data so a package can request feedback without receiving a
-  ;; mutable Surface or frontend handle.
-  (define make-set-surface-message-operation
-    (case-lambda
-      [(surface-id message)
-       (make-set-surface-message-operation surface-id message 'until-command)]
-      [(surface-id message lifetime)
-       (unless (and (identity? surface-id)
-                    (memq lifetime '(until-command persistent))
-                    (or (not message)
-                        (and (string? message)
-                             (not (exists (lambda (character)
-                                            (or (char=? character #\newline)
-                                                (char=? character #\return)))
-                                          (string->list message))))))
-         (assertion-violation 'make-set-surface-message-operation
-                              "invalid Surface identity or single-line message"
-                              surface-id message lifetime))
-       (%make-host-operation
-         'set-surface-message surface-id
-         (list (and message (string-copy message)) lifetime))]))
+  (define (make-set-surface-feedback-operation surface-id feedback)
+    (unless (and (identity? surface-id)
+                 (or (not feedback) (user-feedback? feedback)))
+      (assertion-violation 'make-set-surface-feedback-operation
+                           "invalid Surface identity or UserFeedback"
+                           surface-id feedback))
+    (%make-host-operation 'set-surface-feedback surface-id feedback))
 
   (define (make-set-surface-shortcut-hints-operation surface-id hints)
     (unless (and (identity? surface-id) (list? hints)

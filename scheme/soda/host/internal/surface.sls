@@ -4,8 +4,7 @@
           surface-id
           surface-frontend
           surface-capabilities
-          surface-status-message
-          surface-status-message-lifetime
+          surface-feedback
           surface-shortcut-hints
           surface-size
           surface-root-window
@@ -21,7 +20,7 @@
           surface-pop-interaction!
           surface-resize!
           surface-invalidate!
-          surface-set-status-message!
+          surface-set-feedback!
           surface-set-shortcut-hints!
           surface-generation
           make-surface-service
@@ -39,6 +38,7 @@
           surface-input-message-event)
   (import (rnrs)
           (soda kernel value)
+          (soda host feedback)
           (soda host input-event)
           (soda host internal window))
 
@@ -63,9 +63,7 @@
       (immutable id surface-id)
       (immutable frontend surface-frontend)
       (immutable capabilities surface-capabilities)
-      (mutable status-message surface-status-message surface-status-message-set!)
-      (mutable status-message-lifetime surface-status-message-lifetime
-                                       surface-status-message-lifetime-set!)
+      (mutable feedback surface-feedback surface-feedback-set!)
       (mutable shortcut-hints surface-shortcut-hints surface-shortcut-hints-set!)
       (mutable size surface-size surface-size-set!)
       (mutable root-window surface-root-window surface-root-window-set!)
@@ -92,7 +90,7 @@
        (let ([selected (car (window-leaves root-window))])
          (window-set-selected! selected #t)
          (%make-surface (identity-source-next! surface-identities)
-                        frontend (list-copy capabilities) #f #f '()
+                        frontend (list-copy capabilities) #f '()
                         size root-window selected '() 0))]))
 
   (define (surface-set-shortcut-hints! surface hints)
@@ -114,31 +112,18 @@
             (surface-generation-set! surface (+ 1 (surface-generation surface)))
             #t))))
 
-  (define surface-set-status-message!
-    (case-lambda
-      [(surface message)
-       (surface-set-status-message! surface message 'until-command)]
-      [(surface message lifetime)
-       (unless (and (surface? surface)
-                    (memq lifetime '(until-command persistent))
-                    (or (not message)
-                        (and (string? message)
-                             (not (exists (lambda (character)
-                                            (or (char=? character #\newline)
-                                                (char=? character #\return)))
-                                          (string->list message))))))
-         (assertion-violation 'surface-set-status-message!
-                              "expected a Surface and a single-line message or false"
-                              surface message lifetime))
-       (if (and (equal? message (surface-status-message surface))
-                (eq? (and message lifetime)
-                     (surface-status-message-lifetime surface)))
-           #f
-           (begin
-             (surface-status-message-set! surface (and message (string-copy message)))
-             (surface-status-message-lifetime-set! surface (and message lifetime))
-             (surface-generation-set! surface (+ 1 (surface-generation surface)))
-             #t))]))
+  (define (surface-set-feedback! surface feedback)
+    (unless (and (surface? surface)
+                 (or (not feedback) (user-feedback? feedback)))
+      (assertion-violation 'surface-set-feedback!
+                           "expected a Surface and UserFeedback or false"
+                           surface feedback))
+    (if (equal? feedback (surface-feedback surface))
+        #f
+        (begin
+          (surface-feedback-set! surface feedback)
+          (surface-generation-set! surface (+ 1 (surface-generation surface)))
+          #t)))
 
   (define (surface-active-window surface)
     (unless (surface? surface)

@@ -24,7 +24,7 @@
           (soda view theme))
 
   ;; Native terminal resources stay in this adapter.  The generic frontend
-  ;; above it only sees Surface messages and a presentation callback.
+  ;; above it only sees semantic Surface feedback and a presentation callback.
   (define-record-type
     (terminal-frontend %make-terminal-frontend terminal-frontend?)
     (fields

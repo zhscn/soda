@@ -13,6 +13,7 @@
           (soda kernel state)
           (soda host buffer)
           (soda host command)
+          (soda host feedback)
           (soda host operation)
           (soda host package)
           (soda packages base history)
@@ -61,10 +62,11 @@
            [surface-id (command-context-surface-id context)])
       (if (and (integer? surface-id) (exact? surface-id) (>= surface-id 0))
           (list update
-                (make-set-surface-message-operation
+                (make-set-surface-feedback-operation
                   surface-id
-                  (string-append "File backups "
-                                 (if enabled? "disabled" "enabled"))))
+                  (make-user-feedback
+                    (string-append "File backups "
+                                   (if enabled? "disabled" "enabled")) 'info)))
           update)))
 
   (define (modified-file-buffer? service buffer)

@@ -54,6 +54,7 @@
           (soda host internal window)
           (soda host command)
           (soda host input)
+          (soda host feedback)
           (soda host input-label)
           (soda ffi unicode)
           (soda view compositor)
@@ -134,10 +135,10 @@
                                           (frame-cell-source cell)))
                                   updates)))))))))
 
-  (define (status-frame width message)
+  (define (status-frame width message face)
     (let* ([cells (make-vector
                     width
-                    (make-frame-cell " " 1 #f 'message 'surface-message))]
+                    (make-frame-cell " " 1 #f face 'surface-message))]
            [bytes (string->utf8 message)]
            [size (bytevector-length bytes)])
       (let loop ([offset 0] [column 0])
@@ -152,10 +153,10 @@
                 #f
                 (begin
                   (vector-set! cells column
-                               (make-frame-cell glyph glyph-width #f 'message 'surface-message))
+                               (make-frame-cell glyph glyph-width #f face 'surface-message))
                   (when (= glyph-width 2)
                     (vector-set! cells (+ column 1)
-                                 (make-frame-cell "" 0 #t 'message 'surface-message)))
+                                 (make-frame-cell "" 0 #t face 'surface-message)))
                   (loop next (+ column glyph-width)))))))
       (make-frame width 1 cells)))
 
@@ -170,13 +171,13 @@
                           (car hint) " " (cdr hint))
                         pieces))))))
 
-  (define (compose-surface-frame width height placements message)
+  (define (compose-surface-frame width height placements message face)
     (compose-frame
       width height
       (if (and message (positive? height))
           (append placements
                   (list (make-frame-placement (- height 1) 0
-                                              (status-frame width message))))
+                                              (status-frame width message face))))
           placements)))
 
   (define (content-rectangle surface leaf content-height)
@@ -197,17 +198,24 @@
 
   (define (surface-window-content-rectangle surface views leaf)
     (let* ([height (cdr (surface-size surface))]
-           [position-message (surface-position-message surface views)]
-           [hint-message
-            (and (>= height 3)
-                 (pair? (surface-shortcut-hints surface))
-                 (shortcut-hint-text (surface-shortcut-hints surface)))]
-           [input-message (surface-input-message surface views hint-message)]
+           ;; The echo area is stable chrome. Reserving it independently of
+           ;; current content prevents feedback and prefix guidance from
+           ;; changing the editor viewport height or covering document cells.
            [content-height
-            (if (and (or position-message input-message) (positive? height))
+            (if (and (> height 1)
+                     (memq 'echo-area (surface-capabilities surface)))
                 (- height 1)
                 height)])
       (content-rectangle surface leaf content-height)))
+
+  (define (feedback-face feedback)
+    (if (not feedback)
+        'message
+        (case (user-feedback-severity feedback)
+          [(error) 'error]
+          [(warning) 'warning]
+          [(success) 'success]
+          [else 'message])))
 
   (define (surface-position-message surface views)
     (let* ([leaf (surface-active-window surface)]
@@ -456,8 +464,15 @@
                  (pair? (surface-shortcut-hints surface))
                  (shortcut-hint-text (surface-shortcut-hints surface)))]
            [input-message (surface-input-message surface views hint-message)]
+           [feedback (surface-feedback surface)]
            [message
-            (or (surface-status-message surface) input-message position-message)])
+            ;; Active input guidance owns the echo area. A sticky feedback
+            ;; value may survive input, but it must not obscure a prefix,
+            ;; argument, minibuffer hint, or current shortcut guidance.
+            (or input-message
+                (and feedback (user-feedback-text feedback))
+                position-message)]
+           [message-face (if input-message 'message (feedback-face feedback))])
       (unless (and (nonnegative-exact-integer? width)
                    (nonnegative-exact-integer? height))
         (assertion-violation 'render-surface "invalid Surface size" size))
@@ -467,7 +482,8 @@
               (make-surface-render
                   (surface-id surface)
                   (surface-generation surface)
-                  (compose-surface-frame width height (reverse placements) message)
+                  (compose-surface-frame
+                    width height (reverse placements) message message-face)
                   (if (and message cursor-row (= cursor-row (- height 1))) #f cursor-row)
                   (if (and message cursor-row (= cursor-row (- height 1))) #f cursor-column)
                   (reverse rendered-views))

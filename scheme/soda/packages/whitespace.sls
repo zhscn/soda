@@ -13,6 +13,7 @@
           (soda host buffer)
           (soda host command)
           (soda host command-runtime)
+          (soda host feedback)
           (soda host input)
           (soda host input-event)
           (soda host operation)
@@ -176,9 +177,10 @@
            [surface-id (command-context-surface-id context)])
       (if (and (integer? surface-id) (exact? surface-id) (>= surface-id 0))
           (list transaction
-                (make-set-surface-message-operation
+                (make-set-surface-feedback-operation
                   surface-id
-                  (string-append "Whitespace display: " (symbol->string next))))
+                  (make-user-feedback
+                    (string-append "Whitespace display: " (symbol->string next)) 'info)))
           transaction)))
 
   (define (make-whitespace-service! host owner)

@@ -13,7 +13,7 @@
           make-display-request-operation
           make-resize-surface-operation
           make-invalidate-surface-operation
-          make-set-surface-message-operation
+          make-set-surface-feedback-operation
           make-set-surface-shortcut-hints-operation
           host-update?
           host-update-operation

@@ -17,6 +17,7 @@
           (soda host command)
           (soda host command-runtime)
           (soda host buffer)
+          (soda host feedback)
           (soda host operation)
           (soda host package)
           (soda host value)
@@ -43,10 +44,11 @@
            [surface-id (command-context-surface-id context)])
       (if (and (integer? surface-id) (exact? surface-id) (>= surface-id 0))
           (list update
-                (make-set-surface-message-operation
+                (make-set-surface-feedback-operation
                   surface-id
-                  (string-append "Search is "
-                                 (if enabled? "case-insensitive" "case-sensitive"))))
+                  (make-user-feedback
+                    (string-append "Search is "
+                                   (if enabled? "case-insensitive" "case-sensitive")) 'info)))
           update)))
 
   (define (toggle-whole-word context)
@@ -63,10 +65,11 @@
            [surface-id (command-context-surface-id context)])
       (if (and (integer? surface-id) (exact? surface-id) (>= surface-id 0))
           (list update
-                (make-set-surface-message-operation
+                (make-set-surface-feedback-operation
                   surface-id
-                  (string-append "Search whole-word matching "
-                                 (if enabled? "disabled" "enabled"))))
+                  (make-user-feedback
+                    (string-append "Search whole-word matching "
+                                   (if enabled? "disabled" "enabled")) 'info)))
           update)))
 
   (define (toggle-regular-expression context)
@@ -83,10 +86,11 @@
            [surface-id (command-context-surface-id context)])
       (if (and (integer? surface-id) (exact? surface-id) (>= surface-id 0))
           (list update
-                (make-set-surface-message-operation
+                (make-set-surface-feedback-operation
                   surface-id
-                  (string-append "Search regular-expression matching "
-                                 (if enabled? "disabled" "enabled"))))
+                  (make-user-feedback
+                    (string-append "Search regular-expression matching "
+                                   (if enabled? "disabled" "enabled")) 'info)))
           update)))
 
   (define (make-search-service! host owner)

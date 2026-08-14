@@ -1,7 +1,6 @@
 (library (soda host frontend)
   (export host-frontend-surface-registered?
           host-frontend-active-view
-          host-frontend-surface-message
           host-frontend-clear-input-feedback!
           host-frontend-surface-hit-current?
           host-frontend-pointer-capture-current?
@@ -29,6 +28,7 @@
           (soda kernel view-state)
           (soda kernel viewport)
           (soda host condition)
+          (soda host feedback)
           (soda host command)
           (soda host context)
           (soda host dispatch)
@@ -114,18 +114,16 @@
                         (host-state-views state) (active-context-view-id context) #f))])
       (and context view (cons context view))))
 
-  (define (host-frontend-surface-message state surface)
-    (and (host-frontend-surface-registered? state surface)
-      (surface-status-message surface)))
-
   (define (host-frontend-clear-input-feedback! state surface)
     (unless (and (host-state? state) (surface? surface))
       (assertion-violation
         'host-frontend-clear-input-feedback! "expected HostState and Surface" state surface))
-    (and (eq? (surface-status-message-lifetime surface) 'until-command)
+    (let ([feedback (surface-feedback surface)])
+      (and feedback
+           (eq? (user-feedback-lifetime feedback) 'transient)
          (dispatcher-dispatch-host!
            (host-state-dispatch state)
-           (make-set-surface-message-operation (surface-id surface) #f))))
+           (make-set-surface-feedback-operation (surface-id surface) #f)))))
 
   (define (host-frontend-surface-hit-current? state surface hit)
     (and (host-state? state) (surface? surface) (surface-hit? hit)
