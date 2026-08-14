@@ -283,6 +283,10 @@
                     (list (make-key-stroke 'character (char->integer #\x) 4)
                           (make-key-stroke 'character (char->integer #\c) 4))
                     'application.quit)
+      (keymap-bind! keymap
+                    (list (make-key-stroke 'character (char->integer #\x) 4)
+                          (make-key-stroke 'character (char->integer #\k) 0))
+                    'buffer.kill)
       (keymap-bind! keymap (list (make-key-stroke 'character (char->integer #\u) 2))
                     'history.undo)
       (keymap-bind! keymap (list (make-key-stroke 'character (char->integer #\e) 2))

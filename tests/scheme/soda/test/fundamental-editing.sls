@@ -417,11 +417,10 @@
                           (list (make-key-stroke 'character (char->integer #\x) 4)
                                 (make-key-stroke 'character (char->integer #\i) 0)))
                          'file.insert)
-                   (eq? (keymap-lookup
+                   (not (keymap-lookup
                           file-map
                           (list (make-key-stroke 'character (char->integer #\x) 4)
-                                (make-key-stroke 'character (char->integer #\k) 0)))
-                        'buffer.kill)
+                                (make-key-stroke 'character (char->integer #\k) 0))))
                    (not (keymap-lookup
                           file-map
                           (list (make-key-stroke 'character (char->integer #\x) 4)

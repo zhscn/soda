@@ -72,12 +72,29 @@
            [context (active-command-context application)])
       (unless (and (access-has-key?
                      (command-access runtime context 'message.show-position) "C-c")
+                   (access-has-key?
+                     (command-access runtime context 'buffer.kill) "C-x k")
                    (not (command-access runtime context 'buffer.quit)))
         (error 'command-reachability-tests
                "fundamental context projected special-buffer commands"))
       (assert-command-dispatches!
         application (character-event #\c 4) 'message.show-position
         "fundamental key resolver diverged from the command projection")
+      (let* ([state (soda-application-state application)]
+             [surface (soda-application-surface application)]
+             [active (surface-active-context surface (host-state-views state))]
+             [view (view-service-ref (host-state-views state)
+                                     (active-context-view-id active))]
+             [result
+              (resolve-key-sequence
+                (input-context-layers
+                  (soda-application-resolve-input-context application active view))
+                (list (make-key-stroke 'character (char->integer #\x) 4)
+                      (make-key-stroke 'character (char->integer #\k) 0)))])
+        (unless (and (eq? (car result) 'command)
+                     (eq? (cadr result) 'buffer.kill))
+          (error 'command-reachability-tests
+                 "application key composition did not own the C-x k binding")))
       (soda-application-close! application)))
 
   (define (run-generated-context-test!)
