@@ -156,21 +156,24 @@
       (when current
         (let* ([active (car current)]
                [view (cdr current)]
-               [context ((frontend-resolve-input-context value) active view)])
+               [context ((frontend-resolve-input-context value) active view)]
+               [pending
+                (or (input-stack-pending-sequence
+                      (input-context-stack context)) '())])
           (validate-input-context! context active view)
           (host-frontend-dispatch-host!
             (frontend-host-state value)
             (make-set-surface-shortcut-hints-operation
               (surface-id (frontend-surface value))
-              (command-shortcut-hints
-                (host-state-command-runtime (frontend-host-state value))
-                (make-active-command-context
-                  value active view #f
-                  (or (input-stack-pending-sequence
-                        (input-context-stack context)) '())
-                  (input-stack-prefix-argument (input-context-stack context))
-                  active)
-                context)))))))
+              (if (null? pending)
+                  '()
+                  (command-shortcut-hints
+                    (host-state-command-runtime (frontend-host-state value))
+                    (make-active-command-context
+                      value active view #f pending
+                      (input-stack-prefix-argument (input-context-stack context))
+                      active)
+                    context))))))))
 
   (define (frontend-update-presentation! value)
     (unless (frontend-refreshing-presentation? value)

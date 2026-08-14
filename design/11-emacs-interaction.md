@@ -61,6 +61,7 @@ prefix key、minibuffer、echo area、mode line、Buffer/View/Window 语义作�
 | View-local soft wrap 与 tab width | 每个 View 保持独立布局配置 |
 | line-number gutter 与 guide column | 作为 View decoration 参与布局 |
 | constant position display | 导航状态在 echo area 中低优先级显示 |
+| prefix guidance | 未完成的 prefix 在 echo area 中按需显示可用的下一键，不占用常驻快捷键栏 |
 | 可组合 selection/search/diagnostic/semantic style overlay | decoration 在 cell renderer 之前构建并按范围查询 |
 | soft-wrap visual-row motion | motion 使用 DisplayMap 的可视行语义 |
 | viewport-relative paging | page command 以可视高度移动 viewport 并保持 point 可见 |
@@ -83,5 +84,6 @@ Emacs 交互基线使用以下可观察条件：
 - Buffer 与 View 的选项作用域在多 View 场景保持独立；
 - 输入、搜索、replace、spell 与 generated result Buffer 使用同一普通 Buffer 和 command
   生命周期；
+- 普通编辑状态保留正文、mode line 与 echo area；键位提示由 prefix 或显式帮助命令触发；
 - terminal frontend 在正常退出和 condition unwind 时恢复 terminal session；
 - 文件写入失败、外部版本变化和关闭决策保持 Buffer 与磁盘状态一致。

@@ -4051,7 +4051,7 @@
                        (view-state-selection (view-state view))))
                    2)
                 (<= 1 (length presented) 2)
-                (pair? (surface-shortcut-hints surface))
+                (null? (surface-shortcut-hints surface))
                 (let ([sessions
                        (input-stack-sessions
                          (view-state-input-state (view-state view)))])
@@ -4234,6 +4234,62 @@
                  0)
         (error 'fundamental-editing-tests
                "C-p did not preempt queued C-n action turns"))
+      (frontend-close! frontend)
+      (soda-application-close! application))
+
+    ;; Prefix guidance is derived from the active keymaps and appears only
+    ;; while a prefix is pending.  Ordinary editing keeps the echo area free
+    ;; for messages and position feedback.
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [surface (soda-application-surface application)]
+           [editing (soda-application-editing application)]
+           [presented #f]
+           [frontend
+            (make-frontend
+              state surface
+              (lambda (active current-view)
+                (buffer-input-context
+                  active current-view
+                  (list
+                    (make-input-layer
+                      'default
+                      (file-keymap (soda-application-files application))
+                      #f 'accept)
+                    (fundamental-fallback-input-layer editing))))
+              (lambda (context disposition)
+                (fundamental-input-disposition context disposition))
+              (lambda (render theme) (set! presented render))
+              (make-render-service) default-theme)])
+      (define (send! event)
+        (frontend-enqueue!
+          frontend (make-surface-input-message (surface-id surface) event))
+        (frontend-step! frontend))
+      (frontend-resize! frontend '(20 . 6))
+      (frontend-step! frontend)
+      (unless (null? (surface-shortcut-hints surface))
+        (error 'fundamental-editing-tests
+               "ordinary editing exposed persistent shortcut guidance"))
+      (send! (make-key-event 'character (char->integer #\x) #f #f 4 'press
+                             (make-bytevector 0)))
+      (unless (and
+                (exists
+                  (lambda (hint)
+                    (and (string=? (car hint) "C-x C-f")
+                         (string=? (cdr hint) "file.visit")))
+                  (surface-shortcut-hints surface))
+                (string-contains?
+                  (frame-row-string
+                    (surface-render-frame presented)
+                    (- (frame-height (surface-render-frame presented)) 1))
+                  "C-x"))
+        (error 'fundamental-editing-tests
+               "pending prefix did not expose contextual next-key guidance"))
+      (send! (make-key-event 'character (char->integer #\g) #f #f 4 'press
+                             (make-bytevector 0)))
+      (unless (null? (surface-shortcut-hints surface))
+        (error 'fundamental-editing-tests
+               "completed prefix retained stale shortcut guidance"))
       (frontend-close! frontend)
       (soda-application-close! application))
 
