@@ -169,17 +169,33 @@
                  (or (not mode) (symbol? mode) (mode-spec? mode)))
       (assertion-violation 'package-host-key-binding-layers
                            "expected a PackageHost, context, and optional mode" host context mode))
+    ;; Input resolution stops at the first matching layer.  The setting
+    ;; service exposes sources in registration order, while its configuration
+    ;; semantics let later sources in a layer override earlier sources and
+    ;; let user configuration override application defaults.  Preserve the
+    ;; same contract by materializing each source separately and placing the
+    ;; higher-precedence source layers first.
     (let* ([sources
             (setting-service-configuration-sources
               (host-state-settings (package-host-state host)))]
-           [declarations
-            (apply append
-              (map configuration-source-key-bindings
-                   (filter
-                     (lambda (source)
-                       (memq (configuration-source-layer source) '(application user)))
-                     sources)))])
-      (package-host-materialize-key-bindings host declarations context mode)))
+           [sources-by-precedence
+            (append
+              (reverse
+                (filter
+                  (lambda (source)
+                    (eq? (configuration-source-layer source) 'user))
+                  sources))
+              (reverse
+                (filter
+                  (lambda (source)
+                    (eq? (configuration-source-layer source) 'application))
+                  sources)))])
+      (apply append
+             (map
+               (lambda (source)
+                 (package-host-materialize-key-bindings
+                   host (configuration-source-key-bindings source) context mode))
+               sources-by-precedence))))
 
   (define (package-host-resolve-setting host name scope context)
     (setting-service-resolve

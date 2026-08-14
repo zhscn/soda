@@ -180,8 +180,9 @@
         (error 'fundamental-editing-tests
                "InputHistory did not bound and promote accepted values")))
     ;; A declarative key source is validated before its generation replaces
-    ;; the active input composition.  A rejected replacement leaves the
-    ;; previous binding observable through the normal application resolver.
+    ;; the active input composition.  User configuration overrides application
+    ;; defaults, and a rejected replacement leaves the prior user binding
+    ;; observable through the normal application resolver.
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
            [host (make-package-host state)]
@@ -190,10 +191,24 @@
            [binding
             (make-key-binding-declaration
               'editing #f (list stroke) 'message.show-position 'global #f)]
-           [source
+           [application-source
             (make-configuration-source
               'test.keys 'application #f '() (list binding) 0)])
-      (package-host-reload-configuration-source! host owner source)
+      (package-host-reload-configuration-source! host owner application-source)
+      (package-host-reload-configuration-source!
+        host owner
+        (make-configuration-source
+          'test.user-keys 'user #f '()
+          (list (make-key-binding-declaration
+                  'editing #f (list stroke) 'message.count-words 'global #f))
+          0))
+      (package-host-reload-configuration-source!
+        host owner
+        (make-configuration-source
+          'test.later-user-keys 'user #f '()
+          (list (make-key-binding-declaration
+                  'editing #f (list stroke) 'buffer.list 'global #f))
+          0))
       (let* ([surface (soda-application-surface application)]
              [active (surface-active-context surface (host-state-views state))]
              [view (view-service-ref (host-state-views state)
@@ -204,15 +219,15 @@
                               (make-key-event 'character (char->integer #\q) #f #f 0
                                               'press (make-bytevector 0)))])
         (unless (and (eq? (input-disposition-kind disposition) 'command)
-                     (eq? (input-disposition-value disposition) 'message.show-position))
+                     (eq? (input-disposition-value disposition) 'buffer.list))
           (error 'fundamental-editing-tests
-                 "published key source did not enter application input composition")))
+                 "later user key source did not override lower-precedence sources")))
       (unless
         (guard (condition [else #t])
           (package-host-reload-configuration-source!
             host owner
             (make-configuration-source
-              'test.keys 'application #f '()
+              'test.later-user-keys 'user #f '()
               (list (make-key-binding-declaration
                       'editing #f (list stroke) 'missing.command 'global #f))
               1))
@@ -228,9 +243,9 @@
               (input-dispatch context
                               (make-key-event 'character (char->integer #\q) #f #f 0
                                               'press (make-bytevector 0)))])
-        (unless (eq? (input-disposition-value disposition) 'message.show-position)
+        (unless (eq? (input-disposition-value disposition) 'buffer.list)
           (error 'fundamental-editing-tests
-                 "invalid key source replacement discarded the active generation")))
+                 "invalid key source replacement discarded the active user generation")))
       (owner-close! owner)
       (soda-application-close! application))
     ;; A frontend CommandContext retains the exact composed InputLayers.  Help
