@@ -146,15 +146,34 @@
                      (null? (command-access-key-sequences
                               (command-access runtime origin 'buffer.bury)))
                      ;; The active minibuffer itself has no M-x endpoint; its
-                     ;; projection includes only commands reached by its map.
+                     ;; projection contains local prompt editing plus the
+                     ;; application interrupt, not ordinary editor workflow.
                      (not (command-access runtime minibuffer-context 'buffer.bury))
+                     (not (command-access runtime minibuffer-context 'buffer.kill))
+                     (not (command-access runtime minibuffer-context 'file.visit))
+                     (not (command-access runtime minibuffer-context 'window.split-below))
+                     (not (command-access runtime minibuffer-context 'history.undo))
+                     (not (command-access runtime minibuffer-context 'command.execute-extended))
+                     (access-has-key?
+                       (command-access runtime minibuffer-context 'fundamental.backward-char) "C-b")
                      (access-has-key?
                        (command-access runtime minibuffer-context 'keyboard.quit) "C-g"))
           (error 'command-reachability-tests
                  "interaction origin and active minibuffer projections diverged"))
         (assert-command-dispatches!
           application (character-event #\g 4) 'keyboard.quit
-          "minibuffer key resolver diverged from the command projection"))
+          "minibuffer key resolver diverged from the command projection")
+        (assert-command-dispatches!
+          application (character-event #\b 4) 'fundamental.backward-char
+          "minibuffer lost its local basic text editing fallback")
+        (let ([result
+               (resolve-key-sequence
+                 (command-context-input-layers minibuffer-context)
+                 (list (make-key-stroke 'character (char->integer #\x) 4)
+                       (make-key-stroke 'character (char->integer #\f) 4)))])
+          (unless (eq? (car result) 'unbound)
+            (error 'command-reachability-tests
+                   "minibuffer resolver leaked the application file workflow" result))))
       ;; The assertion only resolves C-g; retire the suspended interaction
       ;; through its ordinary service lifecycle before closing the application.
       (minibuffer-service-cancel! minibuffer)
