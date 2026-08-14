@@ -6,7 +6,7 @@
           frontend-dirty?
           frontend-enqueue!
           frontend-pending?
-          frontend-discard-stale-legacy-repeats!
+          frontend-step-input-burst!
           frontend-step-action!
           frontend-step!
           frontend-resize!
@@ -52,6 +52,8 @@
       (immutable input-scheduler frontend-input-scheduler)
       (mutable theme frontend-theme frontend-theme-set!)
       (mutable dirty? frontend-dirty? frontend-dirty?-set!)
+      (mutable defer-presentation? frontend-defer-presentation?
+                                   frontend-defer-presentation?-set!)
       (mutable refreshing-presentation? frontend-refreshing-presentation?
                                         frontend-refreshing-presentation?-set!)
       (mutable pending-scroll frontend-pending-scroll frontend-pending-scroll-set!)
@@ -87,9 +89,8 @@
     (let* ([owner (make-owner 'frontend)]
            [value
             (%make-frontend owner state surface resolve-input-context handle-disposition
-                            present! render-service
-                            (make-input-scheduler state (surface-id surface))
-                            theme #t #f #f #f #f #f #f #f)])
+                            present! render-service (make-input-scheduler state)
+                            theme #t #f #f #f #f #f #f #f #f)])
       (frontend-routing-registration-set!
         value
         (host-frontend-register-handler!
@@ -148,14 +149,6 @@
   (define (frontend-pending? value)
     (require-open 'frontend-pending? value)
     (host-frontend-pending? (frontend-host-state value)))
-
-  ;; TerminalFrontend calls this after a poll with no input.  Keeping the
-  ;; protocol-specific timing decision at the terminal boundary avoids making
-  ;; generic frontend callers guess whether a key-up event is observable.
-  (define (frontend-discard-stale-legacy-repeats! value)
-    (require-open 'frontend-discard-stale-legacy-repeats! value)
-    (input-scheduler-discard-stale-legacy-repeats!
-      (frontend-input-scheduler value)))
 
   (define (active-view value)
     (host-frontend-active-view
@@ -433,7 +426,8 @@
                  ;; Input coordinates and visual-row motion are interpreted
                  ;; against a committed Frame.  Publish preceding host damage
                  ;; before starting the next input transaction.
-                 (when (and (frontend-dirty? value)
+                 (when (and (not (frontend-defer-presentation? value))
+                            (frontend-dirty? value)
                             (input-scheduler-presentation-ready?
                               (frontend-input-scheduler value)))
                    (%frontend-render! value))
@@ -497,36 +491,58 @@
   ;; Runtime work and completed user actions are separate budgets.  This keeps
   ;; the host queue generic while allowing an interactive frontend to yield at
   ;; an action boundary instead of after an arbitrary number of messages.
-  (define (frontend-advance! who value limit action-limit)
+  (define (frontend-advance! who value limit action-limit present-each-action?)
     (require-open who value)
     (unless (and (integer? limit) (exact? limit) (> limit 0))
       (assertion-violation who "limit must be a positive exact integer" limit))
-    (let loop ([processed 0]
-               [completed
-                (input-scheduler-completed-generation
-                  (frontend-input-scheduler value))]
-               [actions 0]
-               [presented? #f])
-      (if (or (>= processed limit)
-              (and action-limit (>= actions action-limit))
-              (not (frontend-pending? value)))
-          (begin
-            (unless presented? (frontend-render-if-ready! value))
-            processed)
-          (let* ([count (frontend-drain! value 1)]
-                 [next-completed
-                  (input-scheduler-completed-generation
-                    (frontend-input-scheduler value))]
-                 [cycle-completed? (> next-completed completed)])
-            (when cycle-completed? (frontend-render-if-ready! value))
-            (loop (+ processed count) next-completed
-                  (+ actions (if cycle-completed? 1 0))
-                  (or presented? cycle-completed?))))))
+    (let ([previous-defer? (frontend-defer-presentation? value)])
+      (dynamic-wind
+        (lambda ()
+          (when (not present-each-action?)
+            (frontend-defer-presentation?-set! value #t)))
+        (lambda ()
+          (let loop ([processed 0]
+                     [completed
+                      (input-scheduler-completed-generation
+                        (frontend-input-scheduler value))]
+                     [actions 0]
+                     [presented? #f])
+            (if (or (>= processed limit)
+                    (and action-limit (>= actions action-limit))
+                    (not (frontend-pending? value)))
+                (begin
+                  (unless presented? (frontend-render-if-ready! value))
+                  processed)
+                (let* ([count (frontend-drain! value 1)]
+                       [next-completed
+                        (input-scheduler-completed-generation
+                          (frontend-input-scheduler value))]
+                       [cycle-completed? (> next-completed completed)])
+                  (when (and cycle-completed? present-each-action?)
+                    (frontend-render-if-ready! value))
+                  (loop (+ processed count) next-completed
+                        (+ actions (if cycle-completed? 1 0))
+                        (or presented? (and cycle-completed? present-each-action?)))))))
+        (lambda ()
+          (frontend-defer-presentation?-set! value previous-defer?)))))
 
   (define frontend-step!
     (case-lambda
       [(value) (frontend-step! value 32)]
-      [(value limit) (frontend-advance! 'frontend-step! value limit #f)]))
+      [(value limit) (frontend-advance! 'frontend-step! value limit #f #t)]))
+
+  ;; A terminal read is one ordered input burst.  Its actions still run in
+  ;; order and each command receives the preceding command's state, but their
+  ;; Frames are coalesced into one presentation.  This keeps movement paced by
+  ;; available terminal input rather than by render round trips.
+  (define (frontend-step-input-burst! value action-count)
+    (unless (and (integer? action-count) (exact? action-count)
+                 (positive? action-count))
+      (assertion-violation
+        'frontend-step-input-burst! "expected a positive action count" action-count))
+    (frontend-advance!
+      'frontend-step-input-burst! value
+      (max 64 (* action-count 16)) action-count #f))
 
   ;; Advance through exactly one complete user action.  Internal runtime
   ;; messages needed by that action remain atomic, but control returns as soon
@@ -536,7 +552,7 @@
     (case-lambda
       [(value) (frontend-step-action! value 32)]
       [(value limit)
-       (frontend-advance! 'frontend-step-action! value limit 1)]))
+       (frontend-advance! 'frontend-step-action! value limit 1 #t)]))
 
   (define (frontend-resize! value size)
     (require-open 'frontend-resize! value)

@@ -175,50 +175,57 @@
         (terminal-frontend-stop! value))
       result))
 
+  ;; A single fd-ready callback can carry a complete terminal input burst.
+  ;; Count its decoded events while preserving native-event order; the core
+  ;; then executes that burst serially and presents only its final Frame.
+  (define (terminal-frontend-handle-native-events! value events)
+    (let loop ([remaining events] [input-count 0])
+      (if (null? remaining)
+          input-count
+          (let* ([event (car remaining)]
+                 [input?
+                  (terminal-input-session-event?
+                    (terminal-frontend-input value) event)]
+                 [result (terminal-frontend-handle-native-event! value event)])
+            (loop
+              (cdr remaining)
+              (if (and input? (integer? result) (exact? result) (positive? result))
+                  (+ input-count result)
+                  input-count))))))
+
   (define (terminal-frontend-step! value)
     (require-open 'terminal-frontend-step! value)
     (unless (terminal-frontend-active? value)
       (assertion-violation 'terminal-frontend-step! "terminal frontend is inactive" value))
-    (let ([events (native:runtime-poll-nowait! (terminal-frontend-runtime value))])
-      (for-each
-        (lambda (event) (terminal-frontend-handle-native-event! value event))
-        events)
-      (unless (exists
-                (lambda (event)
-                  (terminal-input-session-event?
-                    (terminal-frontend-input value) event))
-                events)
-        (frontend-discard-stale-legacy-repeats!
-          (terminal-frontend-core value))))
-    (terminal-frontend-sync-size! value)
-    (frontend-step-action! (terminal-frontend-core value)))
+    (let ([input-count
+           (terminal-frontend-handle-native-events!
+             value
+             (native:runtime-poll-nowait! (terminal-frontend-runtime value)))])
+      (terminal-frontend-sync-size! value)
+      (if (positive? input-count)
+          (frontend-step-input-burst! (terminal-frontend-core value) input-count)
+          (frontend-step-action! (terminal-frontend-core value)))))
 
   (define (terminal-frontend-run! value)
     (unless (terminal-frontend-active? value)
       (terminal-frontend-start! value))
     (let loop ()
       (when (terminal-frontend-active? value)
-        (let ([events
-               ((if (frontend-pending? (terminal-frontend-core value))
-                    native:runtime-poll-nowait!
-                    native:runtime-poll!)
-                (terminal-frontend-runtime value))])
-          (for-each
-            (lambda (event) (terminal-frontend-handle-native-event! value event))
-            events)
-          (unless (exists
-                    (lambda (event)
-                      (terminal-input-session-event?
-                        (terminal-frontend-input value) event))
-                    events)
-            (frontend-discard-stale-legacy-repeats!
-              (terminal-frontend-core value))))
-        (terminal-frontend-sync-size! value)
-        ;; One native poll and one complete editor action form a terminal turn.
-        ;; Returning here after every action lets a newly arrived direction
-        ;; preempt repeat events that have not started executing.
-        (frontend-step-action! (terminal-frontend-core value))
-        (loop))))
+        (let ([input-count
+               (terminal-frontend-handle-native-events!
+                 value
+                 ((if (frontend-pending? (terminal-frontend-core value))
+                      native:runtime-poll-nowait!
+                      native:runtime-poll!)
+                  (terminal-frontend-runtime value)))])
+          (terminal-frontend-sync-size! value)
+          (if (positive? input-count)
+              (frontend-step-input-burst!
+                (terminal-frontend-core value) input-count)
+              ;; Background runtime work remains a single action so it cannot
+              ;; starve newly readable terminal input.
+              (frontend-step-action! (terminal-frontend-core value)))
+        (loop)))))
 
   (define (terminal-frontend-close! value)
     (unless (terminal-frontend? value)

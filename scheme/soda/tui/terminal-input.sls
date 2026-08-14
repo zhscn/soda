@@ -49,9 +49,7 @@
       (mutable paste-chunks decoder-paste-chunks decoder-paste-chunks-set!)
       (mutable paste-tail decoder-paste-tail decoder-paste-tail-set!)
       (immutable clock decoder-clock)
-      (mutable last-click decoder-last-click decoder-last-click-set!)
-      (mutable last-key-press decoder-last-key-press
-               decoder-last-key-press-set!)))
+      (mutable last-click decoder-last-click decoder-last-click-set!)))
 
   (define (monotonic-milliseconds)
     (let ([time (current-time 'time-monotonic)])
@@ -66,54 +64,9 @@
          (assertion-violation
            'make-terminal-input-decoder "clock must be a procedure" clock))
        (%make-terminal-input-decoder
-         (make-bytevector 0) #f '() (make-bytevector 0) clock #f #f)]))
+         (make-bytevector 0) #f '() (make-bytevector 0) clock #f)]))
 
   (define click-interval-ms 500)
-
-  ;; Legacy terminal protocols send auto-repeat as indistinguishable repeated
-  ;; presses.  The raw-input callback may receive several of them in one read;
-  ;; make that uncertainty explicit before the scheduler decides how much
-  ;; repeat debt may remain queued.  A later physical tap has the same editor
-  ;; meaning, so conservative classification only changes scheduling, never
-  ;; keymap resolution.
-  (define legacy-repeat-window-ms 150)
-
-  (define (same-physical-key? left right)
-    (and (key-event? left) (key-event? right)
-         (key-stroke=? (key-event->key-stroke left)
-                       (key-event->key-stroke right))))
-
-  (define (with-key-event-type event type)
-    (make-key-event
-      (key-event-key event)
-      (key-event-codepoint event)
-      (key-event-shifted-codepoint event)
-      (key-event-base-layout-codepoint event)
-      (key-event-modifiers event) type (key-event-text event)))
-
-  (define (mark-legacy-repeats! decoder events)
-    (let ([now ((decoder-clock decoder))])
-      (let loop ([remaining events] [result '()]
-                 [previous (decoder-last-key-press decoder)])
-        (if (null? remaining)
-            (begin
-              (decoder-last-key-press-set! decoder previous)
-              (reverse result))
-            (let ([event (car remaining)])
-              (cond
-                [(and (key-event? event) (eq? (key-event-type event) 'press))
-                 (let* ([repeat?
-                         (and previous
-                              (same-physical-key? event (car previous))
-                              (<= 0 (- now (cdr previous)) legacy-repeat-window-ms))]
-                        [next (if repeat?
-                                  (with-key-event-type event 'legacy-repeat)
-                                  event)])
-                   (loop (cdr remaining) (cons next result) (cons event now)))]
-                [(and (key-event? event) (eq? (key-event-type event) 'release))
-                 (loop (cdr remaining) (cons event result) #f)]
-                [else
-                 (loop (cdr remaining) (cons event result) previous)]))))))
 
   (define (with-click-count decoder event)
     (if (not (and (pointer-event? event)
@@ -632,11 +585,9 @@
                                  (character-event
                                    bytes index (+ index width) 0 #t)
                                  events))))]))])))])
-        (mark-legacy-repeats!
-          decoder
-          (if (decoder-paste? decoder)
-              (parse-paste initial '())
-              (parse-normal initial 0 '()))))))
+        (if (decoder-paste? decoder)
+            (parse-paste initial '())
+            (parse-normal initial 0 '())))))
 
   ;; The frontend arms an Escape timer only while this decoder is pending.
   ;; Flushing a lone Escape commits it; other incomplete protocol units become
