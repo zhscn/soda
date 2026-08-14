@@ -139,15 +139,14 @@
               host (process-service-owner service)
               (make-process-buffer-name (process-request-command request))
               (make-document "") configuration)])
-      (unless
-        (package-host-present-buffer!
-          host (process-service-owner service) buffer
-          (command-context-surface-id context)
-          (command-context-window-id context) configuration)
-        (package-host-close-buffer! host (buffer-id buffer))
-        (assertion-violation 'process.execute
-                             "origin Window is no longer available" context))
-      buffer))
+      (if (package-host-present-buffer-if-current!
+            host (process-service-owner service) buffer context configuration)
+          buffer
+          (begin
+            ;; A queued spawn may run after its initiating Window changed.
+            ;; Do not start an invisible process or replace the new View.
+            (package-host-close-buffer! host (buffer-id buffer))
+            #f))))
 
   (define (process-service-run! service job)
     (unless (and (process-service? service) (process-job? job))
@@ -175,19 +174,20 @@
   (define (start-process! service request)
     (unless (process-request? request)
       (assertion-violation 'process.spawn "invalid process request" request))
-    (let* ([buffer (open-output-buffer! service request)]
-           [buffer-id (buffer-id buffer)]
-           [job
-            (make-process-job
-              (list "/bin/sh" "-c" (process-request-command request))
-              (current-directory) (make-bytevector 0)
-              (lambda (event)
-                (enqueue-output! service (process-request-context request)
-                                 buffer-id (native:event-data event)))
-              (lambda (status flags)
-                (enqueue-exit! service (process-request-context request)
-                               buffer-id status)))])
-      (process-service-run! service job)))
+    (let ([buffer (open-output-buffer! service request)])
+      (and buffer
+           (let* ([buffer-id (buffer-id buffer)]
+                  [job
+                   (make-process-job
+                     (list "/bin/sh" "-c" (process-request-command request))
+                     (current-directory) (make-bytevector 0)
+                     (lambda (event)
+                       (enqueue-output! service (process-request-context request)
+                                        buffer-id (native:event-data event)))
+                     (lambda (status flags)
+                       (enqueue-exit! service (process-request-context request)
+                                      buffer-id status)))])
+             (process-service-run! service job)))))
 
   (define (process-service-attach-runtime! service runtime)
     (unless (and (process-service? service) (native:runtime? runtime))
