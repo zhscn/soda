@@ -55,6 +55,9 @@
       (mutable dirty? frontend-dirty? frontend-dirty?-set!)
       (mutable defer-presentation? frontend-defer-presentation?
                                    frontend-defer-presentation?-set!)
+      (mutable presentation-update-pending?
+               frontend-presentation-update-pending?
+               frontend-presentation-update-pending?-set!)
       (mutable refreshing-presentation? frontend-refreshing-presentation?
                                         frontend-refreshing-presentation?-set!)
       (mutable pending-scroll frontend-pending-scroll frontend-pending-scroll-set!)
@@ -92,7 +95,7 @@
             (%make-frontend owner state surface resolve-input-context handle-disposition
                             present! render-service (make-viewport-resolution-cache)
                             (make-input-scheduler state)
-                            theme #t #f #f #f #f #f #f #f #f)])
+                            theme #t #f #f #f #f #f #f #f #f #f)])
       (frontend-routing-registration-set!
         value
         (host-frontend-register-handler!
@@ -155,7 +158,7 @@
     (host-frontend-active-view
       (frontend-host-state value) (frontend-surface value)))
 
-  (define (frontend-refresh-prefix-guidance! value)
+  (define (frontend-compute-prefix-guidance! value)
     (let ([current (active-view value)])
       (when current
         (let* ([active (car current)]
@@ -179,11 +182,25 @@
                       active context)
                     context))))))))
 
+  ;; Prefix guidance belongs to presentation chrome, not to the input
+  ;; transition itself.  A terminal read may contain many movements, each of
+  ;; which publishes a View update.  Defer its recomputation with the Frame so
+  ;; the committed state alone decides what the user sees.
   (define (frontend-update-presentation! value)
+    (if (frontend-defer-presentation? value)
+        (frontend-presentation-update-pending?-set! value #t)
+        (frontend-refresh-prefix-guidance! value)))
+
+  (define (frontend-flush-presentation-update! value)
+    (when (frontend-presentation-update-pending? value)
+      (frontend-presentation-update-pending?-set! value #f)
+      (frontend-refresh-prefix-guidance! value)))
+
+  (define (frontend-refresh-prefix-guidance! value)
     (unless (frontend-refreshing-presentation? value)
       (dynamic-wind
         (lambda () (frontend-refreshing-presentation?-set! value #t))
-        (lambda () (frontend-refresh-prefix-guidance! value))
+        (lambda () (frontend-compute-prefix-guidance! value))
         (lambda () (frontend-refreshing-presentation?-set! value #f)))))
 
   (define (validate-input-context! context active view)
@@ -533,8 +550,10 @@
                     (and action-limit (>= actions action-limit))
                     (not (frontend-pending? value)))
                 (begin
-                  (when (and (continue?) (not presented?))
-                    (frontend-render-if-ready! value))
+                  (when (continue?)
+                    (frontend-flush-presentation-update! value)
+                    (unless presented?
+                      (frontend-render-if-ready! value)))
                   processed)
                 (let* ([count (frontend-drain! value 1)]
                        [next-completed

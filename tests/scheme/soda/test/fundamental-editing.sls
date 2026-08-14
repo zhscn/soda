@@ -5459,6 +5459,54 @@
       (frontend-close! frontend)
       (soda-application-close! application))
 
+    ;; A command in an input burst may replace the active View with a
+    ;; minibuffer.  Later events in that same terminal read must resolve their
+    ;; context after the command, rather than editing the View that received
+    ;; its key prefix.
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [surface (soda-application-surface application)]
+           [scratch (soda-application-buffer application)]
+           [minibuffer (soda-application-minibuffer application)]
+           [frontend
+            (make-frontend
+              state surface
+              (lambda (active current-view)
+                (soda-application-resolve-input-context
+                  application active current-view))
+              (lambda (context disposition)
+                (fundamental-input-disposition context disposition))
+              (lambda (render theme) #f)
+              (make-render-service) default-theme)])
+      (define (enqueue! event)
+        (frontend-enqueue!
+          frontend
+          (make-surface-input-message (surface-id surface) event)))
+      (define (control-event character)
+        (make-key-event
+          'character (char->integer character) #f #f 4 'press
+          (make-bytevector 0)))
+      (enqueue! (control-event #\x))
+      (enqueue! (control-event #\f))
+      (enqueue! (make-text-input-event 'text (string->utf8 "xy")))
+      (enqueue! (make-key-event 'backspace 127 #f #f 0 'press
+                                (make-bytevector 0)))
+      (frontend-step-input-burst! frontend 4)
+      (let* ([session (minibuffer-service-current minibuffer)]
+             [input
+              (and session
+                   (prompt-snapshot-input
+                     (minibuffer-session-snapshot minibuffer session)))])
+        (unless (and session
+                     (positive? (string-length input))
+                     (char=? (string-ref input (- (string-length input) 1)) #\x)
+                     (string=? (buffer-string scratch) ""))
+          (error 'fundamental-editing-tests
+                 "input burst did not route post-visit text to its minibuffer"
+                 input (buffer-string scratch))))
+      (frontend-close! frontend)
+      (soda-application-close! application))
+
     ;; Prefix guidance is derived from the active keymaps and appears only
     ;; while a prefix is pending.  Ordinary editing keeps the echo area free
     ;; for messages and position feedback.
