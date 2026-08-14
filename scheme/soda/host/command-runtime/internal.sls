@@ -695,7 +695,8 @@
       (command-context-event context)
       (command-context-key-sequence context)
       prefix (command-context-target context) source
-      (command-context-layout context)))
+      (command-context-layout context)
+      (command-context-input-layers context)))
 
   (define (command-runtime-repeat-last! service context)
     (unless (and (command-runtime? service) (command-context? context))

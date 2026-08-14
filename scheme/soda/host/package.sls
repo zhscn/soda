@@ -795,5 +795,6 @@
            (make-command-context
              #f surface-id requested-window-id (view-id view) (buffer-id buffer)
              (buffer-state buffer) (view-state view) #f '() prefix
-             (command-context-target template) source #f))))
+             (command-context-target template) source #f
+             (command-context-input-layers template)))))
 )

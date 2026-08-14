@@ -198,6 +198,9 @@
        (host-frontend-make-command-context
          state active event sequence prefix-argument source layout active)]
       [(state active event sequence prefix-argument source layout target)
+       (host-frontend-make-command-context
+         state active event sequence prefix-argument source layout target #f)]
+      [(state active event sequence prefix-argument source layout target input-layers)
     (let* ([view
             (or (view-service-ref
                   (host-state-views state) (active-context-view-id active) #f)
@@ -213,7 +216,7 @@
         (buffer-id buffer)
         (buffer-state buffer)
         (view-state view)
-        event sequence prefix-argument target source layout))]))
+        event sequence prefix-argument target source layout input-layers))]))
 
   ;; Resolve a semantic scroll request against the immutable layout last
   ;; presented for its exact Surface/Window/View occurrence.  Host owns the

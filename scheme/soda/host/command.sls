@@ -32,6 +32,7 @@
           command-context-target
           command-context-source
           command-context-layout
+          command-context-input-layers
           make-command-policy
           command-policy?
           command-policy-semantic-command
@@ -233,25 +234,39 @@
       ;; presented for this View.  Command packages treat it as an optional
       ;; read-only measurement; headless callers use #f and retain logical
       ;; motion semantics.
-      (immutable layout command-context-layout)))
+      (immutable layout command-context-layout)
+      ;; A frontend may attach the composed InputLayers that resolved the
+      ;; invocation.  Command presentation uses this optional snapshot to
+      ;; include transient interaction bindings in its user-facing view.
+      (immutable input-layers command-context-input-layers)))
 
   (define make-command-context
     (case-lambda
       [(view-id buffer-id source)
        (%make-command-context
-         view-id buffer-id #f #f #f #f #f #f '() #f #f source #f)]
+         view-id buffer-id #f #f #f #f #f #f '() #f #f source #f #f)]
       [(invocation-id surface-id window-id view-id buffer-id buffer-state view-state event
                       key-sequence prefix-argument target source)
        (%make-command-context
          view-id buffer-id invocation-id surface-id window-id buffer-state view-state event
          (if (list? key-sequence) (list-copy key-sequence) '())
-         prefix-argument target source #f)]
+         prefix-argument target source #f #f)]
       [(invocation-id surface-id window-id view-id buffer-id buffer-state view-state event
                       key-sequence prefix-argument target source layout)
        (%make-command-context
          view-id buffer-id invocation-id surface-id window-id buffer-state view-state event
          (if (list? key-sequence) (list-copy key-sequence) '())
-         prefix-argument target source layout)]))
+         prefix-argument target source layout #f)]
+      [(invocation-id surface-id window-id view-id buffer-id buffer-state view-state event
+                      key-sequence prefix-argument target source layout input-layers)
+       (unless (or (not input-layers) (list? input-layers))
+         (assertion-violation 'make-command-context
+                              "input layers must be a list or false" input-layers))
+       (%make-command-context
+         view-id buffer-id invocation-id surface-id window-id buffer-state view-state event
+         (if (list? key-sequence) (list-copy key-sequence) '())
+         prefix-argument target source layout
+         (and input-layers (list-copy input-layers)))]))
 
   ;; PrefixArgument retains the raw input form while giving commands one
   ;; stable numeric interpretation.  #f at old API boundaries is normalized

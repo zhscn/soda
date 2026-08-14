@@ -59,16 +59,18 @@
         'command-context-keymaps
         "expected a CommandContext and fallback InputLayers"
         context fallback-layers))
-    (let ([state (command-context-buffer-state context)])
+    (let ([invocation-layers (command-context-input-layers context)]
+          [state (command-context-buffer-state context)])
       (map input-layer-keymap
-           (input-layer-compose
-             (append
-               (if state
-                   (configuration-facet
-                     (buffer-state-configuration state)
-                     buffer-input-layers-facet 'buffer)
-                   '())
-               fallback-layers)))))
+           (or invocation-layers
+               (input-layer-compose
+                 (append
+                   (if state
+                       (configuration-facet
+                         (buffer-state-configuration state)
+                         buffer-input-layers-facet 'buffer)
+                       '())
+                   fallback-layers))))))
 
   ;; A CommandAccess is the canonical user-facing projection for one command
   ;; in one context.  An empty key sequence list means it is available only

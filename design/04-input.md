@@ -89,6 +89,11 @@ dispatch、prefix guidance 和 command lookup 使用同一个 translation。Emac
 `ESC + key` 规范化为对应的 Meta KeyStroke，连续 Escape 保持独立 prefix key。其他 application
 使用 identity translation。
 
+frontend 生成的 `CommandContext` 保留触发该 command 的有序 InputLayer 快照。`M-x`、Help、
+`describe-command` 与 `where-is` 使用该快照构造用户命令可达性投影；临时 interaction keymap
+因此与实际 dispatch 一致，且不会由后续的配置重组替代。没有 frontend 快照的直接或测试调用使用
+Buffer mode 与 application fallback 重建等价层。
+
 layer 按高到低组合：
 
 ```text

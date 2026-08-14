@@ -172,7 +172,7 @@
                     (make-active-command-context
                       value active view #f pending
                       (input-stack-prefix-argument (input-context-stack context))
-                      active)
+                      active context)
                     context))))))))
 
   (define (frontend-update-presentation! value)
@@ -260,10 +260,11 @@
                 (frontend-pending-scroll-set! value #f))))))))
 
   (define (make-active-command-context
-            value active view event sequence prefix-argument target)
+            value active view event sequence prefix-argument target input-context)
     (host-frontend-make-command-context
       (frontend-host-state value) active event sequence prefix-argument
-      'tui-frontend (active-command-layout value active view) target))
+      'tui-frontend (active-command-layout value active view) target
+      (input-context-layers input-context)))
 
   (define (pointer-route value event)
     (let* ([render
@@ -353,7 +354,8 @@
                     (make-active-command-context
                       value active view event sequence
                       (input-stack-prefix-argument (input-context-stack context))
-                      (if route (caddr route) active))])
+                      (if route (caddr route) active)
+                      context)])
                (case (input-disposition-kind disposition)
                  [(command)
                   (let ([name (input-disposition-value disposition)])

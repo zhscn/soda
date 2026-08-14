@@ -44,6 +44,7 @@
           (soda packages base history)
           (soda packages base text-motion)
           (soda packages completion)
+          (soda packages command-presentation)
           (soda packages file-path)
           (soda packages file-service)
           (soda packages file-format)
@@ -102,6 +103,23 @@
     (let ([feedback (surface-feedback surface)])
       (and feedback (user-feedback-text feedback))))
 
+  (define (command-context-with-input-layers context layers)
+    (make-command-context
+      (command-context-invocation-id context)
+      (command-context-surface-id context)
+      (command-context-window-id context)
+      (command-context-view-id context)
+      (command-context-buffer-id context)
+      (command-context-buffer-state context)
+      (command-context-view-state context)
+      (command-context-event context)
+      (command-context-key-sequence context)
+      (command-context-prefix-argument context)
+      (command-context-target context)
+      (command-context-source context)
+      (command-context-layout context)
+      layers))
+
   (define (invoke-viewport-command! application name layout)
     (let* ([state (soda-application-state application)]
            [surface (soda-application-surface application)]
@@ -159,6 +177,40 @@
       (unless (equal? (input-history-entries history) '("third" "first"))
         (error 'fundamental-editing-tests
                "InputHistory did not bound and promote accepted values")))
+    ;; A frontend CommandContext retains the exact composed InputLayers.  Help
+    ;; and M-x must describe that snapshot rather than recomposing fallback
+    ;; layers and accidentally omitting a transient interaction binding.
+    (let* ([application (make-soda-application)]
+           [runtime (host-state-command-runtime (soda-application-state application))]
+           [origin (application-command-context application)]
+           [transient (make-keymap 'matrix-transient)]
+           [fallback (make-keymap 'matrix-fallback)]
+           [_transient
+            (keymap-bind!
+              transient (list (make-key-stroke 'character (char->integer #\q) 0))
+              'message.show-position)]
+           [_fallback
+            (keymap-bind!
+              fallback (list (make-key-stroke 'character (char->integer #\r) 0))
+              'message.show-position)]
+           [layers (list (make-input-layer 'transient transient #f 'ignore))]
+           [context (command-context-with-input-layers origin layers)]
+           [access
+            (command-context-command-access
+              runtime context (list (make-input-layer 'global fallback #f 'pass))
+              'message.show-position)]
+           [resolved (resolve-key-sequence layers
+                                           (list (make-key-stroke 'character
+                                                                  (char->integer #\q) 0)))])
+      (unless (and access
+                   (equal? (map key-sequence-name
+                                (command-access-key-sequences access))
+                           '("q"))
+                   (eq? (car resolved) 'command)
+                   (eq? (cadr resolved) 'message.show-position))
+        (error 'fundamental-editing-tests
+               "command presentation diverged from the frontend InputLayer snapshot"))
+      (soda-application-close! application))
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
            [runtime (host-state-command-runtime state)]
