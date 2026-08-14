@@ -280,6 +280,21 @@
                                                     " *minibuffer*" document configuration)]
                [view (package-host-create-view! host (minibuffer-service-owner service)
                                                 buffer configuration)])
+          ;; Initial prompt contents are ready for continuation. Establish the
+          ;; point before placement so every frontend observes the same first
+          ;; Frame and no reader needs a follow-up motion command.
+          (let ([end
+                 (snapshot-byte-size
+                   (buffer-state-document (buffer-state buffer)))])
+            (when (positive? end)
+              (let ([state (view-state view)])
+                (package-host-dispatch-view!
+                  host
+                  (make-view-transaction-spec
+                    (view-id view) (view-state-generation state)
+                    (make-selection (list (make-selection-range end end)))
+                    (view-state-viewport state)
+                    #f '() '() #f)))))
           (if (package-host-push-interaction-view!
                 host (command-context-surface-id context) (view-id view) 1)
               (let ([session

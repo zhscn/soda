@@ -1302,7 +1302,11 @@
                    (string=? (interaction-request-prompt (interaction-session-request session))
                              "Value: ")
                    (minibuffer-service-current minibuffer)
-                   (string=? setup-input "accepted"))
+                   (string=? setup-input "accepted")
+                   (= (prompt-snapshot-point
+                        (minibuffer-session-snapshot
+                          minibuffer (minibuffer-service-current minibuffer)))
+                      8))
         (error 'fundamental-editing-tests "interactive command did not open a reusable session"))
       (let* ([prompt-session (minibuffer-service-current minibuffer)]
              [prompt-view
@@ -1353,7 +1357,6 @@
           (frontend-enqueue!
             frontend (make-surface-input-message (surface-id surface) event))
           (frontend-step! frontend))
-        (send! (make-key-event 'end #f #f #f 0 'press (make-bytevector 0)))
         (send! (make-text-input-event 'text (string->utf8 "x")))
         (send! (make-key-event 'backspace 127 #f #f 0 'press (make-bytevector 0)))
         (unless (string=?
@@ -1385,6 +1388,36 @@
                    (string=? exit-input "acceptedé")
                    (equal? (reverse events) '(opened accepted)))
         (error 'fundamental-editing-tests "interaction submission did not resume through the queue"))
+      (let* ([unicode-reader
+              (make-interactive-reader
+                'file-name
+                (lambda (context arguments)
+                  (make-interactive-suspend
+                    (make-interaction-request
+                      'file-name "Path: " "目录/" #f 'free)
+                    (lambda (value) (make-interactive-ready (list value))))))]
+             [_unicode-command
+              (command-runtime-register-command!
+                runtime
+                (make-command-definition
+                  'interaction.unicode-initial-test
+                  (lambda (context value) (command-handled))
+                  owner "Unicode initial prompt test" 'test
+                  (make-interactive-plan (list unicode-reader))))])
+        (command-runtime-start-interactive!
+          runtime 'interaction.unicode-initial-test
+          (application-command-context application))
+        (let* ([prompt-session (minibuffer-service-current minibuffer)]
+               [snapshot (minibuffer-session-snapshot minibuffer prompt-session)]
+               [range (selection-primary-range
+                        (prompt-snapshot-selection snapshot))])
+          (unless (and (string=? (prompt-snapshot-input snapshot) "目录/")
+                       (= (prompt-snapshot-point snapshot) 3)
+                       (= (selection-range-head range) 7))
+            (error 'fundamental-editing-tests
+                   "Unicode initial prompt did not place point at its logical end")))
+        (minibuffer-service-cancel! minibuffer)
+        (host-state-run! state))
       (let* ([source
               (make-completion-source
                 (lambda (snapshot)

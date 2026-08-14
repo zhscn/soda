@@ -64,7 +64,8 @@ PromptRequest {
 ```
 
 - `prompt` 是 chrome，由 TUI component 渲染，不属于输入 Document。
-- `initial` 是输入 Buffer 的初始正文。
+- `initial` 是输入 Buffer 的初始正文。prompt View 在首次 placement 前将 point 放在其
+  末尾，使初始内容可以直接继续输入；空正文的 point 为 0。
 - `default` 只在接受空输入时成为结果，不预先插入 Document。
 - `history-key` 按输入用途选择 MinibufferService 持有的 history collection。共享键的
   request 共享已接受值；文件名和扩展命令等不同用途保持隔离。
