@@ -22,6 +22,7 @@
           completion-controller-source completion-controller-generation
           completion-controller-candidates completion-controller-selected-index
           completion-controller-selection-policy
+          completion-controller-context-current?
           completion-controller-refresh! completion-controller-select!
           completion-controller-selected completion-controller-restore!
           completion-controller-accept! completion-controller-valid-input?
@@ -141,8 +142,8 @@
             (mutable generation completion-controller-generation completion-controller-generation-set!)
             (mutable candidates completion-controller-candidates completion-controller-candidates-set!)
             (mutable selected-index completion-controller-selected-index completion-controller-selected-index-set!)
-            (mutable input-revision completion-controller-input-revision
-                     completion-controller-input-revision-set!)
+            (mutable context-identity completion-controller-context-identity
+                     completion-controller-context-identity-set!)
             (mutable preview-snapshot completion-controller-preview-snapshot
                      completion-controller-preview-snapshot-set!)
             (immutable selection-policy completion-controller-selection-policy)))
@@ -150,6 +151,24 @@
     (unless (and (completion-source? source) (memq selection-policy '(free must-match)))
       (assertion-violation 'make-completion-controller "invalid completion controller"))
     (%make-completion-controller source 0 '() #f #f #f selection-policy))
+
+  ;; Candidate ranges and previews belong to the exact prompt context that
+  ;; produced them. A point move can select another completion field without
+  ;; changing the prompt Document revision.
+  (define (prompt-snapshot-context-identity snapshot)
+    (list (prompt-snapshot-session-id snapshot)
+          (prompt-snapshot-input-revision snapshot)
+          (prompt-snapshot-point snapshot)
+          (prompt-snapshot-selection snapshot)))
+
+  (define (completion-controller-context-current? controller snapshot)
+    (unless (and (completion-controller? controller) (prompt-snapshot? snapshot))
+      (assertion-violation
+        'completion-controller-context-current?
+        "expected a CompletionController and PromptSnapshot"
+        controller snapshot))
+    (equal? (completion-controller-context-identity controller)
+            (prompt-snapshot-context-identity snapshot)))
   (define (completion-controller-selected controller)
     (let ([index (completion-controller-selected-index controller)]
           [candidates (completion-controller-candidates controller)])
@@ -171,18 +190,16 @@
         (completion-controller-preview-snapshot-set! controller snapshot))))
   (define (completion-controller-refresh! controller snapshot)
     (completion-controller-restore! controller)
-    (let* ([same-input?
-            (and (completion-controller-input-revision controller)
-                 (= (completion-controller-input-revision controller)
-                    (prompt-snapshot-input-revision snapshot)))]
-           [selected (and same-input? (completion-controller-selected controller))]
+    (let* ([same-context?
+            (completion-controller-context-current? controller snapshot)]
+           [selected (and same-context? (completion-controller-selected controller))]
            [selected-id (and selected (completion-candidate-id selected))]
            [candidates ((completion-source-refresh (completion-controller-source controller)) snapshot)])
       (unless (and (list? candidates) (for-all completion-candidate? candidates))
         (assertion-violation 'completion-controller-refresh! "source returned invalid candidates" candidates))
       (completion-controller-generation-set! controller (+ 1 (completion-controller-generation controller)))
-      (completion-controller-input-revision-set!
-        controller (prompt-snapshot-input-revision snapshot))
+      (completion-controller-context-identity-set!
+        controller (prompt-snapshot-context-identity snapshot))
       (completion-controller-candidates-set! controller (reverse (reverse candidates)))
       (completion-controller-selected-index-set! controller
         (let loop ([items candidates] [index 0])
@@ -193,6 +210,10 @@
       (completion-controller-preview! controller snapshot)
       controller))
   (define (completion-controller-select! controller index snapshot)
+    (unless (completion-controller-context-current? controller snapshot)
+      (assertion-violation 'completion-controller-select!
+                           "cannot select a candidate from a stale prompt context"
+                           index))
     (unless (and (integer? index) (exact? index) (>= index -1)
                  (< index (length (completion-controller-candidates controller))))
       (assertion-violation 'completion-controller-select! "invalid candidate index" index))
@@ -201,7 +222,8 @@
     (completion-controller-preview! controller snapshot)
     controller)
   (define (completion-controller-accept! controller snapshot)
-    (let ([candidate (completion-controller-selected controller)]
+    (let ([candidate (and (completion-controller-context-current? controller snapshot)
+                          (completion-controller-selected controller))]
           [accept (completion-source-accept (completion-controller-source controller))])
       (if (and candidate accept)
           (guard
@@ -252,10 +274,12 @@
       (assertion-violation 'completion-controller-application
                            "expected a CompletionController and PromptSnapshot"
                            controller snapshot))
-    (let* ([input (prompt-snapshot-input snapshot)]
-           [candidates (completion-controller-candidates controller)]
-           [selected (completion-controller-selected controller)])
-      (cond
+    (if (not (completion-controller-context-current? controller snapshot))
+        #f
+        (let* ([input (prompt-snapshot-input snapshot)]
+               [candidates (completion-controller-candidates controller)]
+               [selected (completion-controller-selected controller)])
+          (cond
         [selected
          (call-with-values
            (lambda () (completion-candidate-apply selected input)) cons)]
@@ -289,5 +313,5 @@
                   (lambda ()
                     (completion-candidate-apply first input prefix))
                   cons)))]
-        [else #f])))
+            [else #f]))))
 )

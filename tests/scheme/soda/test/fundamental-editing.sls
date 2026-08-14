@@ -1597,6 +1597,82 @@
                    "free completion did not navigate from raw input to its first candidate")))
         (minibuffer-service-cancel! minibuffer)
         (host-state-run! state))
+      ;; Candidate identity includes the prompt point. Moving between fields
+      ;; without editing the Document must refresh ranges and clear a selection
+      ;; that belonged to the old field.
+      (let* ([source
+              (make-completion-source
+                (lambda (snapshot)
+                  (let* ([input (prompt-snapshot-input snapshot)]
+                         [point (prompt-snapshot-point snapshot)]
+                         [separator
+                          (let loop ([index 0])
+                            (cond
+                              [(= index (string-length input)) #f]
+                              [(char=? (string-ref input index) #\/) index]
+                              [else (loop (+ index 1))]))]
+                         [left? (and separator (<= point separator))]
+                         [start (if left? 0 (+ separator 1))]
+                         [end (if left? separator (string-length input))]
+                         [text (if left? "LEFT" "RIGHT")])
+                    (list
+                      (make-replacement-completion-candidate
+                        text start end text text #f #f #f 'final))))
+                #f #f #f)]
+             [reader
+              (make-interactive-reader
+                'read-field-context
+                (lambda (context arguments)
+                  (make-interactive-suspend
+                    (make-interaction-request
+                      'string "Fields: " "left/right" source 'free)
+                    (lambda (value) (make-interactive-ready (list value))))))]
+             [_command
+              (command-runtime-register-command!
+                runtime
+                (make-command-definition
+                  'interaction.field-context-test
+                  (lambda (context value) (command-handled))
+                  owner "Field context completion test" 'test
+                  (make-interactive-plan (list reader))))])
+        (command-runtime-start-interactive!
+          runtime 'interaction.field-context-test
+          (application-command-context application))
+        (command-runtime-start!
+          runtime 'fundamental.end-of-buffer
+          (application-command-context application))
+        (let ([controller (minibuffer-service-refresh-completion! minibuffer)])
+          (minibuffer-service-select-completion! minibuffer 0)
+          (unless (= (completion-candidate-replacement-start
+                       (completion-controller-selected controller))
+                     5)
+            (error 'fundamental-editing-tests
+                   "completion did not start in the point-selected field"))
+          (command-runtime-start!
+            runtime 'fundamental.beginning-of-buffer
+            (application-command-context application))
+          (let* ([current (minibuffer-session-completion
+                            (minibuffer-service-current minibuffer))]
+                 [candidate (car (completion-controller-candidates current))])
+            (unless (and (not (completion-controller-selected-index current))
+                         (= (completion-candidate-replacement-start candidate) 0)
+                         (= (completion-candidate-replacement-end candidate) 4))
+              (error 'fundamental-editing-tests
+                     "point motion retained completion state from another field")))
+          (command-runtime-start!
+            runtime 'minibuffer.complete
+            (application-command-context application))
+          (let* ([session (minibuffer-service-current minibuffer)]
+                 [prompt-buffer
+                  (buffer-service-ref
+                    (host-state-buffers state)
+                    (minibuffer-session-buffer-id session))])
+            (unless (string=? (buffer-string prompt-buffer) "LEFT/right")
+              (error 'fundamental-editing-tests
+                     "completion applied a stale field replacement"
+                     (buffer-string prompt-buffer))))
+          (minibuffer-service-cancel! minibuffer)
+          (host-state-run! state)))
       (let ([cancelled
              (command-runtime-start-interactive!
                runtime 'interaction.package-test (application-command-context application))])

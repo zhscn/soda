@@ -469,7 +469,14 @@
                      (minibuffer-service-host service)
                      (minibuffer-session-buffer-id session) #f)]
                   [raw (and buffer (snapshot-string (buffer-state-document (buffer-state buffer))))]
-                  [controller (minibuffer-session-completion session)]
+                  [snapshot (minibuffer-session-snapshot service session)]
+                  [controller
+                   (let ([current (minibuffer-session-completion session)])
+                     (if (and current
+                              (not (completion-controller-context-current?
+                                     current snapshot)))
+                         (minibuffer-service-refresh-completion! service)
+                         current))]
                   [candidate
                    (and use-candidate? controller
                         (completion-controller-selected controller))]
@@ -478,7 +485,6 @@
                         (call-with-values
                           (lambda () (completion-candidate-apply candidate raw))
                           cons))]
-                  [snapshot (minibuffer-session-snapshot service session)]
                   [request (interaction-session-request (minibuffer-session-interaction session))]
                   [policy (interaction-request-selection-policy
                             request)]
@@ -605,7 +611,12 @@
   (define (minibuffer-service-select-completion! service index)
     (let ([session (minibuffer-service-current service)])
       (and session (minibuffer-session-completion session)
-           (let ([controller (minibuffer-session-completion session)])
+           (let* ([snapshot (minibuffer-session-snapshot service session)]
+                  [current (minibuffer-session-completion session)]
+                  [controller
+                   (if (completion-controller-context-current? current snapshot)
+                       current
+                       (minibuffer-service-refresh-completion! service))])
              (completion-controller-select!
                controller index (minibuffer-session-snapshot service session))
              (ensure-completion-presentation! service session controller)
@@ -615,8 +626,12 @@
     (let* ([session (minibuffer-service-current service)]
            [controller
             (and session
-                 (or (minibuffer-session-completion session)
-                     (minibuffer-service-refresh-completion! service)))]
+                 (let ([current (minibuffer-session-completion session)])
+                   (if (and current
+                            (completion-controller-context-current?
+                              current (minibuffer-session-snapshot service session)))
+                       current
+                       (minibuffer-service-refresh-completion! service))))]
            [candidates
             (and controller (completion-controller-candidates controller))])
       (and (pair? candidates)
@@ -761,19 +776,34 @@
           (let ([session (minibuffer-service-current service)])
             (when (and session
                        (= (editor-update-buffer-id update)
-                          (minibuffer-session-buffer-id session))
-                       (not (change-set-empty? (editor-update-changes update))))
-              (unless (exists
-                        (lambda (annotation)
-                          (eq? (annotation-key annotation) 'minibuffer.history))
-                        (editor-update-annotations update))
-                (minibuffer-session-history-index-set! session #f)
-                (minibuffer-session-history-draft-set!
-                  session
-                  (snapshot-string
-                    (buffer-state-document
-                      (editor-update-new-buffer-state update)))))
-              (when (minibuffer-session-completion session)
-                (minibuffer-service-refresh-completion! service))))))
+                          (minibuffer-session-buffer-id session)))
+              (let ([document-changed?
+                     (not (change-set-empty? (editor-update-changes update)))]
+                    [selection-changed?
+                     (exists
+                       (lambda (view-update)
+                         (and (= (view-state-update-view-id view-update)
+                                 (minibuffer-session-view-id session))
+                              (not
+                                (equal?
+                                  (view-state-selection
+                                    (view-state-update-old-state view-update))
+                                  (view-state-selection
+                                    (view-state-update-new-state view-update))))))
+                       (editor-update-views update))])
+                (when document-changed?
+                  (unless (exists
+                            (lambda (annotation)
+                              (eq? (annotation-key annotation) 'minibuffer.history))
+                            (editor-update-annotations update))
+                    (minibuffer-session-history-index-set! session #f)
+                    (minibuffer-session-history-draft-set!
+                      session
+                      (snapshot-string
+                        (buffer-state-document
+                          (editor-update-new-buffer-state update))))))
+                (when (and (or document-changed? selection-changed?)
+                           (minibuffer-session-completion session))
+                  (minibuffer-service-refresh-completion! service)))))))
       service)))
 )
