@@ -8,7 +8,7 @@ Project、REPL 和多窗口工作台在此基线之上作为独立 package 提�
 
 Soda 保持自己的 Buffer、View 与 command 抽象，并以 Emacs 的可组合 command、
 prefix key、minibuffer、echo area、mode line、Buffer/View/Window 语义作为用户心智
-模型。具体键位由 keymap 组合，不写入编辑机机制。
+模型。基础编辑能力不定义产品工作流或界面；具体键位由 keymap 组合，不写入编辑机机制。
 
 ## 工作流
 

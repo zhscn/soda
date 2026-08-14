@@ -26,6 +26,7 @@
           command-runtime-add-hook!
           command-runtime-add-advice!
           command-runtime-enqueue!
+          command-runtime-enqueue-background!
           command-runtime-handle-message!)
   (import (rnrs)
           (soda kernel extension)
@@ -752,6 +753,18 @@
                      (command-cancel-message? message)))
       (assertion-violation 'command-runtime-enqueue! "invalid command message" message))
     (runtime-enqueue-priority! (command-runtime-queue service) message))
+
+  ;; Native completion callbacks run outside the active input action.  Their
+  ;; commands remain FIFO behind already queued editor work, preserving stream
+  ;; order for output and preventing completion from preempting a key event.
+  (define (command-runtime-enqueue-background! service message)
+    (unless (and (command-runtime? service)
+                 (or (command-invoke-message? message)
+                     (command-resume-message? message)
+                     (command-cancel-message? message)))
+      (assertion-violation 'command-runtime-enqueue-background!
+                           "invalid command message" message))
+    (runtime-enqueue! (command-runtime-queue service) message))
 
   (define (capture-runtime-condition! service message condition)
     (condition-service-capture

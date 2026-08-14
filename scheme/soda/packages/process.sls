@@ -113,6 +113,18 @@
             (process-output-transaction service buffer bytes))
           #f)))
 
+  (define (enqueue-output! service context buffer-id bytes)
+    (command-runtime-enqueue-background!
+      (package-host-command-runtime (process-service-host service))
+      (make-command-invoke-message
+        'process.append-output context (list buffer-id bytes) #f)))
+
+  (define (enqueue-exit! service context buffer-id status)
+    (command-runtime-enqueue-background!
+      (package-host-command-runtime (process-service-host service))
+      (make-command-invoke-message
+        'process.append-exit context (list buffer-id status) #f)))
+
   (define (open-output-buffer! service request)
     (let* ([host (process-service-host service)]
            [context (process-request-context request)]
@@ -168,13 +180,11 @@
               (list "/bin/sh" "-c" (process-request-command request))
               (current-directory) (make-bytevector 0)
               (lambda (event)
-                (append-output! service buffer-id (native:event-data event)))
+                (enqueue-output! service (process-request-context request)
+                                 buffer-id (native:event-data event)))
               (lambda (status flags)
-                (append-output!
-                  service buffer-id
-                  (string->utf8
-                    (string-append "\n[Process exited with status "
-                                   (number->string status) "]\n")))))])
+                (enqueue-exit! service (process-request-context request)
+                               buffer-id status)))])
       (process-service-run! service job)))
 
   (define (process-service-attach-runtime! service runtime)
@@ -184,9 +194,10 @@
     (process-service-runtime-set! service runtime)
     service)
 
-  ;; The terminal adapter calls this for unclaimed native events.  Output is
-  ;; appended through Dispatcher transactions, preserving published Buffer
-  ;; state and View-local selections while a subprocess runs.
+  ;; The terminal adapter calls this for unclaimed native events.  Callbacks
+  ;; enqueue editor commands; the command loop then appends output through
+  ;; Dispatcher transactions, preserving published Buffer state and View-local
+  ;; selections while a subprocess runs.
   (define (process-service-handle-runtime-event! service event)
     (unless (and (process-service? service) (native:event? event))
       (assertion-violation 'process-service-handle-runtime-event!
@@ -237,6 +248,26 @@
         runtime 'process.spawn owner 'native-process-spawn
         (lambda (ignored invocation effect)
           (start-process! service (command-effect-payload effect))))
+      (define-command
+        runtime owner 'process.append-output (context buffer-id bytes)
+        (documentation "Append one native process output chunk to its generated Buffer.")
+        (class 'process)
+        (visible #f)
+        (undo 'ignore)
+        (append-output! service buffer-id bytes)
+        (command-handled))
+      (define-command
+        runtime owner 'process.append-exit (context buffer-id status)
+        (documentation "Append native process completion status to its generated Buffer.")
+        (class 'process)
+        (visible #f)
+        (undo 'ignore)
+        (append-output!
+          service buffer-id
+          (string->utf8
+            (string-append "\n[Process exited with status "
+                           (number->string status) "]\n")))
+        (command-handled))
       (define-command
         runtime owner 'process.execute (context command)
         (documentation "Execute a shell command and display its output in a Buffer.")

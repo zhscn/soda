@@ -4900,7 +4900,8 @@
        [state (soda-application-state application)]
        [runtime (host-state-command-runtime state)]
        [processes (soda-application-processes application)]
-       [native-runtime (native:make-runtime)])
+       [native-runtime (native:make-runtime)]
+       [deferred-output-observed? #f])
   (dynamic-wind
     (lambda () #f)
     (lambda ()
@@ -4918,6 +4919,21 @@
                   (lambda (event)
                     (process-service-handle-runtime-event! processes event))
                   events)]
+               [_deferred
+                (when (and (pair? events) (not deferred-output-observed?))
+                  (let* ([active
+                          (surface-active-context
+                            (soda-application-surface application)
+                            (host-state-views state))]
+                         [buffer
+                          (buffer-service-ref
+                            (host-state-buffers state)
+                            (active-context-buffer-id active) #f)])
+                    (unless (and buffer (string=? (buffer-string buffer) ""))
+                      (error 'kernel-tests
+                             "native process callback mutated a Buffer before command-loop dispatch"))
+                    (set! deferred-output-observed? #t)))]
+               [_drained (host-state-run! state)]
                [active
                 (surface-active-context (soda-application-surface application)
                                         (host-state-views state))]
@@ -4960,6 +4976,8 @@
              (error 'kernel-tests "process output Buffer did not receive complete process output"
                     output)]
             [else (poll (- remaining 1))])))
+      (unless deferred-output-observed?
+        (error 'kernel-tests "native process produced no event for deferred-output test"))
       ;; Generic ProcessJob supplies finite stdin and callbacks without making
       ;; an output Buffer the process package's only consumer.  Tool packages
       ;; such as spelling and formatting can parse their own protocol here.
@@ -4978,6 +4996,7 @@
           (for-each
             (lambda (event) (process-service-handle-runtime-event! processes event))
             (native:runtime-poll! native-runtime))
+          (host-state-run! state)
           (cond
             [(and exit-status (zero? exit-status))
              (unless (string=? output "soda-process-input")
@@ -5020,6 +5039,7 @@
         (for-each
           (lambda (event) (process-service-handle-runtime-event! processes event))
           (native:runtime-poll! native-runtime))
+        (host-state-run! state)
         (let* ([active
                 (surface-active-context (soda-application-surface application)
                                         (host-state-views state))]
@@ -5119,6 +5139,7 @@
         (for-each
           (lambda (event) (process-service-handle-runtime-event! processes event))
           (native:runtime-poll! native-runtime))
+        (host-state-run! state)
         (let* ([surface (soda-application-surface application)]
                [active (surface-active-context surface (host-state-views state))]
                [current
@@ -5229,6 +5250,7 @@
         (for-each
           (lambda (event) (process-service-handle-runtime-event! processes event))
           (native:runtime-poll! native-runtime))
+        (host-state-run! state)
         (let* ([active
                 (surface-active-context (soda-application-surface application)
                                         (host-state-views state))]

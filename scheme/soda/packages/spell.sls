@@ -325,6 +325,13 @@
         host (spell-service-owner service) buffer context configuration)
       buffer))
 
+  (define (enqueue-spell-report! service request status output)
+    (command-runtime-enqueue-background!
+      (package-host-command-runtime (spell-service-host service))
+      (make-command-invoke-message
+        'spell.publish-report (spell-request-context request)
+        (list request status output) #f)))
+
   (define (start-spell-check! service request)
     (unless (spell-request? request)
       (assertion-violation 'spell.check "invalid spelling request" request))
@@ -336,7 +343,7 @@
           (lambda (event)
             (set! chunks (cons (native:event-data event) chunks)))
           (lambda (status flags)
-            (show-spell-report!
+            (enqueue-spell-report!
               service request status
               (utf8->string (concatenate-bytevectors (reverse chunks)))))))))
 
@@ -412,6 +419,14 @@
         runtime 'spell.check owner 'hunspell-check
         (lambda (ignored invocation effect)
           (start-spell-check! service (command-effect-payload effect))))
+      (define-command
+        runtime owner 'spell.publish-report (context request status output)
+        (documentation "Publish a completed spelling report from native process output.")
+        (class 'spell)
+        (visible #f)
+        (undo 'ignore)
+        (show-spell-report! service request status output)
+        (command-handled))
       (define-command
         runtime owner 'spell.check (context)
         (documentation "Check the active Buffer with Hunspell and show reported words.")
