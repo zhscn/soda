@@ -1,5 +1,5 @@
-(library (soda host shortcut-hint)
-  (export command-shortcut-hints key-sequence-label)
+(library (soda host prefix-guidance)
+  (export command-prefix-guidance key-sequence-label)
   (import (rnrs)
           (soda host command)
           (soda host command-runtime-registry)
@@ -25,13 +25,14 @@
           (or (keymap-remap (input-layer-keymap (car remaining)) name #f)
               (loop (cdr remaining))))))
 
-  ;; Hints are a projection of the same ranked InputLayers used by dispatch.
+  ;; Prefix guidance is a projection of the same ranked InputLayers used by
+  ;; dispatch.  It describes only valid continuations of an active sequence.
   ;; Shadowing, remapping, prefix continuations, and command availability are
   ;; resolved before a frontend receives the immutable label pairs.
-  (define (command-shortcut-hints runtime command-context input-context)
+  (define (command-prefix-guidance runtime command-context input-context)
     (unless (and (command-runtime? runtime) (command-context? command-context)
                  (input-context? input-context))
-      (assertion-violation 'command-shortcut-hints
+      (assertion-violation 'command-prefix-guidance
                            "expected a runtime, command context, and input context"))
     (let* ([layers (input-context-layers input-context)]
            [pending
@@ -53,11 +54,11 @@
                             sequence)]
                        [shown-resolution (resolve-key-sequence layers shown)]
                        [label (key-sequence-label shown)])
-                  (if (and (eq? (car resolved) 'command)
-                           (or (null? pending)
-                               (and (> (length sequence) (length pending))
-                                    (sequence-prefix? pending sequence)))
-                           (not (exists (lambda (hint) (string=? (car hint) label))
+                  (if (and (pair? pending)
+                           (eq? (car resolved) 'command)
+                           (> (length sequence) (length pending))
+                           (sequence-prefix? pending sequence)
+                           (not (exists (lambda (entry) (string=? (car entry) label))
                                         result)))
                       (let* ([full-name (remapped-command layers (cadr resolved))]
                              [full-definition

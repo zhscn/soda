@@ -27,7 +27,7 @@
           (soda host operation)
           (soda host render)
           (soda host render-service)
-          (soda host shortcut-hint)
+          (soda host prefix-guidance)
           (soda host state)
           (soda host surface)
           (soda host value)
@@ -151,7 +151,7 @@
     (host-frontend-active-view
       (frontend-host-state value) (frontend-surface value)))
 
-  (define (frontend-refresh-shortcut-hints! value)
+  (define (frontend-refresh-prefix-guidance! value)
     (let ([current (active-view value)])
       (when current
         (let* ([active (car current)]
@@ -163,11 +163,11 @@
           (validate-input-context! context active view)
           (host-frontend-dispatch-host!
             (frontend-host-state value)
-            (make-set-surface-shortcut-hints-operation
+            (make-set-surface-prefix-guidance-operation
               (surface-id (frontend-surface value))
               (if (null? pending)
                   '()
-                  (command-shortcut-hints
+                  (command-prefix-guidance
                     (host-state-command-runtime (frontend-host-state value))
                     (make-active-command-context
                       value active view #f pending
@@ -179,7 +179,7 @@
     (unless (frontend-refreshing-presentation? value)
       (dynamic-wind
         (lambda () (frontend-refreshing-presentation?-set! value #t))
-        (lambda () (frontend-refresh-shortcut-hints! value))
+        (lambda () (frontend-refresh-prefix-guidance! value))
         (lambda () (frontend-refreshing-presentation?-set! value #f)))))
 
   (define (validate-input-context! context active view)

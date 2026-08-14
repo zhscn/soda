@@ -54,8 +54,8 @@
        (and (surface-invalidate! surface) #t)]
       [(set-surface-feedback)
        (and (surface-set-feedback! surface (host-operation-value operation)) #t)]
-      [(set-surface-shortcut-hints)
-       (and (surface-set-shortcut-hints!
+      [(set-surface-prefix-guidance)
+       (and (surface-set-prefix-guidance!
               surface (host-operation-value operation))
             #t)]
       [else

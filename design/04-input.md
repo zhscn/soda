@@ -101,6 +101,9 @@ View transaction 发布新 InputState，再构造 command context，使 command 
 application override layer 在所有 View 中提供 `C-g` 与 `ESC ESC ESC` 的统一 quit。单次 `ESC`
 只建立 prefix，临时界面不把它单独解释为取消。
 
+`PrefixGuidance` 是 active pending sequence 对同一 resolver 的只读投影，只包含仍可到达的下一键
+及 command name。没有 pending sequence 时投影为空；Surface 不承载常驻快捷键列表。
+
 焦点切换不复制 InputState。View 关闭会取消其 transient input session；Buffer 关闭由 host
 先关闭关联 View。
 

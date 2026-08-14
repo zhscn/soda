@@ -5,7 +5,7 @@
           surface-frontend
           surface-capabilities
           surface-feedback
-          surface-shortcut-hints
+          surface-prefix-guidance
           surface-size
           surface-root-window
           surface-selected-window
@@ -24,7 +24,7 @@
           surface-resize!
           surface-invalidate!
           surface-set-feedback!
-          surface-set-shortcut-hints!
+          surface-set-prefix-guidance!
           surface-generation
           make-surface-service
           surface-service?
@@ -68,7 +68,7 @@
       (immutable frontend surface-frontend)
       (immutable capabilities surface-capabilities)
       (mutable feedback surface-feedback surface-feedback-set!)
-      (mutable shortcut-hints surface-shortcut-hints surface-shortcut-hints-set!)
+      (mutable prefix-guidance surface-prefix-guidance surface-prefix-guidance-set!)
       (mutable size surface-size surface-size-set!)
       (mutable root-window surface-root-window surface-root-window-set!)
       (mutable selected-window surface-selected-window surface-selected-window-set!)
@@ -114,22 +114,23 @@
             (remv new-view-id
                   (remv old-view-id (surface-view-history-raw surface))))))
 
-  (define (surface-set-shortcut-hints! surface hints)
-    (unless (and (surface? surface) (list? hints)
+  (define (surface-set-prefix-guidance! surface guidance)
+    (unless (and (surface? surface) (list? guidance)
                  (for-all
-                   (lambda (hint)
-                     (and (pair? hint) (string? (car hint))
-                          (string? (cdr hint))))
-                   hints))
-      (assertion-violation 'surface-set-shortcut-hints!
-                           "expected a Surface and shortcut hint pairs" surface hints))
-    (let ([next (map (lambda (hint)
-                       (cons (string-copy (car hint)) (string-copy (cdr hint))))
-                     hints)])
-      (if (equal? next (surface-shortcut-hints surface))
+                   (lambda (entry)
+                     (and (pair? entry) (string? (car entry))
+                          (string? (cdr entry))))
+                   guidance))
+      (assertion-violation 'surface-set-prefix-guidance!
+                           "expected a Surface and prefix guidance pairs"
+                           surface guidance))
+    (let ([next (map (lambda (entry)
+                       (cons (string-copy (car entry)) (string-copy (cdr entry))))
+                     guidance)])
+      (if (equal? next (surface-prefix-guidance surface))
           #f
           (begin
-            (surface-shortcut-hints-set! surface next)
+            (surface-prefix-guidance-set! surface next)
             (surface-generation-set! surface (+ 1 (surface-generation surface)))
             #t))))
 

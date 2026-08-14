@@ -163,15 +163,15 @@
                   (loop next (+ column glyph-width)))))))
       (make-frame width 1 cells)))
 
-  (define (shortcut-hint-text hints)
-    (let loop ([remaining hints] [pieces '()])
+  (define (prefix-guidance-text guidance)
+    (let loop ([remaining guidance] [pieces '()])
       (if (null? remaining)
           (apply string-append (reverse pieces))
-          (let ([hint (car remaining)])
+          (let ([entry (car remaining)])
             (loop (cdr remaining)
                   (cons (string-append
                           (if (null? pieces) "" "  ")
-                          (car hint) " " (cdr hint))
+                          (car entry) " " (cdr entry))
                         pieces))))))
 
   (define (compose-surface-frame width height placements message face)
@@ -387,7 +387,7 @@
                                   ", column " (number->string (+ (cdr position) 1)))))
                (lambda () (text-close! text)))))))
 
-  (define (surface-input-message surface views hint-message)
+  (define (surface-input-message surface views guidance-message)
     (let* ([leaf (surface-active-window surface)]
            [view (and leaf (view-service-ref views (window-view-id leaf) #f))]
            [stack (and view (view-state-input-state (view-state view)))]
@@ -403,8 +403,8 @@
                (input-stack-prefix-argument stack))))]
         [(pair? pending)
          (let ([prefix (key-sequence-label pending)])
-           (if hint-message
-               (string-append prefix "  " hint-message)
+           (if guidance-message
+               (string-append prefix "  " guidance-message)
                prefix))]
         [else #f])))
 
@@ -607,17 +607,17 @@
            [width (car size)]
            [height (cdr size)]
            [position-message (surface-position-message surface views)]
-           [hint-message
+           [guidance-message
             (and (>= height 3)
-                 (pair? (surface-shortcut-hints surface))
-                 (shortcut-hint-text (surface-shortcut-hints surface)))]
-           [input-message (surface-input-message surface views hint-message)]
+                 (pair? (surface-prefix-guidance surface))
+                 (prefix-guidance-text (surface-prefix-guidance surface)))]
+           [input-message (surface-input-message surface views guidance-message)]
            [feedback (surface-feedback surface)]
            [interaction-active? (pair? (surface-interaction-windows surface))]
            [message
             ;; Active input guidance owns the echo area. Command feedback must
             ;; not obscure a prefix, argument, minibuffer hint, or current
-            ;; shortcut guidance.
+            ;; prefix guidance.
             (and
               (surface-echo-area-visible? surface)
               (or input-message

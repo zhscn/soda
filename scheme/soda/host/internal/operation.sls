@@ -16,7 +16,7 @@
           make-resize-surface-operation
           make-invalidate-surface-operation
           make-set-surface-feedback-operation
-          make-set-surface-shortcut-hints-operation
+          make-set-surface-prefix-guidance-operation
           make-global-host-operation
           make-host-update
           host-update?
@@ -138,21 +138,21 @@
                            surface-id feedback))
     (%make-host-operation 'set-surface-feedback surface-id feedback))
 
-  (define (make-set-surface-shortcut-hints-operation surface-id hints)
-    (unless (and (identity? surface-id) (list? hints)
+  (define (make-set-surface-prefix-guidance-operation surface-id guidance)
+    (unless (and (identity? surface-id) (list? guidance)
                  (for-all
-                   (lambda (hint)
-                     (and (pair? hint) (string? (car hint))
-                          (string? (cdr hint))))
-                   hints))
-      (assertion-violation 'make-set-surface-shortcut-hints-operation
-                           "invalid Surface identity or shortcut hints"
-                           surface-id hints))
+                   (lambda (entry)
+                     (and (pair? entry) (string? (car entry))
+                          (string? (cdr entry))))
+                   guidance))
+      (assertion-violation 'make-set-surface-prefix-guidance-operation
+                           "invalid Surface identity or prefix guidance"
+                           surface-id guidance))
     (%make-host-operation
-      'set-surface-shortcut-hints surface-id
-      (map (lambda (hint)
-             (cons (string-copy (car hint)) (string-copy (cdr hint))))
-           hints)))
+      'set-surface-prefix-guidance surface-id
+      (map (lambda (entry)
+             (cons (string-copy (car entry)) (string-copy (cdr entry))))
+           guidance)))
 
   (define (make-global-host-operation kind value)
     (unless (symbol? kind)

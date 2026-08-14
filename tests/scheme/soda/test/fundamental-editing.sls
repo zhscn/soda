@@ -14,6 +14,7 @@
           (soda host analysis)
           (soda host location)
           (soda host package)
+          (soda host prefix-guidance)
           (soda host internal buffer)
           (soda host internal context)
           (soda host internal mode)
@@ -4351,7 +4352,7 @@
                        (view-state-selection (view-state view))))
                    2)
                 (<= 1 (length presented) 2)
-                (null? (surface-shortcut-hints surface))
+                (null? (surface-prefix-guidance surface))
                 (let ([sessions
                        (input-stack-sessions
                          (view-state-input-state (view-state view)))])
@@ -4543,7 +4544,18 @@
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
            [surface (soda-application-surface application)]
+           [view (soda-application-view application)]
            [editing (soda-application-editing application)]
+           [active (surface-active-context surface (host-state-views state))]
+           [context
+            (buffer-input-context
+              active view
+              (list
+                (make-input-layer
+                  'default
+                  (file-keymap (soda-application-files application))
+                  #f 'accept)
+                (fundamental-fallback-input-layer editing)))]
            [presented #f]
            [frontend
             (make-frontend
@@ -4565,19 +4577,27 @@
         (frontend-enqueue!
           frontend (make-surface-input-message (surface-id surface) event))
         (frontend-step! frontend))
+      (unless
+        (null?
+          (command-prefix-guidance
+            (host-state-command-runtime state)
+            (application-command-context application)
+            context))
+        (error 'fundamental-editing-tests
+               "prefix guidance API exposed bindings without a pending prefix"))
       (frontend-resize! frontend '(20 . 6))
       (frontend-step! frontend)
-      (unless (null? (surface-shortcut-hints surface))
+      (unless (null? (surface-prefix-guidance surface))
         (error 'fundamental-editing-tests
-               "ordinary editing exposed persistent shortcut guidance"))
+               "ordinary editing exposed persistent prefix guidance"))
       (send! (make-key-event 'character (char->integer #\x) #f #f 4 'press
                              (make-bytevector 0)))
       (unless (and
                 (exists
-                  (lambda (hint)
-                    (and (string=? (car hint) "C-x C-f")
-                         (string=? (cdr hint) "file.visit")))
-                  (surface-shortcut-hints surface))
+                  (lambda (entry)
+                    (and (string=? (car entry) "C-x C-f")
+                         (string=? (cdr entry) "file.visit")))
+                  (surface-prefix-guidance surface))
                 (string-contains?
                   (frame-row-string
                     (surface-render-frame presented)
@@ -4587,9 +4607,9 @@
                "pending prefix did not expose contextual next-key guidance"))
       (send! (make-key-event 'character (char->integer #\g) #f #f 4 'press
                              (make-bytevector 0)))
-      (unless (null? (surface-shortcut-hints surface))
+      (unless (null? (surface-prefix-guidance surface))
         (error 'fundamental-editing-tests
-               "completed prefix retained stale shortcut guidance"))
+               "completed prefix retained stale prefix guidance"))
       (frontend-close! frontend)
       (soda-application-close! application))
 
@@ -4634,10 +4654,10 @@
                              (make-bytevector 0)))
       (unless (and
                 (exists
-                  (lambda (hint)
-                    (and (string=? (car hint) "C-x C-f")
-                         (string=? (cdr hint) "file.visit")))
-                  (surface-shortcut-hints surface))
+                  (lambda (entry)
+                    (and (string=? (car entry) "C-x C-f")
+                         (string=? (cdr entry) "file.visit")))
+                  (surface-prefix-guidance surface))
                 (string-contains?
                   (frame-row-string
                     (surface-render-frame presented)
@@ -4657,7 +4677,7 @@
                   (and rendered
                        (= (cadddr (rendered-view-rectangle rendered)) 2))))
         (error 'fundamental-editing-tests
-               "shortcut chrome did not reserve layout or reflect the pending prefix"))
+               "prefix guidance did not reserve layout or reflect the pending prefix"))
       (send! (make-text-input-event 'text (string->utf8 "abcdefghijk")))
       (send! (make-key-event 'character (char->integer #\a) #f #f 4 'press
                              (make-bytevector 0)))
