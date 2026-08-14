@@ -35,6 +35,10 @@
        (let ([value (host-operation-value operation)])
          (surface-push-interaction-view!
            surface views (car value) (cadr value)))]
+      [(add-interaction-companion)
+       (let ([value (host-operation-value operation)])
+         (surface-add-interaction-companion-view!
+           surface views (car value) (cadr value) (caddr value)))]
       [(pop-interaction)
        (surface-pop-interaction-view! surface views)]
       [(remove-interaction)

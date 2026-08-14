@@ -22,6 +22,7 @@
             surface-split-view!
             surface-remove-view-window!
             surface-push-interaction-view!
+            surface-add-interaction-companion-view!
             surface-pop-interaction-view!
             surface-route-display-request!))
 )

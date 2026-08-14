@@ -1,20 +1,20 @@
 # Minibuffer 与读取协议
 
-## 实现状态
+## 能力边界
 
-| 能力 | 状态 |
-|---|---|
-| 非递归 request/session/continuation 协议 | 已实现 |
-| 独立 Buffer/View、接受、取消与 overlay 生命周期 | 已实现 |
-| completion controller 与 candidate source | 已实现 |
-| Vertico 风格候选窗口、固定高度与滚动 | 未实现 |
-| history、固定集合与任意输入 selection policy | 未实现 |
-| `interactive-completing-read` | 未实现 |
+- request/session/continuation 协议在主 command loop 中非递归地运行。
+- 每个 prompt 使用独立的 transient Buffer/View，并通过 identity 完成接受、
+  取消与资源回收。
+- completion controller 管理 candidate、selection、preview、restore 和 accept 事务。
+- minibuffer adapter 使用普通 transient Buffer/View 显示固定高度的候选列表，
+  并使用 interaction companion placement 跟随 prompt 布局。
+- history collection、async completion source 和其他候选 presenter 通过 request、snapshot
+  与 controller 边界扩展。
 
 ## 定位
 
 minibuffer 是 command loop 管理的临时输入会话。它复用 Buffer、View、keymap 和
-TUI component，但不进入 WindowLayout、workbench MRU 或持久化状态。普通文本读取
+Surface interaction placement，但不进入 root WindowLayout、workbench MRU 或持久化状态。普通文本读取
 与候选补全使用同一会话生命周期；completion provider 和候选展示保持独立。
 
 ```text
@@ -118,9 +118,10 @@ revision 和 generation；任一值不匹配时丢弃。candidate 保存稳定 i
 label、annotation、group、payload 与可选 preview target。controller 负责筛选、排序、
 候选选择和接受策略，presenter 只读取其已发布快照。
 
-Vertico 类 adapter 接收 controller snapshot，负责固定候选高度、scroll/index、prompt
-focus 与 candidate focus 之间的切换、以及 candidate 行的显示。它不拥有 completion
-source，也不解释 candidate payload。`free` reader 允许 index 为 `#f` 并接受 raw input；
+minibuffer candidate adapter 接收 controller snapshot，负责固定候选高度、scroll/index
+和 candidate 行的显示。候选 View 作为当前 prompt 的 companion，不获取输入焦点；
+Surface 在小终端中压缩 companion 并为 root View 保留可编辑行。adapter 不拥有
+completion source，也不解释 candidate payload。`free` reader 允许 index 为 `#f` 并接受 raw input；
 `must-match` reader 要求有效候选或 source validator。
 
 Consult 类 adapter 通过 source 的 `preview`、`restore`、`accept` 三个 action 接口提供

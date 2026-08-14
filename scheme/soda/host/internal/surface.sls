@@ -18,6 +18,7 @@
           surface-split-selected-window!
           surface-remove-window!
           surface-push-interaction!
+          surface-add-interaction-companion!
           surface-pop-interaction!
           surface-remove-interaction!
           surface-resize!
@@ -148,9 +149,9 @@
   (define (surface-active-window surface)
     (unless (surface? surface)
       (assertion-violation 'surface-active-window "expected a Surface" surface))
-    (if (null? (surface-interaction-windows surface))
-        (surface-selected-window surface)
-        (car (surface-interaction-windows surface))))
+    (or (find (lambda (window) (eq? (window-purpose window) 'prompt))
+              (surface-interaction-windows surface))
+        (surface-selected-window surface)))
 
   ;; Root leaves are painted first.  Interaction windows are stored top-first
   ;; for input routing, so reverse them for bottom-to-top compositor order.
@@ -233,21 +234,60 @@
     ;; Interaction placement belongs to the Surface projection.  The Window
     ;; retains only its requested height; row and width follow the current
     ;; Surface size at render time.
-    (let ([window (make-leaf-window view-id (list 0 0 0 height))])
+    (let ([window (make-interaction-window view-id height 'prompt)])
       (surface-interaction-windows-set!
         surface (cons window (surface-interaction-windows surface)))
       (surface-generation-set! surface (+ 1 (surface-generation surface)))
       window))
 
+  (define (surface-add-interaction-companion!
+            surface anchor-view-id view-id height)
+    (unless (and (surface? surface) (view-id? anchor-view-id)
+                 (view-id? view-id) (integer? height) (exact? height)
+                 (> height 0))
+      (assertion-violation
+        'surface-add-interaction-companion!
+        "invalid Surface interaction companion request"
+        surface anchor-view-id view-id height))
+    (let ([window
+           (make-interaction-window
+             view-id height (cons 'companion anchor-view-id))])
+      (let insert ([remaining (surface-interaction-windows surface)]
+                   [result '()])
+        (cond
+          [(null? remaining) #f]
+          [(and (= (window-view-id (car remaining)) anchor-view-id)
+                (eq? (window-purpose (car remaining)) 'prompt))
+           (surface-interaction-windows-set!
+             surface
+             (append (reverse result)
+                     (list (car remaining) window)
+                     (cdr remaining)))
+           (surface-generation-set! surface (+ 1 (surface-generation surface)))
+           window]
+          [else (insert (cdr remaining) (cons (car remaining) result))]))))
+
   (define (surface-pop-interaction! surface)
     (unless (surface? surface)
       (assertion-violation 'surface-pop-interaction! "expected a Surface" surface))
-    (let ([interactions (surface-interaction-windows surface)])
-      (and (pair? interactions)
+    (let* ([interactions (surface-interaction-windows surface)]
+           [target
+            (find (lambda (window) (eq? (window-purpose window) 'prompt))
+                  interactions)])
+      (and target
            (begin
-             (surface-interaction-windows-set! surface (cdr interactions))
+             (let ([anchor (window-view-id target)])
+               (surface-interaction-windows-set!
+                 surface
+                 (filter
+                   (lambda (window)
+                     (not (or (eq? window target)
+                              (and (pair? (window-purpose window))
+                                   (eq? (car (window-purpose window)) 'companion)
+                                   (= (cdr (window-purpose window)) anchor)))))
+                   interactions)))
              (surface-generation-set! surface (+ 1 (surface-generation surface)))
-             (car interactions)))))
+             target))))
 
   (define (surface-remove-interaction! surface view-id)
     (unless (and (surface? surface) (view-id? view-id))
@@ -259,11 +299,19 @@
              (surface-interaction-windows surface))])
       (and target
            (begin
+             (let ([remove-anchor
+                    (and (eq? (window-purpose target) 'prompt)
+                         (window-view-id target))])
              (surface-interaction-windows-set!
                surface
                (filter
-                 (lambda (window) (not (eq? window target)))
-                 (surface-interaction-windows surface)))
+                 (lambda (window)
+                   (not (or (eq? window target)
+                            (and remove-anchor
+                                 (pair? (window-purpose window))
+                                 (eq? (car (window-purpose window)) 'companion)
+                                 (= (cdr (window-purpose window)) remove-anchor)))))
+                 (surface-interaction-windows surface))))
              (surface-generation-set!
                surface (+ 1 (surface-generation surface)))
              target))))
@@ -367,9 +415,22 @@
     (unless (and (surface? surface) (view-id? view-id))
       (assertion-violation 'surface-prune-view! "invalid Surface or View identity"
                            surface view-id))
-    (let ([interactions (surface-interaction-windows surface)])
-      (let ([retained (filter (lambda (window) (not (= (window-view-id window) view-id)))
-                              interactions)])
+    (let* ([interactions (surface-interaction-windows surface)]
+           [pruned-prompt?
+            (exists
+              (lambda (window)
+                (and (= (window-view-id window) view-id)
+                     (eq? (window-purpose window) 'prompt)))
+              interactions)])
+      (let ([retained
+             (filter
+               (lambda (window)
+                 (not (or (= (window-view-id window) view-id)
+                          (and pruned-prompt?
+                               (pair? (window-purpose window))
+                               (eq? (car (window-purpose window)) 'companion)
+                               (= (cdr (window-purpose window)) view-id)))))
+               interactions)])
         (unless (= (length retained) (length interactions))
           (surface-interaction-windows-set! surface retained)
           (surface-generation-set! surface (+ 1 (surface-generation surface))))))

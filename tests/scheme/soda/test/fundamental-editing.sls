@@ -23,6 +23,7 @@
           (soda host internal operation)
           (soda host render)
           (soda host internal view)
+          (soda host internal window)
           (soda host render-service)
           (soda host value)
           (soda kernel change)
@@ -1374,7 +1375,11 @@
       (let* ([source
               (make-completion-source
                 (lambda (snapshot)
-                  (list (make-completion-candidate 'allowed "allowed" "allowed" #f #f #f)))
+                  (if (string=? (prompt-snapshot-input snapshot) "allowed")
+                      (list
+                        (make-completion-candidate
+                          'allowed "allowed" "allowed" #f #f #f))
+                      '()))
                 (lambda (candidate snapshot)
                   (set! completion-events (cons 'preview completion-events)))
                 (lambda (snapshot)
@@ -1402,7 +1407,61 @@
           runtime 'interaction.match-test (application-command-context application))
         (let ([controller (minibuffer-service-refresh-completion! minibuffer)])
           (unless (and controller (not (completion-controller-selected-index controller)))
-            (error 'fundamental-editing-tests "completion refresh preselected a candidate")))
+            (error 'fundamental-editing-tests "completion refresh preselected a candidate"))
+          (let* ([surface (soda-application-surface application)]
+                 [windows (surface-interaction-windows surface)]
+                 [prompt (find
+                           (lambda (window) (eq? (window-purpose window) 'prompt))
+                           windows)]
+                 [companion
+                  (find
+                    (lambda (window)
+                      (let ([purpose (window-purpose window)])
+                        (and (pair? purpose)
+                             (eq? (car purpose) 'companion))))
+                    windows)]
+                 [render (render-surface surface (host-state-views state))]
+                 [root-rendered
+                  (find
+                    (lambda (item)
+                      (= (rendered-view-view-id item)
+                         (view-id (soda-application-view application))))
+                    (surface-render-rendered-views render))]
+                 [companion-rendered
+                  (and companion
+                       (find
+                         (lambda (item)
+                           (= (rendered-view-view-id item)
+                              (window-view-id companion)))
+                         (surface-render-rendered-views render)))])
+            (unless (and (= (length windows) 2)
+                         prompt companion companion-rendered root-rendered
+                         (eq? (surface-active-window surface) prompt)
+                         (= (cadddr (rendered-view-rectangle companion-rendered)) 6)
+                         (positive? (cadddr (rendered-view-rectangle root-rendered))))
+              (error 'fundamental-editing-tests
+                     "completion presentation did not preserve prompt focus and root content"))
+            (surface-resize! surface '(40 . 4))
+            (let* ([small (render-surface surface (host-state-views state))]
+                   [small-root
+                    (find
+                      (lambda (item)
+                        (= (rendered-view-view-id item)
+                           (view-id (soda-application-view application))))
+                      (surface-render-rendered-views small))]
+                   [small-companion
+                    (find
+                      (lambda (item)
+                        (= (rendered-view-view-id item)
+                           (window-view-id companion)))
+                      (surface-render-rendered-views small))])
+              (unless (and (= (cadddr (rendered-view-rectangle small-root)) 1)
+                           (= (cadddr
+                                (rendered-view-rectangle small-companion))
+                              1))
+                (error 'fundamental-editing-tests
+                       "small Surface did not reserve one root row before completion")))
+            (surface-resize! surface '(80 . 24))))
         (let* ([prompt (minibuffer-service-current minibuffer)]
                [prompt-buffer
                 (buffer-service-ref
@@ -1422,13 +1481,17 @@
               '() '()))
           (command-runtime-start!
             runtime 'minibuffer.accept (application-command-context application))
-          (unless (and (minibuffer-service-current minibuffer)
+          (unless (and (= (length
+                            (surface-interaction-windows
+                              (soda-application-surface application)))
+                          1)
+                       (minibuffer-service-current minibuffer)
                        (string=?
                          (input-stack-feedback
                            (view-state-input-state (view-state prompt-view)))
                          "Input does not match an available choice"))
             (error 'fundamental-editing-tests
-                   "invalid must-match input did not remain visible with feedback")))
+                   "prompt edits did not refresh completion chrome or validation feedback")))
         (minibuffer-service-cancel! minibuffer)
         (host-state-run! state)
         (command-runtime-start-interactive!

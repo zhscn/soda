@@ -13,6 +13,7 @@
           surface-split-view!
           surface-remove-view-window!
           surface-push-interaction-view!
+          surface-add-interaction-companion-view!
           surface-pop-interaction-view!
           surface-remove-interaction-view!
           surface-route-display-request!
@@ -143,6 +144,20 @@
     (and (view-service-ref views view-id #f)
          (let ([window (surface-push-interaction! surface view-id height)])
            (surface-active-context surface views))))
+
+  (define (surface-add-interaction-companion-view!
+            surface views anchor-view-id view-id height)
+    (unless (and (surface? surface) (view-service? views)
+                 (identity? anchor-view-id) (identity? view-id))
+      (assertion-violation
+        'surface-add-interaction-companion-view!
+        "invalid Surface interaction companion request"
+        surface views anchor-view-id view-id height))
+    (and (view-service-ref views anchor-view-id #f)
+         (view-service-ref views view-id #f)
+         (surface-add-interaction-companion!
+           surface anchor-view-id view-id height)
+         (surface-active-context surface views)))
 
   (define (surface-pop-interaction-view! surface views)
     (unless (and (surface? surface) (view-service? views))

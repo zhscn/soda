@@ -1,9 +1,11 @@
 (library (soda host internal window)
   (export make-leaf-window
+          make-interaction-window
           make-split-window
           window?
           window-id
           window-kind
+          window-purpose
           window-view-id
           window-axis
           window-children
@@ -22,6 +24,7 @@
     (fields
       (immutable id window-id)
       (immutable kind window-kind)
+      (immutable purpose window-purpose)
       (immutable view-id window-view-id)
       (immutable axis window-axis)
       (immutable children window-children)
@@ -33,7 +36,18 @@
 
   (define (make-leaf-window view-id rectangle)
     (%make-window (identity-source-next! window-identities)
-                  'leaf view-id #f '() '() rectangle #f))
+                  'leaf 'editor view-id #f '() '() rectangle #f))
+
+  (define (make-interaction-window view-id height purpose)
+    (unless (and (nonnegative-exact-integer? view-id)
+                 (positive? height) (integer? height) (exact? height)
+                 (or (eq? purpose 'prompt)
+                     (and (pair? purpose) (eq? (car purpose) 'companion)
+                          (nonnegative-exact-integer? (cdr purpose)))))
+      (assertion-violation 'make-interaction-window
+                           "invalid interaction Window" view-id height purpose))
+    (%make-window (identity-source-next! window-identities)
+                  'leaf purpose view-id #f '() '() (list 0 0 0 height) #f))
 
   ;; Replacing a View does not create a new Window.  Window identity belongs
   ;; to placement, while View identity belongs to editor-local selection and
@@ -46,7 +60,7 @@
                            "expected a leaf Window and View identity" window view-id))
     (if (= (window-view-id window) view-id)
         window
-        (%make-window (window-id window) 'leaf view-id #f '() '()
+        (%make-window (window-id window) 'leaf (window-purpose window) view-id #f '() '()
                       (window-rectangle window) (window-selected? window))))
 
   (define (split-weights? children weights)
@@ -75,7 +89,7 @@
                               "invalid split window, children, or weights"
                               axis children weights))
        (%make-window (identity-source-next! window-identities)
-                     'split #f axis (append children '()) (append weights '()) rectangle #f)]))
+                     'split 'editor #f axis (append children '()) (append weights '()) rectangle #f)]))
 
   (define (window-set-selected! window value)
     (unless (window? window)

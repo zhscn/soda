@@ -191,10 +191,43 @@
     (let ([height (cdr (surface-size surface))])
       (if (surface-echo-area-visible? surface) (- height 1) height)))
 
-  (define (surface-interaction-height surface)
+  (define (prompt-window? window)
+    (eq? (window-purpose window) 'prompt))
+
+  (define (active-companion-window? surface window)
+    (let ([purpose (window-purpose window)]
+          [active (surface-active-window surface)])
+      (and active (pair? purpose) (eq? (car purpose) 'companion)
+           (= (cdr purpose) (window-view-id active)))))
+
+  (define (surface-prompt-height surface)
     (fold-left
-      (lambda (height window) (+ height (cadddr (window-rectangle window))))
+      (lambda (height window)
+        (+ height (if (prompt-window? window)
+                      (cadddr (window-rectangle window))
+                      0)))
       0 (surface-interaction-windows surface)))
+
+  ;; A companion is auxiliary chrome for the active prompt.  It may use only
+  ;; rows left after every prompt and one editable root row.  On smaller
+  ;; Surfaces it contracts to zero instead of displacing the editor.
+  (define (surface-companion-budget surface)
+    (let* ([editor-height (surface-editor-height surface)]
+           [prompt-height (surface-prompt-height surface)]
+           [root-reserve (if (> editor-height prompt-height) 1 0)])
+      (max 0 (- editor-height prompt-height root-reserve))))
+
+  (define (surface-interaction-height surface)
+    (+ (surface-prompt-height surface)
+       (min
+         (surface-companion-budget surface)
+         (fold-left
+           (lambda (height window)
+             (+ height
+                (if (active-companion-window? surface window)
+                    (cadddr (window-rectangle window))
+                    0)))
+           0 (surface-interaction-windows surface)))))
 
   (define (surface-root-height surface)
     (max 0 (- (surface-editor-height surface)
@@ -225,20 +258,31 @@
   ;; Interaction Windows are stacked immediately above the echo area.  The
   ;; newest interaction is bottommost and therefore remains the active prompt.
   (define (interaction-content-rectangle surface leaf)
-    (let loop ([windows (surface-interaction-windows surface)] [used 0])
+    (let loop ([windows (surface-interaction-windows surface)]
+               [used 0] [companion-used 0])
       (if (null? windows)
           (list 0 0 0 0)
           (let* ([window (car windows)]
                  [rectangle (window-rectangle window)]
                  [requested-height (cadddr rectangle)]
                  [remaining (max 0 (- (surface-editor-height surface) used))]
-                 [height (min requested-height remaining)])
+                 [companion?
+                  (active-companion-window? surface window)]
+                 [height
+                  (cond
+                    [(prompt-window? window) (min requested-height remaining)]
+                    [companion?
+                     (min requested-height remaining
+                          (max 0 (- (surface-companion-budget surface)
+                                    companion-used)))]
+                    [else 0])])
             (if (eq? window leaf)
                 (list (max 0 (- (surface-editor-height surface) used height))
                       0
                       (car (surface-size surface))
                       height)
-                (loop (cdr windows) (+ used height)))))))
+                (loop (cdr windows) (+ used height)
+                      (+ companion-used (if companion? height 0))))))))
 
   (define (surface-window-base-rectangle surface leaf)
     (if (memq leaf (surface-interaction-windows surface))

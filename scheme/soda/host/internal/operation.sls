@@ -9,6 +9,7 @@
           make-split-view-operation
           make-remove-window-operation
           make-push-interaction-operation
+          make-add-interaction-companion-operation
           make-pop-interaction-operation
           make-remove-interaction-operation
           make-display-request-operation
@@ -78,6 +79,18 @@
       (assertion-violation 'make-push-interaction-operation
                            "invalid interaction operation" surface-id view-id height))
     (%make-host-operation 'push-interaction surface-id (list view-id height)))
+
+  (define (make-add-interaction-companion-operation
+            surface-id anchor-view-id view-id height)
+    (unless (and (identity? surface-id) (identity? anchor-view-id)
+                 (identity? view-id) (identity? height) (> height 0))
+      (assertion-violation
+        'make-add-interaction-companion-operation
+        "invalid interaction companion operation"
+        surface-id anchor-view-id view-id height))
+    (%make-host-operation
+      'add-interaction-companion surface-id
+      (list anchor-view-id view-id height)))
 
   (define (make-pop-interaction-operation surface-id)
     (unless (identity? surface-id)

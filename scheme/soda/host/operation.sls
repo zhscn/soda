@@ -9,6 +9,7 @@
           make-split-view-operation
           make-remove-window-operation
           make-push-interaction-operation
+          make-add-interaction-companion-operation
           make-pop-interaction-operation
           make-remove-interaction-operation
           make-display-request-operation

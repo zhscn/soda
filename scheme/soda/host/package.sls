@@ -42,6 +42,7 @@
           package-host-surface-size
           package-host-replace-window-view!
           package-host-push-interaction-view!
+          package-host-add-interaction-companion-view!
           package-host-pop-interaction-view!
           package-host-remove-interaction-view!
           package-host-publish-feedback!
@@ -429,6 +430,14 @@
     (place-view! host
                  (make-push-interaction-operation surface-id view-id height)
                  view-id))
+
+  (define (package-host-add-interaction-companion-view!
+            host surface-id anchor-view-id view-id height)
+    (place-view!
+      host
+      (make-add-interaction-companion-operation
+        surface-id anchor-view-id view-id height)
+      view-id))
 
   (define (package-host-pop-interaction-view! host surface-id)
     (dispatcher-dispatch-host!
