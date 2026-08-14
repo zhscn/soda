@@ -126,9 +126,9 @@
                              (text-next-grapheme-offset text point))])
                 (kill-range context range point to)))))))
 
-  ;; Nano's Cut Text command operates on the whole logical line when there is
-  ;; no active region.  Keep it separate from `kill-line`: packages that want
-  ;; Emacs-style kill-to-end-of-line retain that reusable primitive.
+  ;; The line-oriented variant removes the complete logical line when there
+  ;; is no active region.  It remains a separate reusable primitive from
+  ;; kill-to-end-of-line.
   (define (cut-text context)
     (let ([range (selection-primary-range (context-selection context))])
       (if (not (selection-range-empty? range))

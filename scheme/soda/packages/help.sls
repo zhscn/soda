@@ -13,15 +13,45 @@
           (soda host value)
           (soda host view)
           (soda packages buffer-mode)
+          (soda packages command-presentation)
           (soda packages edit-policy)
           (soda packages generated-buffer)
           (soda packages buffer-item))
 
-  (define help-text
-    "Soda Nano Help\n\nM-x      Execute named command\nC-h f    Describe command\nC-h w    Show command bindings\nC-x C-f  Visit file\nC-x C-d  Browse directory\nC-x C-b  List buffers (RET visit, d close)\nC-o      Write out\nC-x C-s  Save file\nC-x C-w  Save file as\nC-r      Insert file\nM-B      Toggle file backups\nTAB      Insert indentation (complete prompt input)\nC-c      Current position\nC-l      Refresh screen\nC-t      Check spelling\nM-D      Count words, lines, characters\nM-!      Execute shell command\nM-r      Revert file\nC-w      Search\nM-w/M-W  Repeat search forward/backward\nM-C      Toggle search case\nM-`      Toggle whole-word search\nC-\\      Query replace\nC-k      Cut text or line\nC-u      Uncut text\nM-6      Copy region\nM-a/C-6  Set mark\nC-j      Justify paragraph\nM-g/C-_  Go to line\nC-y/C-v  Previous/next page\nM-\\/M-/ First/last line\nM-u      Undo\nM-e      Redo\nM-i      Toggle auto-indent\nM-R      Toggle read-only\nM-E      Toggle tab-to-spaces\nM-T      Set indent width\nM-F      Toggle auto-fill\nM-$      Toggle soft wrap\nC-x C-k  Close buffer\nC-x C-c  Exit\nM-]      Matching delimiter\nC-g      Close help\n")
+  (define (definition<? left right)
+    (string<? (symbol->string (command-definition-name left))
+              (symbol->string (command-definition-name right))))
+
+  (define (help-text service context)
+    (let* ([runtime (package-host-command-runtime (help-service-host service))]
+           [keymaps
+            (command-context-keymaps
+              context (help-service-fallback-keymaps service))]
+           [definitions
+            (list-sort
+              definition<?
+              (filter
+                (lambda (definition)
+                  (pair? (keymap-where-is
+                           keymaps (command-definition-name definition))))
+                (command-runtime-available-command-definitions runtime context)))])
+      (string-append
+        "Soda Help\n\n"
+        "Commands available in the current context:\n\n"
+        (apply string-append
+          (map
+            (lambda (definition)
+              (let* ([name (command-definition-name definition)]
+                     [keys (map key-sequence-name (keymap-where-is keymaps name))])
+                (string-append
+                  (join-strings keys ", ") "\n  "
+                  (or (command-definition-documentation definition)
+                      (symbol->string name))
+                  "  [" (symbol->string name) "]\n\n")))
+            definitions)))))
 
   (define-record-type help-service
-    (fields host owner keymap mode))
+    (fields host owner keymap mode fallback-keymaps))
 
   (define (help-configuration service)
     (make-configuration (make-buffer-modes-extension (help-service-mode service) '())))
@@ -31,10 +61,11 @@
            [configuration (help-configuration service)]
            [buffer
             (package-host-open-or-create-buffer!
-              host (help-service-owner service) (make-buffer-key 'help 'nano)
+              host (help-service-owner service) (make-buffer-key 'help 'commands)
               (lambda ()
                 (package-host-create-buffer! host (help-service-owner service) "*help*"
-                                             (make-document help-text) configuration)))])
+                                             (make-document (help-text service context))
+                                             configuration)))])
       (unless (= (buffer-id buffer) (command-context-buffer-id context))
         (let ([view (package-host-create-view! host (help-service-owner service) buffer configuration)])
           (unless (package-host-replace-window-view!
@@ -42,7 +73,11 @@
                     (command-context-window-id context) (view-id view))
             (assertion-violation 'help.show "origin Window is no longer available" context))))))
 
-  (define (make-help-service! host owner actions)
+  (define (make-help-service! host owner actions fallback-keymaps)
+    (unless (and (package-host? host) (owner? owner)
+                 (list? fallback-keymaps) (for-all keymap? fallback-keymaps))
+      (assertion-violation 'make-help-service!
+                           "expected a PackageHost, Owner, and application keymaps"))
     (let* ([keymap (make-keymap 'help)]
            [service #f])
       (set! service
@@ -56,10 +91,11 @@
                           (buffer-item-input-layer actions)))
                   (make-buffer-edit-policy-extension
                     (make-buffer-edit-policy 'reject)))
-                '(help) "Help")))
+                '(help) "Help")
+              fallback-keymaps))
       (define-command
         (package-host-command-runtime host) owner 'help.show (context)
-        (documentation "Show the Nano-oriented Soda help Buffer.")
+        (documentation "Show commands and active key bindings for the current context.")
         (class 'help)
         (undo 'ignore)
         (open-help! service context))

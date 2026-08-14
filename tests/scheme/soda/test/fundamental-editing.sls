@@ -172,11 +172,11 @@
            [backspace
             (input-dispatch
               context (make-key-event 'backspace 127 #f #f 0 'press (make-bytevector 0)))]
-           [uncut
+           [yank
             (input-dispatch
-              context (make-key-event 'character (char->integer #\u) #f #f 4 'press
+              context (make-key-event 'character (char->integer #\y) #f #f 4 'press
                                       (make-bytevector 0)))]
-           [cut-text
+           [kill-line
             (input-dispatch
               context (make-key-event 'character (char->integer #\k) #f #f 4 'press
                                       (make-bytevector 0)))]
@@ -210,8 +210,8 @@
                    (eq? (input-disposition-kind backspace) 'command)
                    (eq? (input-disposition-value backspace)
                         'fundamental.delete-backward)
-                   (eq? (input-disposition-value uncut) 'fundamental.yank)
-                   (eq? (input-disposition-value cut-text) 'fundamental.cut-text)
+                   (eq? (input-disposition-value yank) 'fundamental.yank)
+                   (eq? (input-disposition-value kill-line) 'fundamental.kill-line)
                    (eq? (input-disposition-value justify) 'fundamental.fill-paragraph)
                    (eq? (input-disposition-value set-mark) 'fundamental.set-mark)
                    (eq? (command-invocation-phase redraw) 'completed)
@@ -222,8 +222,9 @@
                         'fundamental.recenter)
                    (eq? (keymap-lookup
                           file-map
-                          (list (make-key-stroke 'character (char->integer #\o) 4)))
-                         'file.save)
+                          (list (make-key-stroke 'character (char->integer #\x) 4)
+                                (make-key-stroke 'character (char->integer #\i) 4)))
+                         'file.insert)
                    (eq? (keymap-lookup
                           file-map
                           (list (make-key-stroke 'character (char->integer #\r) 2)))
@@ -231,6 +232,44 @@
         (error 'fundamental-editing-tests
                "fundamental editing did not produce stable editor state"))
       (soda-application-close! application))
+
+    ;; Override commands remain reachable while an ordinary key prefix is
+    ;; pending.  This is the input contract used by keyboard.quit; the host
+    ;; does not special-case C-g or any other physical key.
+    (let* ([prefix-map (make-keymap 'prefix-test)]
+           [override-map (make-keymap 'override-test)]
+           [control (lambda (character)
+                      (make-key-stroke 'character (char->integer character) 4))]
+           [_prefix-binding
+            (keymap-bind! prefix-map
+                          (list (control #\x) (control #\f)) 'file.visit)]
+           [_quit-binding
+            (keymap-bind! override-map (list (control #\g)) 'keyboard.quit)]
+           [layers
+            (input-layer-compose
+              (list (make-input-layer 'global prefix-map #f 'pass)
+                    (make-input-layer 'override override-map #f 'ignore)))]
+           [context (make-input-context 0 0 layers)]
+           [prefix
+            (input-dispatch
+              context
+              (make-key-event 'character (char->integer #\x) #f #f 4 'press
+                              (make-bytevector 0)))]
+           [pending-context
+            (make-input-context
+              0 0 layers (input-disposition-input-state prefix))]
+           [quit
+            (input-dispatch
+              pending-context
+              (make-key-event 'character (char->integer #\g) #f #f 4 'press
+                              (make-bytevector 0)))])
+      (unless (and (eq? (input-disposition-kind prefix) 'consume)
+                   (eq? (input-disposition-kind quit) 'command)
+                   (eq? (input-disposition-value quit) 'keyboard.quit)
+                   (not (input-stack-pending-sequence
+                          (input-disposition-input-state quit))))
+        (error 'fundamental-editing-tests
+               "override command did not interrupt a pending prefix")))
 
     ;; A directory is a generated Buffer: item activation queues the next
     ;; ordinary file/directory command instead of giving the browser a custom
@@ -565,8 +604,7 @@
           (soda-application-close! application)
           (guard (condition [else #f]) (delete-file path)))))
 
-    ;; Nano aliases are declarative entries in the fundamental keymap.  They
-    ;; reuse the same command implementations as their primary bindings.
+    ;; The default editing keymap follows the Emacs interaction contract.
     (let* ([application (make-soda-application)]
            [keymap (fundamental-editing-keymap (soda-application-editing application))]
            [meta (lambda (character)
@@ -574,17 +612,12 @@
            [control (lambda (character)
                       (make-key-stroke 'character (char->integer character) 4))])
       (unless (and (eq? (keymap-lookup keymap (list (control #\y)))
-                       'fundamental.scroll-up)
-                   (eq? (keymap-lookup keymap (list (meta #\6)))
-                       'fundamental.copy-region)
-                   (eq? (keymap-lookup keymap (list (meta #\a)))
-                       'fundamental.set-mark)
-                   (eq? (keymap-lookup keymap (list (meta #\g)))
-                       'fundamental.goto-line)
-                   (eq? (keymap-lookup keymap (list (meta #\\)))
+                       'fundamental.yank)
+                   (eq? (keymap-lookup keymap (list (meta #\<)))
                        'fundamental.beginning-of-buffer)
-                   (eq? (keymap-lookup keymap (list (meta #\/)))
+                   (eq? (keymap-lookup keymap (list (meta #\>)))
                        'fundamental.end-of-buffer)
+                   (not (keymap-lookup keymap (list (control #\u)) #f))
                    (eq? (keymap-lookup keymap (list (control #\l)))
                        'fundamental.recenter)
                    (eq? (keymap-lookup keymap (list (meta #\r)))
@@ -593,7 +626,7 @@
                        'fundamental.previous-line)
                    (eq? (keymap-lookup keymap (list (make-key-stroke 'down #f 0)))
                        'fundamental.next-line))
-        (error 'fundamental-editing-tests "Nano editing aliases are not bound"))
+        (error 'fundamental-editing-tests "Emacs editing bindings are inconsistent"))
       (soda-application-close! application))
 
     ;; Case-folded searches retain source byte spans, including a fold that
@@ -666,7 +699,7 @@
                "search policies or their key bindings are incorrect"))
       (soda-application-close! application))
 
-    ;; Nano's regexp mode is View-local.  It keeps the ordinary search,
+    ;; Regexp mode is View-local.  It keeps the ordinary search,
     ;; repeat and replacement command lifecycle while changing only the
     ;; matcher to POSIX ERE.
     (let* ([application (make-soda-application)]
@@ -761,7 +794,7 @@
                (command-context-buffer-id (application-command-context application)))])
         (unless (and (string=? (buffer-name help-buffer) "*help*")
                      (string-contains? (buffer-string help-buffer) "C-x C-f"))
-          (error 'fundamental-editing-tests "help.show did not display the Nano help Buffer"))
+          (error 'fundamental-editing-tests "help.show did not display contextual command help"))
         (let ([rejected?
                (guard (condition [else #t])
                  (command-runtime-start!
@@ -925,9 +958,9 @@
       (unless
         (eq? (keymap-lookup
                (search-keymap (soda-application-search application))
-               (list (make-key-stroke 'character (char->integer #\w) 3)))
+               (list (make-key-stroke 'character (char->integer #\s) 3)))
              'search.previous)
-        (error 'fundamental-editing-tests "Meta-Shift-w did not bind reverse search repetition"))
+        (error 'fundamental-editing-tests "Meta-Shift-s did not bind reverse search repetition"))
       (command-runtime-start! runtime 'search.replace-all
                               (application-command-context application) (list "alpha" "A"))
       (unless (string=? (buffer-string buffer) "A beta A")

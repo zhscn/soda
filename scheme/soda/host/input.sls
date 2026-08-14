@@ -551,14 +551,35 @@
          (input-pass stack)]
         [else
          (let* ([stroke (key-event->key-stroke event)]
-                [sequence (if pending
-                              (append pending (list stroke))
-                              (list stroke))]
-                [result (resolve-command
-                          (input-context-layers context)
-                          sequence
-                          (resolve-key-sequence
-                            (input-context-layers context) sequence))])
+                [single-sequence (list stroke)]
+                [single-result
+                 (and pending
+                      (resolve-command
+                        (input-context-layers context)
+                        single-sequence
+                        (resolve-key-sequence
+                          (input-context-layers context) single-sequence)))]
+                ;; An override command is an application-declared interrupt:
+                ;; it remains reachable while an ordinary prefix is pending.
+                ;; Input owns this composition rule; it does not know which
+                ;; physical key or command name an application chooses.
+                [interrupt?
+                 (and single-result
+                      (eq? (car single-result) 'command)
+                      (eq? (input-layer-kind (caddr single-result)) 'override))]
+                [sequence (if interrupt?
+                              single-sequence
+                              (if pending
+                                  (append pending single-sequence)
+                                  single-sequence))]
+                [result
+                 (if interrupt?
+                     single-result
+                     (resolve-command
+                       (input-context-layers context)
+                       sequence
+                       (resolve-key-sequence
+                         (input-context-layers context) sequence)))])
            (case (car result)
              [(prefix)
               (input-consume

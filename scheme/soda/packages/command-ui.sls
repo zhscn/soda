@@ -1,14 +1,12 @@
 (library (soda packages command-ui)
   (export make-command-ui!)
   (import (rnrs)
-          (soda kernel extension)
-          (soda kernel state)
           (soda host command)
           (soda host command-runtime)
           (soda host input)
           (soda host input-event)
           (soda host value)
-          (soda packages buffer-mode)
+          (soda packages command-presentation)
           (soda packages edit-policy)
           (soda packages generated-buffer)
           (soda packages buffer-item)
@@ -58,49 +56,6 @@
           (lambda (value)
             (make-interactive-ready (list (string->symbol value))))))))
 
-  (define (modifier-prefix modifiers)
-    (string-append
-      (if (not (zero? (bitwise-and modifiers 4))) "C-" "")
-      (if (not (zero? (bitwise-and modifiers 2))) "M-" "")
-      (if (not (zero? (bitwise-and modifiers 1))) "S-" "")
-      (if (not (zero? (bitwise-and modifiers 8))) "s-" "")))
-
-  (define (stroke-name stroke)
-    (let ([prefix (modifier-prefix (key-stroke-modifiers stroke))]
-          [codepoint (key-stroke-codepoint stroke)])
-      (string-append
-        prefix
-        (if codepoint
-            (string (integer->char codepoint))
-            (string-append "<" (symbol->string (key-stroke-key stroke)) ">")))))
-
-  (define (join strings separator)
-    (if (null? strings)
-        ""
-        (let loop ([remaining (cdr strings)] [result (car strings)])
-          (if (null? remaining)
-              result
-              (loop (cdr remaining)
-                    (string-append result separator (car remaining)))))))
-
-  (define (sequence-name sequence)
-    (join (map (lambda (key)
-                 (if (key-stroke? key) (stroke-name key)
-                     (if (symbol? key) (symbol->string key) key)))
-               sequence)
-          " "))
-
-  (define (context-keymaps context fallback-keymaps)
-    (let ([state (command-context-buffer-state context)])
-      (append
-        (if state
-            (map input-layer-keymap
-                 (configuration-facet
-                   (buffer-state-configuration state)
-                   buffer-input-layers-facet 'buffer))
-            '())
-        fallback-keymaps)))
-
   (define (description runtime name)
     (let ([definition (command-runtime-command-definition runtime name #f)])
       (if definition
@@ -147,7 +102,8 @@
         (interactive (make-interactive-plan (list where-reader)))
         (undo 'ignore)
         (let ([sequences
-               (keymap-where-is (context-keymaps context fallback-keymaps) name)])
+               (keymap-where-is
+                 (command-context-keymaps context fallback-keymaps) name)])
           (make-command-effect
             'message.show
             (make-message-request
@@ -156,6 +112,6 @@
                   (string-append (symbol->string name) " is not bound")
                   (string-append
                     (symbol->string name) " is on "
-                    (join (map sequence-name sequences) ", ")))))))
+                    (join-strings (map key-sequence-name sequences) ", ")))))))
       #t))
 )

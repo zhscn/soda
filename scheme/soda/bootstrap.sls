@@ -93,6 +93,7 @@
       (immutable minibuffer soda-application-minibuffer)
       (immutable buffer-item-actions soda-application-buffer-item-actions)
       (immutable buffer-lists soda-application-buffer-lists)
+      (immutable override-keymap soda-application-override-keymap)
       (immutable default-keymap soda-application-default-keymap)
       (mutable terminal soda-application-terminal soda-application-terminal-set!)
       (mutable effect-registration soda-application-effect-registration
@@ -172,7 +173,6 @@
                [buffer-lists (make-buffer-list-service! host owner history buffer-item-actions)]
                [spelling (make-spell-service! host owner processes buffer-item-actions)]
                [messages (make-message-service! host owner)]
-               [_help (make-help-service! host owner buffer-item-actions)]
                [search
                 (make-search-service! host owner)]
                [word-completion
@@ -183,37 +183,66 @@
                 (install-application-quit-command!
                   (host-state-command-runtime state) owner files)]
                [minibuffer (make-minibuffer-service! host interaction owner)]
+               [_keyboard-quit
+                (install-keyboard-quit-command! host owner interaction)]
+               [override-keymap (make-override-keymap)]
                [default-keymap (make-default-keymap)]
+               [application-keymaps
+                (list override-keymap
+                      (editor-options-keymap options)
+                      (search-keymap search)
+                      (word-completion-keymap word-completion)
+                      (whitespace-keymap whitespace)
+                      (comment-keymap comments)
+                      (keyboard-macro-keymap keyboard-macros)
+                      (message-keymap messages)
+                      (spell-keymap spelling)
+                      (process-keymap processes)
+                      (file-keymap files)
+                      (directory-keymap directories)
+                      (buffer-list-keymap buffer-lists)
+                      default-keymap)]
+               [_help
+                (make-help-service!
+                  host owner buffer-item-actions application-keymaps)]
                [_command-ui
                 (make-command-ui!
-                  (host-state-command-runtime state) owner
-                  (list (editor-options-keymap options)
-                        (search-keymap search)
-                        (word-completion-keymap word-completion)
-                        (whitespace-keymap whitespace)
-                        (comment-keymap comments)
-                        (keyboard-macro-keymap keyboard-macros)
-                        (message-keymap messages)
-                        (spell-keymap spelling)
-                        (process-keymap processes)
-                        (file-keymap files)
-                        (directory-keymap directories)
-                        (buffer-list-keymap buffer-lists)
-                        default-keymap))])
+                  (host-state-command-runtime state) owner application-keymaps)])
           (install-buffer-item-commands!
             (host-state-command-runtime state) owner buffer-item-actions host)
           (surface-service-register! (host-state-surfaces state) surface)
           (history-mark-saved! history (buffer-id buffer))
           (%make-soda-application
-            state owner buffer view surface editing options history keyboard-macros files scheme-mode directories processes spelling messages search interaction minibuffer buffer-item-actions buffer-lists default-keymap
+            state owner buffer view surface editing options history keyboard-macros files scheme-mode directories processes spelling messages search interaction minibuffer buffer-item-actions buffer-lists override-keymap default-keymap
             #f #f #f)))))
+
+  (define (make-override-keymap)
+    (let ([keymap (make-keymap 'soda-override)])
+      (keymap-bind!
+        keymap
+        (list (make-key-stroke 'character (char->integer #\g) 4))
+        'keyboard.quit)
+      keymap))
+
+  (define (install-keyboard-quit-command! host owner interactions)
+    (define-command
+      (package-host-command-runtime host) owner 'keyboard.quit (context)
+      (documentation "Cancel the active interaction or pending input state.")
+      (class 'application)
+      (undo 'ignore)
+      (interaction-service-cancel! interactions)
+      (package-host-set-surface-message!
+        host (command-context-surface-id context) "Quit")
+      (command-handled)))
 
   ;; Application policy belongs to composition.  Fundamental editing exports
   ;; only its own commands, so alternate applications may bind help, history,
   ;; or shutdown differently without importing a default command name.
   (define (make-default-keymap)
     (let ([keymap (make-keymap 'soda-default)])
-      (keymap-bind! keymap (list (make-key-stroke 'character (char->integer #\g) 4))
+      (keymap-bind! keymap
+                    (list (make-key-stroke 'character (char->integer #\h) 4)
+                          (make-key-stroke 'character (char->integer #\h) 0))
                     'help.show)
       (keymap-bind! keymap
                     (list (make-key-stroke 'character (char->integer #\x) 4)
@@ -230,6 +259,9 @@
       (keymap-bind! keymap
                     (list (make-key-stroke 'character (char->integer #\x) 4)
                           (make-key-stroke 'character (char->integer #\u) 0))
+                    'argument.universal)
+      (keymap-bind! keymap
+                    (list (make-key-stroke 'character (char->integer #\u) 4))
                     'argument.universal)
       (for-each
         (lambda (character)
@@ -337,8 +369,8 @@
     (let ([value (string->number text)])
       (and (integer? value) (exact? value) (> value 0) value)))
 
-  ;; The command-line position syntax follows Nano's compact +LINE[,COLUMN]
-  ;; form.  Positions apply to one following file and are converted into an
+  ;; A command-line position uses the compact +LINE[,COLUMN] form. Positions
+  ;; apply to one following file and are converted into an
   ;; ordinary motion command after the file Buffer becomes active.
   (define (parse-startup-position argument)
     (and (> (string-length argument) 1)
@@ -409,11 +441,19 @@
       (or (minibuffer-input-context
             (soda-application-minibuffer application) active view
             (list
+              (make-input-layer
+                'override
+                (soda-application-override-keymap application)
+                #f 'ignore)
               (fundamental-fallback-input-layer
                 (soda-application-editing application))))
           (buffer-input-context
             active view
             (list
+              (make-input-layer
+                'override
+                (soda-application-override-keymap application)
+                #f 'ignore)
               (make-input-layer
                 'global
                 (editor-options-keymap (soda-application-options application))
