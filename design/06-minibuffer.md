@@ -226,6 +226,10 @@ preview、application 或 accept 前刷新 source，并清除旧 context 的 sel
 field 外文本发生变化时仍会推进 generation 并重新产生候选。例如从路径末尾删除一个目录
 分量后，新目录的空 query 不会复用旧目录的空 query 结果。
 
+file-name reader 在 session 创建时冻结 default directory，并把带尾部分隔符的目录作为
+initial input。completion source、field replacement 与 responder 的相对路径解析共享该目录；
+已访问 Buffer 从 resource 父目录取得基准，未访问 Buffer 使用 session 创建时的进程目录。
+
 choice source metadata 为匹配和选择声明策略：
 
 ```text

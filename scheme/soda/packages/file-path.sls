@@ -5,6 +5,8 @@
           file-lock?
           acquire-file-lock
           release-file-lock!
+          current-file-directory
+          make-file-name-completion-source
           file-name-completion-source
           make-file-name-reader)
   (import (rnrs)
@@ -29,6 +31,10 @@
     (require-path 'canonical-file-resource path)
     (make-resource 'file
       (vfs-resolve-path (vfs-directory-path (current-directory)) path)))
+
+  (define (current-file-directory)
+    (vfs-directory-path
+      (vfs-resolve-path (vfs-directory-path (current-directory)) ".")))
 
   (define (file-backup-path path) (string-append path "~"))
 
@@ -59,34 +65,18 @@
       (and (<= length (string-length value))
            (string=? prefix (substring value 0 length)))))
 
-  (define (path-field-start value point)
-    (let loop ([index (- point 1)])
-      (cond [(negative? index) 0]
-            [(vfs-path-separator? (string-ref value index)) (+ index 1)]
-            [else (loop (- index 1))])))
-
-  (define (path-field-end value point)
-    (let loop ([index point])
-      (cond [(= index (string-length value)) index]
-            [(vfs-path-separator? (string-ref value index)) index]
-            [else (loop (+ index 1))])))
-
-  ;; File-name completion has no project ownership.  It resolves the path
-  ;; field under point against the process directory, preserving the spelling
-  ;; already typed in the prompt for the candidate insertion text.
-  (define (file-name-candidates snapshot)
+  ;; A file prompt captures one directory base. Candidate discovery and final
+  ;; submission both resolve against it, so changing process cwd while the
+  ;; prompt is open cannot change the meaning of its text.
+  (define (file-name-candidates base snapshot)
     (let* ([input (prompt-snapshot-input snapshot)]
            [point (prompt-snapshot-point snapshot)]
-           [length (string-length input)])
-      (let* ([start (path-field-start input point)]
-                 [end (path-field-end input point)]
-                 [directory-prefix (substring input 0 start)]
+           [length (string-length input)]
+           [boundaries (vfs-path-field-boundaries input point)])
+      (let* ([start (car boundaries)]
+                 [end (cdr boundaries)]
                  [name-prefix (substring input start point)]
-                 [directory
-                  (if (zero? (string-length directory-prefix))
-                      (vfs-directory-path (current-directory))
-                      (vfs-resolve-path
-                        (vfs-directory-path (current-directory)) directory-prefix))])
+                 [directory (vfs-completion-directory base input point)])
             (guard (condition [else '()])
               (map
                 (lambda (entry)
@@ -110,16 +100,40 @@
                          (string-prefix? name-prefix (vfs-entry-name entry))))
                   (vfs-list-directory directory)))))))
 
-  (define file-name-completion-source
-    (make-completion-source file-name-candidates #f #f #f))
+  (define (make-file-name-completion-source base)
+    (unless (and (string? base) (positive? (string-length base)))
+      (assertion-violation
+        'make-file-name-completion-source "expected a base directory" base))
+    (let ([directory (vfs-directory-path (vfs-resolve-path base "."))])
+      (make-completion-source
+        (lambda (snapshot) (file-name-candidates directory snapshot))
+        #f #f #f)))
 
-  (define (make-file-name-reader prompt)
-    (make-interactive-reader
-      'file-name
-      (lambda (context arguments)
-        (make-interactive-suspend
-          (make-interaction-request
-            'file-name prompt #f file-name-completion-source 'free
-            #f 'file-name)
-          (lambda (value) (make-interactive-ready (list value)))))))
+  (define file-name-completion-source
+    (make-completion-source
+      (lambda (snapshot)
+        (file-name-candidates (current-file-directory) snapshot))
+      #f #f #f))
+
+  (define make-file-name-reader
+    (case-lambda
+      [(prompt)
+       (make-file-name-reader prompt (lambda (context) (current-file-directory)))]
+      [(prompt directory-for-context)
+       (unless (and (string? prompt) (procedure? directory-for-context))
+         (assertion-violation
+           'make-file-name-reader "expected a prompt and directory resolver"))
+       (make-interactive-reader
+         'file-name
+         (lambda (context arguments)
+           (let* ([base
+                   (vfs-directory-path
+                     (vfs-resolve-path (directory-for-context context) "."))]
+                  [source (make-file-name-completion-source base)])
+             (make-interactive-suspend
+               (make-interaction-request
+                 'file-name prompt base source 'free #f 'file-name)
+               (lambda (value)
+                 (make-interactive-ready
+                   (list (vfs-resolve-path base value))))))))]))
 )

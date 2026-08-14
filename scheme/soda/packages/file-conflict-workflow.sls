@@ -92,17 +92,27 @@
            (assertion-violation 'file.resolve-external-change
                                 "invalid external conflict target" arguments)]))))
 
-  (define (make-conflict-save-as-reader)
+  (define (make-conflict-save-as-reader service)
     (make-interactive-reader
       'file-name
       (lambda (context arguments)
         (if (and (= (length arguments) 3)
                  (eq? (caddr arguments) 'save-as))
-            (make-interactive-suspend
-              (make-interaction-request
-                'file-name "Write local contents to: "
-                #f file-name-completion-source 'free)
-              (lambda (value) (make-interactive-ready (list value))))
+            (let* ([conflict (file-service-conflict service (car arguments) #f)]
+                   [base
+                    (if conflict
+                        (vfs-parent-directory
+                          (resource-locator
+                            (file-conflict-resource conflict)))
+                        (current-file-directory))]
+                   [source (make-file-name-completion-source base)])
+              (make-interactive-suspend
+                (make-interaction-request
+                  'file-name "Write local contents to: "
+                  base source 'free)
+                (lambda (value)
+                  (make-interactive-ready
+                    (list (vfs-resolve-path base value))))))
             (make-interactive-ready '())))))
 
   (define (make-conflict-overwrite-reader)

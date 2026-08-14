@@ -2245,6 +2245,9 @@
             (command-runtime-start-interactive!
               runtime 'file.visit (application-command-context application))
             (command-runtime-start!
+              runtime 'fundamental.mark-whole-buffer
+              (application-command-context application))
+            (command-runtime-start!
               runtime 'fundamental.insert-text
               (application-command-context application)
               (list (string->utf8 (string-append root "/s"))))
@@ -2375,6 +2378,8 @@
                              (interaction-service-current interaction))])
               (unless (and (eq? (interaction-request-kind request) 'file-name)
                            (eq? (interaction-request-history-key request) 'file-name)
+                           (string=? (interaction-request-initial-value request)
+                                     (current-file-directory))
                            (string=? (interaction-request-prompt request) "Write file: "))
                 (error 'fundamental-editing-tests
                        "file.save did not ask an unvisited Buffer for its destination")))
@@ -2408,9 +2413,15 @@
                            (eq? (interaction-request-history-key request) 'file-name)
                            (completion-source?
                              (interaction-request-completion-source request))
+                           (string=?
+                             (interaction-request-initial-value request)
+                             (vfs-parent-directory scratch-save))
                            (string=? (interaction-request-prompt request) "Visit file: "))
                 (error 'fundamental-editing-tests
                        "file.visit did not declare a reusable file interaction")))
+            (command-runtime-start!
+              runtime 'fundamental.mark-whole-buffer
+              (application-command-context application))
             (command-runtime-start!
               runtime 'fundamental.insert-text (application-command-context application)
               (list (string->utf8 (substring path 0 (- (string-length path) 4)))))
@@ -2441,8 +2452,14 @@
                        "minibuffer.complete did not apply the path common prefix")))
             (interaction-service-cancel! interaction)
             (host-state-run! state)
-            (command-runtime-start! runtime 'file.visit
-                                    (application-command-context application) (list path))
+            (command-runtime-start-interactive!
+              runtime 'file.visit (application-command-context application))
+            (interaction-service-submit!
+              interaction
+              (substring path
+                         (string-length (vfs-parent-directory path))
+                         (string-length path)))
+            (host-state-run! state)
             (let ([buffer (buffer-service-ref
                             (host-state-buffers state)
                             (command-context-buffer-id

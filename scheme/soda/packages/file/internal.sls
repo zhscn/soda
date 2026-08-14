@@ -82,6 +82,14 @@
     (file-mode-registry-mode-for
       (file-service-mode-registry service) resource))
 
+  (define (file-prompt-directory service context)
+    (let ([resource
+           (file-service-resource
+             service (command-context-buffer-id context) #f)])
+      (if resource
+          (vfs-parent-directory (resource-locator resource))
+          (current-file-directory))))
+
   ;; A visited Buffer has no preceding path argument and writes its own
   ;; resource directly.  For a supplied destination, an existing different
   ;; file requires explicit confirmation before a file-write effect is made.
@@ -118,11 +126,15 @@
       (lambda (context arguments)
         (if (file-service-binding service (command-context-buffer-id context) #f)
             (make-interactive-ready '())
-            (make-interactive-suspend
-              (make-interaction-request
-                'file-name "Write file: " #f file-name-completion-source 'free
-                #f 'file-name)
-              (lambda (value) (make-interactive-ready (list value))))))))
+            (let* ([base (file-prompt-directory service context)]
+                   [source (make-file-name-completion-source base)])
+              (make-interactive-suspend
+                (make-interaction-request
+                  'file-name "Write file: " base source 'free
+                  #f 'file-name)
+                (lambda (value)
+                  (make-interactive-ready
+                    (list (vfs-resolve-path base value))))))))))
 
   (define (file-service-add-state-listener! service owner procedure)
     (unless (file-service? service)
@@ -239,7 +251,7 @@
           (make-interactive-plan
             (list (make-conflict-target-reader service)
                   (make-external-change-reader service)
-                  (make-conflict-save-as-reader)
+                  (make-conflict-save-as-reader service)
                   (make-conflict-overwrite-reader))))
         (undo 'ignore)
         (cond
@@ -393,13 +405,17 @@
                     (file-insert-context request)
                     (list contents) #f)))))))
       (install-file-command! runtime owner 'file.visit "Visit a file in the active Window."
-        (list (make-file-name-reader "Visit file: "))
+        (list (make-file-name-reader
+                "Visit file: "
+                (lambda (context) (file-prompt-directory service context))))
         (lambda (context path)
           (make-command-effect 'file.visit
             (make-file-visit context (canonical-file-resource path)))))
       (install-file-command! runtime owner 'file.insert
         "Insert a file's contents at every active selection."
-        (list (make-file-name-reader "Insert file: "))
+        (list (make-file-name-reader
+                "Insert file: "
+                (lambda (context) (file-prompt-directory service context))))
         (lambda (context path)
           (make-command-effect
             'file.insert
@@ -450,7 +466,10 @@
                         (command-context-buffer-state context)
                         resource #f #t)))))))
       (install-file-command! runtime owner 'file.save-as "Write the active Buffer to a file and visit it."
-        (list (make-file-name-reader "Write file: ") (make-overwrite-reader service))
+        (list (make-file-name-reader
+                "Write file: "
+                (lambda (context) (file-prompt-directory service context)))
+              (make-overwrite-reader service))
         (lambda (context path . decisions)
           ;; A direct command invocation is an explicit noninteractive API
           ;; request.  It keeps the historical one-path calling convention;

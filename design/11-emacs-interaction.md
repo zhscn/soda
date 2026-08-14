@@ -19,6 +19,7 @@ prefix key、minibuffer、echo area、mode line、Buffer/View/Window 语义作�
 | 启动时打开多个文件与 `+LINE[,COLUMN]` 定位 | 每个文件使用可重用 Buffer，并在目标 View 中定位 |
 | 访问、插入、保存、另存、重载与关闭 file Buffer | 文件生命周期通过 command 与 interaction 组合 |
 | 文件名 completion、目录浏览与 Buffer 列表 | 使用普通 Buffer/View 和 minibuffer |
+| file prompt default directory | 已访问 Buffer 使用其文件所在目录；其他 Buffer 使用 session 创建时的当前目录，候选和最终路径共享该基准 |
 | 修改 Buffer 在关闭和退出时的保存决策 | 在实际关闭边界请求用户决策 |
 | 覆盖已有目标文件的明确确认 | 写入前通过 minibuffer 确认 |
 | 外部修改检测 | 保存时校验 resource version |

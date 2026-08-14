@@ -427,7 +427,7 @@
             (let loop ([index point])
               (cond
                 [(= index (string-length input)) index]
-                [(vfs-path-separator? (string-ref input index)) (+ index 1)]
+                [(vfs-path-separator? (string-ref input index)) index]
                 [else (loop (+ index 1))]))])
       (cons start end)))
 
