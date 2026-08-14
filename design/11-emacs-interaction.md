@@ -71,7 +71,7 @@ prefix key、minibuffer、echo area、mode line、Buffer/View/Window 语义作�
 | View-local soft wrap 与 tab width | 每个 View 保持独立布局配置 |
 | line-number gutter 与 guide column | 作为 View decoration 参与布局 |
 | constant position display | 导航状态在 echo area 中低优先级显示 |
-| prefix guidance | 未完成的 prefix 在 echo area 中按需显示可用的下一键，不占用常驻快捷键栏 |
+| prefix guidance | 未完成的 prefix 在 echo area 中按需显示可用的下一键 |
 | command feedback | 单行命令结果显示到下一次有效用户输入；延迟反馈只在发起 View 仍是当前输入目标时显示。长期状态进入 mode line、普通 Buffer 或 interaction |
 | 可组合 selection/search/diagnostic/semantic style overlay | decoration 在 cell renderer 之前构建并按范围查询 |
 | soft-wrap visual-row motion | motion 使用 DisplayMap 的可视行语义 |
