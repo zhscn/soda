@@ -7,7 +7,7 @@
   (import (rnrs)
           (soda kernel change) (soda kernel document) (soda kernel extension) (soda kernel state)
           (soda host command) (soda host command-runtime)
-          (soda host dispatch-core) (soda host dispatch-transaction)
+          (soda host dispatch) (soda host package)
           (soda host value))
   (define-record-type history-entry (fields undo redo semantic invocation-id))
   (define-record-type history
@@ -98,23 +98,24 @@
       (make-command-definition name procedure owner doc 'history #f)))
   (define make-history!
     (case-lambda
-      [(runtime dispatcher owner)
-       (make-history! runtime dispatcher owner (lambda (buffer-id modified?) #f))]
-      [(runtime dispatcher owner publish-modified!)
+      [(host owner)
+       (make-history! host owner (lambda (buffer-id modified?) #f))]
+      [(host owner publish-modified!)
        (unless (procedure? publish-modified!)
          (assertion-violation 'make-history! "expected a presentation publisher"
                               publish-modified!))
        (let ([value (make-history (make-eqv-hashtable) (make-eqv-hashtable)
                                   (make-eqv-hashtable) publish-modified! #f)])
       (history-registration-set! value
-        (dispatcher-add-listener! dispatcher owner
+        (package-host-add-update-listener! host owner
           (lambda (update)
             (let ([id (editor-update-buffer-id update)])
               (unless (exists (lambda (a) (eq? (annotation-key a) 'history.replay))
                               (editor-update-annotations update))
                 (unless (change-set-empty? (editor-update-changes update))
                   (push-update! value update)))))))
-      (install-history-command! runtime owner 'history.undo "Undo the last Buffer transaction."
+      (install-history-command! (package-host-command-runtime host)
+                                owner 'history.undo "Undo the last Buffer transaction."
         (lambda (context)
           (let* ([id (command-context-buffer-id context)] [items (stack-ref (history-undo value) id)])
             (if (null? items) (command-handled)
@@ -125,7 +126,8 @@
                   ((history-publish-modified! value) id
                    (history-modified? value id))
                   (replay context (history-entry-undo (car items))))))))
-      (install-history-command! runtime owner 'history.redo "Redo the next Buffer transaction."
+      (install-history-command! (package-host-command-runtime host)
+                                owner 'history.redo "Redo the next Buffer transaction."
         (lambda (context)
           (let* ([id (command-context-buffer-id context)] [items (stack-ref (history-redo value) id)])
             (if (null? items) (command-handled)

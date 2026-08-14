@@ -2969,8 +2969,7 @@
        [host-capability (make-package-host state)]
        [owner (make-owner 'recovery-writer-test)]
        [history
-        (make-history!
-          (host-state-command-runtime state) (host-state-dispatch state) owner)]
+        (make-history! host-capability owner)]
        [buffer
         (buffer-service-create!
           (host-state-buffers state) owner "recovery-source"
@@ -3032,9 +3031,7 @@
              [next-host (make-package-host next-state)]
              [next-owner (make-owner 'recovery-reader-test)]
              [next-history
-              (make-history!
-                (host-state-command-runtime next-state)
-                (host-state-dispatch next-state) next-owner)]
+              (make-history! next-host next-owner)]
              [base
               (buffer-service-create!
                 (host-state-buffers next-state) next-owner "recovery-target"
@@ -4634,8 +4631,7 @@
              [host (make-package-host state)]
              [owner (make-owner 'startup-recovery-writer)]
              [history
-              (make-history!
-                (host-state-command-runtime state) (host-state-dispatch state) owner)]
+              (make-history! host owner)]
              [buffer
               (buffer-service-create!
                 (host-state-buffers state) owner "recovery-source"

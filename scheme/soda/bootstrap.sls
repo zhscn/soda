@@ -164,8 +164,7 @@
                 (make-editor-options-service!
                   host owner)]
                [history
-                (make-history! (host-state-command-runtime state)
-                               (host-state-dispatch state) owner
+                (make-history! host owner
                                (lambda (buffer-id modified?)
                                  (package-host-publish-buffer-presentation!
                                    host buffer-id 'modified modified?)))]
