@@ -19,6 +19,8 @@
           host-state-conditions
           host-state-dispatch
           host-state-frontend-handlers
+          host-state-location-follow-ready?
+          host-state-location-follow-ready?-set!
           host-state-closed?
           host-state-run!
           host-state-close!)
@@ -62,6 +64,8 @@
       (immutable conditions host-state-conditions)
       (immutable dispatch host-state-dispatch)
       (immutable frontend-handlers host-state-frontend-handlers)
+      (mutable location-follow-ready? host-state-location-follow-ready?
+               host-state-location-follow-ready?-set!)
       (mutable closed? host-state-closed? host-state-closed?-set!)))
 
   (define (make-host-state)
@@ -157,7 +161,7 @@
       (%make-host-state
         owner runtime buffers buffer-attachments analyses modes mode-catalog locations navigation
         presentations settings views surfaces commands
-        command-runtime conditions dispatch (make-eqv-hashtable) #f)))
+        command-runtime conditions dispatch (make-eqv-hashtable) #f #f)))
 
   (define (host-state-close! state)
     (unless (host-state? state)

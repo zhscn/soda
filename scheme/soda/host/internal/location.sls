@@ -2,7 +2,9 @@
   (export make-location-service
           location-service?
           location-service-register!
-          location-service-resolve)
+          location-service-resolve
+          location-service-add-follow!
+          location-service-take-follows!)
   (import (rnrs)
           (soda kernel document)
           (soda kernel location)
@@ -19,13 +21,48 @@
     (location-service %make-location-service location-service?)
     (fields buffers
             (mutable registrations location-service-registrations
-                     location-service-registrations-set!)))
+                     location-service-registrations-set!)
+            (mutable pending-follows location-service-pending-follows
+                     location-service-pending-follows-set!)))
 
   (define (make-location-service buffers)
     (unless (buffer-service? buffers)
       (assertion-violation
         'make-location-service "expected a BufferService" buffers))
-    (%make-location-service buffers '()))
+    (%make-location-service buffers '() '()))
+
+  ;; Pending follow values remain opaque to LocationService.  The service owns
+  ;; only their Resource-keyed lifetime; PackageHost owns their continuation
+  ;; command and presentation semantics.
+  (define (location-service-add-follow! service location follow)
+    (unless (and (location-service? service) (location? location))
+      (assertion-violation 'location-service-add-follow!
+                           "expected a LocationService and Location" service location))
+    (let ([already-pending?
+           (exists
+             (lambda (entry) (location=? location (car entry)))
+             (location-service-pending-follows service))])
+      (location-service-pending-follows-set!
+        service
+        (append (location-service-pending-follows service)
+                (list (cons location follow))))
+      (not already-pending?)))
+
+  (define (location-service-take-follows! service location)
+    (unless (and (location-service? service) (location? location))
+      (assertion-violation 'location-service-take-follows!
+                           "expected a LocationService and Location" service location))
+    (let loop ([remaining (location-service-pending-follows service)]
+               [kept '()]
+               [taken '()])
+      (if (null? remaining)
+          (begin
+            (location-service-pending-follows-set! service (reverse kept))
+            (reverse taken))
+          (let ([entry (car remaining)])
+            (if (location=? location (car entry))
+                (loop (cdr remaining) kept (cons (cdr entry) taken))
+                (loop (cdr remaining) (cons entry kept) taken))))))
 
   (define (location-service-register! service owner provider)
     (unless (and (location-service? service) (owner? owner)
@@ -43,7 +80,15 @@
           (location-service-registrations-set!
             service
             (filter (lambda (candidate) (not (eq? candidate entry)))
-                    (location-service-registrations service)))))))
+                    (location-service-registrations service)))
+          (location-service-pending-follows-set!
+            service
+            (filter
+              (lambda (pending)
+                (not
+                  (eq? (resource-scheme (location-resource (car pending)))
+                       (location-provider-scheme provider))))
+              (location-service-pending-follows service)))))))
 
   (define (provider-for service scheme)
     (let loop ([remaining (location-service-registrations service)])

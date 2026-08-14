@@ -3021,10 +3021,7 @@
                       (make-resource 'file second-path)
                       (make-byte-position 1) (make-byte-position 4)
                       #f 'after '())]
-                   [pending (package-host-resolve-location host location)]
-                   [active-before
-                    (command-context-buffer-id
-                      (application-command-context application))])
+                   [pending (package-host-resolve-location host location)])
               (unless (and (eq? (location-resolution-status pending) 'needs-open)
                            (command-effect?
                              (location-resolution-request pending)))
@@ -3034,25 +3031,37 @@
                 runtime
                 (make-command-definition
                   'test.open-file-location
-                  (lambda (context) (location-resolution-request pending))
+                  (lambda (context)
+                    (package-host-request-location-follow! host context location))
                   (host-state-owner state)))
               (command-runtime-start!
                 runtime 'test.open-file-location
                 (application-command-context application))
+              (host-state-run! state)
               (let ([resolved (package-host-resolve-location host location)])
                 (unless (and (eq? (location-resolution-status resolved) 'resolved)
                              (= (location-resolution-from resolved) 1)
                              (= (location-resolution-to resolved) 4)
                              (= (command-context-buffer-id
                                   (application-command-context application))
-                                active-before)
+                                (location-resolution-buffer-id resolved))
                              (string=?
                                (buffer-string
                                  (package-host-buffer-ref
                                    host (location-resolution-buffer-id resolved)))
                                "second"))
                   (error 'fundamental-editing-tests
-                         "file Location loading changed placement or failed to resolve"))))
+                         "file Location follow did not open, resolve, and present the target")))
+              ;; The remaining scenarios in this fixture begin from scratch.
+              (let ([current (application-command-context application)])
+                (unless
+                  (package-host-present-buffer!
+                    host (host-state-owner state) scratch
+                    (command-context-surface-id current)
+                    (command-context-window-id current)
+                    (buffer-state-configuration (buffer-state scratch)))
+                  (error 'fundamental-editing-tests
+                         "could not restore the file Location test fixture"))))
             (command-runtime-start-interactive!
               runtime 'file.save (application-command-context application))
             (let ([request (interaction-session-request

@@ -11,13 +11,18 @@
           location-resolution-buffer-id
           location-resolution-from
           location-resolution-to
-          location-resolution-request)
+          location-resolution-request
+          make-location-follow-request
+          location-follow-request?
+          location-follow-request-context
+          location-follow-request-target)
   (import (rnrs)
           (soda kernel location))
 
   ;; A provider identifies an already-open Buffer for one Resource scheme and
-  ;; optionally creates an opaque asynchronous open request.  The Host owns
-  ;; registry traversal and coordinate conversion.
+  ;; optionally creates an open request.  Command-runtime adapters consume a
+  ;; command-effect request and notify PackageHost after opening the Resource,
+  ;; which resumes every pending Location follow for that Resource.
   (define-record-type
     (location-provider %make-location-provider location-provider?)
     (fields scheme locate request-open))
@@ -37,6 +42,11 @@
   (define-record-type
     (location-resolution %make-location-resolution location-resolution?)
     (fields status location buffer-id from to request))
+
+  ;; An immutable follow request carries the initiating editor context through
+  ;; an open effect without retaining a package callback or mutable View.
+  (define-record-type location-follow-request
+    (fields context target))
 
   (define (make-location-resolution status location buffer-id from to request)
     (unless (and (memq status '(resolved unavailable needs-open stale outside))

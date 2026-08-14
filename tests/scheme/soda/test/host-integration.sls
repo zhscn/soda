@@ -13,6 +13,7 @@
           (soda host internal context)
           (soda host internal navigation)
           (soda host internal operation)
+          (soda host location)
           (soda host package)
           (soda host internal state)
           (soda host internal surface)
@@ -186,9 +187,82 @@
           (owner-close! owner)
           (soda-application-close! application)))))
 
+  (define (run-deferred-location-follow-test!)
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [host (make-package-host state)]
+           [owner (make-owner 'deferred-location-follow-test)]
+           [surface (soda-application-surface application)]
+           [source (soda-application-buffer application)]
+           [runtime (host-state-command-runtime state)]
+           [opened-location #f]
+           [opened-buffer-id #f])
+      (define (current-context)
+        (let* ([active (surface-active-context surface (host-state-views state))]
+               [view
+                (view-service-ref (host-state-views state)
+                                  (active-context-view-id active))]
+               [buffer (view-buffer view)])
+          (make-command-context
+            #f
+            (active-context-surface-id active)
+            (active-context-window-id active)
+            (view-id view)
+            (buffer-id buffer)
+            (buffer-state buffer)
+            (view-state view)
+            #f '() #f #f 'host-integration #f)))
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (package-host-register-location-provider!
+            host owner
+            (make-location-provider
+              'deferred
+              (lambda (resource) opened-buffer-id)
+              (lambda (location)
+                (make-command-effect 'test.deferred-location-open location))))
+          (command-runtime-register-effect-handler!
+            runtime 'test.deferred-location-open owner 'capture-deferred-open
+            (lambda (ignored invocation effect)
+              (set! opened-location (command-effect-payload effect))))
+          (command-runtime-register-command!
+            runtime
+            (make-command-definition
+              'test.deferred-location-follow
+              (lambda (context location)
+                (package-host-request-location-follow! host context location))
+              owner))
+          (let ([location
+                 (make-location
+                   (make-resource 'deferred "target")
+                   (make-byte-position 0) (make-byte-position 0)
+                   #f 'after '())])
+            (command-runtime-start!
+              runtime 'test.deferred-location-follow (current-context) (list location))
+            (unless (and (location? opened-location)
+                         (= (command-context-buffer-id (current-context))
+                            (buffer-id source)))
+              (error 'host-integration-tests
+                     "deferred Location follow ran before its resource opened"))
+            (let ([target
+                   (package-host-create-buffer!
+                     host owner " *deferred-target*" (make-document "target")
+                     (buffer-state-configuration (buffer-state source)))])
+              (set! opened-buffer-id (buffer-id target))
+              (package-host-location-opened! host opened-location)
+              (host-state-run! state)
+              (unless (= (command-context-buffer-id (current-context)) (buffer-id target))
+                (error 'host-integration-tests
+                       "deferred Location follow did not resume after open completion")))))
+        (lambda ()
+          (owner-close! owner)
+          (soda-application-close! application)))))
+
   (define (run-host-integration-tests!)
     (run-cleanup-test!)
     (run-dispatcher-observer-test!)
     (run-dispatch-gate-test!)
     (run-interaction-placement-rollback-test!)
-    (run-navigation-capability-test!)))
+    (run-navigation-capability-test!)
+    (run-deferred-location-follow-test!)))

@@ -311,10 +311,12 @@
             (unless (file-location-open? request)
               (assertion-violation
                 'file.location-open "invalid Location open request" request))
-            (ensure-file-buffer!
-              service
-              (command-invocation-context invocation)
-              (location-resource (file-location-open-location request))))))
+            (let ([location (file-location-open-location request)])
+              (ensure-file-buffer!
+                service
+                (command-invocation-context invocation)
+                (location-resource location))
+              (package-host-location-opened! host location)))))
       (package-host-register-location-provider!
         host owner
         (make-location-provider

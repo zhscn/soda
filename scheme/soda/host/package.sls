@@ -22,6 +22,8 @@
           package-host-register-location-provider!
           package-host-resolve-location
           package-host-follow-location!
+          package-host-request-location-follow!
+          package-host-location-opened!
           package-host-navigate-back!
           package-host-navigate-forward!
           package-host-dispatch!
@@ -97,7 +99,9 @@
   (define (make-package-host state)
     (unless (host-state? state)
       (assertion-violation 'make-package-host "expected a HostState" state))
-    (%make-package-host state))
+    (let ([host (%make-package-host state)])
+      (ensure-location-follow-runtime! host)
+      host))
 
   (define (package-host-command-runtime host)
     (host-state-command-runtime (package-host-state host)))
@@ -286,6 +290,100 @@
   (define (package-host-resolve-location host location)
     (location-service-resolve
       (host-state-locations (package-host-state host)) location))
+
+  ;; Request a Location follow at the command-loop boundary.  A command-effect
+  ;; open request retains the follow until its provider reports completion;
+  ;; already-resolved and opaque requests use the generic follow effect.
+  (define (package-host-request-location-follow! host context target)
+    (unless (and (package-host? host) (command-context? context) (location? target))
+      (assertion-violation 'package-host-request-location-follow!
+                           "expected a PackageHost, CommandContext, and Location"
+                           host context target))
+    (let* ([resolution (package-host-resolve-location host target)]
+           [follow
+            (make-command-effect
+              'location.follow (make-location-follow-request context target))])
+      (if (eq? (location-resolution-status resolution) 'needs-open)
+          (let ([open (location-resolution-request resolution)])
+            (if (command-effect? open)
+                (if (location-service-add-follow!
+                      (host-state-locations (package-host-state host)) target
+                      (make-location-follow-request context target))
+                    (list open)
+                    '())
+                (list follow)))
+          (list follow))))
+
+  ;; Resource providers call this capability only after their open effect has
+  ;; made the target Buffer discoverable.  Each retained request returns to
+  ;; Runtime as an ordinary hidden command, behind already queued user input.
+  (define (package-host-location-opened! host target)
+    (unless (and (package-host? host) (location? target))
+      (assertion-violation 'package-host-location-opened!
+                           "expected a PackageHost and Location" host target))
+    (let ([runtime (package-host-command-runtime host)])
+      (for-each
+        (lambda (request)
+          (unless (location-follow-request? request)
+            (assertion-violation 'package-host-location-opened!
+                                 "invalid retained Location follow request" request))
+          (command-runtime-enqueue-background!
+            runtime
+            (make-command-invoke-message
+              'host.follow-location
+              (location-follow-request-context request)
+              (list request) #f)))
+        (location-service-take-follows!
+          (host-state-locations (package-host-state host)) target))))
+
+  (define (location-follow-feedback host target)
+    (case (location-resolution-status (package-host-resolve-location host target))
+      [(unavailable) "Location is unavailable"]
+      [(stale) "Location is stale"]
+      [(outside) "Location is outside its buffer"]
+      [(needs-open) "Could not open location"]
+      [else "Could not visit location"]))
+
+  ;; The Host installs this bridge once per HostState.  Location-producing
+  ;; packages return effect values only; resource providers signal completion
+  ;; through `package-host-location-opened!`.
+  (define (ensure-location-follow-runtime! host)
+    (let ([state (package-host-state host)])
+      (unless (host-state-location-follow-ready? state)
+        (let ([runtime (package-host-command-runtime host)]
+              [owner (host-state-owner state)])
+          (command-runtime-register-effect-handler!
+            runtime 'location.follow owner 'enqueue-location-follow
+            (lambda (runtime ignored effect)
+              (let ([request (command-effect-payload effect)])
+                (unless (location-follow-request? request)
+                  (assertion-violation 'location.follow
+                                       "invalid Location follow request" request))
+                (command-runtime-enqueue!
+                  runtime
+                  (make-command-invoke-message
+                    'host.follow-location
+                    (location-follow-request-context request)
+                    (list request) #f)))))
+          (define-command
+            runtime owner 'host.follow-location (context request)
+            (documentation "Complete a queued Location follow request.")
+            (class 'application)
+            (visible #f)
+            (undo 'ignore)
+            (unless (location-follow-request? request)
+              (assertion-violation 'host.follow-location
+                                   "invalid Location follow request" request))
+            (unless (package-host-follow-location!
+                      host owner context (location-follow-request-target request))
+              (package-host-publish-feedback-if-current!
+                host context
+                (make-user-feedback
+                  (location-follow-feedback host
+                                            (location-follow-request-target request))
+                  'warning)))
+            (command-handled))
+          (host-state-location-follow-ready?-set! state #t)))))
 
   (define (package-host-dispatch! host specification)
     (dispatcher-dispatch! (host-state-dispatch (package-host-state host)) specification))
