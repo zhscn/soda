@@ -170,7 +170,10 @@
   (define (queue-flush! service buffer-id)
     (unless (hashtable-ref (recovery-service-queued service) buffer-id #f)
       (hashtable-set! (recovery-service-queued service) buffer-id #t)
-      (command-runtime-enqueue!
+      ;; Snapshot persistence is an idle/background effect.  The pending slot
+      ;; retains only the newest document state, so a burst of edits neither
+      ;; schedules repeated writes nor extends the latency of its key actions.
+      (command-runtime-enqueue-background!
         (package-host-command-runtime (recovery-service-host service))
         (make-command-invoke-message
           'recovery.flush (make-command-context #f buffer-id 'recovery)
