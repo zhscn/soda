@@ -2438,6 +2438,24 @@
              #f))
       (error 'kernel-tests
              "mode catalog did not validate configured binding capability")))
+  (let ([unknown-mode
+         (make-key-binding-declaration
+           'editing 'missing-mode (list control-x) 'configured.edit
+           'global binding-source)])
+    (unless
+      (guard
+        (condition
+          [(key-binding-configuration-error? condition)
+           (and (eq? (key-binding-configuration-error-reason condition)
+                     'unknown-mode)
+                (eq? (key-binding-configuration-error-source condition)
+                     binding-source))]
+          [else #f])
+        (package-host-validate-key-bindings!
+          (make-package-host host) (list unknown-mode))
+        #f)
+      (error 'kernel-tests
+             "configured key did not diagnose an unknown mode")))
   (let ([invalid
          (make-key-binding-declaration
            'editing #f (list 'not-a-key-stroke) 'configured.default

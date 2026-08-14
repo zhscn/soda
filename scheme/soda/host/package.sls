@@ -280,7 +280,9 @@
                      (and mode
                           (command-definition-class definition)
                           (memq (command-definition-class definition)
-                                (mode-spec-command-category-list mode))))))))))
+                                (mode-spec-command-category-list mode)))))))
+        (lambda (mode)
+          (and (package-host-mode-spec host mode #f) #t)))))
 
   (define (package-host-register-location-provider! host owner provider)
     (location-service-register!

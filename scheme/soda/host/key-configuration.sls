@@ -59,6 +59,7 @@
           (case reason
             [(invalid-key) "key sequence contains an invalid key stroke"]
             [(unknown-command) "key binding names an unregistered command"]
+            [(unknown-mode) "key binding names an unregistered mode"]
             [(mode-capability) "key binding command is unavailable in the declared mode"]
             [(conflict) "key bindings conflict at the same semantic layer"]
             [else "invalid key binding configuration"]))
@@ -77,7 +78,8 @@
     (map key-stroke-binding-key
          (key-binding-declaration-sequence declaration)))
 
-  (define (validate-declarations declarations command-known? command-compatible?)
+  (define (validate-declarations declarations command-known? command-compatible?
+                                mode-known?)
     (let ([seen (make-hashtable equal-hash equal?)])
       (for-each
         (lambda (declaration)
@@ -91,6 +93,9 @@
           (unless (command-known?
                     (key-binding-declaration-command declaration))
             (raise-binding-error 'unknown-command declaration #f))
+          (let ([mode (key-binding-declaration-mode declaration)])
+            (when (and mode (not (mode-known? mode)))
+              (raise-binding-error 'unknown-mode declaration #f)))
           (unless (command-compatible? declaration)
             (raise-binding-error 'mode-capability declaration #f))
           (let* ([token
@@ -105,15 +110,19 @@
             (hashtable-set! seen token declaration)))
         declarations)))
 
-  (define (key-binding-declarations-validate!
-           declarations command-known? command-compatible?)
+  (define key-binding-declarations-validate!
+    (case-lambda
+      [(declarations command-known? command-compatible?)
+       (key-binding-declarations-validate!
+         declarations command-known? command-compatible? (lambda (ignored) #t))]
+      [(declarations command-known? command-compatible? mode-known?)
     (unless (and (list? declarations) (procedure? command-known?)
-                 (procedure? command-compatible?))
+                 (procedure? command-compatible?) (procedure? mode-known?))
       (assertion-violation 'key-binding-declarations-validate!
                            "expected declarations and validation procedures"
-                           declarations command-known? command-compatible?))
-    (validate-declarations declarations command-known? command-compatible?)
-    #t)
+                           declarations command-known? command-compatible? mode-known?))
+    (validate-declarations declarations command-known? command-compatible? mode-known?)
+    #t]))
 
   (define (declaration-applies? declaration context mode)
     (and (eq? (key-binding-declaration-context declaration) context)
