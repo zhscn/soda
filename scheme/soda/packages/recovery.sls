@@ -341,13 +341,11 @@
                (make-document (recovery-artifact-contents artifact))
                configuration)])
         (unless
-          (package-host-present-buffer!
-            host (recovery-service-owner service) buffer
-            (command-context-surface-id context)
-            (command-context-window-id context) configuration)
+          (package-host-present-buffer-if-current!
+            host (recovery-service-owner service) buffer context configuration)
           (package-host-close-buffer! host (buffer-id buffer))
           (assertion-violation 'recovery.restore
-                               "origin Window is no longer available" context))
+                               "origin View is no longer current" context))
         (remove-pending-artifact! service artifact #t)
         buffer)))
 

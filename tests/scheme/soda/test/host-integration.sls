@@ -164,6 +164,62 @@
           (owner-close! owner)
           (soda-application-close! application)))))
 
+  ;; Effects retain a CommandContext only as a conditional presentation
+  ;; target.  Once its View has been replaced, a late result must neither
+  ;; reclaim the Window nor allocate another presentation for itself.
+  (define (run-stale-presentation-test!)
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [host (make-package-host state)]
+           [owner (make-owner 'stale-presentation-test)]
+           [surface (soda-application-surface application)]
+           [source (soda-application-buffer application)]
+           [configuration (buffer-state-configuration (buffer-state source))]
+           [diverted
+            (package-host-create-buffer!
+              host owner " *stale-diverted*" (make-document "diverted") configuration)]
+           [late
+            (package-host-create-buffer!
+              host owner " *stale-result*" (make-document "result") configuration)])
+      (define (current-context)
+        (let* ([active (surface-active-context surface (host-state-views state))]
+               [view
+                (view-service-ref
+                  (host-state-views state) (active-context-view-id active))]
+               [buffer (view-buffer view)])
+          (make-command-context
+            #f
+            (active-context-surface-id active)
+            (active-context-window-id active)
+            (view-id view)
+            (buffer-id buffer)
+            (buffer-state buffer)
+            (view-state view)
+            #f '() #f #f 'host-integration #f)))
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let ([origin (current-context)])
+            (unless
+              (package-host-present-buffer!
+                host owner diverted
+                (command-context-surface-id origin)
+                (command-context-window-id origin) configuration)
+              (error 'host-integration-tests "could not replace stale presentation origin"))
+            (let ([views-before
+                   (length (view-service-views (host-state-views state)))])
+              (unless (and (not (package-host-present-buffer-if-current!
+                                  host owner late origin configuration))
+                           (= (command-context-buffer-id (current-context))
+                              (buffer-id diverted))
+                           (= (length (view-service-views (host-state-views state)))
+                              views-before))
+                (error 'host-integration-tests
+                       "stale result reclaimed a Window or retained a presentation")))))
+        (lambda ()
+          (owner-close! owner)
+          (soda-application-close! application)))))
+
   (define (run-navigation-capability-test!)
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
@@ -371,5 +427,6 @@
     (run-dispatch-gate-test!)
     (run-interaction-placement-rollback-test!)
     (run-composite-view-placement-rollback-test!)
+    (run-stale-presentation-test!)
     (run-navigation-capability-test!)
     (run-deferred-location-follow-test!)))
