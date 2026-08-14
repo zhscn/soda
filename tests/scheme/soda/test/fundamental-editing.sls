@@ -1468,6 +1468,52 @@
                             runtime (command-invocation-id cancelled) #f))
                      (not (interaction-service-current interaction)))
           (error 'fundamental-editing-tests "interaction cancellation did not retire its invocation")))
+      (let* ([outer
+              (command-runtime-start-interactive!
+                runtime 'interaction.package-test
+                (application-command-context application))]
+             [outer-prompt (minibuffer-service-current minibuffer)]
+             [inner
+              (command-runtime-start-interactive!
+                runtime 'interaction.package-test
+                (application-command-context application))]
+             [inner-prompt (minibuffer-service-current minibuffer)])
+        (unless (and (= (length (interaction-service-sessions interaction)) 2)
+                     (= (length (minibuffer-service-sessions minibuffer)) 2)
+                     (= (length
+                          (surface-interaction-windows
+                            (soda-application-surface application)))
+                        2)
+                     (= (minibuffer-session-origin-view-id inner-prompt)
+                        (minibuffer-session-view-id outer-prompt))
+                     (= (interaction-session-invocation-id
+                          (minibuffer-session-interaction inner-prompt))
+                        (command-invocation-id inner)))
+          (error 'fundamental-editing-tests
+                 "nested interaction did not form one coherent prompt stack"))
+        (minibuffer-service-cancel! minibuffer)
+        (host-state-run! state)
+        (unless (and (= (length (interaction-service-sessions interaction)) 1)
+                     (= (length (minibuffer-service-sessions minibuffer)) 1)
+                     (= (interaction-session-invocation-id
+                          (minibuffer-session-interaction
+                            (minibuffer-service-current minibuffer)))
+                        (command-invocation-id outer))
+                     (= (active-context-view-id
+                          (surface-active-context
+                            (soda-application-surface application)
+                            (host-state-views state)))
+                        (minibuffer-session-view-id outer-prompt)))
+          (error 'fundamental-editing-tests
+                 "closing an inner prompt did not restore its outer prompt"))
+        (minibuffer-service-cancel! minibuffer)
+        (host-state-run! state)
+        (unless (and (not (interaction-service-current interaction))
+                     (not (minibuffer-service-current minibuffer))
+                     (null? (surface-interaction-windows
+                              (soda-application-surface application))))
+          (error 'fundamental-editing-tests
+                 "closing the outer prompt did not restore the editor")))
       (command-runtime-start-interactive!
         runtime 'command.execute-extended (application-command-context application))
       (let* ([request
