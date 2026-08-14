@@ -264,7 +264,7 @@
     (host-frontend-make-command-context
       (frontend-host-state value) active event sequence prefix-argument
       'tui-frontend (active-command-layout value active view) target
-      (input-context-layers input-context)))
+      (input-layers-snapshot (input-context-layers input-context))))
 
   (define (pointer-route value event)
     (let* ([render

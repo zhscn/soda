@@ -184,30 +184,34 @@
            [runtime (host-state-command-runtime (soda-application-state application))]
            [origin (application-command-context application)]
            [transient (make-keymap 'matrix-transient)]
-           [fallback (make-keymap 'matrix-fallback)]
            [_transient
             (keymap-bind!
               transient (list (make-key-stroke 'character (char->integer #\q) 0))
               'message.show-position)]
-           [_fallback
-            (keymap-bind!
-              fallback (list (make-key-stroke 'character (char->integer #\r) 0))
-              'message.show-position)]
            [layers (list (make-input-layer 'transient transient #f 'ignore))]
-           [context (command-context-with-input-layers origin layers)]
+           [snapshot-layers (input-layers-snapshot layers)]
+           [_reconfigured
+            (keymap-bind!
+              transient (list (make-key-stroke 'character (char->integer #\r) 0))
+              'message.show-position)]
+           [context (command-context-with-input-layers origin snapshot-layers)]
            [access
             (command-context-command-access
-              runtime context (list (make-input-layer 'global fallback #f 'pass))
+              runtime context '()
               'message.show-position)]
-           [resolved (resolve-key-sequence layers
+           [resolved (resolve-key-sequence snapshot-layers
                                            (list (make-key-stroke 'character
-                                                                  (char->integer #\q) 0)))])
+                                                                  (char->integer #\q) 0)))]
+           [late-binding (resolve-key-sequence snapshot-layers
+                                               (list (make-key-stroke 'character
+                                                                      (char->integer #\r) 0)))])
       (unless (and access
                    (equal? (map key-sequence-name
                                 (command-access-key-sequences access))
                            '("q"))
                    (eq? (car resolved) 'command)
-                   (eq? (cadr resolved) 'message.show-position))
+                   (eq? (cadr resolved) 'message.show-position)
+                   (eq? (car late-binding) 'unbound))
         (error 'fundamental-editing-tests
                "command presentation diverged from the frontend InputLayer snapshot"))
       (soda-application-close! application))

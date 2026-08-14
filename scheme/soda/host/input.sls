@@ -6,6 +6,7 @@
           keymap-unbind!
           keymap-lookup
           keymap-binding-entries
+          keymap-snapshot
           keymap-where-is
           keymap-prefix?
           keymap-remap!
@@ -48,6 +49,7 @@
           input-layer-kind
           input-layer-handler
           input-layer-text-policy
+          input-layers-snapshot
           make-input-translation
           input-translation?
           input-translation-translate
@@ -228,6 +230,27 @@
     (if (hashtable-contains? (keymap-remaps map) command)
         (hashtable-ref (keymap-remaps map) command #f)
         (if (null? default) #f (car default))))
+
+  ;; A snapshot owns independent binding, remap, and prefix tables.  It is
+  ;; used by command presentation after an input event has been resolved, so
+  ;; later keymap reconfiguration cannot rewrite that invocation's visible
+  ;; command access.
+  (define (keymap-snapshot keymap)
+    (unless (keymap? keymap)
+      (assertion-violation 'keymap-snapshot "expected a Keymap" keymap))
+    (let ([snapshot (make-keymap (keymap-name keymap))])
+      (for-each
+        (lambda (entry)
+          (keymap-bind! snapshot (car entry) (cdr entry)))
+        (keymap-binding-entries keymap))
+      (call-with-values
+        (lambda () (hashtable-entries (keymap-remaps keymap)))
+        (lambda (commands replacements)
+          (do ([index 0 (+ index 1)])
+              ((= index (vector-length commands)))
+            (keymap-remap!
+              snapshot (vector-ref commands index) (vector-ref replacements index)))))
+      snapshot))
 
   (define-record-type
     (input-state %make-input-state input-state?)
@@ -432,6 +455,19 @@
       (if (or (null? options) (null? (cdr options)))
           'pass
           (cadr options))))
+
+  (define (input-layers-snapshot layers)
+    (unless (and (list? layers) (for-all input-layer? layers))
+      (assertion-violation 'input-layers-snapshot
+                           "expected a list of InputLayers" layers))
+    (map
+      (lambda (layer)
+        (make-input-layer
+          (input-layer-kind layer)
+          (keymap-snapshot (input-layer-keymap layer))
+          (input-layer-handler layer)
+          (input-layer-text-policy layer)))
+      layers))
 
   (define-record-type
     (input-context %make-input-context input-context?)
