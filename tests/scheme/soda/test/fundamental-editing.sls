@@ -262,6 +262,11 @@
                                 (make-key-stroke 'character (char->integer #\b) 0)))
                         'buffer.list)
                    (eq? (keymap-lookup
+                          buffer-list-map
+                          (list (make-key-stroke 'character (char->integer #\x) 4)
+                                (make-key-stroke 'character (char->integer #\b) 4)))
+                        'buffer.switch)
+                   (eq? (keymap-lookup
                           directory-map
                           (list (make-key-stroke 'character (char->integer #\x) 4)
                                 (make-key-stroke 'character (char->integer #\d) 0)))
@@ -519,6 +524,54 @@
             (let* ([file-context (application-command-context application)]
                    [file-id (command-context-buffer-id file-context)]
                    [file-view-id (command-context-view-id file-context)])
+              (command-runtime-start-interactive! runtime 'buffer.switch file-context)
+              (let* ([request
+                      (interaction-session-request (interaction-service-current interaction))]
+                     [controller
+                      (minibuffer-service-refresh-completion!
+                        (soda-application-minibuffer application))])
+                (unless (and (eq? (interaction-request-kind request) 'buffer)
+                             (eq? (interaction-request-history-key request) 'buffer)
+                             (eq? (interaction-request-selection-policy request) 'must-match)
+                             (exists
+                               (lambda (candidate)
+                                 (string=? (completion-candidate-insert-text candidate)
+                                           (buffer-name scratch)))
+                               (completion-controller-candidates controller))
+                             (exists
+                               (lambda (candidate)
+                                 (string=? (completion-candidate-insert-text candidate) path))
+                               (completion-controller-candidates controller))
+                             (not
+                               (exists
+                                 (lambda (candidate)
+                                   (string=? (completion-candidate-insert-text candidate)
+                                             " *minibuffer*"))
+                                 (completion-controller-candidates controller))))
+                  (error 'fundamental-editing-tests
+                         "buffer.switch did not expose the live Surface Buffer catalog")))
+              (interaction-service-submit! interaction (buffer-name scratch))
+              (host-state-run! state)
+              (unless (and (= (command-context-buffer-id
+                                (application-command-context application))
+                               (buffer-id scratch))
+                           (= (command-context-view-id
+                                (application-command-context application))
+                               (view-id (soda-application-view application))))
+                (error 'fundamental-editing-tests
+                       "buffer.switch did not restore the scratch View"))
+              (command-runtime-start-interactive!
+                runtime 'buffer.switch (application-command-context application))
+              (interaction-service-submit! interaction path)
+              (host-state-run! state)
+              (unless (and (= (command-context-buffer-id
+                                (application-command-context application))
+                               file-id)
+                           (= (command-context-view-id
+                                (application-command-context application))
+                               file-view-id))
+                (error 'fundamental-editing-tests
+                       "buffer.switch did not restore the selected Buffer View"))
               (command-runtime-start! runtime 'fundamental.end-of-buffer file-context)
               (command-runtime-start! runtime 'fundamental.insert-text
                                       (application-command-context application)

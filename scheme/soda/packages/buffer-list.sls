@@ -22,7 +22,9 @@
           (soda packages buffer-mode)
           (soda packages edit-policy)
           (soda packages generated-buffer)
-          (soda packages buffer-item))
+          (soda packages buffer-item)
+          (soda packages completion)
+          (soda packages interaction))
 
   ;; BufferListService is a generated Buffer producer.  It has no special
   ;; rendering or navigation path: rows are BufferItems and activation uses
@@ -90,6 +92,79 @@
              (buffer-state-configuration (buffer-state buffer))
              buffer-mode-facet 'buffer)])
       (if mode (mode-spec-display-name mode) "Fundamental")))
+
+  (define (string-contains? value needle)
+    (let ([limit (- (string-length value) (string-length needle))])
+      (let loop ([index 0])
+        (and (<= index limit)
+             (or (string=? needle
+                           (substring value index (+ index (string-length needle))))
+                 (loop (+ index 1)))))))
+
+  ;; The reader captures the Surface-relative catalog before opening its
+  ;; minibuffer.  Prompt and completion Buffers therefore never appear as
+  ;; switch targets, while liveness is checked again when the user accepts a
+  ;; name.
+  (define (make-buffer-switch-reader service)
+    (make-interactive-reader
+      'buffer
+      (lambda (context arguments)
+        (if (pair? arguments)
+            (make-interactive-ready '())
+            (let* ([host (buffer-list-service-host service)]
+                   [surface-id (command-context-surface-id context)]
+                   [choices (package-host-buffers-for-surface host surface-id)])
+              (define (live-buffer-for-name name)
+                (let ([candidate
+                       (find (lambda (buffer) (string=? (buffer-name buffer) name))
+                             choices)])
+                  (and candidate
+                       (let ([current
+                              (package-host-buffer-ref host (buffer-id candidate) #f)])
+                         (and current
+                              (string=? (buffer-name current) name)
+                              current)))))
+              (define source
+                (make-completion-source
+                  (lambda (snapshot)
+                    (let ([query (prompt-snapshot-input snapshot)])
+                      (map
+                        (lambda (buffer)
+                          (make-completion-candidate
+                            (buffer-id buffer) (buffer-name buffer) (buffer-name buffer)
+                            (buffer-mode-name buffer) "Buffers" buffer))
+                        (filter
+                          (lambda (buffer)
+                            (and (live-buffer-for-name (buffer-name buffer))
+                                 (string-contains? (buffer-name buffer) query)))
+                          choices))))
+                  #f #f #f
+                  (lambda (name snapshot) (and (string? name)
+                                                (live-buffer-for-name name)))))
+              (make-interactive-suspend
+                (make-interaction-request
+                  'buffer "Switch to buffer: " "" source 'must-match
+                  (lambda (name snapshot) (and (string? name)
+                                                (live-buffer-for-name name)))
+                  'buffer)
+                (lambda (name)
+                  (let ([buffer (and (string? name) (live-buffer-for-name name))])
+                    (unless buffer
+                      (assertion-violation 'buffer.switch
+                                           "selected Buffer no longer exists" name))
+                    (make-interactive-ready (list buffer))))))))))
+
+  (define (switch-buffer! service context buffer)
+    (unless (buffer? buffer)
+      (assertion-violation 'buffer.switch "expected a live Buffer" buffer))
+    (unless
+      (package-host-present-buffer!
+        (buffer-list-service-host service) (buffer-list-service-owner service) buffer
+        (command-context-surface-id context)
+        (command-context-window-id context)
+        (buffer-state-configuration (buffer-state buffer)))
+      (assertion-violation 'buffer.switch "origin Window is no longer available" context))
+    (command-handled))
 
   (define (buffer-list-layout service list-state)
     (let loop ([buffers (listed-buffers service list-state)]
@@ -267,6 +342,10 @@
                     (list (control-stroke #\x)
                           (make-key-stroke 'character (char->integer #\b) 0))
                     'buffer.list)
+      (keymap-bind! keymap
+                    (list (control-stroke #\x)
+                          (make-key-stroke 'character (char->integer #\b) 4))
+                    'buffer.switch)
       (keymap-bind! result-keymap (list (make-key-stroke 'character (char->integer #\g) 0))
                     'buffer-list.refresh)
       (keymap-bind! result-keymap (list (make-key-stroke 'character (char->integer #\d) 0))
@@ -293,6 +372,14 @@
         (class 'buffer)
         (undo 'ignore)
         (make-command-effect 'buffer-list.open (make-buffer-list-open-request context)))
+      (define-command
+        runtime owner 'buffer.switch (context buffer)
+        (documentation "Switch to a live Buffer selected with completion.")
+        (class 'buffer)
+        (interactive
+          (make-interactive-plan (list (make-buffer-switch-reader service))))
+        (undo 'ignore)
+        (switch-buffer! service context buffer))
       (define-command
         runtime owner 'buffer-list.refresh (context)
         (documentation "Refresh the generated Buffer List.")
