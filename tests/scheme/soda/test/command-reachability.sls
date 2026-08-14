@@ -99,7 +99,9 @@
 
   (define (run-generated-context-test!)
     (let* ([application (make-soda-application)]
-           [runtime (host-state-command-runtime (soda-application-state application))])
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [origin-buffer (soda-application-buffer application)])
       (command-runtime-start! runtime 'help.show (active-command-context application))
       (let ([context (active-command-context application)])
         (unless (and (access-has-key? (command-access runtime context 'buffer.quit) "q")
@@ -108,7 +110,16 @@
                  "generated Buffer context projected ordinary editing commands"))
         (assert-command-dispatches!
           application (character-event #\q 0) 'buffer.quit
-          "generated Buffer key resolver diverged from the command projection"))
+          "generated Buffer key resolver diverged from the command projection")
+        (let ([generated-id (command-context-buffer-id context)])
+          (command-runtime-start! runtime 'buffer.quit context)
+          (unless (and (= (command-context-buffer-id
+                            (active-command-context application))
+                          (buffer-id origin-buffer))
+                       (buffer-service-ref
+                         (host-state-buffers state) generated-id #f))
+            (error 'command-reachability-tests
+                   "generated Buffer quit did not restore its prior presentation"))))
       (soda-application-close! application)))
 
   (define (run-semantic-item-context-test!)
