@@ -11,6 +11,7 @@
           surface-select-window!
           surface-replace-window-view-context!
           surface-split-view!
+          surface-split-window-view!
           surface-remove-view-window!
           surface-push-interaction-view!
           surface-add-interaction-companion-view!
@@ -128,6 +129,20 @@
          (let ([window
                 (surface-split-selected-window! surface axis target-view-id focus-policy)])
            (context-for-window surface views window))))
+
+  (define (surface-split-window-view!
+            surface views window-id axis target-view-id focus-policy)
+    (unless (and (surface? surface) (view-service? views) (identity? window-id)
+                 (identity? target-view-id) (memq axis '(horizontal vertical))
+                 (memq focus-policy '(focus preserve)))
+      (assertion-violation 'surface-split-window-view!
+                           "invalid explicit Surface split View request"
+                           surface views window-id axis target-view-id focus-policy))
+    (and (view-service-ref views target-view-id #f)
+         (let ([window
+                (surface-split-window!
+                  surface window-id axis target-view-id focus-policy)])
+           (and window (context-for-window surface views window)))))
 
   (define (surface-remove-view-window! surface views window-id)
     (unless (and (surface? surface) (view-service? views) (identity? window-id))

@@ -28,6 +28,10 @@
        (let ([value (host-operation-value operation)])
          (surface-split-view!
            surface views (car value) (cadr value) (caddr value)))]
+      [(split-window-view)
+       (let ([value (host-operation-value operation)])
+         (surface-split-window-view!
+           surface views (car value) (cadr value) (caddr value) (cadddr value)))]
       [(remove-window)
        (surface-remove-view-window!
          surface views (host-operation-value operation))]

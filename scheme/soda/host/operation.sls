@@ -7,6 +7,7 @@
           make-focus-window-operation
           make-replace-window-view-operation
           make-split-view-operation
+          make-split-window-view-operation
           make-remove-window-operation
           make-push-interaction-operation
           make-add-interaction-companion-operation

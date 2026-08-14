@@ -55,6 +55,7 @@
           (soda packages generated-buffer)
           (soda packages buffer-item)
           (soda packages buffer-list)
+          (soda packages window)
           (soda packages search)
           (soda packages scheme-mode)
           (soda packages message)
@@ -310,6 +311,120 @@
                      (eq? (input-disposition-kind former-universal) 'undefined))
           (error 'fundamental-editing-tests
                  "C-x C-u retained a non-Emacs universal-argument binding")))
+      (soda-application-close! application))
+
+    ;; Window commands use one Host-owned placement path: splitting creates a
+    ;; distinct View of the same Buffer, `other-window` moves focus without
+    ;; changing either View, and deletion retires only the removed View.
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [surface (soda-application-surface application)]
+           [primary-view (soda-application-view application)]
+           [primary-context (application-command-context application)]
+           [window-map (window-keymap (soda-application-windows application))])
+      (let* ([active (surface-active-context surface (host-state-views state))]
+             [input-context
+              (soda-application-resolve-input-context application active primary-view)]
+             [prefix
+              (input-dispatch
+                input-context
+                (make-key-event 'character (char->integer #\x) #f #f 4 'press
+                                (make-bytevector 0)))]
+             [continued
+              (input-context-with-translation
+                (make-input-context
+                  (input-context-view-id input-context)
+                  (input-context-buffer-id input-context)
+                  (input-context-layers input-context)
+                  (input-disposition-input-state prefix))
+                (input-context-translation input-context))]
+             [split
+              (input-dispatch
+                continued
+                (make-key-event 'character (char->integer #\2) #f #f 0 'press
+                                (make-bytevector 0)))])
+        (unless (and (eq? (input-disposition-kind split) 'command)
+                     (eq? (input-disposition-value split) 'window.split-below))
+          (error 'fundamental-editing-tests
+                 "application input composition did not dispatch C-x 2")))
+      (command-runtime-start!
+        runtime 'fundamental.end-of-buffer (application-command-context application))
+      (let* ([before-state (view-state primary-view)]
+             [_split
+              (command-runtime-start!
+                runtime 'window.split-below (application-command-context application))]
+             [leaves (window-leaves (surface-root-window surface))]
+             [active (surface-active-context surface (host-state-views state))]
+             [secondary-leaf
+              (find (lambda (leaf) (not (= (window-view-id leaf) (view-id primary-view))))
+                    leaves)]
+             [secondary
+              (and secondary-leaf
+                   (view-service-ref (host-state-views state)
+                                     (window-view-id secondary-leaf) #f))])
+        (unless (and (= (length leaves) 2)
+                     (= (active-context-view-id active) (view-id primary-view))
+                     secondary
+                     (= (buffer-id (view-buffer secondary))
+                        (buffer-id (view-buffer primary-view)))
+                     (equal? (view-state-selection (view-state secondary))
+                             (view-state-selection before-state))
+                     (equal? (view-state-viewport (view-state secondary))
+                             (view-state-viewport before-state))
+                     (eq? (keymap-lookup
+                            window-map
+                            (list (make-key-stroke 'character (char->integer #\x) 4)
+                                  (make-key-stroke 'character (char->integer #\2) 0)))
+                          'window.split-below)
+                     (eq? (keymap-lookup
+                            window-map
+                            (list (make-key-stroke 'character (char->integer #\x) 4)
+                                  (make-key-stroke 'character (char->integer #\3) 0)))
+                          'window.split-right)
+                     (eq? (keymap-lookup
+                            window-map
+                            (list (make-key-stroke 'character (char->integer #\x) 4)
+                                  (make-key-stroke 'character (char->integer #\o) 0)))
+                          'window.other)
+                     (eq? (keymap-lookup
+                            window-map
+                            (list (make-key-stroke 'character (char->integer #\x) 4)
+                                  (make-key-stroke 'character (char->integer #\0) 0)))
+                          'window.delete)
+                     (eq? (keymap-lookup
+                            window-map
+                            (list (make-key-stroke 'character (char->integer #\x) 4)
+                                  (make-key-stroke 'character (char->integer #\1) 0)))
+                          'window.delete-others))
+          (error 'fundamental-editing-tests
+                 "window.split-below did not create a cloned independent View"))
+        (command-runtime-start!
+          runtime 'window.other (application-command-context application))
+        (unless (= (command-context-view-id (application-command-context application))
+                   (view-id secondary))
+          (error 'fundamental-editing-tests "window.other did not select the sibling View"))
+        ;; A delayed command cannot redirect a split into the newly selected
+        ;; sibling: Window placement remains bound to its original context.
+        (command-runtime-start! runtime 'window.split-right primary-context)
+        (unless (= (length (window-leaves (surface-root-window surface))) 2)
+          (error 'fundamental-editing-tests
+                 "a stale window command split the newly selected Window"))
+        (command-runtime-start!
+          runtime 'window.delete (application-command-context application))
+        (unless (and (= (length (window-leaves (surface-root-window surface))) 1)
+                     (= (command-context-view-id (application-command-context application))
+                        (view-id primary-view))
+                     (not (view-service-ref (host-state-views state) (view-id secondary) #f)))
+          (error 'fundamental-editing-tests
+                 "window.delete did not retire only the selected View"))
+        (command-runtime-start!
+          runtime 'window.split-right (application-command-context application))
+        (command-runtime-start!
+          runtime 'window.delete-others (application-command-context application))
+        (unless (= (length (window-leaves (surface-root-window surface))) 1)
+          (error 'fundamental-editing-tests
+                 "window.delete-others did not preserve exactly one Window")))
       (soda-application-close! application))
 
     ;; Override commands remain reachable while an ordinary key prefix is

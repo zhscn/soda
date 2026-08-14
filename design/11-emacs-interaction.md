@@ -18,6 +18,7 @@ prefix key、minibuffer、echo area、mode line、Buffer/View/Window 语义作�
 |---|---|
 | 启动时打开多个文件与 `+LINE[,COLUMN]` 定位 | 每个文件使用可重用 Buffer，并在目标 View 中定位 |
 | 不带文件启动 | 进入唯一的 `*scratch*` Buffer；启动不要求回应恢复、保存或帮助界面 |
+| Window 管理 | `C-x 2`、`C-x 3`、`C-x o`、`C-x 0` 与 `C-x 1` 通过 Host placement 操作 split、切换和删除 Window；split 创建独立 View，删除 Window 不关闭 Buffer |
 | 访问、插入、保存、另存、重载与关闭 file Buffer | 文件生命周期通过 command 与 interaction 组合 |
 | `C-x b` Buffer completion、文件名 completion、目录浏览与 `C-x C-b` Buffer 列表 | 使用普通 Buffer/View 和 minibuffer；切换 Buffer 时复用该 Surface 最近使用的 View |
 | file prompt default directory | 已访问 Buffer 使用其文件所在目录；其他 Buffer 使用 session 创建时的当前目录，候选和最终路径共享该基准 |

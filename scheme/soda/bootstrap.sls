@@ -20,6 +20,7 @@
           soda-application-minibuffer
           soda-application-buffer-item-actions
           soda-application-buffer-lists
+          soda-application-windows
           soda-application-resolve-input-context
           soda-application-open-files!
           soda-application-run!
@@ -50,6 +51,7 @@
           (soda packages scheme-mode)
           (soda packages directory)
           (soda packages buffer-list)
+          (soda packages window)
           (soda packages process)
           (soda packages spell)
           (soda packages message)
@@ -95,6 +97,7 @@
       (immutable minibuffer soda-application-minibuffer)
       (immutable buffer-item-actions soda-application-buffer-item-actions)
       (immutable buffer-lists soda-application-buffer-lists)
+      (immutable windows soda-application-windows)
       (immutable override-keymap soda-application-override-keymap)
       (immutable default-keymap soda-application-default-keymap)
       (immutable input-layers soda-application-input-layers)
@@ -179,6 +182,7 @@
                [buffer-item-actions (make-buffer-item-action-service)]
                [directories (make-directory-service! host owner files buffer-item-actions)]
                [buffer-lists (make-buffer-list-service! host owner history buffer-item-actions)]
+               [windows (make-window-service! host owner)]
                [spelling (make-spell-service! host owner processes buffer-item-actions)]
                [messages (make-message-service! host owner)]
                [search
@@ -199,7 +203,7 @@
                 (make-application-input-layers
                   override-keymap options search word-completion whitespace comments
                   keyboard-macros messages spelling processes files directories
-                  buffer-lists default-keymap)]
+                  buffer-lists windows default-keymap)]
                [_help
                 (make-help-service!
                   host owner application-input-layers)]
@@ -211,7 +215,7 @@
           (surface-service-register! (host-state-surfaces state) surface)
           (history-mark-saved! history (buffer-id buffer))
           (%make-soda-application
-            state owner buffer view surface editing options history keyboard-macros files scheme-mode directories processes spelling messages search interaction minibuffer buffer-item-actions buffer-lists override-keymap default-keymap application-input-layers
+            state owner buffer view surface editing options history keyboard-macros files scheme-mode directories processes spelling messages search interaction minibuffer buffer-item-actions buffer-lists windows override-keymap default-keymap application-input-layers
             #f #f #f)))))
 
   ;; This is the application composition boundary shared by terminal input,
@@ -220,7 +224,7 @@
   (define (make-application-input-layers
             override-keymap options search word-completion whitespace comments
             keyboard-macros messages spelling processes files directories
-            buffer-lists default-keymap)
+            buffer-lists windows default-keymap)
     (list
       (make-input-layer 'override override-keymap #f 'pass)
       (make-input-layer 'global (editor-options-keymap options) #f 'pass)
@@ -235,6 +239,7 @@
       (make-input-layer 'global (file-keymap files) #f 'pass)
       (make-input-layer 'global (directory-keymap directories) #f 'pass)
       (make-input-layer 'global (buffer-list-keymap buffer-lists) #f 'pass)
+      (make-input-layer 'global (window-keymap windows) #f 'pass)
       (make-input-layer 'global default-keymap #f 'pass)))
 
   (define (make-override-keymap)

@@ -42,6 +42,10 @@
           package-host-create-view!
           package-host-present-buffer!
           package-host-present-buffer-if-current!
+          package-host-split-window!
+          package-host-focus-next-window!
+          package-host-delete-window!
+          package-host-delete-other-windows!
           package-host-quit-window!
           package-host-close-view!
           package-host-surface-size
@@ -517,6 +521,127 @@
            (command-context-surface-id context)
            (command-context-window-id context)
            configuration)))
+
+  ;; User Window commands operate on the selected editor Window identified by
+  ;; their CommandContext.  This rejects interaction overlays and stale
+  ;; contexts rather than mutating whichever Window is selected later.
+  (define (selected-editor-window host context)
+    (let* ([state (package-host-state host)]
+           [surface
+            (surface-service-ref
+              (host-state-surfaces state) (command-context-surface-id context) #f)]
+           [window
+            (and surface
+                 (find
+                   (lambda (leaf)
+                     (= (window-id leaf) (command-context-window-id context)))
+                   (window-leaves (surface-root-window surface))))])
+      (and window surface
+           (eq? window (surface-selected-window surface))
+           (package-host-command-context-current? host context)
+           (cons surface window))))
+
+  (define (clone-view-placement! state source clone)
+    ;; Point and viewport are View-local placement state.  Pending input is
+    ;; deliberately not copied: a prefix belongs to the command sequence that
+    ;; opened the split, not to the new Window.
+    (let ([source-state (view-state source)]
+          [clone-state (view-state clone)])
+      (dispatcher-dispatch-view!
+        (host-state-dispatch state)
+        (make-view-transaction-spec
+          (view-id clone) (view-state-generation clone-state)
+          (view-state-selection source-state) (view-state-viewport source-state)
+          #f '() '() #f))))
+
+  (define (package-host-split-window! host owner context axis focus-policy)
+    (unless (and (package-host? host) (owner? owner) (command-context? context)
+                 (memq axis '(horizontal vertical))
+                 (memq focus-policy '(focus preserve)))
+      (assertion-violation 'package-host-split-window!
+                           "invalid PackageHost Window split request"
+                           host owner context axis focus-policy))
+    (let* ([state (package-host-state host)]
+           [target (selected-editor-window host context)]
+           [views (host-state-views state)]
+           [source (and target
+                        (view-service-ref views (command-context-view-id context) #f))])
+      (and source
+           (let ([clone
+                  (view-service-create!
+                    views owner (view-buffer source)
+                    (view-state-configuration (view-state source)))])
+             (guard
+               (condition
+                 [else
+                  (view-service-close-view! views (view-id clone))
+                  (raise condition)])
+               (if (and (clone-view-placement! state source clone)
+                        (dispatcher-dispatch-host!
+                          (host-state-dispatch state)
+                          (make-split-window-view-operation
+                            (command-context-surface-id context)
+                            (window-id (cdr target)) axis (view-id clone) focus-policy)))
+                   clone
+                   (begin
+                     (view-service-close-view! views (view-id clone))
+                     #f)))))))
+
+  (define (package-host-focus-next-window! host context)
+    (unless (and (package-host? host) (command-context? context))
+      (assertion-violation 'package-host-focus-next-window!
+                           "expected a PackageHost and CommandContext" host context))
+    (let ([target (selected-editor-window host context)])
+      (and target
+           (let* ([surface (car target)]
+                  [selected (cdr target)]
+                  [leaves (window-leaves (surface-root-window surface))]
+                  [next
+                   (let loop ([remaining leaves])
+                     (and (pair? remaining)
+                          (if (eq? (car remaining) selected)
+                              (if (pair? (cdr remaining)) (cadr remaining) (car leaves))
+                              (loop (cdr remaining)))))])
+             (and next (not (eq? next selected))
+                  (dispatcher-dispatch-host!
+                    (host-state-dispatch (package-host-state host))
+                    (make-focus-window-operation
+                      (surface-id surface) (window-id next))))))))
+
+  (define (delete-window! host surface window)
+    (let* ([state (package-host-state host)]
+           [views (host-state-views state)]
+           [view-id (window-view-id window)]
+           [update
+            (dispatcher-dispatch-host!
+              (host-state-dispatch state)
+              (make-remove-window-operation (surface-id surface) (window-id window)))])
+      (and update
+           (begin
+             ;; Removing the Window retires this presentation, not its Buffer.
+             (view-service-close-view! views view-id)
+             update))))
+
+  (define (package-host-delete-window! host context)
+    (unless (and (package-host? host) (command-context? context))
+      (assertion-violation 'package-host-delete-window!
+                           "expected a PackageHost and CommandContext" host context))
+    (let ([target (selected-editor-window host context)])
+      (and target (delete-window! host (car target) (cdr target)))))
+
+  (define (package-host-delete-other-windows! host context)
+    (unless (and (package-host? host) (command-context? context))
+      (assertion-violation 'package-host-delete-other-windows!
+                           "expected a PackageHost and CommandContext" host context))
+    (let ([target (selected-editor-window host context)])
+      (and target
+           (let ([surface (car target)] [selected (cdr target)])
+             (for-each
+               (lambda (window)
+                 (unless (eq? window selected)
+                   (delete-window! host surface window)))
+               (window-leaves (surface-root-window surface)))
+             #t))))
 
   ;; Quitting a temporary presentation returns the target Window to its most
   ;; recently shown different View.  The Buffer remains alive: its owner may

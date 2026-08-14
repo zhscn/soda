@@ -7,6 +7,7 @@
           make-focus-window-operation
           make-replace-window-view-operation
           make-split-view-operation
+          make-split-window-view-operation
           make-remove-window-operation
           make-push-interaction-operation
           make-add-interaction-companion-operation
@@ -66,6 +67,20 @@
       (assertion-violation 'make-split-view-operation "invalid split View operation"
                            surface-id axis view-id focus-policy))
     (%make-host-operation 'split-view surface-id (list axis view-id focus-policy)))
+
+  ;; `split-view` retains its selected-window meaning for internal display
+  ;; routing.  User commands name the target Window explicitly so a delayed
+  ;; command cannot split whichever Window happens to be selected later.
+  (define (make-split-window-view-operation
+            surface-id window-id axis view-id focus-policy)
+    (unless (and (identity? surface-id) (identity? window-id) (identity? view-id)
+                 (memq axis '(horizontal vertical))
+                 (memq focus-policy '(focus preserve)))
+      (assertion-violation 'make-split-window-view-operation
+                           "invalid split Window View operation"
+                           surface-id window-id axis view-id focus-policy))
+    (%make-host-operation
+      'split-window-view surface-id (list window-id axis view-id focus-policy)))
 
   (define (make-remove-window-operation surface-id window-id)
     (unless (and (identity? surface-id) (identity? window-id))

@@ -16,6 +16,7 @@
           surface-set-selected-window!
           surface-replace-window-view!
           surface-split-selected-window!
+          surface-split-window!
           surface-remove-window!
           surface-push-interaction!
           surface-add-interaction-companion!
@@ -371,21 +372,34 @@
     (surface-generation-set! surface (+ 1 (surface-generation surface)))
     selected)
 
-  ;; Add a sibling beside the selected leaf.  The new leaf is returned even
-  ;; when focus remains on the old leaf, allowing HostUpdate to report the
-  ;; placement resolution independently from active context.
-  (define (surface-split-selected-window! surface axis view-id focus-policy)
-    (unless (and (surface? surface) (memq axis '(horizontal vertical))
+  ;; Add a sibling beside an explicit editor leaf.  The new leaf is returned
+  ;; even when focus remains elsewhere, allowing HostUpdate to report the
+  ;; placement resolution independently from the selected context.
+  (define (surface-split-window! surface target-window-id axis view-id focus-policy)
+    (unless (and (surface? surface) (view-id? target-window-id)
+                 (memq axis '(horizontal vertical))
                  (view-id? view-id) (memq focus-policy '(focus preserve)))
+      (assertion-violation 'surface-split-window!
+                           "invalid Surface split Window request"
+                           surface target-window-id axis view-id focus-policy))
+    (let* ([target (leaf-by-id (surface-root-window surface) target-window-id)]
+           [selected (surface-selected-window surface)])
+      (and target
+           (let* ([new-leaf (make-leaf-window view-id #f)]
+                  [split (make-split-window axis (list target new-leaf) #f)]
+                  [root (replace-window (surface-root-window surface) target split)])
+             (surface-rebuild-window!
+               surface root (if (eq? focus-policy 'focus) new-leaf selected))
+             new-leaf))))
+
+  ;; Compatibility entry point for display routing that intentionally targets
+  ;; the selected Window.
+  (define (surface-split-selected-window! surface axis view-id focus-policy)
+    (unless (surface? surface)
       (assertion-violation 'surface-split-selected-window!
-                           "invalid Surface split request" surface axis view-id focus-policy))
-    (let* ([selected (surface-selected-window surface)]
-           [new-leaf (make-leaf-window view-id #f)]
-           [split (make-split-window axis (list selected new-leaf) #f)]
-           [root (replace-window (surface-root-window surface) selected split)])
-      (surface-rebuild-window!
-        surface root (if (eq? focus-policy 'focus) new-leaf selected))
-      new-leaf))
+                           "expected a Surface" surface))
+    (surface-split-window!
+      surface (window-id (surface-selected-window surface)) axis view-id focus-policy))
 
   ;; Removing the final leaf has no meaning: a Surface always retains a live
   ;; selected placement.  A non-active removal preserves the selected leaf;
