@@ -55,6 +55,7 @@
           package-host-pop-interaction-view!
           package-host-remove-interaction-view!
           package-host-publish-feedback!
+          package-host-publish-feedback-if-current!
           package-host-publish-buffer-presentation!
           package-host-register-buffer-presentation-projector!
           package-host-refresh-command-context)
@@ -78,6 +79,7 @@
           (soda host internal presentation)
           (soda host internal setting)
           (soda host internal state)
+          (soda host internal context)
           (soda host internal surface)
           (soda host internal view)
           (soda host internal window)
@@ -483,10 +485,10 @@
                                (view-service-close-view! views (view-id created))
                                #f))))))))))
 
-  ;; An asynchronous producer may use its initiating CommandContext only for
-  ;; placement while that exact View is still shown by the target Window.
-  ;; This prevents a late result from replacing content selected by the user
-  ;; after the command began.
+  ;; A delayed outcome may use its initiating CommandContext only while that
+  ;; exact View remains the active input target.  A retained but unfocused
+  ;; split Window, or an active minibuffer, does not authorize a result to
+  ;; replace content or occupy the echo area.
   (define (package-host-command-context-current? host context)
     (unless (and (package-host? host) (command-context? context))
       (assertion-violation 'package-host-command-context-current?
@@ -496,14 +498,12 @@
             (surface-service-ref
               (host-state-surfaces state)
               (command-context-surface-id context) #f)]
-           [window
+           [active
             (and surface
-                 (find
-                   (lambda (leaf)
-                     (= (window-id leaf) (command-context-window-id context)))
-                   (window-leaves (surface-root-window surface))))])
-      (and window
-           (= (window-view-id window) (command-context-view-id context)))))
+                 (surface-active-context surface (host-state-views state)))])
+      (and active
+           (= (active-context-window-id active) (command-context-window-id context))
+           (= (active-context-view-id active) (command-context-view-id context)))))
 
   ;; An asynchronous producer presents its result only when the View that
   ;; requested it is still current in its Window.  The predicate remains a
@@ -720,6 +720,20 @@
     (dispatcher-dispatch-host!
       (host-state-dispatch (package-host-state host))
       (make-set-surface-feedback-operation surface-id feedback)))
+
+  ;; Delayed command effects and asynchronous package callbacks use this
+  ;; operation when feedback belongs to their initiating interaction.  The
+  ;; result is discarded after a focus, Buffer, or minibuffer transition;
+  ;; durable state belongs to a Buffer presentation or mode line instead.
+  (define (package-host-publish-feedback-if-current! host context feedback)
+    (unless (and (package-host? host) (command-context? context)
+                 (user-feedback? feedback))
+      (assertion-violation 'package-host-publish-feedback-if-current!
+                           "expected a PackageHost, CommandContext, and UserFeedback"
+                           host context feedback))
+    (and (package-host-command-context-current? host context)
+         (package-host-publish-feedback!
+           host (command-context-surface-id context) feedback)))
 
   (define (package-host-publish-buffer-presentation! host buffer-id key value)
     (unless (package-host? host)

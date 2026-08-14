@@ -1114,6 +1114,23 @@
         (error 'fundamental-editing-tests "regexp replacement or key binding is incorrect"))
       (soda-application-close! application))
 
+    ;; A delayed feedback outcome is attached to the command's active input
+    ;; target.  Replacing that target with Help makes the outcome stale rather
+    ;; than letting it overwrite the echo area in the new interaction.
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [host (make-package-host state)]
+           [surface (soda-application-surface application)]
+           [origin (application-command-context application)])
+      (command-runtime-start! runtime 'help.show origin)
+      (unless (and (not (package-host-publish-feedback-if-current!
+                          host origin (make-user-feedback "stale feedback" 'info)))
+                   (not (surface-feedback surface)))
+        (error 'fundamental-editing-tests
+               "stale contextual feedback interrupted the replacement View"))
+      (soda-application-close! application))
+
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
            [runtime (host-state-command-runtime state)]
