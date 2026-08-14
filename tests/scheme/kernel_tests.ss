@@ -3,9 +3,11 @@
         (rnrs eval)
         (only (chezscheme)
               delete-directory
+              getenv
               get-mode
               get-process-id
-              mkdir)
+              mkdir
+              putenv)
         (soda kernel change)
         (soda kernel extension)
         (soda kernel option)
@@ -4505,6 +4507,86 @@
         (error 'kernel-tests
                "parameterless application startup did not remain an empty Emacs-style editing session")))
     (lambda () (soda-application-close! application))))
+
+;; Recovery discovery is session state, not startup chrome.  An application
+;; with a real pending artifact remains a normal *scratch* editing session
+;; until the user explicitly invokes recovery.restore.
+(let* ([directory
+         (string-append
+           "/tmp/soda-startup-recovery-" (number->string (get-process-id)))]
+       [previous-directory (getenv "SODA_RECOVERY_DIRECTORY")])
+  (define (clear-directory!)
+    (when (file-exists? directory)
+      (for-each
+        (lambda (entry)
+          (delete-file (vfs-path-join directory (vfs-entry-name entry))))
+        (vfs-list-directory directory))
+      (delete-directory directory)))
+  (dynamic-wind
+    (lambda ()
+      (clear-directory!)
+      (putenv "SODA_RECOVERY_DIRECTORY" directory))
+    (lambda ()
+      (let* ([state (make-host-state)]
+             [host (make-package-host state)]
+             [owner (make-owner 'startup-recovery-writer)]
+             [history
+              (make-history!
+                (host-state-command-runtime state) (host-state-dispatch state) owner)]
+             [buffer
+              (buffer-service-create!
+                (host-state-buffers state) owner "recovery-source"
+                (make-document "saved") (make-configuration '()))]
+             [resource (make-resource 'file "/tmp/soda-startup-recovery-source")]
+             [service
+              (make-recovery-service!
+                host owner history
+                (lambda (id)
+                  (and (= id (buffer-id buffer)) resource))
+                directory)])
+        (dynamic-wind
+          (lambda () #f)
+          (lambda ()
+            (history-mark-saved! history (buffer-id buffer))
+            (let* ([before (buffer-state buffer)]
+                   [length (snapshot-byte-size (buffer-state-document before))])
+              (dispatcher-dispatch!
+                (host-state-dispatch state)
+                (make-transaction-spec
+                  (buffer-id buffer) (buffer-state-generation before)
+                  (make-change-set
+                    length
+                    (list (make-text-change 0 length
+                                            (string->utf8 "unsaved")))))))
+            (host-state-run! state)
+            (unless (= (length (vfs-list-directory directory)) 1)
+              (error 'kernel-tests
+                     "startup recovery fixture did not create an artifact")))
+          (lambda ()
+            (owner-close! owner)
+            (host-state-close! state))))
+      (let* ([application (make-soda-application)]
+             [state (soda-application-state application)]
+             [surface (soda-application-surface application)]
+             [recovery
+              (file-service-recovery (soda-application-files application))]
+             [buffers (buffer-service-buffers (host-state-buffers state))])
+        (dynamic-wind
+          (lambda () #f)
+          (lambda ()
+            (unless (and (= (length (recovery-service-pending-artifacts recovery)) 1)
+                         (= (length buffers) 1)
+                         (string=? (buffer-name (car buffers)) "*scratch*")
+                         (null? (surface-interaction-windows surface))
+                         (not (surface-feedback surface))
+                         (not (interaction-service-current
+                                (soda-application-interaction application))))
+              (error 'kernel-tests
+                     "recovery discovery changed parameterless startup presentation")))
+          (lambda () (soda-application-close! application)))))
+    (lambda ()
+      (putenv "SODA_RECOVERY_DIRECTORY" (or previous-directory ""))
+      (clear-directory!))))
 
 (let* ([application (make-soda-application)]
        [state (soda-application-state application)]
