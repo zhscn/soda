@@ -4118,8 +4118,9 @@
                (buffer-state-document (buffer-state buffer))
                (view-state-selection (view-state view)) 0 20 10)])
         (invoke-viewport-command! application 'fundamental.scroll-down layout))
-      (unless (and (= (viewport-first-line (view-state-viewport (view-state view))) 0)
-                   (= (viewport-visual-row (view-state-viewport (view-state view))) 2))
+      (unless (and (document-viewport? (view-state-viewport (view-state view)))
+                   (= (viewport-first-line (view-state-viewport (view-state view))) 2)
+                   (= (viewport-visual-row (view-state-viewport (view-state view))) 0))
         (error 'fundamental-editing-tests "scroll-down did not advance the Viewport"))
       (let ([layout
              (layout-text-snapshot

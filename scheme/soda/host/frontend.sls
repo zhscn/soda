@@ -270,11 +270,15 @@
            layout
            (selection-range-head (selection-primary-range selection)))))
 
-  (define (raw-document-reveal-viewport view state width height request)
+  (define (plain-document-projection? view)
     (let ([projection (view-projection view)])
-      (and (eq? (scroll-request-kind request) 'reveal-point)
-           (not (view-projection-display-stream projection))
-           (null? (view-projection-transforms projection))
+      (and (not (view-projection-display-stream projection))
+           (null? (view-projection-transforms projection)))))
+
+  (define (raw-document-reveal-viewport view state width height request)
+    (and (eq? (scroll-request-kind request) 'reveal-point)
+           (plain-document-projection? view)
+           (document-viewport? (view-state-viewport state))
            (let* ([snapshot (buffer-state-document (buffer-state (view-buffer view)))]
                   [text (snapshot-text snapshot)]
                   [options (configuration-facet (view-state-configuration state)
@@ -286,6 +290,26 @@
                    text options width height (view-state-viewport state)
                    (selection-range-head
                      (selection-primary-range (view-state-selection state)))))
+               (lambda () (text-close! text))))))
+
+  ;; A generic DisplayMap resolver is still required for pages, recentering,
+  ;; and structural projections.  When it serves a plain document, translate
+  ;; its target display row back to the document-origin Viewport contract so
+  ;; later point reveal can return to the incremental measurement path.
+  (define (document-viewport-at-display-row view options width geometry row)
+    (let ([offset (layout-document-at-row geometry row 0)])
+      (and offset
+           (let* ([snapshot (buffer-state-document (buffer-state (view-buffer view)))]
+                  [text (snapshot-text snapshot)])
+             (dynamic-wind
+               (lambda () #f)
+               (lambda ()
+                 (let ([position
+                        (text-layout-document-visual-position
+                          text options width offset)])
+                   (make-viewport
+                     (visual-position-line position)
+                     (visual-position-row position))))
                (lambda () (text-close! text)))))))
 
   (define (publish-revealed-viewport! state view state-value viewport)
@@ -384,7 +408,11 @@
                          [(recenter) (- point-row (screen-row argument))]
                          [(move-point-to-window-row) current-top])]
                       [target-top (min last-top (max 0 requested-top))]
-                      [target (make-display-viewport target-top)]
+                      [target
+                       (or (and (plain-document-projection? view)
+                                (document-viewport-at-display-row
+                                  view options width geometry target-top))
+                           (make-display-viewport target-top))]
                       [next-selection
                        (cond
                          [(eq? kind 'move-point-to-window-row)
