@@ -4,6 +4,7 @@
           command-runtime-command-names command-runtime-command-definitions
           command-runtime-command-available? command-runtime-available-command-names
           command-runtime-available-command-definitions
+          command-runtime-available-user-command-definitions
           command-runtime-command-interactive? command-runtime-start!
           command-runtime-start-interactive! command-runtime-resume!
           command-runtime-cancel! command-runtime-invocation

@@ -392,7 +392,8 @@
       (define-command
         runtime owner 'spell.correct-item (context)
         (documentation "Prompt for a replacement of the spelling finding at point.")
-        (class 'tool)
+        (class 'spell)
+        (scope 'mode)
         (undo 'ignore)
         (let ([item (buffer-item-at-point
                       (command-context-buffer-state context)
@@ -406,6 +407,7 @@
         runtime owner 'spell.correct (context finding replacement)
         (documentation "Replace a spelling finding after choosing a correction.")
         (class 'tool)
+        (visible #f)
         (interactive (make-interactive-plan (list (make-spell-replacement-reader))))
         (undo 'boundary)
         (apply-correction service context finding replacement))

@@ -37,7 +37,7 @@
               (lambda (definition)
                 (string-contains?
                   (symbol->string (command-definition-name definition)) query))
-              (command-runtime-available-command-definitions runtime context)))))
+              (command-runtime-available-user-command-definitions runtime context)))))
       #f #f #f
       (lambda (input snapshot)
         (let ([name (string->symbol input)])

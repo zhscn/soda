@@ -292,14 +292,16 @@
       (define-command
         runtime owner 'buffer-list.refresh (context)
         (documentation "Refresh the generated Buffer List.")
-        (class 'buffer)
+        (class 'buffer-list)
+        (scope 'mode)
         (undo 'ignore)
         (make-command-effect
           'buffer-list.refresh (make-buffer-list-refresh-request context)))
       (define-command
         runtime owner 'buffer-list.close-item (context)
         (documentation "Close the Buffer item at point.")
-        (class 'buffer)
+        (class 'buffer-list)
+        (scope 'mode)
         (undo 'ignore)
         (close-item-at-point! service context))
       (package-host-add-buffer-close-listener!

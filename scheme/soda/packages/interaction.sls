@@ -375,6 +375,7 @@
         runtime owner 'interaction.submit-key (context codepoint)
         (documentation "Submit a discrete answer accepted by the active interaction.")
         (class 'interaction)
+        (visible #f)
         (interactive
           (make-interactive-plan (list command-key-codepoint-reader)))
         (undo 'ignore)

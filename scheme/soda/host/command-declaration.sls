@@ -9,64 +9,70 @@
   ;; combinations in define-command.
   (define-syntax define-command-options
     (syntax-rules (documentation class scope interactive semantic repeatable
-                                 undo preserve-prefix transient-state)
+                                 undo preserve-prefix transient-state visible)
       [(_ fixed (doc cls command-scope interaction semantic-name repeat?
-                      undo-policy preserve? transient)
+                      undo-policy preserve? transient user-visible?)
           (documentation value) rest ...)
        (define-command-options fixed
          (value cls command-scope interaction semantic-name repeat?
-                undo-policy preserve? transient) rest ...)]
+                undo-policy preserve? transient user-visible?) rest ...)]
       [(_ fixed (doc cls command-scope interaction semantic-name repeat?
-                      undo-policy preserve? transient)
+                      undo-policy preserve? transient user-visible?)
           (class value) rest ...)
        (define-command-options fixed
          (doc value command-scope interaction semantic-name repeat?
-              undo-policy preserve? transient) rest ...)]
+              undo-policy preserve? transient user-visible?) rest ...)]
       [(_ fixed (doc cls command-scope interaction semantic-name repeat?
-                      undo-policy preserve? transient)
+                      undo-policy preserve? transient user-visible?)
           (scope value) rest ...)
        (define-command-options fixed
          (doc cls value interaction semantic-name repeat?
-              undo-policy preserve? transient) rest ...)]
+              undo-policy preserve? transient user-visible?) rest ...)]
       [(_ fixed (doc cls command-scope interaction semantic-name repeat?
-                      undo-policy preserve? transient)
+                      undo-policy preserve? transient user-visible?)
           (interactive value) rest ...)
        (define-command-options fixed
          (doc cls command-scope value semantic-name repeat?
-              undo-policy preserve? transient) rest ...)]
+              undo-policy preserve? transient user-visible?) rest ...)]
       [(_ fixed (doc cls command-scope interaction semantic-name repeat?
-                      undo-policy preserve? transient)
+                      undo-policy preserve? transient user-visible?)
           (semantic value) rest ...)
        (define-command-options fixed
          (doc cls command-scope interaction value repeat?
-              undo-policy preserve? transient) rest ...)]
+              undo-policy preserve? transient user-visible?) rest ...)]
       [(_ fixed (doc cls command-scope interaction semantic-name repeat?
-                      undo-policy preserve? transient)
+                      undo-policy preserve? transient user-visible?)
           (repeatable value) rest ...)
        (define-command-options fixed
          (doc cls command-scope interaction semantic-name value
-              undo-policy preserve? transient) rest ...)]
+              undo-policy preserve? transient user-visible?) rest ...)]
       [(_ fixed (doc cls command-scope interaction semantic-name repeat?
-                      undo-policy preserve? transient)
+                      undo-policy preserve? transient user-visible?)
           (undo value) rest ...)
        (define-command-options fixed
          (doc cls command-scope interaction semantic-name repeat?
-              value preserve? transient) rest ...)]
+              value preserve? transient user-visible?) rest ...)]
       [(_ fixed (doc cls command-scope interaction semantic-name repeat?
-                      undo-policy preserve? transient)
+                      undo-policy preserve? transient user-visible?)
           (preserve-prefix value) rest ...)
        (define-command-options fixed
          (doc cls command-scope interaction semantic-name repeat?
-              undo-policy value transient) rest ...)]
+              undo-policy value transient user-visible?) rest ...)]
       [(_ fixed (doc cls command-scope interaction semantic-name repeat?
-                      undo-policy preserve? transient)
+                      undo-policy preserve? transient user-visible?)
           (transient-state value) rest ...)
        (define-command-options fixed
          (doc cls command-scope interaction semantic-name repeat?
-              undo-policy preserve? value) rest ...)]
+              undo-policy preserve? value user-visible?) rest ...)]
+      [(_ fixed (doc cls command-scope interaction semantic-name repeat?
+                      undo-policy preserve? transient user-visible?)
+          (visible value) rest ...)
+       (define-command-options fixed
+         (doc cls command-scope interaction semantic-name repeat?
+              undo-policy preserve? transient value) rest ...)]
       [(_ (runtime owner name (context . arguments))
           (doc cls command-scope interaction semantic-name repeat?
-               undo-policy preserve? transient)
+               undo-policy preserve? transient user-visible?)
           body ...)
        (command-runtime-register-command!
          runtime
@@ -74,39 +80,43 @@
            name (lambda (context . arguments) body ...) owner
            doc cls interaction command-scope
            (make-command-policy semantic-name repeat? undo-policy
-                                preserve? transient)))]))
+                                preserve? transient)
+           user-visible?))]))
 
   (define-syntax define-command
     (syntax-rules (documentation class scope interactive semantic repeatable
-                                 undo preserve-prefix transient-state)
+                                 undo preserve-prefix transient-state visible)
       [(_ runtime owner name arguments (documentation value) rest ...)
        (define-command-options (runtime owner name arguments)
-         (#f #f 'global #f #f #f 'boundary #f #f)
+         (#f #f 'global #f #f #f 'boundary #f #f #t)
          (documentation value) rest ...)]
       [(_ runtime owner name arguments (class value) rest ...)
        (define-command-options (runtime owner name arguments)
-         (#f #f 'global #f #f #f 'boundary #f #f) (class value) rest ...)]
+         (#f #f 'global #f #f #f 'boundary #f #f #t) (class value) rest ...)]
       [(_ runtime owner name arguments (scope value) rest ...)
        (define-command-options (runtime owner name arguments)
-         (#f #f 'global #f #f #f 'boundary #f #f) (scope value) rest ...)]
+         (#f #f 'global #f #f #f 'boundary #f #f #t) (scope value) rest ...)]
       [(_ runtime owner name arguments (interactive value) rest ...)
        (define-command-options (runtime owner name arguments)
-         (#f #f 'global #f #f #f 'boundary #f #f) (interactive value) rest ...)]
+         (#f #f 'global #f #f #f 'boundary #f #f #t) (interactive value) rest ...)]
       [(_ runtime owner name arguments (semantic value) rest ...)
        (define-command-options (runtime owner name arguments)
-         (#f #f 'global #f #f #f 'boundary #f #f) (semantic value) rest ...)]
+         (#f #f 'global #f #f #f 'boundary #f #f #t) (semantic value) rest ...)]
       [(_ runtime owner name arguments (repeatable value) rest ...)
        (define-command-options (runtime owner name arguments)
-         (#f #f 'global #f #f #f 'boundary #f #f) (repeatable value) rest ...)]
+         (#f #f 'global #f #f #f 'boundary #f #f #t) (repeatable value) rest ...)]
       [(_ runtime owner name arguments (undo value) rest ...)
        (define-command-options (runtime owner name arguments)
-         (#f #f 'global #f #f #f 'boundary #f #f) (undo value) rest ...)]
+         (#f #f 'global #f #f #f 'boundary #f #f #t) (undo value) rest ...)]
       [(_ runtime owner name arguments (preserve-prefix value) rest ...)
        (define-command-options (runtime owner name arguments)
-         (#f #f 'global #f #f #f 'boundary #f #f) (preserve-prefix value) rest ...)]
+         (#f #f 'global #f #f #f 'boundary #f #f #t) (preserve-prefix value) rest ...)]
       [(_ runtime owner name arguments (transient-state value) rest ...)
        (define-command-options (runtime owner name arguments)
-         (#f #f 'global #f #f #f 'boundary #f #f) (transient-state value) rest ...)]
+         (#f #f 'global #f #f #f 'boundary #f #f #t) (transient-state value) rest ...)]
+      [(_ runtime owner name arguments (visible value) rest ...)
+       (define-command-options (runtime owner name arguments)
+         (#f #f 'global #f #f #f 'boundary #f #f #t) (visible value) rest ...)]
       [(_ runtime owner name (context . arguments) documentation-value class-value
           (scope command-scope) (interactive interaction-spec) body ...)
        (command-runtime-register-command! runtime

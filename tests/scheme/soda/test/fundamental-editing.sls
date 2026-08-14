@@ -1995,10 +1995,28 @@
                      (exists
                        (lambda (candidate)
                          (string=? (completion-candidate-insert-text candidate)
-                                   "fundamental.insert-text"))
-                       (completion-controller-candidates controller)))
+                                   "fundamental.newline"))
+                       (completion-controller-candidates controller))
+                     (not
+                       (exists
+                         (lambda (candidate)
+                           (member
+                             (completion-candidate-insert-text candidate)
+                             '("fundamental.insert-text"
+                               "fundamental.pointer-select"
+                               "fundamental.pointer-scroll"
+                               "recovery.flush"
+                               "macro.step"
+                               "buffer.next-item"
+                               "buffer-list.refresh"
+                               "directory.refresh"
+                               "spell.correct-item"
+                               "spell.correct"
+                               "minibuffer.accept"
+                               "minibuffer.complete")))
+                         (completion-controller-candidates controller))))
           (error 'fundamental-editing-tests
-                 "M-x did not expose mode-aware command completion"))
+                 "M-x command completion did not hide runtime-only commands"))
         (unless (> (length (completion-controller-candidates controller)) 7)
           (error 'fundamental-editing-tests
                  "M-x did not provide enough commands to test candidate scrolling"))

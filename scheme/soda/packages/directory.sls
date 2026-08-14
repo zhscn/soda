@@ -414,12 +414,14 @@
         runtime owner 'directory.refresh (context)
         (documentation "Refresh the directory entries in the current Directory Buffer.")
         (class 'directory)
+        (scope 'mode)
         (undo 'ignore)
         (make-command-effect 'directory.refresh (make-directory-refresh-request context)))
       (define-command
         runtime owner 'directory.create-directory (context name)
         (documentation "Create a directory and refresh the current browser.")
         (class 'directory)
+        (scope 'mode)
         (interactive
           (make-interactive-plan
             (list (make-interaction-string-reader
@@ -439,6 +441,7 @@
         runtime owner 'directory.rename (context source destination)
         (documentation "Rename the entry at point without replacing an existing path.")
         (class 'directory)
+        (scope 'mode)
         (interactive
           (make-interactive-plan
             (list (make-selected-path-reader 'directory.rename)
@@ -459,6 +462,7 @@
         runtime owner 'directory.delete (context path decision)
         (documentation "Delete the entry at point after confirmation.")
         (class 'directory)
+        (scope 'mode)
         (interactive
           (make-interactive-plan
             (list (make-selected-path-reader 'directory.delete)

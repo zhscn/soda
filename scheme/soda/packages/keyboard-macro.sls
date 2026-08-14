@@ -163,6 +163,7 @@
         runtime owner 'macro.step (context step)
         (documentation "Run one cancellable keyboard macro step.")
         (class 'macro)
+        (visible #f)
         (undo 'ignore)
         (if (keyboard-macro-playing? service)
             (make-command-effect 'macro.invoke-step (cons step context))

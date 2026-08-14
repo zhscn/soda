@@ -9,6 +9,7 @@
           command-definition-interaction-spec
           command-definition-policy
           command-definition-interactive?
+          command-definition-user-visible?
           command-definition-owner
           make-command-registry
           command-registry?
@@ -139,6 +140,7 @@
       (immutable scope command-definition-scope)
       (immutable interaction-spec command-definition-interaction-spec)
       (immutable policy command-definition-policy)
+      (immutable user-visible? command-definition-user-visible?)
       (immutable owner command-definition-owner)))
 
   ;; The short forms preserve the original public constructor.  The complete
@@ -156,18 +158,22 @@
       [(name invoke owner documentation class interaction-spec scope)
        (make-command-definition
          name invoke owner documentation class interaction-spec scope
-         (make-command-policy))]
+         (make-command-policy) #t)]
       [(name invoke owner documentation class interaction-spec scope policy)
+       (make-command-definition
+         name invoke owner documentation class interaction-spec scope policy #t)]
+      [(name invoke owner documentation class interaction-spec scope policy user-visible?)
        (owner-assert-active 'make-command-definition owner)
        (unless (and (symbol? name) (procedure? invoke)
                     (or (not documentation) (string? documentation))
                     (or (not class) (symbol? class))
                     (memq scope '(global mode))
-                    (command-policy? policy))
+                    (command-policy? policy)
+                    (boolean? user-visible?))
          (assertion-violation 'make-command-definition "invalid command definition"
                               name invoke documentation class scope))
        (%make-command-definition
-         name invoke documentation class scope interaction-spec policy owner)]))
+         name invoke documentation class scope interaction-spec policy user-visible? owner)]))
 
   (define (command-definition-interactive? definition)
     (unless (command-definition? definition)

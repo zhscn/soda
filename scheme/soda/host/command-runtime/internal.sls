@@ -8,6 +8,7 @@
           command-runtime-command-available?
           command-runtime-available-command-names
           command-runtime-available-command-definitions
+          command-runtime-available-user-command-definitions
           command-runtime-command-interactive?
           command-runtime-start!
           command-runtime-start-interactive!
@@ -153,6 +154,14 @@
       (lambda (definition)
         (command-runtime-command-available? service definition context))
       (command-runtime-command-definitions service)))
+
+  ;; The command registry also contains effect continuations and frontend
+  ;; adapters. They are executable runtime entries, but not user commands.
+  ;; Command palettes and describe readers must use this projection rather
+  ;; than exposing argument-only implementation commands through M-x.
+  (define (command-runtime-available-user-command-definitions service context)
+    (filter command-definition-user-visible?
+            (command-runtime-available-command-definitions service context)))
 
   (define (command-runtime-available-command-names service context)
     (map command-definition-name

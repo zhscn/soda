@@ -238,6 +238,7 @@
         runtime owner 'file.external-auto-reload (context buffer-id version)
         (documentation "Reload an unmodified Buffer after a stable external change.")
         (class 'file)
+        (visible #f)
         (undo 'ignore)
         (make-command-effect
           'file.external-resolution
@@ -247,6 +248,7 @@
         (context buffer-id version action . arguments)
         (documentation "Resolve a changed-on-disk conflict without applying a stale decision.")
         (class 'file)
+        (visible #f)
         (interactive
           (make-interactive-plan
             (list (make-conflict-target-reader service)

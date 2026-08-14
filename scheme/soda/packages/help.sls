@@ -36,7 +36,7 @@
                 (lambda (definition)
                   (pair? (keymap-where-is
                            keymaps (command-definition-name definition))))
-                (command-runtime-available-command-definitions runtime context)))])
+                (command-runtime-available-user-command-definitions runtime context)))])
       (string-append
         "Soda Help\n\n"
         "Commands available in the current context:\n\n"
@@ -117,7 +117,7 @@
                           (buffer-item-input-layer actions)))
                   (make-buffer-edit-policy-extension
                     (make-buffer-edit-policy 'reject #f authority))))
-              '(help) "Help")]
+              '(help buffer-item) "Help")]
            [service
             (make-help-service
               host owner keymap mode fallback-keymaps authority 0)])

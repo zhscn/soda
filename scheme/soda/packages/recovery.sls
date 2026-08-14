@@ -387,6 +387,7 @@
               [runtime (package-host-command-runtime host)])
          (define-command
            runtime owner 'recovery.flush (context buffer-id)
+           (visible #f)
            (documentation "Persist the latest coalesced recovery snapshot.")
            (class 'recovery)
            (undo 'ignore)

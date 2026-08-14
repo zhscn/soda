@@ -24,6 +24,7 @@ CommandDefinition {
   documentation?,
   class?,
   interaction_plan?,
+  user_visible?,
   owner
 }
 ```
@@ -140,8 +141,9 @@ registry definition，也不把 transient wrapper 写回 keymap。
 mode 不属于 CommandRuntime。Buffer mode extension 通过 [03-buffer-ui.md](03-buffer-ui.md) 的
 Facet 提供 local keymap 和 command category。CommandDefinition 声明 `global` 或 `mode` scope；
 mode-scoped definition 的 class 必须出现在活动 major/minor mode 的有效 category 集合中。
-registry 保存全局可发现的 definition；执行入口、M-x、describe-command 和 where-is 使用同一
-active-context availability 查询。
+registry 保存全局可发现的 definition。执行入口使用 active-context availability 查询；M-x、
+describe-command 与 where-is 进一步只读取 `user_visible?` definition。effect continuation、
+frontend adapter 和需要运行时参数的内部 command 仍可由 runtime 排队，但不进入用户命令选择器。
 
 M-x 的 command reader 产生 must-match completion request，接受后把选择排入 runtime queue，
 不递归调用另一条 command。describe-command 读取 CommandDefinition metadata。where-is 对当前
@@ -154,7 +156,8 @@ minor mode 是可卸载的 Buffer Compartment contribution，不是 command runt
 
 公开 constructor 是稳定底层接口。`define-command` 展开为 CommandDefinition metadata 和
 显式的 owner-scoped runtime 安装，不创建隐藏全局 registry，也不改变调用语义。普通命令
-省略 interactive clause；交互命令显式提供 InteractivePlan。
+省略 interactive clause；交互命令显式提供 InteractivePlan。默认 declaration 是用户可见命令；
+内部 continuation 使用 `(visible #f)` 保留其 runtime identity，而不出现在 M-x 或命令描述输入中。
 
 ```scheme
 (define-command

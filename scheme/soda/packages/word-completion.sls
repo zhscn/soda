@@ -193,6 +193,7 @@
         runtime owner 'word.complete (context prefix)
         (documentation "Complete the word before point from words in editor Buffers.")
         (class 'completion)
+        (scope 'mode)
         (interactive (make-interactive-plan (list (make-word-reader service))))
         (repeatable #t)
         (undo 'amalgamate)

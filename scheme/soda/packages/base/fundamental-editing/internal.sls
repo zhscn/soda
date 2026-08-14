@@ -50,8 +50,8 @@
             (immutable kill-ring fundamental-editing-kill-ring)))
 
   (define-syntax install-command!
-    (syntax-rules ()
-      [(_ runtime owner name (context . arguments) documentation class body ...)
+    (syntax-rules (visible)
+      [(_ runtime owner name (context . arguments) documentation class (visible user-visible?) body ...)
        (command-runtime-register-command!
          runtime
          (make-command-definition
@@ -61,7 +61,11 @@
              name
              (and (memq class '(editing motion selection kill yank viewport)) #t)
              (if (memq class '(editing kill yank)) 'amalgamate 'ignore)
-             #f #f)))]))
+             #f #f)
+           user-visible?))]
+      [(_ runtime owner name (context . arguments) documentation class body ...)
+       (install-command! runtime owner name (context . arguments) documentation class
+                         (visible #t) body ...)]))
 
   (define (make-fundamental-editing! runtime owner)
     (unless (and (command-runtime? runtime) (owner? owner))
@@ -75,7 +79,7 @@
                   (make-plain-text-syntax-profile))
                 (make-buffer-input-layer-extension
                   (list (make-input-layer 'major keymap #f 'accept))))
-              '(editing motion selection kill yank viewport interface)
+              '(editing motion selection kill yank viewport interface completion)
               "Fund")]
            [editing (%make-fundamental-editing keymap mode (make-kill-ring))])
       (command-runtime-register-effect-handler!
@@ -85,7 +89,7 @@
                         (command-effect-payload effect))))
       (install-command!
         runtime owner 'fundamental.insert-text (context inserted)
-        "Insert committed text at every selection." 'editing
+        "Insert committed text at every selection." 'editing (visible #f)
         (auto-fill-insert context inserted))
       (install-command!
         runtime owner 'fundamental.newline (context)
@@ -195,11 +199,11 @@
         (fundamental-scroll-visual context 1 #f))
       (install-command!
         runtime owner 'fundamental.pointer-select (context)
-        "Select document content targeted by a pointer event." 'selection
+        "Select document content targeted by a pointer event." 'selection (visible #f)
         (fundamental-pointer-selection context))
       (install-command!
         runtime owner 'fundamental.pointer-scroll (context amount page?)
-        "Scroll the targeted View from a pointer wheel event." 'viewport
+        "Scroll the targeted View from a pointer wheel event." 'viewport (visible #f)
         (fundamental-scroll-visual context amount page?))
       (install-command!
         runtime owner 'fundamental.recenter (context)

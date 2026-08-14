@@ -24,11 +24,17 @@
           (soda host view)
           (soda packages interaction))
 
-  (define (install-command! runtime owner name documentation readers procedure)
-    (command-runtime-register-command!
-      runtime
-      (make-command-definition name procedure owner documentation 'search
-                               (and readers (make-interactive-plan readers)))))
+  (define install-command!
+    (case-lambda
+      [(runtime owner name documentation readers procedure)
+       (install-command! runtime owner name documentation readers procedure #t)]
+      [(runtime owner name documentation readers procedure user-visible?)
+       (command-runtime-register-command!
+         runtime
+         (make-command-definition
+           name procedure owner documentation 'search
+           (and readers (make-interactive-plan readers))
+           'global (make-command-policy) user-visible?))]))
 
   (define (toggle-case-sensitive context)
     (let* ([state (command-context-view-state context)]
@@ -150,7 +156,8 @@
                         "Apply the current query replace decision."
                         (list decision-reader)
         (lambda (context value)
-          (query-replace-decision! service context value)))
+          (query-replace-decision! service context value))
+        #f)
       (command-runtime-register-effect-handler!
         runtime 'search.query-replace.advance owner 'query-replace-advance
         (lambda (ignored invocation effect)
