@@ -215,6 +215,16 @@
   ;; Closing a placed Buffer is a host lifecycle operation.  The host replaces
   ;; every occurrence before retirement, so a feature package never traverses
   ;; Surface trees or leaves a Window targeting a retired View.
+  (define (recent-replacement-view surface views excluded-buffer-id)
+    (let loop ([ids (surface-view-history surface)])
+      (and (pair? ids)
+           (let ([view (view-service-ref views (car ids) #f)])
+             (if (and view
+                      (not (= (buffer-id (view-buffer view))
+                              excluded-buffer-id)))
+                 view
+                 (loop (cdr ids)))))))
+
   (define (package-host-close-buffer-with-fallback! host owner target-id)
     (let* ((state (package-host-state host))
            (buffers (host-state-buffers state))
@@ -255,16 +265,23 @@
                      (lambda (window)
                        (let ((view (view-service-ref views (window-view-id window) #f)))
                          (when (and view (= (buffer-id (view-buffer view)) target-id))
-                           (let ((replacement
-                                  (view-service-create!
-                                    views owner replacement-buffer
-                                    (view-state-configuration (view-state view)))))
+                           (let* ((recent
+                                   (recent-replacement-view
+                                     surface views target-id))
+                                  (replacement
+                                   (or recent
+                                       (view-service-create!
+                                         views owner replacement-buffer
+                                         (view-state-configuration
+                                           (view-state view))))))
                              (unless (dispatcher-dispatch-host!
                                        (host-state-dispatch state)
                                        (make-replace-window-view-operation
                                          (surface-id surface) (window-id window)
                                          (view-id replacement)))
-                               (view-service-close-view! views (view-id replacement))
+                               (unless recent
+                                 (view-service-close-view!
+                                   views (view-id replacement)))
                                (assertion-violation
                                  'package-host-close-buffer-with-fallback!
                                  "unable to replace a Buffer View before close" target-id))))))

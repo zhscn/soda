@@ -609,6 +609,53 @@
           (soda-application-close! application)
           (guard (condition [else #f]) (delete-file path)))))
 
+    ;; Closing the current Buffer restores the previous presentation, including
+    ;; its point, before falling back to the canonical scratch Buffer.
+    (let* ([base (string-append "/tmp/soda-close-mru-"
+                                (number->string (get-process-id)))]
+           [first-path (string-append base "-first.txt")]
+           [second-path (string-append base "-second.txt")]
+           [application (make-soda-application)])
+      (dynamic-wind
+        (lambda ()
+          (vfs-write-file first-path (string->utf8 "first"))
+          (vfs-write-file second-path (string->utf8 "second")))
+        (lambda ()
+          (let* ([state (soda-application-state application)]
+                 [runtime (host-state-command-runtime state)])
+            (command-runtime-start!
+              runtime 'file.visit (application-command-context application)
+              (list first-path))
+            (let* ([first-context (application-command-context application)]
+                   [first-id (command-context-buffer-id first-context)]
+                   [first-view-id (command-context-view-id first-context)])
+              (command-runtime-start!
+                runtime 'fundamental.end-of-buffer first-context)
+              (command-runtime-start!
+                runtime 'file.visit (application-command-context application)
+                (list second-path))
+              (let ([second-id
+                     (command-context-buffer-id
+                       (application-command-context application))])
+                (command-runtime-start!
+                  runtime 'file.close (application-command-context application)
+                  (list second-id 'discard))
+                (host-state-run! state)
+                (let ([active (application-command-context application)])
+                  (unless (and (= (command-context-buffer-id active) first-id)
+                               (= (command-context-view-id active) first-view-id)
+                               (= (selection-range-head
+                                    (selection-primary-range
+                                      (view-state-selection
+                                        (command-context-view-state active))))
+                                  5))
+                    (error 'fundamental-editing-tests
+                           "closing a Buffer did not restore its MRU View")))))))
+        (lambda ()
+          (soda-application-close! application)
+          (guard (condition [else #f]) (delete-file first-path))
+          (guard (condition [else #f]) (delete-file second-path)))))
+
     ;; Scheme startup supplies remaining argv entries to `scheme-start`.
     ;; Opening them here follows the same file.visit command path as C-x C-f.
     (let* ([path (string-append "/tmp/soda-startup-file-"
