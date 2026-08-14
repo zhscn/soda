@@ -220,6 +220,52 @@
           (owner-close! owner)
           (soda-application-close! application)))))
 
+  ;; Removing a frontend Surface invalidates every context that targeted it.
+  ;; A delayed result may retain its Buffer data, but cannot recreate a View
+  ;; or a Window after that frontend has gone away.
+  (define (run-removed-surface-presentation-test!)
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [host (make-package-host state)]
+           [owner (make-owner 'removed-surface-presentation-test)]
+           [surface (soda-application-surface application)]
+           [source (soda-application-buffer application)]
+           [configuration (buffer-state-configuration (buffer-state source))]
+           [late
+            (package-host-create-buffer!
+              host owner " *removed-surface-result*" (make-document "result") configuration)])
+      (define (current-context)
+        (let* ([active (surface-active-context surface (host-state-views state))]
+               [view
+                (view-service-ref
+                  (host-state-views state) (active-context-view-id active))]
+               [buffer (view-buffer view)])
+          (make-command-context
+            #f
+            (active-context-surface-id active)
+            (active-context-window-id active)
+            (view-id view)
+            (buffer-id buffer)
+            (buffer-state buffer)
+            (view-state view)
+            #f '() #f #f 'host-integration #f)))
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let* ([origin (current-context)]
+                 [views-before (length (view-service-views (host-state-views state)))])
+            (surface-service-remove! (host-state-surfaces state) (surface-id surface))
+            (unless (and (not (package-host-command-context-current? host origin))
+                         (not (package-host-present-buffer-if-current!
+                                host owner late origin configuration))
+                         (= (length (view-service-views (host-state-views state)))
+                            views-before))
+              (error 'host-integration-tests
+                     "removed Surface accepted a delayed presentation"))))
+        (lambda ()
+          (owner-close! owner)
+          (soda-application-close! application)))))
+
   (define (run-navigation-capability-test!)
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
@@ -428,5 +474,6 @@
     (run-interaction-placement-rollback-test!)
     (run-composite-view-placement-rollback-test!)
     (run-stale-presentation-test!)
+    (run-removed-surface-presentation-test!)
     (run-navigation-capability-test!)
     (run-deferred-location-follow-test!)))
