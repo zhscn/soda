@@ -38,9 +38,11 @@
     (unless (and (location-service? service) (location? location))
       (assertion-violation 'location-service-add-follow!
                            "expected a LocationService and Location" service location))
-    (let ([already-pending?
+    (let* ([resource (location-resource location)]
+          [already-pending?
            (exists
-             (lambda (entry) (location=? location (car entry)))
+             (lambda (entry)
+               (resource=? resource (location-resource (car entry))))
              (location-service-pending-follows service))])
       (location-service-pending-follows-set!
         service
@@ -60,7 +62,8 @@
             (location-service-pending-follows-set! service (reverse kept))
             (reverse taken))
           (let ([entry (car remaining)])
-            (if (location=? location (car entry))
+            (if (resource=? (location-resource location)
+                            (location-resource (car entry)))
                 (loop (cdr remaining) kept (cons (cdr entry) taken))
                 (loop (cdr remaining) (cons entry kept) taken))))))
 

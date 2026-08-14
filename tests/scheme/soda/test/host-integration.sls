@@ -11,6 +11,7 @@
           (soda host input)
           (soda host input-event)
           (soda host internal context)
+          (soda host internal location)
           (soda host internal navigation)
           (soda host internal operation)
           (soda host location)
@@ -507,6 +508,28 @@
           (owner-close! owner)
           (soda-application-close! application)))))
 
+  (define (run-resource-coalesced-location-follow-test!)
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [locations (host-state-locations state)]
+           [resource (make-resource 'test "shared-resource")]
+           [first
+            (make-location resource (make-byte-position 0) (make-byte-position 0)
+                           #f 'after '())]
+           [second
+            (make-location resource (make-byte-position 1) (make-byte-position 1)
+                           #f 'after '())])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (unless (and (location-service-add-follow! locations first 'first)
+                       (not (location-service-add-follow! locations second 'second))
+                       (equal? (location-service-take-follows! locations first)
+                               '(first second)))
+            (error 'host-integration-tests
+                   "Location follows did not coalesce and resume by Resource")))
+        (lambda () (soda-application-close! application)))))
+
   (define (run-host-integration-tests!)
     (run-cleanup-test!)
     (run-dispatcher-observer-test!)
@@ -517,4 +540,5 @@
     (run-stale-presentation-test!)
     (run-removed-surface-presentation-test!)
     (run-navigation-capability-test!)
-    (run-deferred-location-follow-test!)))
+    (run-deferred-location-follow-test!)
+    (run-resource-coalesced-location-follow-test!)))
