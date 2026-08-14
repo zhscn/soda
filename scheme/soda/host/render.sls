@@ -187,9 +187,15 @@
     (and (> (cdr (surface-size surface)) 1)
          (memq 'echo-area (surface-capabilities surface))))
 
-  (define (surface-editor-height surface)
+  ;; The echo area and an active interaction share one bottom presentation
+  ;; slot.  A prompt therefore remains terminal-bottom anchored instead of
+  ;; leaving an empty echo row beneath it.
+  (define (surface-layout-height surface)
     (let ([height (cdr (surface-size surface))])
-      (if (surface-echo-area-visible? surface) (- height 1) height)))
+      (if (and (surface-echo-area-visible? surface)
+               (null? (surface-interaction-windows surface)))
+          (- height 1)
+          height)))
 
   (define (prompt-window? window)
     (eq? (window-purpose window) 'prompt))
@@ -212,7 +218,7 @@
   ;; rows left after every prompt and one editable root row.  On smaller
   ;; Surfaces it contracts to zero instead of displacing the editor.
   (define (surface-companion-budget surface)
-    (let* ([editor-height (surface-editor-height surface)]
+    (let* ([editor-height (surface-layout-height surface)]
            [prompt-height (surface-prompt-height surface)]
            [root-reserve (if (> editor-height prompt-height) 1 0)])
       (max 0 (- editor-height prompt-height root-reserve))))
@@ -230,7 +236,7 @@
            0 (surface-interaction-windows surface)))))
 
   (define (surface-root-height surface)
-    (max 0 (- (surface-editor-height surface)
+    (max 0 (- (surface-layout-height surface)
               (surface-interaction-height surface))))
 
   ;; Root Window geometry is projected proportionally into the rows left by
@@ -265,7 +271,7 @@
           (let* ([window (car windows)]
                  [rectangle (window-rectangle window)]
                  [requested-height (cadddr rectangle)]
-                 [remaining (max 0 (- (surface-editor-height surface) used))]
+                 [remaining (max 0 (- (surface-layout-height surface) used))]
                  [companion?
                   (active-companion-window? surface window)]
                  [height
@@ -277,7 +283,7 @@
                                     companion-used)))]
                     [else 0])])
             (if (eq? window leaf)
-                (list (max 0 (- (surface-editor-height surface) used height))
+                (list (max 0 (- (surface-layout-height surface) used height))
                       0
                       (car (surface-size surface))
                       height)

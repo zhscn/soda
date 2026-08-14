@@ -2154,12 +2154,20 @@
                         (= (rendered-view-view-id item)
                            (window-view-id companion)))
                       (surface-render-rendered-views small))])
+            (let ([small-prompt
+                   (find
+                     (lambda (item)
+                       (= (rendered-view-view-id item)
+                          (window-view-id prompt)))
+                     (surface-render-rendered-views small))])
               (unless (and (= (cadddr (rendered-view-rectangle small-root)) 1)
                            (= (cadddr
                                 (rendered-view-rectangle small-companion))
-                              1))
+                              2)
+                           (= (car (rendered-view-rectangle small-prompt)) 3)
+                           (= (cadddr (rendered-view-rectangle small-prompt)) 1))
                 (error 'fundamental-editing-tests
-                       "small Surface did not reserve one root row before completion")))
+                       "small Surface did not bottom-anchor its prompt beside completion"))))
             (surface-resize! surface '(80 . 24))))
         (let* ([prompt (minibuffer-service-current minibuffer)]
                [prompt-buffer

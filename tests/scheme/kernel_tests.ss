@@ -1996,8 +1996,8 @@
                (not (eq? after-chrome after-layout)))
     (error 'kernel-tests "RenderService invalidation matrix differs")))
 
-;; Temporary interaction Windows consume dedicated rows between root Window
-;; mode lines and the echo area. They do not cover either stable chrome layer.
+;; An active interaction takes the terminal-bottom presentation slot normally
+;; used by the echo area. Root mode lines remain stable above it.
 (let* ([root-document (make-document "root")]
        [root-buffer
         (buffer-service-create!
@@ -2032,14 +2032,14 @@
           (surface-render-rendered-views render))]
        [frame (surface-render-frame render)])
   (unless (and root-rendered prompt-rendered
-               (= (cadddr (rendered-view-rectangle root-rendered)) 3)
-               (= (car (rendered-view-rectangle prompt-rendered)) 4)
+               (= (cadddr (rendered-view-rectangle root-rendered)) 4)
+               (= (car (rendered-view-rectangle prompt-rendered)) 5)
                (= (cadddr (rendered-view-rectangle prompt-rendered)) 1)
-               (eq? (frame-cell-face (frame-cell-at frame 3 0)) 'mode-line)
-               (not (eq? (frame-cell-face (frame-cell-at frame 4 0))
+               (eq? (frame-cell-face (frame-cell-at frame 4 0)) 'mode-line)
+               (not (eq? (frame-cell-face (frame-cell-at frame 5 0))
                          'mode-line)))
     (error 'kernel-tests
-           "interaction Window did not reserve root, mode-line, and echo rows"))
+           "interaction Window did not occupy the bottom presentation slot"))
   (surface-resize! surface '(14 . 6))
   (let* ([resized-render (render-surface surface (host-state-views host))]
          [resized-prompt
@@ -2047,7 +2047,7 @@
             (lambda (item) (= (rendered-view-view-id item) (view-id prompt-view)))
             (surface-render-rendered-views resized-render))])
     (unless (and resized-prompt
-                 (equal? (rendered-view-rectangle resized-prompt) '(4 0 14 1)))
+                 (equal? (rendered-view-rectangle resized-prompt) '(5 0 14 1)))
       (error 'kernel-tests
              "interaction Window did not follow the resized Surface width")))
   (surface-resize! surface '(10 . 6))
@@ -2062,9 +2062,9 @@
                    (render-surface surface (host-state-views host)))])
     (unless (and (= (length interactions) 1)
                  (= (window-view-id (car interactions)) (view-id root-view))
-                 (string=? (frame-cell-grapheme (frame-cell-at hidden 5 0)) " "))
+                 (string=? (frame-cell-grapheme (frame-cell-at hidden 5 0)) "r"))
       (error 'kernel-tests
-             "non-top interaction removal or feedback suppression differs")))
+             "non-top interaction removal did not retain bottom prompt ownership")))
   (surface-remove-interaction! surface (view-id root-view))
   (let ([restored
          (surface-render-frame (render-surface surface (host-state-views host)))])
