@@ -147,7 +147,7 @@
                   (host-state-views state) owner buffer configuration)]
                [surface
                 (make-surface
-                  'terminal '(kitty color-256 osc52 echo-area)
+                  'terminal '(kitty color-256 osc52 mode-line echo-area)
                   (make-leaf-window (view-id view) '(0 0 80 24))
                   '(80 . 24))]
                [options
@@ -155,7 +155,10 @@
                   host owner)]
                [history
                 (make-history! (host-state-command-runtime state)
-                               (host-state-dispatch state) owner)]
+                               (host-state-dispatch state) owner
+                               (lambda (buffer-id modified?)
+                                 (package-host-publish-buffer-presentation!
+                                   host buffer-id 'modified modified?)))]
                [_repeat
                 (make-repeat-command! (host-state-command-runtime state) owner)]
                [_prefix-arguments

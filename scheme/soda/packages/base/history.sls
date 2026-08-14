@@ -11,7 +11,7 @@
           (soda host value))
   (define-record-type history-entry (fields undo redo semantic invocation-id))
   (define-record-type history
-    (fields undo redo saved
+    (fields undo redo saved publish-modified!
             (mutable registration history-registration history-registration-set!)))
   (define (stack-ref table id) (hashtable-ref table id '()))
 
@@ -26,6 +26,7 @@
     (unless (and (history? value) (buffer-id? buffer-id))
       (assertion-violation 'history-mark-saved! "expected a history and Buffer id" value buffer-id))
     (hashtable-set! (history-saved value) buffer-id (stack-ref (history-undo value) buffer-id))
+    ((history-publish-modified! value) buffer-id #f)
     #t)
 
   (define (history-modified? value buffer-id)
@@ -86,7 +87,8 @@
                 (cdr items))
               (cons (make-history-entry current-undo current-redo semantic invocation-id)
                     items)))
-        (hashtable-set! (history-redo value) id '()))))
+        (hashtable-set! (history-redo value) id '()))
+      ((history-publish-modified! value) id (history-modified? value id))))
   (define (replay context changes)
     (make-transaction-spec (command-context-buffer-id context) (command-context-view-id context)
                            (buffer-state-generation (command-context-buffer-state context))
@@ -94,9 +96,16 @@
   (define (install-history-command! runtime owner name doc procedure)
     (command-runtime-register-command! runtime
       (make-command-definition name procedure owner doc 'history #f)))
-  (define (make-history! runtime dispatcher owner)
-    (let ([value (make-history (make-eqv-hashtable) (make-eqv-hashtable)
-                               (make-eqv-hashtable) #f)])
+  (define make-history!
+    (case-lambda
+      [(runtime dispatcher owner)
+       (make-history! runtime dispatcher owner (lambda (buffer-id modified?) #f))]
+      [(runtime dispatcher owner publish-modified!)
+       (unless (procedure? publish-modified!)
+         (assertion-violation 'make-history! "expected a presentation publisher"
+                              publish-modified!))
+       (let ([value (make-history (make-eqv-hashtable) (make-eqv-hashtable)
+                                  (make-eqv-hashtable) publish-modified! #f)])
       (history-registration-set! value
         (dispatcher-add-listener! dispatcher owner
           (lambda (update)
@@ -109,15 +118,23 @@
         (lambda (context)
           (let* ([id (command-context-buffer-id context)] [items (stack-ref (history-undo value) id)])
             (if (null? items) (command-handled)
-                (begin (hashtable-set! (history-undo value) id (cdr items))
-                       (hashtable-set! (history-redo value) id (cons (car items) (stack-ref (history-redo value) id)))
-                       (replay context (history-entry-undo (car items))))))))
+                (begin
+                  (hashtable-set! (history-undo value) id (cdr items))
+                  (hashtable-set! (history-redo value) id
+                                  (cons (car items) (stack-ref (history-redo value) id)))
+                  ((history-publish-modified! value) id
+                   (history-modified? value id))
+                  (replay context (history-entry-undo (car items))))))))
       (install-history-command! runtime owner 'history.redo "Redo the next Buffer transaction."
         (lambda (context)
           (let* ([id (command-context-buffer-id context)] [items (stack-ref (history-redo value) id)])
             (if (null? items) (command-handled)
-                (begin (hashtable-set! (history-redo value) id (cdr items))
-                       (hashtable-set! (history-undo value) id (cons (car items) (stack-ref (history-undo value) id)))
-                       (replay context (history-entry-redo (car items))))))))
-      value))
+                (begin
+                  (hashtable-set! (history-redo value) id (cdr items))
+                  (hashtable-set! (history-undo value) id
+                                  (cons (car items) (stack-ref (history-undo value) id)))
+                  ((history-publish-modified! value) id
+                   (history-modified? value id))
+                  (replay context (history-entry-redo (car items))))))))
+         value)]))
 )

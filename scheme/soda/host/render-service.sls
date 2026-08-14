@@ -10,6 +10,7 @@
           (soda kernel view-state)
           (soda kernel value)
           (soda host internal buffer)
+          (soda host internal presentation)
           (soda host render)
           (soda host internal surface)
           (soda host internal view)
@@ -53,8 +54,10 @@
               (selection-layout-token (view-state-selection state))))
           (vector (window-view-id leaf) #f #f))))
 
-  (define (surface-render-token service surface views)
+  (define (surface-render-token service surface views presentations)
     (vector (render-service-epoch service)
+            (and presentations
+                 (buffer-presentation-service-generation presentations))
             (surface-id surface)
             (surface-generation surface)
             (map (lambda (leaf) (view-render-token leaf views))
@@ -78,60 +81,44 @@
     (render-service-epoch-set! service (+ 1 (render-service-epoch service)))
     #t)
 
-  (define (retarget-caret render surface views)
-    (let ([active (surface-active-window surface)])
-      (and active
-           (let find ([remaining (surface-render-rendered-views render)])
-             (and (pair? remaining)
-                  (let ([rendered (car remaining)])
-                    (if (not (= (rendered-view-window-id rendered)
-                                (window-id active)))
-                        (find (cdr remaining))
-                        (let* ([view
-                                (view-service-ref
-                                  views (rendered-view-view-id rendered) #f)]
-                               [selection
-                                (and view
-                                     (view-state-selection (view-state view)))]
-                               [point
-                                (and selection (collapsed-caret? selection)
-                                     (text-layout-document->point
-                                       (rendered-view-layout rendered)
-                                       (selection-range-head
-                                         (selection-primary-range selection))))])
-                          (and point
-                               (let* ([rectangle (rendered-view-rectangle rendered)]
-                                      [row (+ (car rectangle) (car point))]
-                                      [column (+ (cadr rectangle) (cdr point))])
-                                 (if (and (equal? row (surface-render-cursor-row render))
-                                          (equal? column
-                                                  (surface-render-cursor-column render)))
-                                     render
-                                     (make-surface-render
-                                       (surface-render-surface-id render)
-                                       (surface-render-surface-generation render)
-                                       (surface-render-frame render)
-                                       row column
-                                       (surface-render-rendered-views render)))))))))))))
-
-  (define (render-service-render! service surface views)
+  (define (render-service-render-with-presentations!
+            service surface views presentations)
     (unless (and (render-service? service) (surface? surface) (view-service? views))
       (assertion-violation 'render-service-render! "invalid render request" service surface views))
-    (let ([signature (surface-render-token service surface views)]
+    (let ([signature (surface-render-token service surface views presentations)]
           [caret-signature (surface-caret-token surface views)])
       (if (equal? signature (render-service-signature service))
           (let ([cached (render-service-last-render service)])
             (if (equal? caret-signature (render-service-caret-signature service))
                 cached
                 (let ([render
-                       (or (and cached (retarget-caret cached surface views))
-                           (render-surface surface views))])
+                       (or (and cached
+                                (surface-render-retarget-active-view
+                                  cached surface views presentations))
+                           (if presentations
+                               (render-surface surface views presentations)
+                               (render-surface surface views)))])
                   (render-service-caret-signature-set! service caret-signature)
                   (render-service-render-set! service render)
                   render)))
-          (let ([render (render-surface surface views)])
+          (let ([render
+                 (if presentations
+                     (render-surface surface views presentations)
+                     (render-surface surface views))])
             (render-service-signature-set! service signature)
             (render-service-caret-signature-set! service caret-signature)
             (render-service-render-set! service render)
             render))))
+
+  (define render-service-render!
+    (case-lambda
+      [(service surface views)
+       (render-service-render-with-presentations! service surface views #f)]
+      [(service surface views presentations)
+       (unless (buffer-presentation-service? presentations)
+         (assertion-violation 'render-service-render!
+                              "expected a BufferPresentationService"
+                              presentations))
+       (render-service-render-with-presentations!
+         service surface views presentations)]))
 )

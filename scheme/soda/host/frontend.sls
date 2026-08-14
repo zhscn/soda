@@ -426,7 +426,8 @@
       (host-state-dispatch state) (host-state-owner state) listener))
 
   (define (host-frontend-render! state service surface)
-    (render-service-render! service surface (host-state-views state)))
+    (render-service-render!
+      service surface (host-state-views state) (host-state-presentations state)))
 
   (define (add-occurrence groups id occurrence)
     (cond [(null? groups) (list (cons id (list occurrence)))]

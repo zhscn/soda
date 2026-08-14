@@ -37,11 +37,13 @@
           surface-hit-source
           surface-render-hit-test
           surface-render-hit-test-window
+          surface-render-retarget-active-view
           surface-window-content-rectangle
           render-surface
           render-surface-frame)
   (import (rnrs)
           (soda kernel document)
+          (soda kernel mode)
           (soda kernel state)
           (soda kernel extension)
           (soda kernel selection)
@@ -49,6 +51,7 @@
           (soda kernel view-state)
           (soda kernel viewport)
           (soda host internal buffer)
+          (soda host internal presentation)
           (soda host internal surface)
           (soda host internal view)
           (soda host internal window)
@@ -206,7 +209,68 @@
                      (memq 'echo-area (surface-capabilities surface)))
                 (- height 1)
                 height)])
-      (content-rectangle surface leaf content-height)))
+      (let ([rectangle (content-rectangle surface leaf content-height)])
+        (if (and (> (cadddr rectangle) 1)
+                 (not (memq leaf (surface-interaction-windows surface)))
+                 (memq 'mode-line (surface-capabilities surface)))
+            (list (car rectangle) (cadr rectangle) (caddr rectangle)
+                  (- (cadddr rectangle) 1))
+            rectangle))))
+
+  (define (surface-window-mode-line-rectangle surface leaf)
+    (let* ([height (cdr (surface-size surface))]
+           [content-height
+            (if (and (> height 1)
+                     (memq 'echo-area (surface-capabilities surface)))
+                (- height 1)
+                height)]
+           [rectangle (content-rectangle surface leaf content-height)])
+      (and (> (cadddr rectangle) 1)
+           (not (memq leaf (surface-interaction-windows surface)))
+           (memq 'mode-line (surface-capabilities surface))
+           (list (+ (car rectangle) (cadddr rectangle) -1)
+                 (cadr rectangle) (caddr rectangle) 1))))
+
+  (define (buffer-mode-name state)
+    (let ([mode
+           (configuration-facet
+             (buffer-state-configuration state) buffer-mode-facet 'buffer)])
+      (if mode (mode-spec-display-name mode) "Fundamental")))
+
+  (define (view-line-column view)
+    (let ([text
+           (snapshot-text
+             (buffer-state-document (buffer-state (view-buffer view))))])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let* ([offset
+                  (selection-range-head
+                    (selection-primary-range
+                      (view-state-selection (view-state view))))]
+                 [position (text-position text offset)])
+            (cons (+ (car position) 1) (+ (cdr position) 1))))
+        (lambda () (text-close! text)))))
+
+  (define (mode-line-message view presentations)
+    (let* ([buffer (view-buffer view)]
+           [state (buffer-state buffer)]
+           [modified?
+            (and presentations
+                 (buffer-presentation-service-ref
+                   presentations (buffer-id buffer) 'modified #f))]
+           [read-only?
+            (and presentations
+                 (buffer-presentation-service-ref
+                   presentations (buffer-id buffer) 'read-only #f))]
+           [position (view-line-column view)])
+      (string-append
+        (if modified? "**" "--")
+        (if read-only? "%%" "--")
+        "  " (buffer-name buffer)
+        "   " (buffer-mode-name state)
+        "   L" (number->string (car position))
+        " C" (number->string (cdr position)))))
 
   (define (feedback-face feedback)
     (if (not feedback)
@@ -452,7 +516,7 @@
 
   ;; Rendering consumes only published BufferState and ViewState.  A frontend
   ;; may retain the result, but no render step mutates editor state.
-  (define (render-surface surface views)
+  (define (render-surface-with-presentations surface views presentations)
     (unless (and (surface? surface) (view-service? views))
       (assertion-violation 'render-surface-frame "expected a Surface and ViewService"))
     (let* ([size (surface-size surface)]
@@ -493,6 +557,8 @@
                     (loop (cdr leaves) placements rendered-views cursor-row cursor-column)
                     (let* ([rectangle
                             (surface-window-content-rectangle surface views leaf)]
+                           [mode-line-rectangle
+                            (surface-window-mode-line-rectangle surface leaf)]
                            [row (car rectangle)]
                            [column (cadr rectangle)]
                            [view-width (caddr rectangle)]
@@ -548,6 +614,16 @@
                           (list (make-frame-placement row (+ column gutter-width)
                                                       (guide-column-frame
                                                         (text-layout-frame layout) guide-column)))
+                          (if mode-line-rectangle
+                              (list
+                                (make-frame-placement
+                                  (car mode-line-rectangle)
+                                  (cadr mode-line-rectangle)
+                                  (status-frame
+                                    (caddr mode-line-rectangle)
+                                    (mode-line-message view presentations)
+                                    'mode-line)))
+                              '())
                           placements)
                         (cons (make-rendered-view
                                 (view-id view) (window-id leaf)
@@ -571,6 +647,69 @@
                                  (text-layout-cursor-column layout))
                             (+ column gutter-width (text-layout-cursor-column layout))
                             cursor-column)))))))))
+
+  (define render-surface
+    (case-lambda
+      [(surface views)
+       (render-surface-with-presentations surface views #f)]
+      [(surface views presentations)
+       (unless (buffer-presentation-service? presentations)
+         (assertion-violation 'render-surface
+                              "expected a BufferPresentationService"
+                              presentations))
+       (render-surface-with-presentations surface views presentations)]))
+
+  (define (frame-replace-row frame row start-column replacement)
+    (let loop ([column 0] [updates '()])
+      (if (= column (frame-width replacement))
+          (frame-with-cells frame (reverse updates))
+          (loop
+            (+ column 1)
+            (cons (list row (+ start-column column)
+                        (frame-cell-at replacement 0 column))
+                  updates)))))
+
+  ;; Collapsed-caret motion does not change text layout.  Retarget the cursor
+  ;; and the active Window's mode line against the committed DisplayMap so
+  ;; line/column feedback stays current without rebuilding every View Frame.
+  (define (surface-render-retarget-active-view
+            render surface views presentations)
+    (let* ([leaf (surface-active-window surface)]
+           [view (and leaf (view-service-ref views (window-view-id leaf) #f))]
+           [rendered
+            (and leaf
+                 (find
+                   (lambda (candidate)
+                     (= (rendered-view-window-id candidate) (window-id leaf)))
+                   (surface-render-rendered-views render)))]
+           [selection (and view (view-state-selection (view-state view)))]
+           [point
+            (and rendered selection
+                 (text-layout-document->point
+                   (rendered-view-layout rendered)
+                   (selection-range-head
+                     (selection-primary-range selection))))])
+      (and point
+           (let* ([rectangle (rendered-view-rectangle rendered)]
+                  [cursor-row (+ (car rectangle) (car point))]
+                  [cursor-column (+ (cadr rectangle) (cdr point))]
+                  [mode-rectangle
+                   (surface-window-mode-line-rectangle surface leaf)]
+                  [frame (surface-render-frame render)]
+                  [next-frame
+                   (if mode-rectangle
+                       (frame-replace-row
+                         frame (car mode-rectangle) (cadr mode-rectangle)
+                         (status-frame
+                           (caddr mode-rectangle)
+                           (mode-line-message view presentations)
+                           'mode-line))
+                       frame)])
+             (make-surface-render
+               (surface-render-surface-id render)
+               (surface-render-surface-generation render)
+               next-frame cursor-row cursor-column
+               (surface-render-rendered-views render))))))
 
   (define (render-surface-frame surface views)
     (surface-render-frame (render-surface surface views)))

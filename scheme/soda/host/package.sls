@@ -43,6 +43,8 @@
           package-host-push-interaction-view!
           package-host-pop-interaction-view!
           package-host-publish-feedback!
+          package-host-publish-buffer-presentation!
+          package-host-register-buffer-presentation-projector!
           package-host-refresh-command-context)
   (import (rnrs)
           (soda kernel document)
@@ -59,6 +61,7 @@
           (soda host internal analysis)
           (soda host internal location)
           (soda host internal navigation)
+          (soda host internal presentation)
           (soda host internal setting)
           (soda host internal state)
           (soda host internal surface)
@@ -378,6 +381,32 @@
     (dispatcher-dispatch-host!
       (host-state-dispatch (package-host-state host))
       (make-set-surface-feedback-operation surface-id feedback)))
+
+  (define (package-host-publish-buffer-presentation! host buffer-id key value)
+    (unless (package-host? host)
+      (assertion-violation 'package-host-publish-buffer-presentation!
+                           "expected a PackageHost" host))
+    (buffer-presentation-service-set!
+      (host-state-presentations (package-host-state host)) buffer-id key value))
+
+  (define (package-host-register-buffer-presentation-projector!
+            host owner key procedure)
+    (unless (and (package-host? host) (owner? owner) (symbol? key)
+                 (procedure? procedure))
+      (assertion-violation
+        'package-host-register-buffer-presentation-projector!
+        "invalid presentation projector" host owner key procedure))
+    (let* ([state (package-host-state host)]
+           [presentations (host-state-presentations state)]
+           [registration
+            (buffer-presentation-service-register-projector!
+              presentations owner key procedure)])
+      (for-each
+        (lambda (buffer)
+          (buffer-presentation-service-refresh!
+            presentations (buffer-id buffer) buffer))
+        (buffer-service-buffers (host-state-buffers state)))
+      registration))
 
   ;; Long-running command compositions refresh state at each queued step.
   ;; Window identity is followed across View replacement, so a file visit or

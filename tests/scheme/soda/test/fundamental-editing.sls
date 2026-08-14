@@ -17,6 +17,7 @@
           (soda host internal buffer)
           (soda host internal context)
           (soda host internal mode)
+          (soda host internal presentation)
           (soda host internal state)
           (soda host internal surface)
           (soda host internal operation)
@@ -876,6 +877,70 @@
       (command-runtime-start!
         runtime 'fundamental.insert-text (application-command-context application)
         (list (string->utf8 "alpha β\ngamma")))
+      (let* ([frame
+              (surface-render-frame
+                (render-surface
+                  surface (host-state-views state)
+                  (host-state-presentations state)))]
+             [row (- (frame-height frame) 2)])
+        (unless (and (string-prefix? "**--  *scratch*   Fundamental"
+                                     (frame-row-string frame row))
+                     (eq? (frame-cell-face (frame-cell-at frame row 0))
+                          'mode-line))
+          (error 'fundamental-editing-tests
+                 "mode line did not project modified Buffer state")))
+      (command-runtime-start! runtime 'history.undo
+                              (application-command-context application))
+      (let* ([frame
+              (surface-render-frame
+                (render-surface
+                  surface (host-state-views state)
+                  (host-state-presentations state)))]
+             [row (- (frame-height frame) 2)])
+        (unless (string-prefix? "----  *scratch*"
+                                (frame-row-string frame row))
+          (error 'fundamental-editing-tests
+                 "mode line did not clear modified state at the save point")))
+      (command-runtime-start! runtime 'history.redo
+                              (application-command-context application))
+      (command-runtime-start! runtime 'editor.toggle-read-only
+                              (application-command-context application))
+      (let* ([frame
+              (surface-render-frame
+                (render-surface
+                  surface (host-state-views state)
+                  (host-state-presentations state)))]
+             [row (- (frame-height frame) 2)])
+        (unless (string-prefix? "**%%  *scratch*"
+                                (frame-row-string frame row))
+          (error 'fundamental-editing-tests
+                 "mode line did not project read-only policy")))
+      (command-runtime-start! runtime 'editor.toggle-read-only
+                              (application-command-context application))
+      (command-runtime-start! runtime 'fundamental.beginning-of-buffer
+                              (application-command-context application))
+      (let* ([service (make-render-service)]
+             [first
+              (render-service-render!
+                service surface (host-state-views state)
+                (host-state-presentations state))])
+        (command-runtime-start! runtime 'fundamental.forward-char
+                                (application-command-context application))
+        (let* ([second
+                (render-service-render!
+                  service surface (host-state-views state)
+                  (host-state-presentations state))]
+               [row (- (frame-height (surface-render-frame second)) 2)])
+          (unless (and
+                    (eq? (rendered-view-layout
+                           (car (surface-render-rendered-views first)))
+                         (rendered-view-layout
+                           (car (surface-render-rendered-views second))))
+                    (string-contains?
+                      (frame-row-string (surface-render-frame second) row)
+                      "L1 C2"))
+            (error 'fundamental-editing-tests
+                   "caret fast path did not retarget mode-line position"))))
       (command-runtime-start! runtime 'message.count-words
                               (application-command-context application))
       (unless (and (string=? (surface-feedback-text surface)
@@ -2978,9 +3043,9 @@
                 (fundamental-input-disposition context disposition))
               (lambda (render theme) #f)
               (make-render-service) default-theme)])
-      ;; The terminal profile reserves one stable echo-area row, leaving the
-      ;; same two document rows that this wrapped-motion scenario exercises.
-      (frontend-resize! frontend '(4 . 3))
+      ;; Stable mode-line and echo-area rows leave the same two document rows
+      ;; that this wrapped-motion scenario exercises.
+      (frontend-resize! frontend '(4 . 4))
       (frontend-step! frontend)
       (command-runtime-start!
         runtime 'fundamental.insert-text (application-command-context application)
@@ -3694,7 +3759,7 @@
                            (= (rendered-view-view-id candidate) (view-id view)))
                          (surface-render-rendered-views presented))])
                   (and rendered
-                       (= (cadddr (rendered-view-rectangle rendered)) 3))))
+                       (= (cadddr (rendered-view-rectangle rendered)) 2))))
         (error 'fundamental-editing-tests
                "shortcut chrome did not reserve layout or reflect the pending prefix"))
       (send! (make-text-input-event 'text (string->utf8 "abcdefghijk")))

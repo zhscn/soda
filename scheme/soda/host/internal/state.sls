@@ -9,6 +9,7 @@
           host-state-modes
           host-state-locations
           host-state-navigation
+          host-state-presentations
           host-state-settings
           host-state-views
           host-state-surfaces
@@ -31,6 +32,7 @@
           (soda host dispatch)
           (soda host internal location)
           (soda host internal navigation)
+          (soda host internal presentation)
           (soda host internal setting)
           (soda host internal mode)
           (soda host runtime)
@@ -49,6 +51,7 @@
       (immutable modes host-state-modes)
       (immutable locations host-state-locations)
       (immutable navigation host-state-navigation)
+      (immutable presentations host-state-presentations)
       (immutable settings host-state-settings)
       (immutable views host-state-views)
       (immutable surfaces host-state-surfaces)
@@ -76,6 +79,7 @@
                   conditions owner source (lambda arguments #f) '(dismiss))))]
            [locations (make-location-service buffers)]
            [navigation (make-navigation-history)]
+           [presentations (make-buffer-presentation-service)]
            [settings (make-setting-service)]
            [command-runtime
              (make-command-runtime owner commands dispatch runtime conditions)]
@@ -110,7 +114,9 @@
         (lambda (buffer)
           (mode-service-reconcile!
             modes buffer #f
-            (buffer-state-configuration (buffer-state buffer)))))
+            (buffer-state-configuration (buffer-state buffer)))
+          (buffer-presentation-service-refresh!
+            presentations (buffer-id buffer) buffer)))
       (dispatcher-add-listener!
         dispatch owner
         (lambda (update)
@@ -122,6 +128,9 @@
             (when (and buffer (not (eq? old-configuration new-configuration)))
               (mode-service-reconcile!
                 modes buffer old-configuration new-configuration))
+            (when buffer
+              (buffer-presentation-service-refresh!
+                presentations (buffer-id buffer) buffer))
             (analysis-service-refresh! analyses update))))
       (view-service-set-close-handler!
         views
@@ -137,9 +146,14 @@
           (and (mode-service-close-buffer! modes buffer)
                (analysis-service-close-buffer! analyses (buffer-id buffer))
                (view-service-close-buffer-views! views (buffer-id buffer))
+               (begin
+                 (buffer-presentation-service-discard!
+                   presentations (buffer-id buffer))
+                 #t)
                (buffer-attachment-service-destroy-buffer! buffer-attachments buffer))))
       (%make-host-state
-        owner runtime buffers buffer-attachments analyses modes locations navigation settings views surfaces commands
+        owner runtime buffers buffer-attachments analyses modes locations navigation
+        presentations settings views surfaces commands
         command-runtime conditions dispatch (make-eqv-hashtable) #f)))
 
   (define (host-state-close! state)

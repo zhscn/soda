@@ -48,6 +48,7 @@
       (list (cons 'selection (make-face-style #f #f '(reverse)))
             (cons 'cursor (make-face-style #f #f '(reverse)))
             (cons 'message (make-face-style #f #f '(reverse)))
+            (cons 'mode-line (make-face-style #f #f '(reverse)))
             (cons 'line-number (make-face-style 8 #f '(dim)))
             (cons 'guide-column (make-face-style #f 236 '()))
             (cons 'whitespace.marker (make-face-style 8 #f '(dim)))

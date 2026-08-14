@@ -15,6 +15,7 @@
           (soda packages interaction)
           (soda host command)
           (soda host command-runtime)
+          (soda host buffer)
           (soda host feedback)
           (soda host input)
           (soda host input-event)
@@ -313,6 +314,11 @@
            [keymap (make-keymap 'editor-options)]
            [service (%make-editor-options-service keymap)])
       (register-editor-settings! host owner)
+      (package-host-register-buffer-presentation-projector!
+        host owner 'read-only
+        (lambda (buffer)
+          (buffer-read-only?
+            (buffer-state-configuration (buffer-state buffer)))))
       (install-command!
         runtime owner 'editor.toggle-auto-indent
         "Toggle automatic leading indentation for the active Buffer."
