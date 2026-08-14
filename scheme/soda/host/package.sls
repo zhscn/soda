@@ -655,6 +655,28 @@
              (make-byte-position (selection-range-head primary))
              (snapshot-revision document) 'after '()))))
 
+  ;; Stage a View for a Location follow without placing it in a Window.  A
+  ;; newly-created View remains private until the composite dispatcher commits
+  ;; both its selection and the Window replacement.
+  (define (stage-location-follow-view! host owner context buffer)
+    (let* ([state (package-host-state host)]
+           [views (host-state-views state)]
+           [surface
+            (surface-service-ref
+              (host-state-surfaces state)
+              (command-context-surface-id context) #f)]
+           [current (package-host-view-ref host (command-context-view-id context) #f)])
+      (and surface
+           (if (and current (= (buffer-id (view-buffer current)) (buffer-id buffer)))
+               (cons current #f)
+               (let ([recent (recent-buffer-view surface views (buffer-id buffer))])
+                 (if recent
+                     (cons recent #f)
+                     (cons
+                       (view-service-create!
+                         views owner buffer (buffer-state-configuration (buffer-state buffer)))
+                       #t)))))))
+
   ;; All Location follows use one Host-owned commit boundary.  The target is
   ;; resolved before placement; the history token moves only after selection
   ;; and reveal were published for the resulting View.
@@ -663,53 +685,75 @@
            (and (eq? (location-resolution-status resolution) 'resolved)
                 (package-host-buffer-ref
                   host (location-resolution-buffer-id resolution) #f))]
-          [committed? #f])
+          [committed? #f]
+          ;; A View created while staging is not owned by a Window until the
+          ;; composite dispatch succeeds.  Keep that ownership explicit so a
+          ;; rejected transaction, including one that raises, cannot leak it.
+          [unplaced-created-view #f])
       (and buffer
            (dynamic-wind
              (lambda () #f)
              (lambda ()
-               (let ([view
-                      (package-host-present-buffer!
-                        host owner buffer
-                        (command-context-surface-id context)
-                        (command-context-window-id context)
-                        (buffer-state-configuration (buffer-state buffer)))])
-                 (and view
-                      (package-host-dispatch-view!
-                        host
-                        (make-view-transaction-spec
-                          (view-id view)
-                          (view-state-generation (view-state view))
-                          (make-selection
-                            (list
-                              (make-selection-range
-                                (location-resolution-from resolution)
-                                (location-resolution-from resolution))))
-                          (view-state-viewport (view-state view))
-                          #f '() '()
-                          (make-scroll-request
-                            'reveal-point
-                            (command-context-surface-id context)
-                            (command-context-window-id context)
-                            (view-id view))))
-                      (navigation-history-commit!
-                        (host-state-navigation (package-host-state host))
-                        jump (location-resolution-location resolution))
-                      (begin
-                        (set! committed? #t)
-                        (make-command-context
-                          #f
-                          (command-context-surface-id context)
-                          (command-context-window-id context)
-                          (view-id view)
-                          (buffer-id buffer)
-                          (buffer-state buffer)
-                          (view-state view)
-                          #f '() #f #f 'location-follow #f)))))
+               (let ([staged (stage-location-follow-view! host owner context buffer)])
+                 (and staged
+                      (let* ([view (car staged)]
+                             [created? (cdr staged)]
+                             [selection
+                              (make-view-transaction-spec
+                                (view-id view)
+                                (view-state-generation (view-state view))
+                                (make-selection
+                                  (list
+                                    (make-selection-range
+                                      (location-resolution-from resolution)
+                                      (location-resolution-from resolution))))
+                                (view-state-viewport (view-state view))
+                                #f '() '()
+                                (make-scroll-request
+                                  'reveal-point
+                                  (command-context-surface-id context)
+                                  (command-context-window-id context)
+                                  (view-id view)))]
+                             [same-view? (= (view-id view) (command-context-view-id context))])
+                        (when created?
+                          (set! unplaced-created-view view))
+                        (let ([placed?
+                               (if same-view?
+                                   (package-host-dispatch-view! host selection)
+                                   (dispatcher-dispatch-view-with-host!
+                                     (host-state-dispatch (package-host-state host))
+                                     selection
+                                     (make-replace-window-view-operation
+                                       (command-context-surface-id context)
+                                       (command-context-window-id context)
+                                       (view-id view))))])
+                          (and placed?
+                               (begin
+                                 ;; The Surface now owns the new placement.  It
+                                 ;; must survive a later history-token failure.
+                                 (set! unplaced-created-view #f)
+                                 (and (navigation-history-commit!
+                                        (host-state-navigation (package-host-state host))
+                                        jump (location-resolution-location resolution))
+                                      (begin
+                                        (set! committed? #t)
+                                        (make-command-context
+                                          #f
+                                          (command-context-surface-id context)
+                                          (command-context-window-id context)
+                                          (view-id view)
+                                          (buffer-id buffer)
+                                          (buffer-state buffer)
+                                          (view-state view)
+                                          #f '() #f #f 'location-follow #f))))))))))
              (lambda ()
                (unless committed?
                  (navigation-history-cancel!
-                   (host-state-navigation (package-host-state host)) jump)))))))
+                   (host-state-navigation (package-host-state host)) jump)
+                 (when unplaced-created-view
+                   (view-service-close-view!
+                     (host-state-views (package-host-state host))
+                     (view-id unplaced-created-view)))))))))
 
   ;; Follow a new Location from the current editor position.  Providers own a
   ;; `needs-open` continuation; callers resume the same Location only after

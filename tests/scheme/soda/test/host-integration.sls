@@ -23,7 +23,9 @@
           (soda kernel extension)
           (soda kernel location)
           (soda kernel resource)
+          (soda kernel selection)
           (soda kernel state)
+          (soda kernel view-state)
           (soda support cleanup))
 
   (define (run-cleanup-test!)
@@ -112,6 +114,56 @@
           (owner-close! owner)
           (host-state-close! state)))))
 
+  ;; A combined View/Surface dispatch validates the View change before it can
+  ;; replace a Window.  This is the transaction boundary used by Location
+  ;; follow, where an invalid target point must leave the origin visible.
+  (define (run-composite-view-placement-rollback-test!)
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [surface (soda-application-surface application)]
+           [dispatch (host-state-dispatch state)]
+           [owner (make-owner 'composite-view-placement-rollback-test)]
+           [source-active
+            (surface-active-context surface (host-state-views state))]
+           [source-view-id (active-context-view-id source-active)]
+           [source-window-id (active-context-window-id source-active)]
+           [source (soda-application-buffer application)]
+           [target
+            (package-host-create-buffer!
+              (make-package-host state) owner " *composite-target*"
+              (make-document "target")
+              (buffer-state-configuration (buffer-state source)))]
+           [target-view
+            (view-service-create!
+              (host-state-views state) owner target
+              (buffer-state-configuration (buffer-state target)))]
+           [target-generation (view-state-generation (view-state target-view))]
+           [rejected? #f])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (guard (condition [else (set! rejected? #t)])
+            (dispatcher-dispatch-view-with-host!
+              dispatch
+              (make-view-transaction-spec
+                (view-id target-view) target-generation
+                (make-selection (list (make-selection-range 999 999)))
+                (view-state-viewport (view-state target-view))
+                #f '() '() #f)
+              (make-replace-window-view-operation
+                (surface-id surface) source-window-id (view-id target-view))))
+          (let ([active
+                 (surface-active-context surface (host-state-views state))])
+            (unless (and rejected?
+                         (= (active-context-view-id active) source-view-id)
+                         (= (view-state-generation (view-state target-view))
+                            target-generation))
+              (error 'host-integration-tests
+                     "rejected composite dispatch changed Window placement or View state"))))
+        (lambda ()
+          (owner-close! owner)
+          (soda-application-close! application)))))
+
   (define (run-navigation-capability-test!)
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
@@ -152,6 +204,20 @@
       (dynamic-wind
         (lambda () #f)
         (lambda ()
+          (let ([source-view-id (command-context-view-id (current-context))]
+                [rejected-result
+                 (package-host-follow-location!
+                   host owner (current-context)
+                   (make-location
+                     (make-resource 'buffer (number->string (buffer-id target)))
+                     (make-byte-position 999) (make-byte-position 999)
+                     (snapshot-revision (buffer-state-document (buffer-state target)))
+                     'after '()))])
+            (unless (and (not rejected-result)
+                         (= (command-context-view-id (current-context)) source-view-id)
+                         (= (length (view-service-views (host-state-views state))) 1))
+              (error 'host-integration-tests
+                     "rejected Location follow changed placement or retained its staged View")))
           (let* ([back-key (dispatch-navigation-key 2)]
                  [forward-key (dispatch-navigation-key 6)]
                  [location
@@ -304,5 +370,6 @@
     (run-dispatcher-observer-test!)
     (run-dispatch-gate-test!)
     (run-interaction-placement-rollback-test!)
+    (run-composite-view-placement-rollback-test!)
     (run-navigation-capability-test!)
     (run-deferred-location-follow-test!)))

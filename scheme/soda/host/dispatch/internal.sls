@@ -18,6 +18,7 @@
           dispatcher-dispatch!
           dispatcher-dispatch-specs!
           dispatcher-dispatch-view!
+          dispatcher-dispatch-view-with-host!
           dispatcher-dispatch-host!
           dispatcher-publish-buffer-damage!
           dispatcher-set-error-reporter!
@@ -316,4 +317,46 @@
         "expected a dispatcher and ViewTransactionSpec"))
     (dispatcher-run! dispatcher
                      (lambda () (dispatcher-dispatch-view-now! dispatcher spec))))
+
+  ;; A Location follow must not expose a Window whose View placement and
+  ;; selection disagree.  Validate and advance the target View before the
+  ;; Surface changes, then publish both updates from one dispatch gate.  A
+  ;; rejected View transaction leaves the Window and its previous View intact.
+  (define (dispatcher-dispatch-view-with-host-now! dispatcher spec operation)
+    (let* ([result
+            (dispatch-view-transaction! (dispatcher-views dispatcher) spec)]
+           [update (car result)]
+           [configuration (cdr result)]
+           [state-update (car (editor-update-views update))]
+           [view
+            (view-service-ref
+              (dispatcher-views dispatcher)
+              (view-state-update-view-id state-update)
+              #f)]
+           [surface-update
+            (dispatcher-dispatch-host-now! dispatcher operation)])
+      (if surface-update
+          (begin
+            (dispatcher-notify-editor-update! dispatcher update configuration)
+            #t)
+          (begin
+            ;; No observer has seen the staged View state yet, so restoring it
+            ;; here leaves both editor and terminal presentation unchanged.
+            (when view
+              (view-publish-state! view (view-state-update-old-state state-update)))
+            #f))))
+
+  (define (dispatcher-dispatch-view-with-host! dispatcher spec operation)
+    (unless (and (dispatcher? dispatcher)
+                 (view-transaction-spec? spec)
+                 (host-operation? operation)
+                 (host-operation-surface-id operation))
+      (assertion-violation
+        'dispatcher-dispatch-view-with-host!
+        "expected a Dispatcher, ViewTransactionSpec, and Surface HostOperation"
+        dispatcher spec operation))
+    (dispatcher-run!
+      dispatcher
+      (lambda ()
+        (dispatcher-dispatch-view-with-host-now! dispatcher spec operation))))
 )
