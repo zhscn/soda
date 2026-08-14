@@ -278,6 +278,7 @@
                   host (buffer-id buffer) scheme-highlight-provider-key))
               (make-comment-syntax "; " "#|" "|#"))]
            [service (%make-scheme-mode-service spec profile keymap)])
+      (package-host-register-mode! host owner spec)
       (package-host-register-analysis-provider!
         host owner (make-scheme-highlight-provider host))
       (define-command

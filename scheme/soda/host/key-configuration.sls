@@ -12,6 +12,7 @@
           key-binding-configuration-error-declaration
           key-binding-configuration-error-conflict
           key-binding-configuration-error-source
+          key-binding-declarations-validate!
           key-binding-declarations->input-layers)
   (import (rnrs)
           (only (chezscheme) equal-hash)
@@ -104,6 +105,16 @@
             (hashtable-set! seen token declaration)))
         declarations)))
 
+  (define (key-binding-declarations-validate!
+           declarations command-known? command-compatible?)
+    (unless (and (list? declarations) (procedure? command-known?)
+                 (procedure? command-compatible?))
+      (assertion-violation 'key-binding-declarations-validate!
+                           "expected declarations and validation procedures"
+                           declarations command-known? command-compatible?))
+    (validate-declarations declarations command-known? command-compatible?)
+    #t)
+
   (define (declaration-applies? declaration context mode)
     (and (eq? (key-binding-declaration-context declaration) context)
          (let ([required (key-binding-declaration-mode declaration)])
@@ -130,7 +141,8 @@
         'key-binding-declarations->input-layers
         "invalid key binding materialization request"
         declarations command-known? command-compatible? context mode))
-    (validate-declarations declarations command-known? command-compatible?)
+    (key-binding-declarations-validate!
+      declarations command-known? command-compatible?)
     (let* ([applicable
             (filter
               (lambda (declaration)

@@ -123,6 +123,8 @@
         (let* ([editing
                 (make-fundamental-editing!
                   (host-state-command-runtime state) owner)]
+               [_fundamental-mode
+                (package-host-register-mode! host owner (fundamental-mode editing))]
                [whitespace
                 (make-whitespace-service! host owner)]
                [comments

@@ -2347,6 +2347,15 @@
        [other-mode
         (make-mode-spec
           'other 'major "Configured other" #f '() '() "Configured")]
+       [catalog-restricted-mode
+        (make-mode-spec
+          'restricted 'major "Configured catalog restricted" #f '() '() "Configured")]
+       [editing-mode-catalog-registration
+        (package-host-register-mode!
+          (make-package-host host) binding-owner editing-mode)]
+       [restricted-mode-catalog-registration
+        (package-host-register-mode!
+          (make-package-host host) binding-owner catalog-restricted-mode)]
        [layers
         (package-host-materialize-key-bindings
           (make-package-host host)
@@ -2405,6 +2414,30 @@
              #f))
       (error 'kernel-tests
              "configured mode binding did not validate command capability")))
+  (let* ([mode-binding
+          (make-key-binding-declaration
+            'editing 'scheme (list control-x) 'configured.edit
+            'global binding-source)]
+         [catalog-incompatible
+          (make-key-binding-declaration
+            'editing 'restricted (list control-x) 'configured.edit
+            'global binding-source)])
+    (unless
+      (and (package-host-validate-key-bindings!
+             (make-package-host host) (list mode-binding))
+           (guard
+             (condition
+               [(key-binding-configuration-error? condition)
+                (and (eq? (key-binding-configuration-error-reason condition)
+                          'mode-capability)
+                     (eq? (key-binding-configuration-error-source condition)
+                          binding-source))]
+               [else #f])
+             (package-host-validate-key-bindings!
+               (make-package-host host) (list catalog-incompatible))
+             #f))
+      (error 'kernel-tests
+             "mode catalog did not validate configured binding capability")))
   (let ([invalid
          (make-key-binding-declaration
            'editing #f (list 'not-a-key-stroke) 'configured.default
@@ -2440,6 +2473,8 @@
   (registration-close! second-registration)
   (registration-close! first-registration)
   (registration-close! mode-registration)
+  (registration-close! restricted-mode-catalog-registration)
+  (registration-close! editing-mode-catalog-registration)
   (owner-close! binding-owner)
   (unless
     (guard

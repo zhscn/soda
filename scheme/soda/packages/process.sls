@@ -232,6 +232,7 @@
            [service
             (%make-process-service
               host owner keymap authority mode (make-eqv-hashtable) #f)])
+      (package-host-register-mode! host owner mode)
       (command-runtime-register-effect-handler!
         runtime 'process.spawn owner 'native-process-spawn
         (lambda (ignored invocation effect)

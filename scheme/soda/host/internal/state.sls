@@ -7,6 +7,7 @@
           host-state-buffer-attachments
           host-state-analyses
           host-state-modes
+          host-state-mode-catalog
           host-state-locations
           host-state-navigation
           host-state-presentations
@@ -49,6 +50,7 @@
       (immutable buffer-attachments host-state-buffer-attachments)
       (immutable analyses host-state-analyses)
       (immutable modes host-state-modes)
+      (immutable mode-catalog host-state-mode-catalog)
       (immutable locations host-state-locations)
       (immutable navigation host-state-navigation)
       (immutable presentations host-state-presentations)
@@ -77,6 +79,7 @@
               (lambda (source condition)
                 (condition-service-capture
                   conditions owner source (lambda arguments #f) '(dismiss))))]
+           [mode-catalog (make-mode-catalog)]
            [locations (make-location-service buffers)]
            [navigation (make-navigation-history)]
            [presentations (make-buffer-presentation-service)]
@@ -152,7 +155,7 @@
                  #t)
                (buffer-attachment-service-destroy-buffer! buffer-attachments buffer))))
       (%make-host-state
-        owner runtime buffers buffer-attachments analyses modes locations navigation
+        owner runtime buffers buffer-attachments analyses modes mode-catalog locations navigation
         presentations settings views surfaces commands
         command-runtime conditions dispatch (make-eqv-hashtable) #f)))
 

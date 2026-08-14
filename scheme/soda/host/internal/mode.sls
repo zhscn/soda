@@ -15,7 +15,11 @@
           mode-event-new-major-mode
           mode-event-enabled-minor-modes
           mode-event-disabled-minor-modes
-          mode-event-generation)
+          mode-event-generation
+          make-mode-catalog
+          mode-catalog?
+          mode-catalog-register!
+          mode-catalog-spec)
   (import (rnrs)
           (soda kernel extension)
           (soda kernel mode)
@@ -47,6 +51,52 @@
             (mutable phase mode-service-phase mode-service-phase-set!)
             (mutable deferred mode-service-deferred mode-service-deferred-set!)
             (mutable draining? mode-service-draining? mode-service-draining?-set!)))
+
+  ;; ModeCatalog stores declared ModeSpecs independently of live Buffer
+  ;; instances.  Configuration can consequently validate a target mode before
+  ;; any Buffer has selected that mode.
+  (define-record-type
+    (mode-catalog %make-mode-catalog mode-catalog?)
+    (fields (immutable table mode-catalog-table)))
+  (define-record-type mode-catalog-entry
+    (fields owner spec))
+
+  (define (make-mode-catalog)
+    (%make-mode-catalog (make-eq-hashtable)))
+
+  (define (mode-catalog-spec catalog id . default)
+    (unless (and (mode-catalog? catalog) (symbol? id))
+      (assertion-violation 'mode-catalog-spec "expected a ModeCatalog and mode id"
+                           catalog id))
+    (let ([entry (hashtable-ref (mode-catalog-table catalog) id #f)])
+      (if entry
+          (mode-catalog-entry-spec entry)
+          (if (null? default) #f (car default)))))
+
+  (define (mode-catalog-register! catalog owner spec)
+    (unless (and (mode-catalog? catalog) (owner? owner) (mode-spec? spec))
+      (assertion-violation 'mode-catalog-register!
+                           "expected a ModeCatalog, Owner, and ModeSpec"
+                           catalog owner spec))
+    (owner-assert-active 'mode-catalog-register! owner)
+    (let* ([table (mode-catalog-table catalog)]
+           [id (mode-spec-id spec)]
+           [existing (hashtable-ref table id #f)])
+      (cond
+        [(not existing)
+         (let ([entry (make-mode-catalog-entry owner spec)])
+           (hashtable-set! table id entry)
+           (make-registration
+             owner
+             (lambda ()
+               (when (eq? (hashtable-ref table id #f) entry)
+                 (hashtable-delete! table id)))))]
+        [(eq? (mode-catalog-entry-spec existing) spec)
+         (make-registration owner (lambda () #f))]
+        [else
+         (assertion-violation 'mode-catalog-register!
+                              "mode id is already registered by another ModeSpec"
+                              id spec)])))
 
   (define (make-mode-service report-error!)
     (unless (procedure? report-error!)

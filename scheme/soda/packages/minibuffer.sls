@@ -771,6 +771,8 @@
                 host interactions owner keymap mode completion-mode
                 (make-eq-hashtable)
                 '() '() '() #f)])
+      (package-host-register-mode! host owner mode)
+      (package-host-register-mode! host owner completion-mode)
       (define-command
         (package-host-command-runtime host) owner 'minibuffer.accept (context)
         (documentation "Accept the current minibuffer input.")

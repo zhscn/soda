@@ -262,6 +262,7 @@
             (%make-buffer-list-service
               host owner history actions keymap result-keymap authority mode
               (make-eqv-hashtable))])
+      (package-host-register-mode! host owner mode)
       (keymap-bind! keymap
                     (list (control-stroke #\x)
                           (make-key-stroke 'character (char->integer #\b) 0))

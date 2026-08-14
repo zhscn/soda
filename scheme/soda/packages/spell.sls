@@ -383,6 +383,7 @@
            [service
             (%make-spell-service
               host owner processes keymap result-keymap result-mode)])
+      (package-host-register-mode! host owner result-mode)
       (keymap-bind! result-keymap (list (control-stroke #\r)) 'spell.correct-item)
       (buffer-item-action-register!
         actions owner 'spell 'visit

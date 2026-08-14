@@ -55,7 +55,7 @@ prefix key、minibuffer、echo area、mode line、Buffer/View/Window 语义作�
 | 拼写检查、替换建议与结果 Buffer | 结果和候选是可导航的普通 Buffer；finding 激活复用源 View 并 reveal 目标位置 |
 | help、describe-command 与 where-is | help 是按调用时 InputContext 刷新的可复用 generated Buffer；`q` 返回前一个 View 而保留 Buffer，简短结果进入 echo area |
 | `M-x` command completion | 仅列出当前上下文可用且声明为用户可见的 command；Help、describe 与 where-is 使用和 terminal dispatch 相同的有序 InputLayer 投影；输入、effect continuation 与 frontend adapter 不进入候选 |
-| 声明式 mode key binding | 目标 ModeSpec materialize 时按继承后的 command category 验证 mode-scoped command，并在配置来源处报告不匹配 |
+| 声明式 mode key binding | ModeCatalog 按 mode id 提供继承后的 command category；配置验证与 ModeSpec materialization 都在配置来源处验证 mode-scoped command |
 | 外部命令的 process Buffer | 前台命令创建只读的 Process generated Buffer；外部 I/O 通过 effect 和 package owner authority 追加输出，后台输出不改变当前焦点 |
 | 位置与词/行/字符统计 | 结果显示在 echo area 或结果 Buffer |
 

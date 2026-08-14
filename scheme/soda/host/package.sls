@@ -14,6 +14,9 @@
           package-host-configuration-source
           package-host-resolve-setting
           package-host-configuration-extensions
+          package-host-register-mode!
+          package-host-mode-spec
+          package-host-validate-key-bindings!
           package-host-materialize-key-bindings
           package-host-register-location-provider!
           package-host-resolve-location
@@ -66,6 +69,7 @@
           (soda host internal analysis)
           (soda host internal location)
           (soda host internal navigation)
+          (soda host internal mode)
           (soda host internal presentation)
           (soda host internal setting)
           (soda host internal state)
@@ -149,6 +153,18 @@
     (setting-service-extensions
       (host-state-settings (package-host-state host)) scope context))
 
+  (define (package-host-register-mode! host owner spec)
+    (unless (package-host? host)
+      (assertion-violation 'package-host-register-mode! "expected a PackageHost" host))
+    (mode-catalog-register!
+      (host-state-mode-catalog (package-host-state host)) owner spec))
+
+  (define (package-host-mode-spec host id . default)
+    (unless (package-host? host)
+      (assertion-violation 'package-host-mode-spec "expected a PackageHost" host))
+    (apply mode-catalog-spec
+           (host-state-mode-catalog (package-host-state host)) id default))
+
   (define (package-host-materialize-key-bindings host declarations context mode)
     (unless (and (package-host? host)
                  (or (not mode) (symbol? mode) (mode-spec? mode)))
@@ -157,10 +173,14 @@
                            host mode))
     (let* ([runtime
             (host-state-command-runtime (package-host-state host))]
-           [mode-id (if (mode-spec? mode) (mode-spec-id mode) mode)]
-           [categories
+           [mode-spec
             (if (mode-spec? mode)
-                (mode-spec-command-category-list mode)
+                mode
+                (and mode (package-host-mode-spec host mode #f)))]
+           [mode-id (if (mode-spec? mode-spec) (mode-spec-id mode-spec) mode)]
+           [categories
+            (if mode-spec
+                (mode-spec-command-category-list mode-spec)
                 #f)])
       (key-binding-declarations->input-layers
         declarations
@@ -185,6 +205,30 @@
                           (memq (command-definition-class definition)
                                 categories))))))
         context mode-id)))
+
+  (define (package-host-validate-key-bindings! host declarations)
+    (unless (package-host? host)
+      (assertion-violation 'package-host-validate-key-bindings!
+                           "expected a PackageHost" host))
+    (let ([runtime (host-state-command-runtime (package-host-state host))])
+      (key-binding-declarations-validate!
+        declarations
+        (lambda (name)
+          (and (command-runtime-command-definition runtime name #f) #t))
+        (lambda (declaration)
+          (let ([definition
+                 (command-runtime-command-definition
+                   runtime (key-binding-declaration-command declaration) #f)]
+                [mode
+                 (and (key-binding-declaration-mode declaration)
+                      (package-host-mode-spec
+                        host (key-binding-declaration-mode declaration) #f))])
+            (and definition
+                 (or (eq? (command-definition-scope definition) 'global)
+                     (and mode
+                          (command-definition-class definition)
+                          (memq (command-definition-class definition)
+                                (mode-spec-command-category-list mode))))))))))
 
   (define (package-host-register-location-provider! host owner provider)
     (location-service-register!

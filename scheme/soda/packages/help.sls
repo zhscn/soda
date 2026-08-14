@@ -120,6 +120,7 @@
            [service
             (make-help-service
               host owner keymap mode fallback-layers authority 0)])
+      (package-host-register-mode! host owner mode)
       (define-command
         (package-host-command-runtime host) owner 'help.show (context)
         (documentation "Show commands and active key bindings for the current context.")
