@@ -5140,7 +5140,48 @@
                             "spell finding activation did not restore the source View and location")))))]
             [(zero? remaining)
              (error 'kernel-tests "spell check did not display a parsed report" output)]
-            [else (poll (- remaining 1))]))))
+            [else (poll (- remaining 1))])))
+      ;; A repeated check refreshes the source's stable report Buffer instead
+      ;; of allocating another Buffer with the same user-visible name.
+      (let* ([source (soda-application-buffer application)]
+             [host (make-package-host state)]
+             [surface (soda-application-surface application)]
+             [active (surface-active-context surface (host-state-views state))]
+             [test-owner (make-owner 'spell-result-reuse-test)]
+             [report
+              (package-host-find-buffer-key
+                host (make-buffer-key 'spell (buffer-id source)) #f)])
+        (unless report
+          (error 'kernel-tests "initial spell report was not keyed by source Buffer"))
+        (let ([before (buffer-state-generation (buffer-state report))])
+          (unless
+            (package-host-present-buffer!
+              host test-owner source (active-context-surface-id active)
+              (active-context-window-id active)
+              (buffer-state-configuration (buffer-state source)))
+            (error 'kernel-tests "could not restore source Buffer for repeated spell check"))
+          (command-runtime-start!
+            runtime 'spell.check (application-command-context application))
+          (let poll ([remaining 4])
+            (for-each
+              (lambda (event) (process-service-handle-runtime-event! processes event))
+              (native:runtime-poll! native-runtime))
+            (host-state-run! state)
+            (cond
+              [(> (buffer-state-generation (buffer-state report)) before)
+               (unless (= (length
+                            (filter
+                              (lambda (buffer)
+                                (string=? (buffer-name buffer)
+                                          "*Spelling: *scratch**"))
+                              (buffer-service-buffers (host-state-buffers state))))
+                          1)
+                 (error 'kernel-tests
+                        "repeated spell check created duplicate result Buffers"))]
+              [(zero? remaining)
+               (error 'kernel-tests "repeated spell check did not refresh its result Buffer")]
+              [else (poll (- remaining 1))]))
+          (owner-close! test-owner))))
     (lambda ()
       (native:runtime-close! native-runtime)
       (soda-application-close! application))))

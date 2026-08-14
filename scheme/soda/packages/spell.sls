@@ -37,10 +37,13 @@
     (spell-service %make-spell-service spell-service?)
     (fields host owner processes keymap result-keymap result-mode authority
             (mutable generation spell-service-generation
-                     spell-service-generation-set!)))
+                     spell-service-generation-set!)
+            (mutable next-request-id spell-service-next-request-id
+                     spell-service-next-request-id-set!)
+            (immutable latest-requests spell-service-latest-requests)))
 
   (define-record-type spell-request
-    (fields context buffer-id buffer-name buffer-generation source input))
+    (fields id context buffer-id buffer-name buffer-generation source input))
 
   ;; A finding carries source coordinates from the immutable snapshot handed
   ;; to Hunspell.  Result Buffers are therefore navigable without treating
@@ -236,6 +239,37 @@
   (define (spell-result-key request)
     (make-buffer-key 'spell (spell-request-buffer-id request)))
 
+  ;; Completion order is not request order.  The service retains only the
+  ;; latest request identity for each source Buffer, so an older native
+  ;; process can never replace a newer report after it finishes.
+  (define (make-spell-request! service context)
+    (let* ([buffer-state (command-context-buffer-state context)]
+           [buffer-id (command-context-buffer-id context)]
+           [next-id (+ (spell-service-next-request-id service) 1)]
+           [request
+            (make-spell-request
+              next-id context buffer-id
+              (buffer-name (package-host-buffer-ref
+                             (spell-service-host service) buffer-id))
+              (buffer-state-generation buffer-state)
+              (snapshot-string (buffer-state-document buffer-state))
+              (snapshot-bytevector (buffer-state-document buffer-state)))])
+      (spell-service-next-request-id-set! service next-id)
+      (hashtable-set! (spell-service-latest-requests service) buffer-id next-id)
+      request))
+
+  (define (spell-request-current? service request)
+    (and (spell-request? request)
+         (let ([current
+                (hashtable-ref (spell-service-latest-requests service)
+                               (spell-request-buffer-id request) #f)])
+           (and current (= current (spell-request-id request))))))
+
+  (define (finish-spell-request! service request)
+    (when (spell-request-current? service request)
+      (hashtable-delete! (spell-service-latest-requests service)
+                         (spell-request-buffer-id request))))
+
   (define (source-selection offset)
     (make-selection (list (make-selection-range offset offset))))
 
@@ -311,35 +345,37 @@
               selection '() '())))))
 
   (define (show-spell-report! service request status output)
-    (let* ([host (spell-service-host service)]
-           [context (spell-request-context request)]
-           [layout (report-layout request status output)]
-           [configuration (spell-result-configuration service)]
-           [buffer
-            (package-host-open-or-create-buffer!
-              host (spell-service-owner service) (spell-result-key request)
-              (lambda ()
-                (package-host-create-buffer!
-                  host (spell-service-owner service)
-                  (string-append "*Spelling: " (spell-request-buffer-name request) "*")
-                  (make-document "") configuration)))]
-           [generation (+ (spell-service-generation service) 1)]
-           [update
-            (make-projection-update generation (car layout) (cdr layout) '() '())]
-           [published
-            (package-host-dispatch! host
-              (make-projection-transaction-spec
-                (buffer-id buffer) #f (buffer-state buffer) update
-                (list
-                  (make-edit-authority-annotation
-                    (spell-service-authority service)))))])
-      (unless published
-        (assertion-violation 'spell.publish-report
-                             "spell projection was not published" request))
-      (spell-service-generation-set! service generation)
-      (package-host-present-buffer-if-current!
-        host (spell-service-owner service) buffer context configuration)
-      buffer))
+    (and (spell-request-current? service request)
+         (let* ([host (spell-service-host service)]
+                [context (spell-request-context request)]
+                [layout (report-layout request status output)]
+                [configuration (spell-result-configuration service)]
+                [buffer
+                 (package-host-open-or-create-buffer!
+                   host (spell-service-owner service) (spell-result-key request)
+                   (lambda ()
+                     (package-host-create-buffer!
+                       host (spell-service-owner service)
+                       (string-append "*Spelling: " (spell-request-buffer-name request) "*")
+                       (make-document "") configuration)))]
+                [generation (+ (spell-service-generation service) 1)]
+                [update
+                 (make-projection-update generation (car layout) (cdr layout) '() '())]
+                [published
+                 (package-host-dispatch! host
+                   (make-projection-transaction-spec
+                     (buffer-id buffer) #f (buffer-state buffer) update
+                     (list
+                       (make-edit-authority-annotation
+                         (spell-service-authority service)))))])
+           (unless published
+             (assertion-violation 'spell.publish-report
+                                  "spell projection was not published" request))
+           (spell-service-generation-set! service generation)
+           (finish-spell-request! service request)
+           (package-host-present-buffer-if-current!
+             host (spell-service-owner service) buffer context configuration)
+           buffer)))
 
   (define (enqueue-spell-report! service request status output)
     (command-runtime-enqueue-background!
@@ -352,16 +388,21 @@
     (unless (spell-request? request)
       (assertion-violation 'spell.check "invalid spelling request" request))
     (let ([chunks '()])
-      (process-service-run!
-        (spell-service-processes service)
-        (make-process-job
-          (list "hunspell" "-a") (current-directory) (spell-request-input request)
-          (lambda (event)
-            (set! chunks (cons (native:event-data event) chunks)))
-          (lambda (status flags)
-            (enqueue-spell-report!
-              service request status
-              (utf8->string (concatenate-bytevectors (reverse chunks)))))))))
+      (guard
+        (condition
+          [else
+           (finish-spell-request! service request)
+           (raise condition)])
+        (process-service-run!
+          (spell-service-processes service)
+          (make-process-job
+            (list "hunspell" "-a") (current-directory) (spell-request-input request)
+            (lambda (event)
+              (set! chunks (cons (native:event-data event) chunks)))
+            (lambda (status flags)
+              (enqueue-spell-report!
+                service request status
+                (utf8->string (concatenate-bytevectors (reverse chunks))))))))))
 
   (define (make-spell-replacement-reader)
     (make-interactive-reader
@@ -401,7 +442,8 @@
               "Spell")]
            [service
             (%make-spell-service
-              host owner processes keymap result-keymap result-mode authority 0)])
+              host owner processes keymap result-keymap result-mode authority 0 0
+              (make-eqv-hashtable))])
       (package-host-register-mode! host owner result-mode)
       (keymap-bind! result-keymap (list (control-stroke #\r)) 'spell.correct-item)
       (buffer-item-action-register!
@@ -449,16 +491,6 @@
         (documentation "Check the active Buffer with Hunspell and show reported words.")
         (class 'tool)
         (undo 'ignore)
-        (let ([buffer-state (command-context-buffer-state context)])
-          (make-command-effect
-            'spell.check
-            (make-spell-request
-              context
-              (command-context-buffer-id context)
-              (buffer-name
-                (package-host-buffer-ref host (command-context-buffer-id context)))
-              (buffer-state-generation buffer-state)
-              (snapshot-string (buffer-state-document buffer-state))
-              (snapshot-bytevector (buffer-state-document buffer-state))))))
+        (make-command-effect 'spell.check (make-spell-request! service context)))
       (keymap-bind! keymap (list (control-stroke #\t)) 'spell.check)
       service)))
