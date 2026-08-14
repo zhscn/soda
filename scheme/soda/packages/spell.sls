@@ -8,7 +8,9 @@
           (soda kernel change)
           (soda kernel document)
           (soda kernel extension)
+          (soda kernel location)
           (soda kernel range-set)
+          (soda kernel resource)
           (soda kernel selection)
           (soda kernel state)
           (soda kernel mode)
@@ -19,6 +21,7 @@
           (soda host buffer)
           (soda host input)
           (soda host input-event)
+          (soda host location)
           (soda host package)
           (soda host value)
           (soda host view)
@@ -43,13 +46,13 @@
             (immutable latest-requests spell-service-latest-requests)))
 
   (define-record-type spell-request
-    (fields id context buffer-id buffer-name buffer-generation source input))
+    (fields id context buffer-id buffer-name buffer-revision source input))
 
-  ;; A finding carries source coordinates from the immutable snapshot handed
-  ;; to Hunspell.  Result Buffers are therefore navigable without treating
-  ;; their rendered protocol text as editor state.
+  ;; A finding names its source through a revisioned Location.  Result Buffers
+  ;; therefore navigate by the same coordinate contract as diagnostics and
+  ;; search, rather than retaining package-specific Buffer offsets.
   (define-record-type spell-finding
-    (fields buffer-id buffer-generation offset line word protocol))
+    (fields location line word protocol))
 
   (define (control-stroke character)
     (make-key-stroke 'character (char->integer character) 4))
@@ -218,9 +221,19 @@
                                                source-line (cdr location) (car location))])
                         (and offset
                              (make-spell-finding
-                               (spell-request-buffer-id request)
-                               (spell-request-buffer-generation request)
-                               offset source-line (car location) protocol))) )]
+                               (make-location
+                                 (make-resource
+                                   'buffer
+                                   (number->string
+                                     (spell-request-buffer-id request)))
+                                 (make-byte-position offset)
+                                 (make-byte-position
+                                   (+ offset
+                                      (bytevector-length
+                                        (string->utf8 (car location)))))
+                                 (spell-request-buffer-revision request)
+                                 'after '())
+                               source-line (car location) protocol))) )]
                 [next-ranges
                  (if finding
                      (cons (make-range-value
@@ -251,7 +264,7 @@
               next-id context buffer-id
               (buffer-name (package-host-buffer-ref
                              (spell-service-host service) buffer-id))
-              (buffer-state-generation buffer-state)
+              (snapshot-revision (buffer-state-document buffer-state))
               (snapshot-string (buffer-state-document buffer-state))
               (snapshot-bytevector (buffer-state-document buffer-state)))])
       (spell-service-next-request-id-set! service next-id)
@@ -281,10 +294,16 @@
 
   (define (open-finding! service finding context)
     (let* ([host (spell-service-host service)]
-           [source (package-host-buffer-ref host (spell-finding-buffer-id finding) #f)])
-      (if (or (not source)
-              (not (= (buffer-state-generation (buffer-state source))
-                      (spell-finding-buffer-generation finding))))
+           [resolution
+            (and (spell-finding? finding)
+                 (package-host-resolve-location host
+                                                (spell-finding-location finding)))]
+           [source
+            (and resolution
+                 (eq? (location-resolution-status resolution) 'resolved)
+                 (package-host-buffer-ref
+                   host (location-resolution-buffer-id resolution) #f))])
+      (if (not source)
           (begin (show-stale-source-message! service context) #f)
           (let ([view
                  (package-host-present-buffer!
@@ -298,7 +317,7 @@
                   (package-host-dispatch-view! host
                     (make-view-transaction-spec
                       (view-id view) (view-state-generation (view-state view))
-                      (source-selection (spell-finding-offset finding))
+                      (source-selection (location-resolution-from resolution))
                       #f #f '() '() #f))
                   (make-command-context
                     #f (command-context-surface-id context) (command-context-window-id context)
@@ -323,20 +342,29 @@
       (command-handled)))
 
   (define (apply-correction service context finding replacement)
-    (let* ([buffer-state (command-context-buffer-state context)]
+    (let* ([host (spell-service-host service)]
+           [resolution
+            (and (spell-finding? finding)
+                 (package-host-resolve-location host
+                                                (spell-finding-location finding)))]
+           [buffer-state (command-context-buffer-state context)]
            [document (buffer-state-document buffer-state)]
-           [offset (spell-finding-offset finding)]
-           [expected (string->utf8 (spell-finding-word finding))]
+           [offset (and resolution (location-resolution-from resolution))]
+           [end (and resolution (location-resolution-to resolution))]
+           [expected (and (spell-finding? finding)
+                          (string->utf8 (spell-finding-word finding)))]
            [replacement-bytes (string->utf8 replacement)]
            [bytes (snapshot-bytevector document)])
       (if (or (not (spell-finding? finding))
-              (not (= (command-context-buffer-id context) (spell-finding-buffer-id finding)))
-              (not (= (buffer-state-generation buffer-state)
-                      (spell-finding-buffer-generation finding)))
+              (not resolution)
+              (not (eq? (location-resolution-status resolution) 'resolved))
+              (not (= (command-context-buffer-id context)
+                      (location-resolution-buffer-id resolution)))
+              (not (= end (+ offset (bytevector-length expected))))
               (not (bytevector-prefix-at? bytes offset expected)))
           (begin (show-stale-source-message! service context) (command-handled))
-          (let* ([end (+ offset (bytevector-length expected))]
-                 [selection (source-selection (+ offset (bytevector-length replacement-bytes)))])
+          (let ([selection
+                 (source-selection (+ offset (bytevector-length replacement-bytes)))])
             (make-transaction-spec
               (command-context-buffer-id context) (command-context-view-id context)
               (buffer-state-generation buffer-state)

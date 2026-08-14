@@ -1341,6 +1341,8 @@
 
 (let* ([package-host (make-package-host host)]
        [resource (make-resource 'buffer "kernel")]
+       [intrinsic-resource
+        (make-resource 'buffer (number->string (buffer-id buffer)))]
        [provider-owner (make-owner 'location-provider-test)]
        [provider
         (make-location-provider
@@ -1358,6 +1360,18 @@
           (make-location resource
                          (make-byte-position 1) (make-byte-position 3)
                          revision 'after '()))]
+       [intrinsic-resolution
+        (package-host-resolve-location
+          package-host
+          (make-location intrinsic-resource
+                         (make-byte-position 1) (make-byte-position 3)
+                         revision 'after '()))]
+       [intrinsic-stale-resolution
+        (package-host-resolve-location
+          package-host
+          (make-location intrinsic-resource
+                         (make-byte-position 1) (make-byte-position 3)
+                         (+ revision 1) 'after '()))]
        [line-resolution
         (package-host-resolve-location
           package-host
@@ -1388,6 +1402,11 @@
                (= (location-resolution-buffer-id byte-resolution) (buffer-id buffer))
                (= (location-resolution-from byte-resolution) 1)
                (= (location-resolution-to byte-resolution) 3)
+               (eq? (location-resolution-status intrinsic-resolution) 'resolved)
+               (= (location-resolution-buffer-id intrinsic-resolution) (buffer-id buffer))
+               (= (location-resolution-from intrinsic-resolution) 1)
+               (= (location-resolution-to intrinsic-resolution) 3)
+               (eq? (location-resolution-status intrinsic-stale-resolution) 'stale)
                (eq? (location-resolution-status line-resolution) 'resolved)
                (= (location-resolution-from line-resolution) 2)
                (= (location-resolution-to line-resolution) 4)

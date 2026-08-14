@@ -53,6 +53,17 @@
                  provider
                  (loop (cdr remaining)))))))
 
+  ;; A live Buffer has a Host-owned resource identity.  Numeric `buffer`
+  ;; locators are reserved for this intrinsic provider so packages can create
+  ;; Locations for generated, scratch, and unvisited text without learning
+  ;; another package's binding registry.  Other buffer locators remain
+  ;; available to registered providers.
+  (define (intrinsic-buffer-id resource)
+    (and (eq? (resource-scheme resource) 'buffer)
+         (let ([candidate (string->number (resource-locator resource))])
+           (and (integer? candidate) (exact? candidate) (>= candidate 0)
+                candidate))))
+
   (define (line-bounds text line)
     (and (< line (text-line-count text))
          (cons (text-line-start text line) (text-line-content-end text line))))
@@ -103,14 +114,19 @@
         'location-service-resolve "expected a LocationService and Location"
         service value))
     (let* ([resource (location-resource value)]
-           [provider (provider-for service (resource-scheme resource))])
-      (if (not provider)
+           [intrinsic-id (intrinsic-buffer-id resource)]
+           [provider (and (not intrinsic-id)
+                          (provider-for service (resource-scheme resource)))])
+      (if (and (not intrinsic-id) (not provider))
           (unresolved #f value 'unavailable)
-          (let* ([id ((location-provider-locate provider) resource)]
+          (let* ([id (or intrinsic-id
+                         ((location-provider-locate provider) resource))]
                  [buffer (and id (buffer-service-ref
                                    (location-service-buffers service) id #f))])
             (if (not buffer)
-                (unresolved provider value 'unavailable)
+                (if intrinsic-id
+                    (make-location-resolution 'unavailable value #f #f #f #f)
+                    (unresolved provider value 'unavailable))
                 (let* ([snapshot (buffer-state-document (buffer-state buffer))]
                        [revision (snapshot-revision snapshot)])
                   (if (and (location-revision value)
