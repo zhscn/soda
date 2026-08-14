@@ -4,8 +4,12 @@
           (soda bootstrap)
           (soda host condition)
           (soda host buffer)
+          (soda host command)
+          (soda host command-runtime)
           (soda host dispatch)
           (soda host dispatch gate)
+          (soda host internal context)
+          (soda host internal navigation)
           (soda host internal operation)
           (soda host package)
           (soda host internal state)
@@ -14,6 +18,8 @@
           (soda host value)
           (soda kernel document)
           (soda kernel extension)
+          (soda kernel location)
+          (soda kernel resource)
           (soda kernel state)
           (soda support cleanup))
 
@@ -103,8 +109,68 @@
           (owner-close! owner)
           (host-state-close! state)))))
 
+  (define (run-navigation-capability-test!)
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [host (make-package-host state)]
+           [owner (make-owner 'navigation-capability-test)]
+           [surface (soda-application-surface application)]
+           [source (soda-application-buffer application)]
+           [target-document (make-document "navigation target")]
+           [target
+            (package-host-create-buffer!
+              host owner " *navigation-target*" target-document
+              (buffer-state-configuration (buffer-state source)))] )
+      (define (current-context)
+        (let* ([active (surface-active-context surface (host-state-views state))]
+               [view
+                (view-service-ref (host-state-views state)
+                                  (active-context-view-id active))]
+               [buffer (view-buffer view)])
+          (make-command-context
+            #f
+            (active-context-surface-id active)
+            (active-context-window-id active)
+            (view-id view)
+            (buffer-id buffer)
+            (buffer-state buffer)
+            (view-state view)
+            #f '() #f #f 'host-integration #f)))
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let* ([location
+                  (make-location
+                    (make-resource 'buffer (number->string (buffer-id target)))
+                    (make-byte-position 0) (make-byte-position 0)
+                    (snapshot-revision (buffer-state-document (buffer-state target)))
+                    'after '())]
+                 [followed
+                  (package-host-follow-location! host owner (current-context) location)]
+                 [history (host-state-navigation state)]
+                 [runtime (host-state-command-runtime state)])
+            (unless (and followed
+                         (= (command-context-buffer-id followed) (buffer-id target))
+                         (= (navigation-history-cursor history) 1))
+              (error 'host-integration-tests
+                     "Location follow did not establish navigation history"))
+            (command-runtime-start! runtime 'navigation.back (current-context))
+            (unless (and (= (command-context-buffer-id (current-context)) (buffer-id source))
+                         (= (navigation-history-cursor history) 0))
+              (error 'host-integration-tests
+                     "navigation.back did not restore the source Location"))
+            (command-runtime-start! runtime 'navigation.forward (current-context))
+            (unless (and (= (command-context-buffer-id (current-context)) (buffer-id target))
+                         (= (navigation-history-cursor history) 1))
+              (error 'host-integration-tests
+                     "navigation.forward did not restore the target Location"))))
+        (lambda ()
+          (owner-close! owner)
+          (soda-application-close! application)))))
+
   (define (run-host-integration-tests!)
     (run-cleanup-test!)
     (run-dispatcher-observer-test!)
     (run-dispatch-gate-test!)
-    (run-interaction-placement-rollback-test!)))
+    (run-interaction-placement-rollback-test!)
+    (run-navigation-capability-test!)))

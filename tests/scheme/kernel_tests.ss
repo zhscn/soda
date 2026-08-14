@@ -1567,38 +1567,38 @@
     (error 'kernel-tests "SettingSchema Owner cleanup differs"))
   (owner-close! schema-owner))
 
-(let* ([package-host (make-package-host host)]
+(let* ([history (host-state-navigation host)]
        [resource (make-resource 'buffer "navigation")]
        [at
         (lambda (offset)
           (make-location resource
                          (make-byte-position offset) (make-byte-position offset)
                          #f 'after '()))]
-       [first (package-host-begin-navigation! package-host (at 0) (at 1))]
-       [replacement (package-host-begin-navigation! package-host (at 0) (at 2))])
-  (unless (and (not (package-host-commit-navigation! package-host first (at 1)))
-               (package-host-commit-navigation! package-host replacement (at 2)))
+       [first (navigation-history-begin! history (at 0) (at 1))]
+       [replacement (navigation-history-begin! history (at 0) (at 2))])
+  (unless (and (not (navigation-history-commit! history first (at 1)))
+               (navigation-history-commit! history replacement (at 2)))
     (error 'kernel-tests "superseded navigation committed history"))
-  (let ([cancelled (package-host-navigation-back! package-host)])
+  (let ([cancelled (navigation-history-back! history)])
     (unless (and cancelled
                  (location=? (navigation-jump-target cancelled) (at 0))
-                 (package-host-cancel-navigation! package-host cancelled)
-                 (not (package-host-navigation-forward! package-host)))
+                 (navigation-history-cancel! history cancelled)
+                 (not (navigation-history-forward! history)))
       (error 'kernel-tests "cancelled navigation changed history cursor")))
-  (let ([back (package-host-navigation-back! package-host)])
+  (let ([back (navigation-history-back! history)])
     (unless (and back
-                 (package-host-commit-navigation! package-host back (at 0)))
+                 (navigation-history-commit! history back (at 0)))
       (error 'kernel-tests "navigation back did not commit")))
-  (let ([forward (package-host-navigation-forward! package-host)])
+  (let ([forward (navigation-history-forward! history)])
     (unless (and forward
                  (location=? (navigation-jump-target forward) (at 2))
-                 (package-host-commit-navigation! package-host forward (at 2)))
+                 (navigation-history-commit! history forward (at 2)))
       (error 'kernel-tests "navigation forward did not commit")))
-  (let ([back (package-host-navigation-back! package-host)])
-    (package-host-commit-navigation! package-host back (at 0)))
-  (let ([branch (package-host-begin-navigation! package-host (at 0) (at 3))])
-    (unless (and (package-host-commit-navigation! package-host branch (at 3))
-                 (not (package-host-navigation-forward! package-host)))
+  (let ([back (navigation-history-back! history)])
+    (navigation-history-commit! history back (at 0)))
+  (let ([branch (navigation-history-begin! history (at 0) (at 3))])
+    (unless (and (navigation-history-commit! history branch (at 3))
+                 (not (navigation-history-forward! history)))
       (error 'kernel-tests "new navigation did not truncate forward history"))))
 (surface-service-register! (host-state-surfaces host) surface)
 (surface-set-selected-window! surface leaf)

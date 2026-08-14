@@ -198,6 +198,8 @@
                [minibuffer (make-minibuffer-service! host interaction owner)]
                [_keyboard-quit
                 (install-keyboard-quit-command! host owner interaction)]
+               [_navigation
+                (install-navigation-commands! host owner)]
                [override-keymap (make-override-keymap)]
                [default-keymap (make-default-keymap)]
                [application-input-layers
@@ -277,6 +279,44 @@
             host context (make-user-feedback "Quit" 'info))))
       (command-handled)))
 
+  (define (navigation-feedback direction status)
+    (case status
+      [(unavailable) "No visitable location in navigation history"]
+      [(stale) "Navigation location is stale"]
+      [(outside) "Navigation location is outside its buffer"]
+      [(needs-open) "Navigation location is not open"]
+      [(inactive) "Navigation target is no longer current"]
+      [(placement-failed) "Could not display navigation location"]
+      [else
+       (if (eq? direction 'back)
+           "No earlier location in navigation history"
+           "No later location in navigation history")]))
+
+  ;; History navigation is application policy: feature packages publish
+  ;; Locations, while Host owns their resolution, presentation and commit.
+  (define (install-navigation-commands! host owner)
+    (define (navigate! context direction)
+      (let ([status
+             (if (eq? direction 'back)
+                 (package-host-navigate-back! host owner context)
+                 (package-host-navigate-forward! host owner context))])
+        (unless (eq? status 'followed)
+          (package-host-publish-feedback-if-current!
+            host context (make-user-feedback (navigation-feedback direction status) 'info)))
+        (command-handled)))
+    (define-command
+      (package-host-command-runtime host) owner 'navigation.back (context)
+      (documentation "Visit the preceding Location in navigation history.")
+      (class 'application)
+      (undo 'ignore)
+      (navigate! context 'back))
+    (define-command
+      (package-host-command-runtime host) owner 'navigation.forward (context)
+      (documentation "Visit the following Location in navigation history.")
+      (class 'application)
+      (undo 'ignore)
+      (navigate! context 'forward)))
+
   ;; Application policy belongs to composition.  Fundamental editing exports
   ;; only its own commands, so alternate applications may bind help, history,
   ;; or shutdown differently without importing a default command name.
@@ -319,6 +359,12 @@
       (keymap-bind! keymap
                     (list (make-key-stroke 'character (char->integer #\x) 2))
                     'command.execute-extended)
+      (keymap-bind! keymap
+                    (list (make-key-stroke 'character (char->integer #\,) 2))
+                    'navigation.back)
+      (keymap-bind! keymap
+                    (list (make-key-stroke 'character (char->integer #\.) 2))
+                    'navigation.forward)
       (keymap-bind! keymap
                     (list (make-key-stroke 'character (char->integer #\h) 4)
                           (make-key-stroke 'character (char->integer #\f) 0))

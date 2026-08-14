@@ -22,11 +22,8 @@
           package-host-register-location-provider!
           package-host-resolve-location
           package-host-follow-location!
-          package-host-begin-navigation!
-          package-host-navigation-back!
-          package-host-navigation-forward!
-          package-host-commit-navigation!
-          package-host-cancel-navigation!
+          package-host-navigate-back!
+          package-host-navigate-forward!
           package-host-dispatch!
           package-host-dispatch-view!
           package-host-add-update-listener!
@@ -289,26 +286,6 @@
   (define (package-host-resolve-location host location)
     (location-service-resolve
       (host-state-locations (package-host-state host)) location))
-
-  (define (package-host-begin-navigation! host from target)
-    (navigation-history-begin!
-      (host-state-navigation (package-host-state host)) from target))
-
-  (define (package-host-navigation-back! host)
-    (navigation-history-back!
-      (host-state-navigation (package-host-state host))))
-
-  (define (package-host-navigation-forward! host)
-    (navigation-history-forward!
-      (host-state-navigation (package-host-state host))))
-
-  (define (package-host-commit-navigation! host jump arrived)
-    (navigation-history-commit!
-      (host-state-navigation (package-host-state host)) jump arrived))
-
-  (define (package-host-cancel-navigation! host jump)
-    (navigation-history-cancel!
-      (host-state-navigation (package-host-state host)) jump))
 
   (define (package-host-dispatch! host specification)
     (dispatcher-dispatch! (host-state-dispatch (package-host-state host)) specification))
@@ -580,10 +557,65 @@
              (make-byte-position (selection-range-head primary))
              (snapshot-revision document) 'after '()))))
 
-  ;; Follow an already-resolved Location through the host-owned presentation
-  ;; path.  Providers retain responsibility for a `needs-open` continuation;
-  ;; callers resume this operation with the original Location after opening.
-  ;; A failed resolution or placement leaves the navigation history unchanged.
+  ;; All Location follows use one Host-owned commit boundary.  The target is
+  ;; resolved before placement; the history token moves only after selection
+  ;; and reveal were published for the resulting View.
+  (define (follow-resolved-location! host owner context resolution jump)
+    (let ([buffer
+           (and (eq? (location-resolution-status resolution) 'resolved)
+                (package-host-buffer-ref
+                  host (location-resolution-buffer-id resolution) #f))]
+          [committed? #f])
+      (and buffer
+           (dynamic-wind
+             (lambda () #f)
+             (lambda ()
+               (let ([view
+                      (package-host-present-buffer!
+                        host owner buffer
+                        (command-context-surface-id context)
+                        (command-context-window-id context)
+                        (buffer-state-configuration (buffer-state buffer)))])
+                 (and view
+                      (package-host-dispatch-view!
+                        host
+                        (make-view-transaction-spec
+                          (view-id view)
+                          (view-state-generation (view-state view))
+                          (make-selection
+                            (list
+                              (make-selection-range
+                                (location-resolution-from resolution)
+                                (location-resolution-from resolution))))
+                          (view-state-viewport (view-state view))
+                          #f '() '()
+                          (make-scroll-request
+                            'reveal-point
+                            (command-context-surface-id context)
+                            (command-context-window-id context)
+                            (view-id view))))
+                      (navigation-history-commit!
+                        (host-state-navigation (package-host-state host))
+                        jump (location-resolution-location resolution))
+                      (begin
+                        (set! committed? #t)
+                        (make-command-context
+                          #f
+                          (command-context-surface-id context)
+                          (command-context-window-id context)
+                          (view-id view)
+                          (buffer-id buffer)
+                          (buffer-state buffer)
+                          (view-state view)
+                          #f '() #f #f 'location-follow #f)))))
+             (lambda ()
+               (unless committed?
+                 (navigation-history-cancel!
+                   (host-state-navigation (package-host-state host)) jump)))))))
+
+  ;; Follow a new Location from the current editor position.  Providers own a
+  ;; `needs-open` continuation; callers resume the same Location only after
+  ;; its resource becomes available.  A false result leaves history unchanged.
   (define (package-host-follow-location! host owner context target)
     (unless (and (package-host? host) (owner? owner)
                  (command-context? context) (location? target))
@@ -592,56 +624,65 @@
                            host owner context target))
     (and (package-host-command-context-current? host context)
          (let* ([resolution (package-host-resolve-location host target)]
-                [buffer
-                 (and (eq? (location-resolution-status resolution) 'resolved)
-                      (package-host-buffer-ref
-                        host (location-resolution-buffer-id resolution) #f))]
                 [from (command-context-location context)])
-           (and buffer from
-                (let ([jump (package-host-begin-navigation! host from target)]
-                      [committed? #f])
-                  (dynamic-wind
-                    (lambda () #f)
-                    (lambda ()
-                      (let ([view
-                             (package-host-present-buffer!
-                               host owner buffer
-                               (command-context-surface-id context)
-                               (command-context-window-id context)
-                               (buffer-state-configuration (buffer-state buffer)))])
-                        (and view
-                             (package-host-dispatch-view!
-                               host
-                               (make-view-transaction-spec
-                                 (view-id view)
-                                 (view-state-generation (view-state view))
-                                 (make-selection
-                                   (list
-                                     (make-selection-range
-                                       (location-resolution-from resolution)
-                                       (location-resolution-from resolution))))
-                                 (view-state-viewport (view-state view))
-                                 #f '() '()
-                                 (make-scroll-request
-                                   'reveal-point
-                                   (command-context-surface-id context)
-                                   (command-context-window-id context)
-                                   (view-id view))))
-                             (package-host-commit-navigation! host jump target)
-                             (begin
-                               (set! committed? #t)
-                               (make-command-context
-                                 #f
-                                 (command-context-surface-id context)
-                                 (command-context-window-id context)
-                                 (view-id view)
-                                 (buffer-id buffer)
-                                 (buffer-state buffer)
-                                 (view-state view)
-                                 #f '() #f #f 'location-follow #f)))))
-                    (lambda ()
-                      (unless committed?
-                        (package-host-cancel-navigation! host jump)))))))))
+           (and from
+                (eq? (location-resolution-status resolution) 'resolved)
+                (follow-resolved-location!
+                  host owner context resolution
+                  (navigation-history-begin!
+                    (host-state-navigation (package-host-state host)) from target))))))
+
+  ;; Complete a pending history traversal in the current editor Window.  This
+  ;; is private to the capability: feature packages never receive its mutable
+  ;; history token.
+  (define (follow-navigation! host owner context jump)
+    (unless (and (package-host? host) (owner? owner)
+                 (command-context? context) (navigation-jump? jump))
+      (assertion-violation 'follow-navigation!
+                           "expected a PackageHost, Owner, CommandContext, and NavigationJump"
+                           host owner context jump))
+    (let ([history (host-state-navigation (package-host-state host))])
+      (cond
+        [(not (package-host-command-context-current? host context))
+         (navigation-history-cancel! history jump)
+         'inactive]
+        [else
+         (let ([resolution
+                (package-host-resolve-location host (navigation-jump-target jump))])
+           (if (not (eq? (location-resolution-status resolution) 'resolved))
+               (begin
+                 (navigation-history-cancel! history jump)
+                 (location-resolution-status resolution))
+               (if (follow-resolved-location! host owner context resolution jump)
+                   'followed
+                   'placement-failed)))])))
+
+  ;; Traverse Location history through the same follow boundary used for new
+  ;; Location visits.  Failure cancels the pending traversal, retaining the
+  ;; current history position for a later retry.
+  (define (package-host-navigate-back! host owner context)
+    (unless (and (package-host? host) (owner? owner) (command-context? context))
+      (assertion-violation 'package-host-navigate-back!
+                           "expected a PackageHost, Owner, and CommandContext"
+                           host owner context))
+    (let ([jump
+           (navigation-history-back!
+             (host-state-navigation (package-host-state host)))])
+      (if jump
+          (follow-navigation! host owner context jump)
+          'empty)))
+
+  (define (package-host-navigate-forward! host owner context)
+    (unless (and (package-host? host) (owner? owner) (command-context? context))
+      (assertion-violation 'package-host-navigate-forward!
+                           "expected a PackageHost, Owner, and CommandContext"
+                           host owner context))
+    (let ([jump
+           (navigation-history-forward!
+             (host-state-navigation (package-host-state host)))])
+      (if jump
+          (follow-navigation! host owner context jump)
+          'empty)))
 
   ;; User Window commands operate on the selected editor Window identified by
   ;; their CommandContext.  This rejects interaction overlays and stale
