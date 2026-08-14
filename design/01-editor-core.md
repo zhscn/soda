@@ -769,8 +769,8 @@ pending key sequence 属于 View input session，保存原始 KeyStroke list 和
 不锁定到单一 prefix map，也没有 timeout。dispatch、which-key、describe-key、keymap
 introspection 和测试使用同一个 resolver。
 
-override 在 pending sequence 和 InputState handler 之前解析。`C-g` 始终可产生统一 quit
-request。
+override 在 pending sequence 和 InputState handler 之前解析。`C-g` 与 `ESC ESC ESC` 产生统一
+quit request；单次 `ESC` 作为普通 prefix 保留在 pending sequence 中。
 
 ### Per-View InputState
 

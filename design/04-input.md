@@ -98,6 +98,9 @@ InputState 属于 ViewState，包括 pending sequence、prefix argument、transi
 View transaction 发布新 InputState，再构造 command context，使 command 观察到与下一事件一致
 的状态。
 
+application override layer 在所有 View 中提供 `C-g` 与 `ESC ESC ESC` 的统一 quit。单次 `ESC`
+只建立 prefix，临时界面不把它单独解释为取消。
+
 焦点切换不复制 InputState。View 关闭会取消其 transient input session；Buffer 关闭由 host
 先关闭关联 View。
 

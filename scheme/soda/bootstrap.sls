@@ -226,6 +226,12 @@
         keymap
         (list (make-key-stroke 'character (char->integer #\g) 4))
         'keyboard.quit)
+      (keymap-bind!
+        keymap
+        (list (make-key-stroke 'escape #f 0)
+              (make-key-stroke 'escape #f 0)
+              (make-key-stroke 'escape #f 0))
+        'keyboard.quit)
       keymap))
 
   (define (install-keyboard-quit-command! host owner interactions)

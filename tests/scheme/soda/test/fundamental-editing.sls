@@ -1469,17 +1469,33 @@
               (make-frontend
                 state surface
                 (lambda (active prompt-view)
-                  (or (minibuffer-input-context
-                        minibuffer active prompt-view
-                        (list (fundamental-fallback-input-layer editing)))
-                      (buffer-input-context
-                        active prompt-view
-                        (list (fundamental-fallback-input-layer editing)))))
+                  (soda-application-resolve-input-context
+                    application active prompt-view))
                 (lambda (context disposition)
                   (fundamental-input-disposition context disposition))
                 (lambda (render theme)
                   (set! presented (cons render presented)))
                 (make-render-service) default-theme)])
+        (define (send-escape!)
+          (frontend-enqueue!
+            frontend
+            (make-surface-input-message
+              (surface-id surface)
+              (make-key-event
+                'escape 27 #f #f 0 'press (make-bytevector 0))))
+          (frontend-step! frontend))
+        (define (prompt-pending-length)
+          (let* ([session (minibuffer-service-current minibuffer)]
+                 [view
+                  (and session
+                       (view-service-ref
+                         (host-state-views state)
+                         (minibuffer-session-view-id session)))])
+            (and view
+                 (length
+                   (or (input-stack-pending-sequence
+                         (view-state-input-state (view-state view)))
+                       '())))))
         (frontend-resize! frontend '(80 . 5))
         (frontend-step! frontend)
         (set! presented '())
@@ -1517,8 +1533,22 @@
             (error 'fundamental-editing-tests
                    "long initial prompt exposed an off-screen provisional frame"
                    (length presented) cursor-row)))
-        (minibuffer-service-cancel! minibuffer)
-        (host-state-run! state)
+        (send-escape!)
+        (unless (and (minibuffer-service-current minibuffer)
+                     (= (prompt-pending-length) 1))
+          (error 'fundamental-editing-tests
+                 "single ESC cancelled the minibuffer instead of entering a prefix"))
+        (send-escape!)
+        (unless (and (minibuffer-service-current minibuffer)
+                     (= (prompt-pending-length) 2))
+          (error 'fundamental-editing-tests
+                 "second ESC did not continue the application quit prefix"))
+        (send-escape!)
+        (unless (and (not (minibuffer-service-current minibuffer))
+                     (not (interaction-service-current interaction))
+                     (string=? (surface-feedback-text surface) "Quit"))
+          (error 'fundamental-editing-tests
+                 "ESC ESC ESC did not run the application-wide quit command"))
         (frontend-resize! frontend '(80 . 5))
         (frontend-step! frontend)
         (command-runtime-start!

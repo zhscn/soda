@@ -751,7 +751,6 @@
         keymap (list (make-key-stroke 'down #f 2))
         'minibuffer.next-history)
       (keymap-bind! keymap (list (control-stroke #\g)) 'minibuffer.cancel)
-      (keymap-bind! keymap (list (make-key-stroke 'escape #f 0)) 'minibuffer.cancel)
       (let* ([mode
               (make-mode-spec
                 'minibuffer-mode 'major "Minibuffer" #f

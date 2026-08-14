@@ -173,7 +173,7 @@ face。输入 cell 保留 transient Document position 和 component source，因
 
 - `RET`、`C-j`：接受显式选中的候选；没有选择时接受原始输入；
 - `M-RET`、`M-j`：忽略候选并接受原始输入；
-- `ESC`、`C-g`：取消；
+- `C-g`：取消；application-wide `ESC ESC ESC` 进入统一 `keyboard.quit`；
 - `Up`、`C-p`：选择上一个候选；
 - `Down`、`C-n`：选择下一个候选；
 - `M-p`、`M-Up`：上一条 history；
