@@ -84,8 +84,23 @@
           ((interaction-listener-procedure listener) kind session)))
       (interaction-service-listeners service)))
 
+  (define (transition-session! session next)
+    (let ([current (interaction-session-status session)])
+      (unless
+        (case next
+          [(submitting cancelling) (eq? current 'open)]
+          [(accepted) (eq? current 'submitting)]
+          [(cancelled) (memq current '(open submitting cancelling))]
+          [else #f])
+        (assertion-violation 'interaction-session
+                             "invalid session status transition"
+                             current next))
+      (interaction-session-status-set! session next)
+      session))
+
   (define (remove-session! service target event)
     (let ([sessions (interaction-service-sessions service)])
+      (when event (transition-session! target event))
       (interaction-service-sessions-set!
         service (filter (lambda (session) (not (eq? session target))) sessions))
       (when event (notify! service event target))
@@ -316,7 +331,7 @@
                  (interaction-service-runtime service)
                  (make-command-resume-message
                    (interaction-session-invocation-id session) value))
-               (interaction-session-status-set! session 'submitting)
+               (transition-session! session 'submitting)
                session)))))
 
   (define (interaction-service-cancel! service)
@@ -329,7 +344,7 @@
                (interaction-service-runtime service)
                (make-command-cancel-message
                  (interaction-session-invocation-id session)))
-             (interaction-session-status-set! session 'cancelling)
+             (transition-session! session 'cancelling)
              session))))
 
   (define (interaction-service-cancel-all! service)
@@ -339,13 +354,15 @@
     (let ([sessions
             (filter (lambda (session) (eq? (interaction-session-status session) 'open))
                     (interaction-service-sessions service))])
+      ;; Priority messages are LIFO. Enqueue outer sessions first so runtime
+      ;; cancellation observes the presentation stack from inner to outer.
       (for-each
         (lambda (session)
           (command-runtime-enqueue!
             (interaction-service-runtime service)
             (make-command-cancel-message (interaction-session-invocation-id session)))
-          (interaction-session-status-set! session 'cancelling))
-        sessions)
+          (transition-session! session 'cancelling))
+        (reverse sessions))
       sessions))
 
   (define (make-interaction-service! runtime owner)

@@ -1380,6 +1380,7 @@
       (unless (and (string=? observed "acceptedé")
                    (not (interaction-service-current interaction))
                    (not (minibuffer-service-current minibuffer))
+                   (eq? (interaction-session-status session) 'accepted)
                    (string=? exit-input "acceptedé")
                    (equal? (reverse events) '(opened accepted)))
         (error 'fundamental-editing-tests "interaction submission did not resume through the queue"))
@@ -1594,6 +1595,43 @@
                               (soda-application-surface application))))
           (error 'fundamental-editing-tests
                  "closing the outer prompt did not restore the editor")))
+      (let* ([outer
+              (command-runtime-start-interactive!
+                runtime 'interaction.package-test
+                (application-command-context application))]
+             [outer-session (interaction-service-current interaction)]
+             [inner
+              (command-runtime-start-interactive!
+                runtime 'interaction.package-test
+                (application-command-context application))]
+             [inner-session (interaction-service-current interaction)]
+             [cancelled-order '()]
+             [_listener
+              (interaction-service-add-listener!
+                interaction owner
+                (lambda (event session)
+                  (when (eq? event 'cancelled)
+                    (set! cancelled-order
+                      (cons (interaction-session-invocation-id session)
+                            cancelled-order)))))])
+        (interaction-service-cancel-all! interaction)
+        (unless (and (eq? (interaction-session-status inner-session) 'cancelling)
+                     (eq? (interaction-session-status outer-session) 'cancelling))
+          (error 'fundamental-editing-tests
+                 "cancel-all did not atomically mark every open interaction"))
+        (host-state-run! state)
+        (unless (and (equal? (reverse cancelled-order)
+                             (list (command-invocation-id inner)
+                                   (command-invocation-id outer)))
+                     (eq? (interaction-session-status inner-session) 'cancelled)
+                     (eq? (interaction-session-status outer-session) 'cancelled)
+                     (not (interaction-service-current interaction))
+                     (not (minibuffer-service-current minibuffer))
+                     (null? (surface-interaction-windows
+                              (soda-application-surface application))))
+          (error 'fundamental-editing-tests
+                 "cancel-all did not retire nested interactions inside-out"
+                 cancelled-order)))
       (command-runtime-start-interactive!
         runtime 'command.execute-extended (application-command-context application))
       (let* ([request

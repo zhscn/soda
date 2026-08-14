@@ -82,6 +82,11 @@ PromptRequest {
 状态和 history 游标。session id 单调递增，供后续 completion generation 和异步
 结果校验使用。
 
+session 状态沿 `open → submitting → accepted` 或
+`open → cancelling → cancelled` 单向迁移。命令错误也将尚未终止的 session 转换为
+`cancelled`。批量取消按 session 栈从内向外执行，使每个内层 prompt 在其 origin View
+仍有效时完成关闭和焦点恢复。
+
 `minibuffer.accept` 与 `minibuffer.cancel` 是普通 command。minibuffer keymap 只绑定
 这两个命令，frontend 按所有其他 command 相同的队列路径投递它们。`setup` 和 `exit`
 hook 以 owner-scoped registration 安装，回调只接收 `PromptSnapshot`；hook 不能持有或
