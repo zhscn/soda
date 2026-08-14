@@ -280,7 +280,7 @@
 
   (define (command-runtime-add-hook! service phase owner name procedure)
     (unless (and (command-runtime? service)
-                 (memq phase '(pre-command post-command execution-record
+                 (memq phase '(pre-command before-outcomes post-command execution-record
                                command-error command-cancel)))
       (assertion-violation 'command-runtime-add-hook! "invalid runtime or hook phase" service phase))
     (register-named-entry!
@@ -579,13 +579,19 @@
                                  (command-loop-state-last-record previous)
                                  (command-loop-state-repeat-record previous)))
     (run-hooks! service 'pre-command invocation)
-    (let ([result (apply-result!
-                    service invocation
-                    (invoke-with-advice service invocation definition context arguments))])
-      (run-hooks! service 'post-command invocation result)
-      (record-terminal-invocation!
-        service invocation 'completed result (command-result-transition result))
-      result)))
+    (let ([result
+           (invoke-with-advice service invocation definition context arguments)])
+      ;; A resumed interactive command still owns its temporary prompt while
+      ;; its procedure runs.  Give lifecycle owners a boundary to retire that
+      ;; presentation before command outcomes publish feedback or effects to
+      ;; the initiating editing context.
+      (run-hooks! service 'before-outcomes invocation result)
+      (let ([applied-result (apply-result! service invocation result)])
+        (run-hooks! service 'post-command invocation applied-result)
+        (record-terminal-invocation!
+          service invocation 'completed applied-result
+          (command-result-transition applied-result))
+        applied-result))))
 
   (define (retire-invocation! service invocation)
     (hashtable-delete! (command-runtime-invocations service)

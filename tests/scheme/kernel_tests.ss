@@ -4508,6 +4508,35 @@
                "parameterless application startup did not remain an empty Emacs-style editing session")))
     (lambda () (soda-application-close! application))))
 
+;; Echo feedback belongs to the command's initiating input target.  A queued
+;; message outcome from a stale View must not overwrite the active session.
+(let* ([application (make-soda-application)]
+       [state (soda-application-state application)]
+       [runtime (host-state-command-runtime state)]
+       [surface (soda-application-surface application)]
+       [active (surface-active-context surface (host-state-views state))]
+       [view
+        (view-service-ref (host-state-views state) (active-context-view-id active))]
+       [buffer (view-buffer view)]
+       [stale-context
+        (make-command-context
+          #f (surface-id surface) (active-context-window-id active)
+          (+ 1000 (view-id view)) (buffer-id buffer)
+          (buffer-state buffer) (view-state view)
+          #f '() #f active 'stale-message)])
+  (dynamic-wind
+    (lambda () #f)
+    (lambda ()
+      (command-runtime-start! runtime 'message.show-position stale-context)
+      (unless (not (surface-feedback surface))
+        (error 'kernel-tests "stale message effect occupied the echo area"))
+      (command-runtime-start! runtime 'message.show-position
+                              (application-command-context application))
+      (unless (string=? (user-feedback-text (surface-feedback surface))
+                        "Line 1, column 1")
+        (error 'kernel-tests "current message effect did not publish feedback")))
+    (lambda () (soda-application-close! application))))
+
 ;; Recovery discovery is session state, not startup chrome.  An application
 ;; with a real pending artifact remains a normal *scratch* editing session
 ;; until the user explicitly invokes recovery.restore.

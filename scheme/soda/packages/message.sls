@@ -104,9 +104,12 @@
   (define (show-message! service request)
     (unless (message-request? request)
       (assertion-violation 'message.show "invalid message request" request))
-    (package-host-publish-feedback!
+    ;; Message effects retain their initiating CommandContext.  They can run
+    ;; after focus has changed, in which case echo feedback would otherwise
+    ;; overwrite the active user's newer interaction.
+    (package-host-publish-feedback-if-current!
       (message-service-host service)
-      (command-context-surface-id (message-request-context request))
+      (message-request-context request)
       (make-user-feedback (message-request-text request) 'info)))
 
   (define (make-message-service! host owner)

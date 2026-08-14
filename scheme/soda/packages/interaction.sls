@@ -396,7 +396,7 @@
           (lambda (ignored invocation request)
             (open-session! service invocation request))))
       (command-runtime-add-hook!
-        runtime 'post-command owner 'accept-interaction-session
+        runtime 'before-outcomes owner 'accept-interaction-session
         (lambda (invocation result)
           (let ([session
                  (interaction-service-session-for-id

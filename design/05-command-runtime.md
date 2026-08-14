@@ -115,8 +115,10 @@ runtime 以 invocation id 管理存活状态。resume/cancel message 必须匹�
 
 ## Hook
 
-hook 观察 runtime lifecycle，例如 pre-command、post-command、error 和 cancel。hook registration
-包含 owner、name、order 和 procedure。observer failure 被隔离并报告，不替换 command result。
+hook 观察 runtime lifecycle。`pre-command` 在命令 procedure 之前运行；`before-outcomes` 在
+procedure 返回后、transaction 与 effect 发布前运行；`post-command` 在 outcomes 已发布后运行。
+error、cancel 与 execution-record 分别观察结束路径与已提交的执行记录。hook registration 包含 owner、name、order 和
+procedure。observer failure 被隔离并报告，不替换 command result。
 
 需要改变参数或返回值的扩展使用 advice，不借用 hook。
 
