@@ -252,7 +252,7 @@
                           file-map
                           (list (make-key-stroke 'character (char->integer #\x) 4)
                                 (make-key-stroke 'character (char->integer #\k) 0)))
-                        'file.close)
+                        'buffer.kill)
                    (not (keymap-lookup
                           file-map
                           (list (make-key-stroke 'character (char->integer #\x) 4)
@@ -311,6 +311,26 @@
                      (eq? (input-disposition-kind former-universal) 'undefined))
           (error 'fundamental-editing-tests
                  "C-x C-u retained a non-Emacs universal-argument binding")))
+      (command-runtime-start-interactive!
+        runtime 'buffer.kill (application-command-context application))
+      (let ([request
+             (interaction-session-request
+               (interaction-service-current (soda-application-interaction application)))])
+        (unless (and (eq? (interaction-request-kind request) 'discard-decision)
+                     (string=? (interaction-request-prompt request)
+                               "Discard changes to *scratch*?")
+                     (= (length (interaction-request-actions request)) 2)
+                     (eq? (choice-action-id
+                            (interaction-request-default-action request))
+                          'cancel))
+          (error 'fundamental-editing-tests
+                 "buffer.kill did not protect a modified unvisited Buffer")))
+      (interaction-service-submit!
+        (soda-application-interaction application) 'cancel)
+      (host-state-run! state)
+      (unless (buffer-service-ref (host-state-buffers state) (buffer-id buffer) #f)
+        (error 'fundamental-editing-tests
+               "cancelling buffer.kill discarded the modified scratch Buffer"))
       (soda-application-close! application))
 
     ;; Window commands use one Host-owned placement path: splitting creates a
@@ -687,6 +707,18 @@
                                file-view-id))
                 (error 'fundamental-editing-tests
                        "buffer.switch did not restore the selected Buffer View"))
+              (command-runtime-start!
+                runtime 'buffer.bury (application-command-context application))
+              (unless (and (= (command-context-buffer-id
+                                (application-command-context application))
+                               (buffer-id scratch))
+                           (buffer-service-ref (host-state-buffers state) file-id #f))
+                (error 'fundamental-editing-tests
+                       "buffer.bury did not leave the selected Buffer alive"))
+              (command-runtime-start-interactive!
+                runtime 'buffer.switch (application-command-context application))
+              (interaction-service-submit! interaction path)
+              (host-state-run! state)
               (command-runtime-start! runtime 'fundamental.end-of-buffer file-context)
               (command-runtime-start! runtime 'fundamental.insert-text
                                       (application-command-context application)
@@ -819,7 +851,7 @@
                    (command-context-buffer-id
                      (application-command-context application))])
               (command-runtime-start!
-                runtime 'file.close (application-command-context application)
+                runtime 'buffer.kill (application-command-context application)
                 (list file-id 'discard))
               (host-state-run! state)
               (let ([live-scratches
@@ -871,7 +903,7 @@
                      (command-context-buffer-id
                        (application-command-context application))])
                 (command-runtime-start!
-                  runtime 'file.close (application-command-context application)
+                  runtime 'buffer.kill (application-command-context application)
                   (list second-id 'discard))
                 (host-state-run! state)
                 (let ([active (application-command-context application)])
@@ -2946,7 +2978,7 @@
                                         (application-command-context application)
                                         (list (string->utf8 " discard")))
                 (command-runtime-start-interactive!
-                  runtime 'file.close (application-command-context application))
+                  runtime 'buffer.kill (application-command-context application))
                 (let ([request (interaction-session-request
                                  (interaction-service-current interaction))])
                   (unless (and (eq? (interaction-request-kind request) 'save-decision)
@@ -2955,7 +2987,7 @@
                                                         "?"))
                                (= (length (interaction-request-actions request)) 3))
                     (error 'fundamental-editing-tests
-                           "file.close did not request a modified-file decision")))
+                           "buffer.kill did not request a modified-file decision")))
                 (interaction-service-submit! interaction 'discard)
                 (host-state-run! state)
                 (unless (and (not (buffer-service-ref
@@ -2968,7 +3000,7 @@
                                        (application-command-context application))
                                      (buffer-id revisited))))
                   (error 'fundamental-editing-tests
-                         "file.close did not replace every active View before releasing its Buffer"))))
+                         "buffer.kill did not replace every active View before releasing its Buffer"))))
             (command-runtime-start! runtime 'file.visit
                                     (application-command-context application) (list second-path))
             (let ([closable (buffer-service-ref
@@ -2981,14 +3013,14 @@
                                       (application-command-context application)
                                       (list (string->utf8 " saved")))
               (command-runtime-start-interactive!
-                runtime 'file.close (application-command-context application))
+                runtime 'buffer.kill (application-command-context application))
               (interaction-service-submit! interaction 'save)
               (host-state-run! state)
               (unless (and (string=? (utf8->string (vfs-read-file second-path)) "second saved")
                            (not (buffer-service-ref
                                   (host-state-buffers state) (buffer-id closable) #f)))
                 (error 'fundamental-editing-tests
-                       "file.close save did not write and release the file Buffer")))
+                       "buffer.kill save did not write and release the file Buffer")))
             (command-runtime-start! runtime 'file.visit
                                     (application-command-context application) (list new-path))
             (command-runtime-start! runtime 'fundamental.end-of-buffer

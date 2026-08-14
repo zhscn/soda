@@ -4910,7 +4910,7 @@
                (unless (and (mode-spec? mode)
                             (eq? (mode-spec-id mode) 'process-mode)
                             (command-runtime-command-available?
-                              runtime 'buffer.close context)
+                              runtime 'buffer.kill context)
                             (not (command-runtime-command-available?
                                    runtime 'fundamental.insert-text context)))
                  (error 'kernel-tests

@@ -148,18 +148,9 @@
                 (command-handled))
             (command-handled))))
     (define-command
-      runtime owner 'buffer.close (context)
-      (documentation "Close the active special Buffer.")
-      (class 'generated-buffer) (scope 'mode) (undo 'ignore)
-      (package-host-close-buffer-with-fallback!
-        host owner (command-context-buffer-id context))
-      (command-handled))
-    (define-command
       runtime owner 'buffer.quit (context)
-      (documentation "Return from the active special Buffer without closing it.")
+      (documentation "Return from the active special Buffer without killing it.")
       (class 'generated-buffer) (scope 'mode) (undo 'ignore)
-      (package-host-quit-window!
-        host (command-context-surface-id context)
-        (command-context-window-id context))
+      (package-host-bury-window! host context)
       (command-handled)))
 )

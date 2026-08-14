@@ -295,7 +295,7 @@
             ;; Buffer as an explicit command target.
             (command-runtime-enqueue!
               (package-host-command-runtime (buffer-list-service-host service))
-              (make-command-invoke-message 'file.close context (list target-id) #t))
+              (make-command-invoke-message 'buffer.kill context (list target-id) #t))
             (command-handled)))))
 
   (define (close-item-at-point! service context)
@@ -380,6 +380,13 @@
           (make-interactive-plan (list (make-buffer-switch-reader service))))
         (undo 'ignore)
         (switch-buffer! service context buffer))
+      (define-command
+        runtime owner 'buffer.bury (context)
+        (documentation "Leave the active Buffer displayed elsewhere without killing it.")
+        (class 'buffer)
+        (undo 'ignore)
+        (package-host-bury-window! host context)
+        (command-handled))
       (define-command
         runtime owner 'buffer-list.refresh (context)
         (documentation "Refresh the generated Buffer List.")

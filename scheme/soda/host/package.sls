@@ -46,7 +46,7 @@
           package-host-focus-next-window!
           package-host-delete-window!
           package-host-delete-other-windows!
-          package-host-quit-window!
+          package-host-bury-window!
           package-host-close-view!
           package-host-surface-size
           package-host-replace-window-view!
@@ -643,34 +643,30 @@
                (window-leaves (surface-root-window surface)))
              #t))))
 
-  ;; Quitting a temporary presentation returns the target Window to its most
-  ;; recently shown different View.  The Buffer remains alive: its owner may
-  ;; refresh it and the user may revisit it without reconstructing state.
-  ;; This is intentionally distinct from closing a Buffer resource.
-  (define (package-host-quit-window! host target-surface-id target-window-id)
-    (unless (package-host? host)
-      (assertion-violation 'package-host-quit-window! "expected a PackageHost" host))
-    (let* ([state (package-host-state host)]
-           [views (host-state-views state)]
-           [surface
-            (surface-service-ref
-              (host-state-surfaces state) target-surface-id #f)]
-           [window
-            (and surface
-                 (find (lambda (leaf) (= (window-id leaf) target-window-id))
-                       (window-leaves (surface-root-window surface))))]
-           [current
-            (and window (view-service-ref views (window-view-id window) #f))])
-      (and current
-           (let ([previous
-                  (recent-replacement-view
-                    surface views (buffer-id (view-buffer current)))])
-             (and previous
-                  (dispatcher-dispatch-host!
-                    (host-state-dispatch state)
-                    (make-replace-window-view-operation
-                      target-surface-id target-window-id (view-id previous)))
-                  previous)))))
+  ;; Bury leaves a Buffer alive and returns the selected Window to its recent
+  ;; presentation history.  Generated `q` and the user-facing buffer command
+  ;; share this operation; neither one is a resource close.
+  (define (package-host-bury-window! host context)
+    (unless (and (package-host? host) (command-context? context))
+      (assertion-violation 'package-host-bury-window!
+                           "expected a PackageHost and CommandContext" host context))
+    (let* ([target (selected-editor-window host context)]
+           [state (package-host-state host)]
+           [views (host-state-views state)])
+      (and target
+           (let* ([surface (car target)]
+                  [window (cdr target)]
+                  [current (view-service-ref views (window-view-id window) #f)])
+             (and current
+                  (let ([previous
+                         (recent-replacement-view
+                           surface views (buffer-id (view-buffer current)))])
+                    (and previous
+                         (dispatcher-dispatch-host!
+                           (host-state-dispatch state)
+                           (make-replace-window-view-operation
+                             (surface-id surface) (window-id window) (view-id previous)))
+                         previous)))))))
 
   (define (package-host-close-view! host id)
     (view-service-close-view! (host-state-views (package-host-state host)) id))

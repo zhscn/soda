@@ -148,6 +148,13 @@
       (make-command-definition
         name procedure owner documentation 'file (make-interactive-plan readers))))
 
+  ;; FileService owns the save and resource-release effects, while Buffer kill
+  ;; is a user operation over every Buffer kind.
+  (define (install-buffer-command! runtime owner name documentation readers procedure)
+    (command-runtime-register-command! runtime
+      (make-command-definition
+        name procedure owner documentation 'buffer (make-interactive-plan readers))))
+
   (define (make-decision-request prompt)
     (make-choice-interaction-request
       'save-decision prompt
@@ -156,11 +163,18 @@
         (make-choice-action 'discard "Discard" (list #\d) 'destructive #f)
         (make-choice-action 'cancel "Cancel" (list #\c) 'cancel #t))))
 
+  (define (make-discard-request prompt)
+    (make-choice-interaction-request
+      'discard-decision prompt
+      (list
+        (make-choice-action 'discard "Discard" (list #\d) 'destructive #f)
+        (make-choice-action 'cancel "Cancel" (list #\c) 'cancel #t))))
+
   ;; The reader evaluates dirty state at command invocation time.  The
   ;; minibuffer is therefore a normal interaction overlay; it does not hold a
   ;; Buffer close transaction open while the user decides.
-  ;; `file.close` accepts an optional initial Buffer identity.  Interactive
-  ;; invocations without one close the active Buffer; generated result Buffers
+  ;; `buffer.kill` accepts an optional initial Buffer identity.  Interactive
+  ;; invocations without one target the active Buffer; generated result Buffers
   ;; can supply another live target without changing the selected Window.
   (define (make-buffer-close-target-reader)
     (make-interactive-reader
@@ -172,7 +186,7 @@
           [(and (null? (cdr arguments)) (buffer-id? (car arguments)))
            (make-interactive-ready '())]
           [else
-           (assertion-violation 'file.close
+           (assertion-violation 'buffer.kill
                                 "expected an optional Buffer identity before close decision"
                                 arguments)]))))
 
@@ -182,20 +196,27 @@
       (lambda (context arguments)
         (unless (and (pair? arguments) (null? (cdr arguments))
                      (buffer-id? (car arguments)))
-          (assertion-violation 'file.close
+          (assertion-violation 'buffer.kill
                                "close decision requires exactly one Buffer identity"
                                arguments))
         (let ([buffer
                (package-host-buffer-ref (file-service-host service)
                                    (car arguments) #f)])
-          (if (modified-file-buffer? service buffer)
-              (make-interactive-suspend
-                (make-decision-request
-                  (string-append "Save changes to " (buffer-name buffer)
-                                 "?"))
-                (lambda (value)
-                  (make-interactive-ready (list value))))
-              (make-interactive-ready (list 'discard)))))))
+          (cond
+            [(modified-file-buffer? service buffer)
+             (make-interactive-suspend
+               (make-decision-request
+                 (string-append "Save changes to " (buffer-name buffer) "?"))
+               (lambda (value) (make-interactive-ready (list value))))]
+            [(and buffer
+                  (file-service-history service)
+                  (history-modified?
+                    (file-service-history service) (buffer-id buffer)))
+             (make-interactive-suspend
+               (make-discard-request
+                 (string-append "Discard changes to " (buffer-name buffer) "?"))
+               (lambda (value) (make-interactive-ready (list value))))]
+            [else (make-interactive-ready (list 'discard))])))))
 
   (define (close-buffer! service target-id)
     (package-host-close-buffer-with-fallback!
@@ -379,11 +400,11 @@
               (history-mark-saved! history (file-write-buffer-id request)))
             (clear-recovery! service (file-write-buffer-id request)))))
       (command-runtime-register-effect-handler!
-        runtime 'file.close owner 'close-file-buffer
+        runtime 'buffer.kill owner 'kill-buffer
         (lambda (ignored invocation effect)
           (let ([request (command-effect-payload effect)])
             (unless (file-close? request)
-              (assertion-violation 'file.close "invalid file close request" request))
+              (assertion-violation 'buffer.kill "invalid Buffer kill request" request))
             (close-buffer! service (file-close-buffer-id request)))))
       (command-runtime-register-effect-handler!
         runtime 'file.insert owner 'insert-file-contents
@@ -483,7 +504,7 @@
                     service (command-context-buffer-id context)
                     (command-context-buffer-state context) resource #f #t))
                 (command-handled)))))
-      (install-file-command! runtime owner 'file.close "Close the active file Buffer."
+      (install-buffer-command! runtime owner 'buffer.kill "Kill the active Buffer."
         (list (make-buffer-close-target-reader)
               (make-buffer-close-decision-reader service))
         (lambda (context target-id decision)
@@ -501,10 +522,10 @@
                            target-id
                            (buffer-state target)
                            (file-binding-resource binding) (file-binding-version binding) #f)
-                         (make-command-effect 'file.close (make-file-close target-id)))
-                       (make-command-effect 'file.close (make-file-close target-id)))))]
+                         (make-command-effect 'buffer.kill (make-file-close target-id)))
+                       (make-command-effect 'buffer.kill (make-file-close target-id)))))]
             [else
-             (make-command-effect 'file.close (make-file-close target-id))])))
+             (make-command-effect 'buffer.kill (make-file-close target-id))])))
       (package-host-add-buffer-close-listener!
         host owner
         (lambda (buffer)

@@ -21,6 +21,7 @@ prefix key、minibuffer、echo area、mode line、Buffer/View/Window 语义作�
 | Window 管理 | `C-x 2`、`C-x 3`、`C-x o`、`C-x 0` 与 `C-x 1` 通过 Host placement 操作 split、切换和删除 Window；split 创建独立 View，删除 Window 不关闭 Buffer |
 | 访问、插入、保存、另存、重载与关闭 file Buffer | 文件生命周期通过 command 与 interaction 组合 |
 | `C-x b` Buffer completion、文件名 completion、目录浏览与 `C-x C-b` Buffer 列表 | 使用普通 Buffer/View 和 minibuffer；切换 Buffer 时复用该 Surface 最近使用的 View |
+| Buffer leave、bury 与 kill | generated Buffer 的 `q` 与 `buffer.bury` 只离开当前 presentation；`C-x k` 运行 `buffer.kill` 并释放 Buffer resource。修改过的文件提供保存决策，修改过的未访问 Buffer 需要明确 discard 确认 |
 | file prompt default directory | 已访问 Buffer 使用其文件所在目录；其他 Buffer 使用 session 创建时的当前目录，候选和最终路径共享该基准 |
 | 修改 Buffer 在关闭和退出时的保存决策 | 在实际关闭边界请求用户决策 |
 | 覆盖已有目标文件的明确确认 | 写入前通过 minibuffer 确认 |
