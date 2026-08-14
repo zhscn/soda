@@ -70,6 +70,7 @@
         (soda tui presenter)
         (soda tui presenter-session)
         (soda test fundamental-editing)
+        (soda test command-reachability)
         (soda test file-state)
         (soda test buffer-ui)
         (soda test host-integration)
@@ -5271,6 +5272,7 @@
       (soda-application-close! application))))
 
 (run-fundamental-editing-tests!)
+(run-command-reachability-tests!)
 (run-file-state-tests!)
 (run-buffer-ui-tests!)
 (run-host-integration-tests!)
