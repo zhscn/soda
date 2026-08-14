@@ -4998,6 +4998,25 @@
                  (unless (and rejected? (string=? output (buffer-string buffer)))
                    (error 'kernel-tests
                           "process output Buffer accepted ordinary editing"))))
+             ;; Repeated command text starts an independent job and must not
+             ;; produce ambiguous Buffer names in the Buffer catalog.
+             (command-runtime-start!
+               runtime 'process.execute (application-command-context application)
+               (list "printf soda-process-output"))
+             (let ([named
+                    (filter
+                      (lambda (candidate)
+                        (or (string=? (buffer-name candidate)
+                                      "*command: printf soda-process-output*")
+                            (string=? (buffer-name candidate)
+                                      "*command: printf soda-process-output*<2>")))
+                      (buffer-service-buffers (host-state-buffers state)))])
+               (unless (and (= (length named) 2)
+                            (not (= (buffer-id (car named))
+                                    (buffer-id (cadr named)))))
+                 (error 'kernel-tests
+                        "repeated process command did not receive distinct result Buffers"
+                        (map buffer-name named))))
              #t]
             [(zero? remaining)
              (error 'kernel-tests "process output Buffer did not receive complete process output"
