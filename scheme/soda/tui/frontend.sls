@@ -49,6 +49,7 @@
       (immutable handle-disposition frontend-handle-disposition)
       (immutable present! frontend-present!)
       (immutable render-service frontend-render-service)
+      (immutable viewport-resolution-cache frontend-viewport-resolution-cache)
       (immutable input-scheduler frontend-input-scheduler)
       (mutable theme frontend-theme frontend-theme-set!)
       (mutable dirty? frontend-dirty? frontend-dirty?-set!)
@@ -89,7 +90,8 @@
     (let* ([owner (make-owner 'frontend)]
            [value
             (%make-frontend owner state surface resolve-input-context handle-disposition
-                            present! render-service (make-input-scheduler state)
+                            present! render-service (make-viewport-resolution-cache)
+                            (make-input-scheduler state)
                             theme #t #f #f #f #f #f #f #f #f)])
       (frontend-routing-registration-set!
         value
@@ -275,7 +277,8 @@
                    [layout (active-command-layout value active view)])
               (when (and layout
                          (host-frontend-resolve-scroll-request!
-                           (frontend-host-state value) active layout request))
+                           (frontend-host-state value) active layout request
+                           (frontend-viewport-resolution-cache value)))
                 (frontend-pending-scroll-set! value #f))))))))
 
   (define (make-active-command-context

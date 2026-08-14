@@ -6,6 +6,8 @@
           host-frontend-pointer-capture-current?
           host-frontend-pointer-target
           host-frontend-make-command-context
+          make-viewport-resolution-cache
+          viewport-resolution-cache?
           host-frontend-resolve-scroll-request!
           host-frontend-enqueue!
           host-frontend-enqueue-priority!
@@ -77,6 +79,46 @@
                           [else 1])))
                    0 (display-stream-fragments stream)))])
       (layout-display-stream stream selection width height options)))
+
+  ;; Viewport resolution needs document-to-row coordinates, not a new visible
+  ;; Frame. Selection changes alter faces but not the coordinate map, so a
+  ;; frontend reuses it while the View's content, projection, and width hold.
+  (define-record-type
+    (viewport-resolution-cache %make-viewport-resolution-cache
+                               viewport-resolution-cache?)
+    (fields (mutable signature viewport-resolution-cache-signature
+                             viewport-resolution-cache-signature-set!)
+            (mutable geometry viewport-resolution-cache-geometry
+                              viewport-resolution-cache-geometry-set!)))
+
+  (define (make-viewport-resolution-cache)
+    (%make-viewport-resolution-cache #f #f))
+
+  (define (viewport-resolution-signature view width options)
+    (list (view-id view)
+          (buffer-state-generation (buffer-state (view-buffer view)))
+          (view-projection-generation (view-projection view))
+          width options))
+
+  (define (same-viewport-resolution-signature? left right)
+    (and left right
+         (= (car left) (car right))
+         (= (cadr left) (cadr right))
+         (= (caddr left) (caddr right))
+         (= (cadddr left) (cadddr right))
+         (eq? (car (cddddr left)) (car (cddddr right)))))
+
+  (define (viewport-resolution-geometry! cache view selection width options)
+    (if (not cache)
+        (full-display-layout view selection width options)
+        (let ([signature (viewport-resolution-signature view width options)])
+          (if (same-viewport-resolution-signature?
+                signature (viewport-resolution-cache-signature cache))
+              (viewport-resolution-cache-geometry cache)
+              (let ([geometry (full-display-layout view selection width options)])
+                (viewport-resolution-cache-signature-set! cache signature)
+                (viewport-resolution-cache-geometry-set! cache geometry)
+                geometry)))))
 
   (define (layout-row-for-document layout offset)
     (let ([point (text-layout-document->point layout offset)])
@@ -221,9 +263,10 @@
   ;; Resolve a semantic scroll request against the immutable layout last
   ;; presented for its exact Surface/Window/View occurrence.  Host owns the
   ;; resulting View publication; text-layout owns the pure coordinate policy.
-  (define (host-frontend-resolve-scroll-request! state active layout request)
+  (define (resolve-scroll-request! state active layout request cache)
     (unless (and (host-state? state) (active-context? active)
-                 (text-layout? layout) (scroll-request? request))
+                 (text-layout? layout) (scroll-request? request)
+                 (or (not cache) (viewport-resolution-cache? cache)))
       (assertion-violation
         'host-frontend-resolve-scroll-request!
         "invalid scroll request resolution input"
@@ -250,7 +293,9 @@
                          (view-state-configuration view-state)
                          text-layout-options-facet 'view)]
                       [selection (view-state-selection view-state)]
-                      [geometry (full-display-layout view selection width options)]
+                      [geometry
+                       (viewport-resolution-geometry!
+                         cache view selection width options)]
                       [content-height (text-layout-content-height geometry)]
                       [last-top (max 0 (- content-height height))]
                       [current (view-state-viewport view-state)]
@@ -361,6 +406,13 @@
                        (and (not (viewport=? target current)) target)
                        #f '() '() #f)))
                  #t)))))
+
+  (define host-frontend-resolve-scroll-request!
+    (case-lambda
+      [(state active layout request)
+       (resolve-scroll-request! state active layout request #f)]
+      [(state active layout request cache)
+       (resolve-scroll-request! state active layout request cache)]))
 
   (define (host-frontend-enqueue! state message)
     (runtime-enqueue! (host-state-runtime state) message))
