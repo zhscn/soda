@@ -80,13 +80,15 @@
             (mutable generation completion-controller-generation completion-controller-generation-set!)
             (mutable candidates completion-controller-candidates completion-controller-candidates-set!)
             (mutable selected-index completion-controller-selected-index completion-controller-selected-index-set!)
+            (mutable input-revision completion-controller-input-revision
+                     completion-controller-input-revision-set!)
             (mutable preview-active? completion-controller-preview-active?
                      completion-controller-preview-active?-set!)
             (immutable selection-policy completion-controller-selection-policy)))
   (define (make-completion-controller source selection-policy)
     (unless (and (completion-source? source) (memq selection-policy '(free must-match)))
       (assertion-violation 'make-completion-controller "invalid completion controller"))
-    (%make-completion-controller source 0 '() #f #f selection-policy))
+    (%make-completion-controller source 0 '() #f #f #f selection-policy))
   (define (completion-controller-selected controller)
     (let ([index (completion-controller-selected-index controller)]
           [candidates (completion-controller-candidates controller)])
@@ -98,12 +100,18 @@
       (completion-controller-preview-active?-set! controller #f)))
   (define (completion-controller-refresh! controller snapshot)
     (completion-controller-restore! controller snapshot)
-    (let* ([selected (completion-controller-selected controller)]
+    (let* ([same-input?
+            (and (completion-controller-input-revision controller)
+                 (= (completion-controller-input-revision controller)
+                    (prompt-snapshot-input-revision snapshot)))]
+           [selected (and same-input? (completion-controller-selected controller))]
            [selected-id (and selected (completion-candidate-id selected))]
            [candidates ((completion-source-refresh (completion-controller-source controller)) snapshot)])
       (unless (and (list? candidates) (for-all completion-candidate? candidates))
         (assertion-violation 'completion-controller-refresh! "source returned invalid candidates" candidates))
       (completion-controller-generation-set! controller (+ 1 (completion-controller-generation controller)))
+      (completion-controller-input-revision-set!
+        controller (prompt-snapshot-input-revision snapshot))
       (completion-controller-candidates-set! controller (reverse (reverse candidates)))
       (completion-controller-selected-index-set! controller
         (let loop ([items candidates] [index 0])

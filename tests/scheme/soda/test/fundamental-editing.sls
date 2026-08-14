@@ -1630,10 +1630,24 @@
             (error 'fundamental-editing-tests
                    "completion viewport did not reveal a selected off-screen candidate"
                    text))
-          (minibuffer-service-select-completion! minibuffer 0)))
+          (let find-message ([candidates
+                              (completion-controller-candidates controller)]
+                             [index 0])
+            (cond
+              [(null? candidates)
+               (error 'fundamental-editing-tests
+                      "M-x completion omitted message.show-position")]
+              [(string=?
+                 (completion-candidate-insert-text (car candidates))
+                 "message.show-position")
+               (minibuffer-service-select-completion! minibuffer index)]
+              [else (find-message (cdr candidates) (+ index 1))])))
       (command-runtime-start!
         runtime 'fundamental.insert-text (application-command-context application)
         (list (string->utf8 "message.show-position")))
+      (unless (not (completion-controller-selected-index controller))
+        (error 'fundamental-editing-tests
+               "editing minibuffer input retained a stale completion selection")))
       (minibuffer-service-submit! minibuffer)
       (host-state-run! state)
       (host-state-run! state)
