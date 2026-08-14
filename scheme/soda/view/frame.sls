@@ -68,7 +68,7 @@
 
   (define-record-type
     (frame %make-frame frame?)
-    (fields width height cells))
+    (fields width height rows))
 
   (define (frame-size width height)
     (unless (and (exact-integer? width) (>= width 0)
@@ -76,78 +76,107 @@
       (assertion-violation 'make-frame "invalid frame dimensions" width height))
     (* width height))
 
-  (define (frame-grid-valid? width height cells)
+  (define (frame-row-valid? row width)
+    (let loop-column ([column 0])
+      (if (= column width)
+          #t
+          (let ([cell (vector-ref row column)])
+            (and
+              (if (frame-cell-continuation? cell)
+                  (and (> column 0)
+                       (let ([previous (vector-ref row (- column 1))])
+                         (and (not (frame-cell-continuation? previous))
+                              (= (frame-cell-width previous) 2))))
+                  (if (= (frame-cell-width cell) 2)
+                      (and (< (+ column 1) width)
+                           (frame-cell-continuation?
+                             (vector-ref row (+ column 1))))
+                      #t))
+              (loop-column (+ column 1)))))))
+
+  (define (frame-grid-valid? width height rows)
     (let loop-row ([row 0])
       (if (= row height)
           #t
-          (and
-            (let loop-column ([column 0])
-              (if (= column width)
-                  #t
-                  (let ([cell (vector-ref cells (+ (* row width) column))])
-                    (and
-                      (if (frame-cell-continuation? cell)
-                          (and (> column 0)
-                               (let ([previous (vector-ref cells
-                                                           (+ (* row width) (- column 1)))])
-                                 (and (not (frame-cell-continuation? previous))
-                                      (= (frame-cell-width previous) 2))))
-                          (if (= (frame-cell-width cell) 2)
-                              (and (< (+ column 1) width)
-                                   (frame-cell-continuation?
-                                     (vector-ref cells (+ (* row width) (+ column 1)))))
-                              #t))
-                      (loop-column (+ column 1))))))
-            (loop-row (+ row 1))))))
+          (and (frame-row-valid? (vector-ref rows row) width)
+               (loop-row (+ row 1))))))
+
+  (define (frame-rows-from-cells width height cells)
+    (let ([rows (make-vector height)])
+      (do ([row 0 (+ row 1)])
+          ((= row height) rows)
+        (let ([target (make-vector width)])
+          (do ([column 0 (+ column 1)])
+              ((= column width))
+            (vector-set! target column
+                         (vector-ref cells (+ (* row width) column))))
+          (vector-set! rows row target)))))
+
+  (define (make-default-frame-rows width height)
+    (let ([rows (make-vector height)])
+      (do ([row 0 (+ row 1)])
+          ((= row height) rows)
+        (vector-set! rows row (make-vector width default-frame-cell)))))
 
   (define make-frame
     (case-lambda
       [(width height)
-       (%make-frame width height (make-vector (frame-size width height) default-frame-cell))]
+       (frame-size width height)
+       (%make-frame width height (make-default-frame-rows width height))]
       [(width height cells)
        (let ([size (frame-size width height)])
          (unless (and (vector? cells) (= (vector-length cells) size)
-                      (for-all frame-cell? (vector->list cells))
-                      (frame-grid-valid? width height cells))
+                      (for-all frame-cell? (vector->list cells)))
            (assertion-violation 'make-frame "invalid frame cell vector" cells))
-         (%make-frame width height (vector-copy cells)))]))
+         (let ([rows (frame-rows-from-cells width height cells)])
+           (unless (frame-grid-valid? width height rows)
+             (assertion-violation 'make-frame "invalid frame cell vector" cells))
+           (%make-frame width height rows)))]))
 
-  (define (frame-index frame row column who)
+  (define (frame-assert-index frame row column who)
     (unless (frame? frame)
       (assertion-violation who "expected a Frame" frame))
     (unless (and (exact-integer? row) (exact-integer? column)
                  (<= 0 row) (< row (frame-height frame))
                  (<= 0 column) (< column (frame-width frame)))
-      (assertion-violation who "cell is outside Frame" row column))
-    (+ (* row (frame-width frame)) column))
+      (assertion-violation who "cell is outside Frame" row column)))
 
   (define (frame-cell-at frame row column)
-    (vector-ref (frame-cells frame) (frame-index frame row column 'frame-cell-at)))
+    (frame-assert-index frame row column 'frame-cell-at)
+    (vector-ref (vector-ref (frame-rows frame) row) column))
 
   (define (frame-with-cell frame row column cell)
     (unless (frame-cell? cell)
       (assertion-violation 'frame-with-cell "expected a FrameCell" cell))
-    (let ([cells (vector-copy (frame-cells frame))]
-          [index (frame-index frame row column 'frame-with-cell)])
-      (vector-set! cells index cell)
-      (make-frame (frame-width frame) (frame-height frame) cells)))
+    (frame-with-cells frame (list (list row column cell))))
 
   ;; Updates is a list of (row column FrameCell).  Copy once so composing a
   ;; window tree never creates an intermediate Frame per terminal cell.
   (define (frame-with-cells frame updates)
     (unless (and (frame? frame) (list? updates))
       (assertion-violation 'frame-with-cells "expected a Frame and updates" frame updates))
-    (let ([cells (vector-copy (frame-cells frame))])
-      (for-each
-        (lambda (update)
-          (unless (and (list? update) (= (length update) 3)
-                       (frame-cell? (caddr update)))
-            (assertion-violation 'frame-with-cells "invalid frame cell update" update))
-          (vector-set! cells
-                       (frame-index frame (car update) (cadr update) 'frame-with-cells)
-                       (caddr update)))
-        updates)
-      (make-frame (frame-width frame) (frame-height frame) cells)))
+    (if (null? updates)
+        frame
+        (let ([rows (vector-copy (frame-rows frame))]
+              [changed-rows '()])
+          (for-each
+            (lambda (update)
+              (unless (and (list? update) (= (length update) 3)
+                           (frame-cell? (caddr update)))
+                (assertion-violation 'frame-with-cells "invalid frame cell update" update))
+              (let ([row (car update)] [column (cadr update)] [cell (caddr update)])
+                (frame-assert-index frame row column 'frame-with-cells)
+                (unless (memv row changed-rows)
+                  (vector-set! rows row (vector-copy (vector-ref rows row)))
+                  (set! changed-rows (cons row changed-rows)))
+                (vector-set! (vector-ref rows row) column cell)))
+            updates)
+          (for-each
+            (lambda (row)
+              (unless (frame-row-valid? (vector-ref rows row) (frame-width frame))
+                (assertion-violation 'frame-with-cells "invalid frame cell update" updates)))
+            changed-rows)
+          (%make-frame (frame-width frame) (frame-height frame) rows))))
 
   (define-record-type
     (frame-row-span %make-frame-row-span frame-row-span?)
@@ -182,19 +211,22 @@
         (let loop-row ([row 0] [result '()])
           (if (= row (frame-height new))
               (reverse result)
-              (let loop-column ([column 0] [spans result])
-                (cond
-                  [(= column (frame-width new))
-                   (loop-row (+ row 1) spans)]
-                  [(frame-cell-paint=? (frame-cell-at old row column)
-                                       (frame-cell-at new row column))
-                   (loop-column (+ column 1) spans)]
-                  [else
-                   (let find-end ([end (+ column 1)])
-                     (if (or (= end (frame-width new))
-                             (frame-cell-paint=? (frame-cell-at old row end)
-                                                 (frame-cell-at new row end)))
-                         (loop-column
-                           end
-                           (cons (make-frame-row-span row column end) spans))
-                         (find-end (+ end 1))))])))))))
+              (if (eq? (vector-ref (frame-rows old) row)
+                       (vector-ref (frame-rows new) row))
+                  (loop-row (+ row 1) result)
+                  (let loop-column ([column 0] [spans result])
+                    (cond
+                      [(= column (frame-width new))
+                       (loop-row (+ row 1) spans)]
+                      [(frame-cell-paint=? (frame-cell-at old row column)
+                                           (frame-cell-at new row column))
+                       (loop-column (+ column 1) spans)]
+                      [else
+                       (let find-end ([end (+ column 1)])
+                         (if (or (= end (frame-width new))
+                                 (frame-cell-paint=? (frame-cell-at old row end)
+                                                     (frame-cell-at new row end)))
+                             (loop-column
+                               end
+                               (cons (make-frame-row-span row column end) spans))
+                             (find-end (+ end 1))))]))))))))

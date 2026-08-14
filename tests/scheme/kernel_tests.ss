@@ -3780,6 +3780,25 @@
                  (make-frame 2 1 (vector continuation default-frame-cell)) #f))
     (error 'kernel-tests "Frame grid validation differs")))
 
+;; A local Frame update preserves unrelated wide-cell rows.  This is the
+;; structural contract used by cursor retargeting to leave the text grid
+;; shared while it updates a mode-line row.
+(let* ([wide (make-frame-cell "界" 2 #f 'default 'wide)]
+       [continuation (make-frame-cell "" 0 #t 'default 'wide)]
+       [base (make-frame 3 2
+                         (vector wide continuation default-frame-cell
+                                 default-frame-cell default-frame-cell default-frame-cell))]
+       [next (frame-with-cell base 1 1
+                              (make-frame-cell "x" 1 #f 'mode-line 'position))]
+       [spans (frame-diff base next)])
+  (unless (and (string=? (frame-cell-grapheme (frame-cell-at next 0 0)) "界")
+               (frame-cell-continuation? (frame-cell-at next 0 1))
+               (= (length spans) 1)
+               (= (frame-row-span-row (car spans)) 1)
+               (= (frame-row-span-from (car spans)) 1)
+               (= (frame-row-span-to (car spans)) 2))
+    (error 'kernel-tests "local Frame update changed an unrelated wide row" spans)))
+
 (let* ([document (make-document "ab\ncd")]
        [snapshot (document-snapshot document)]
        [selection (make-selection (list (make-selection-range 1 3)))]
