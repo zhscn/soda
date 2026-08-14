@@ -60,6 +60,21 @@
             (put-string port "[?25l")))
       (get-output)))
 
+  ;; A cursor-only transaction follows a completed Frame transaction with the
+  ;; same Theme, which has already restored the terminal style.  It therefore
+  ;; needs only cursor state, not an otherwise redundant SGR reset.
+  (define (cursor-state->ansi cursor-row cursor-column)
+    (let-values ([(port get-output) (open-string-output-port)])
+      (if (and cursor-row cursor-column)
+          (begin
+            (put-string port (cursor-address cursor-row cursor-column))
+            (put-string port escape)
+            (put-string port "[?25h"))
+          (begin
+            (put-string port escape)
+            (put-string port "[?25l")))
+      (get-output)))
+
   ;; The returned transaction is complete and can be written partially by a
   ;; presenter queue.  `old` may be #f for the first surface presentation.
   (define frame-diff->ansi
@@ -185,10 +200,14 @@
                   presenter
                   (make-presentation-transaction
                     (string->utf8
-                      (frame-spans->ansi
-                        spans desired-frame (presentation-state-theme desired)
-                        (presentation-state-cursor-row desired)
-                        (presentation-state-cursor-column desired)))
+                      (if (and same-theme? (null? spans))
+                          (cursor-state->ansi
+                            (presentation-state-cursor-row desired)
+                            (presentation-state-cursor-column desired))
+                          (frame-spans->ansi
+                            spans desired-frame (presentation-state-theme desired)
+                            (presentation-state-cursor-row desired)
+                            (presentation-state-cursor-column desired))))
                     desired))))))))
 
   ;; writer receives a bytevector and offset, and returns a positive byte count

@@ -3768,6 +3768,7 @@
                (= (length writes) 1)
                (contains-string? (car writes) "[1;1H")
                (contains-string? (car writes) "[?25h")
+               (not (contains-string? (car writes) "[0m"))
                (not (contains-string? (car writes) "x")))
     (error 'kernel-tests "cursor-only presentation repainted Frame cells" writes)))
 
