@@ -58,8 +58,18 @@
       (unless (and (= builds 1) (= (buffer-id first) (buffer-id second))
                    (eq? (buffer-lifecycle first) 'live))
         (error 'buffer-ui-tests "BufferKey did not reuse one live Buffer"))
-      (unless (buffer-service-close-buffer! buffers (buffer-id first))
-        (error 'buffer-ui-tests "keyed Buffer did not close"))
+      (let ([duplicate (make-test-buffer buffers owner "*shared*")])
+        (unless (string=? (buffer-name duplicate) "*shared*<2>")
+          (error 'buffer-ui-tests
+                 "BufferService did not disambiguate a live display name"
+                 (buffer-name duplicate)))
+        (unless (buffer-service-close-buffer! buffers (buffer-id first))
+          (error 'buffer-ui-tests "keyed Buffer did not close"))
+        (let ([reused (make-test-buffer buffers owner "*shared*")])
+          (unless (string=? (buffer-name reused) "*shared*")
+            (error 'buffer-ui-tests
+                   "BufferService did not reuse a released display name"
+                   (buffer-name reused)))))
       (unless (and (not (buffer-service-find-key buffers key #f))
                    (not (buffer-service-ref buffers (buffer-id first) #f))
                    (eq? (buffer-lifecycle first) 'closed))

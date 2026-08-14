@@ -125,7 +125,9 @@ BufferKey {
 
 `BufferCatalog` 维护 `BufferKey -> BufferId`。`open-or-create` 原子检查 live Buffer、创建新
 Buffer 并安装初始 extension/attachment。没有稳定复用语义的临时 Buffer 不提供 key。
-Buffer 关闭时 catalog 删除映射；name 冲突只影响显示名生成。
+Buffer 关闭时 catalog 删除映射。所有存活 Buffer 的显示名由 BufferService 全局唯一化：
+首次使用保留请求名称，冲突名称使用稳定的 numeric suffix；关闭后该名称可以再次使用。name
+冲突不改变 BufferKey 或 BufferId。
 
 BufferKey 不等同于 Project。文件、目录和 Scheme environment 可以在没有 Project 的情况
 下拥有稳定资源 identity。

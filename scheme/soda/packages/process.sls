@@ -88,25 +88,11 @@
       (assertion-violation 'process-keymap "expected a process service" service))
     (process-service-keymap service))
 
-  ;; Each invocation owns an independent result Buffer: concurrent commands
-  ;; can complete in either order, so output must never be merged merely
-  ;; because their command text is equal.  Keep the familiar base name when
-  ;; it is available and use Emacs-style numeric disambiguation while an
-  ;; earlier result remains live.
-  (define (make-process-buffer-name service command)
-    (let ([base (string-append "*command: " command "*")])
-      (define (in-use? name)
-        (exists
-          (lambda (buffer) (string=? (buffer-name buffer) name))
-          (package-host-buffers (process-service-host service))))
-      (if (not (in-use? base))
-          base
-          (let loop ([suffix 2])
-            (let ([candidate
-                   (string-append base "<" (number->string suffix) ">")])
-              (if (in-use? candidate)
-                  (loop (+ suffix 1))
-                  candidate))))))
+  ;; Each invocation owns a fresh result Buffer because concurrent commands
+  ;; can complete in either order.  Packages provide only their semantic base
+  ;; name; BufferService is the single owner of live-name disambiguation.
+  (define (make-process-buffer-name command)
+    (string-append "*command: " command "*"))
 
   (define (make-process-request-reader)
     (make-interaction-string-reader 'shell-command "Execute command: "))
@@ -151,8 +137,7 @@
            [buffer
             (package-host-create-buffer!
               host (process-service-owner service)
-              (make-process-buffer-name service
-                                        (process-request-command request))
+              (make-process-buffer-name (process-request-command request))
               (make-document "") configuration)]
            [view
             (package-host-create-view! host (process-service-owner service) buffer configuration)])
