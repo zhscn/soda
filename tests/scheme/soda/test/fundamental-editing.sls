@@ -3974,14 +3974,16 @@
         (host-state-dispatch state)
         (make-set-surface-feedback-operation
           (surface-id surface)
-          (make-user-feedback "persistent feedback" 'info 'sticky)))
+          (make-user-feedback "temporary feedback" 'info)))
       (send! (make-pointer-event 0 0 'none 0 0 'move))
-      (send! (make-key-event 'left #f #f #f 0 'press (make-bytevector 0)))
-      (unless (and (string=? (surface-feedback-text surface) "persistent feedback")
-                   (eq? (user-feedback-severity (surface-feedback surface)) 'info)
-                   (eq? (user-feedback-lifetime (surface-feedback surface)) 'sticky))
+      (unless (and (string=? (surface-feedback-text surface) "temporary feedback")
+                   (eq? (user-feedback-severity (surface-feedback surface)) 'info))
         (error 'fundamental-editing-tests
-               "persistent feedback was cleared by unrelated input"))
+               "passive pointer motion cleared echo-area feedback"))
+      (send! (make-key-event 'left #f #f #f 0 'press (make-bytevector 0)))
+      (unless (not (surface-feedback surface))
+        (error 'fundamental-editing-tests
+               "actionable input retained stale echo-area feedback"))
       (dispatcher-dispatch-host!
         (host-state-dispatch state)
         (make-set-surface-feedback-operation
@@ -4405,7 +4407,7 @@
         (host-state-dispatch state)
         (make-set-surface-feedback-operation
           (surface-id surface)
-          (make-user-feedback "sticky alert" 'warning 'sticky)))
+          (make-user-feedback "previous alert" 'warning)))
       (send! (make-key-event 'character (char->integer #\x) #f #f 4 'press
                              (make-bytevector 0)))
       (unless (and
@@ -4424,7 +4426,7 @@
                     (frame-row-string
                       (surface-render-frame presented)
                       (- (frame-height (surface-render-frame presented)) 1))
-                    "sticky alert"))
+                    "previous alert"))
                 (let ([rendered
                        (find
                          (lambda (candidate)

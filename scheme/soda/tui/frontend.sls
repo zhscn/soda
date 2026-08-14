@@ -320,11 +320,12 @@
     (unless (input-event? event)
       (assertion-violation 'frontend-dispatch-input! "expected an input event" event))
     (input-scheduler-begin-cycle! (frontend-input-scheduler value))
-    ;; Transient echo-area feedback is cleared by the next user input before
-    ;; dispatch. A command may publish a new semantic feedback value at the
-    ;; same boundary; sticky feedback survives without obscuring input chrome.
+    ;; Echo-area command feedback is cleared by the next actionable user input
+    ;; before dispatch. A command may publish a new semantic feedback value at
+    ;; the same boundary. Durable status belongs to a mode line, Buffer, or
+    ;; explicit interaction rather than resurfacing from behind input chrome.
     (when (feedback-clearing-event? event)
-      (host-frontend-clear-transient-surface-feedback!
+      (host-frontend-clear-surface-feedback!
         (frontend-host-state value) (frontend-surface value)))
     (let* ([route (and (pointer-event? event) (pointer-route value event))]
            [current

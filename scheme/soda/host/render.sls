@@ -615,9 +615,9 @@
            [feedback (surface-feedback surface)]
            [interaction-active? (pair? (surface-interaction-windows surface))]
            [message
-            ;; Active input guidance owns the echo area. A sticky feedback
-            ;; value may survive input, but it must not obscure a prefix,
-            ;; argument, minibuffer hint, or current shortcut guidance.
+            ;; Active input guidance owns the echo area. Command feedback must
+            ;; not obscure a prefix, argument, minibuffer hint, or current
+            ;; shortcut guidance.
             (and
               (surface-echo-area-visible? surface)
               (or input-message

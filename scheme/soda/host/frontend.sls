@@ -1,7 +1,7 @@
 (library (soda host frontend)
   (export host-frontend-surface-registered?
           host-frontend-active-view
-          host-frontend-clear-transient-surface-feedback!
+          host-frontend-clear-surface-feedback!
           host-frontend-surface-hit-current?
           host-frontend-pointer-capture-current?
           host-frontend-pointer-target
@@ -114,17 +114,16 @@
                         (host-state-views state) (active-context-view-id context) #f))])
       (and context view (cons context view))))
 
-  (define (host-frontend-clear-transient-surface-feedback! state surface)
+  (define (host-frontend-clear-surface-feedback! state surface)
     (unless (and (host-state? state) (surface? surface))
       (assertion-violation
-        'host-frontend-clear-transient-surface-feedback!
+        'host-frontend-clear-surface-feedback!
         "expected HostState and Surface" state surface))
     (let ([feedback (surface-feedback surface)])
       (and feedback
-           (eq? (user-feedback-lifetime feedback) 'transient)
-         (dispatcher-dispatch-host!
-           (host-state-dispatch state)
-           (make-set-surface-feedback-operation (surface-id surface) #f)))))
+           (dispatcher-dispatch-host!
+             (host-state-dispatch state)
+             (make-set-surface-feedback-operation (surface-id surface) #f)))))
 
   (define (host-frontend-surface-hit-current? state surface hit)
     (and (host-state? state) (surface? surface) (surface-hit? hit)

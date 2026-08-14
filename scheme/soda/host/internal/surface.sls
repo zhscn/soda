@@ -233,8 +233,11 @@
                            "invalid Surface interaction request" surface view-id height))
     ;; Interaction placement belongs to the Surface projection.  The Window
     ;; retains only its requested height; row and width follow the current
-    ;; Surface size at render time.
+    ;; Surface size at render time. Entering an interaction also retires the
+    ;; previous command's echo feedback; hiding it would allow stale text to
+    ;; resurface when the interaction closes.
     (let ([window (make-interaction-window view-id height 'prompt)])
+      (surface-feedback-set! surface #f)
       (surface-interaction-windows-set!
         surface (cons window (surface-interaction-windows surface)))
       (surface-generation-set! surface (+ 1 (surface-generation surface)))

@@ -1959,7 +1959,7 @@
              "interaction Window did not follow the resized Surface width")))
   (surface-resize! surface '(10 . 6))
   (surface-set-feedback!
-    surface (make-user-feedback "older feedback" 'warning 'sticky))
+    surface (make-user-feedback "older feedback" 'warning))
   (surface-push-interaction!
     surface (view-id root-view) 1)
   (unless (surface-remove-interaction! surface (view-id prompt-view))
@@ -1975,9 +1975,9 @@
   (surface-remove-interaction! surface (view-id root-view))
   (let ([restored
          (surface-render-frame (render-surface surface (host-state-views host)))])
-    (unless (string=? (frame-cell-grapheme (frame-cell-at restored 5 0)) "o")
+    (unless (string=? (frame-cell-grapheme (frame-cell-at restored 5 0)) " ")
       (error 'kernel-tests
-             "feedback did not return after the interaction closed")))
+             "retired feedback resurfaced after the interaction closed")))
   (surface-resize! surface '(10 . 1))
   (let ([minimal (render-surface surface (host-state-views host))])
     (unless (and
