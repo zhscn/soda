@@ -2530,6 +2530,18 @@
     (unless (and (= (length sequences) 1)
                  (key-stroke=? (caar sequences) control-s))
       (error 'kernel-tests "where-is did not honor active command remapping"))))
+(let* ([higher (make-keymap 'higher-command)]
+       [lower (make-keymap 'lower-prefix)]
+       [control-f (make-key-stroke 'character (char->integer #\f) 4)]
+       [_higher (keymap-bind! higher (list control-x) 'higher-command)]
+       [_lower (keymap-bind! lower (list control-x control-f) 'lower-command)])
+  (let ([higher-sequences (keymap-where-is (list higher lower) 'higher-command)])
+    (unless (and (= (length higher-sequences) 1)
+                 (= (length (car higher-sequences)) 1)
+                 (key-stroke=? (caar higher-sequences) control-x)
+                 (null? (keymap-where-is (list higher lower) 'lower-command)))
+    (error 'kernel-tests
+           "where-is reported a lower prefix sequence blocked by a higher command"))))
 (let ([rejected? #f])
   (guard (condition [else (set! rejected? #t)])
     (make-input-layer 'package-name test-keymap #f 'pass))

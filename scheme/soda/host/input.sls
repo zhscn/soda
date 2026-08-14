@@ -200,19 +200,39 @@
                 (map (lambda (keymap)
                        (map car (keymap-binding-entries keymap)))
                      maps)))]
+           ;; Introspection must preserve the resolver's incremental prefix
+           ;; semantics.  A higher map may turn the first key of a lower-map
+           ;; sequence into a command, making the longer sequence impossible
+           ;; to enter even though its full binding still exists in storage.
+           [resolve-prefix
+            (lambda (sequence)
+              (let loop ([remaining maps])
+                (and (pair? remaining)
+                     (let ([keymap (car remaining)])
+                       (cond
+                         [(keymap-lookup keymap sequence #f)
+                          => (lambda (binding) (cons 'command binding))]
+                         [(keymap-prefix? keymap sequence) (cons 'prefix #t)]
+                         [else (loop (cdr remaining))])))))]
+           [remap-command
+            (lambda (binding)
+              (let loop ([remaining maps])
+                (if (null? remaining)
+                    binding
+                    (or (keymap-remap (car remaining) binding #f)
+                        (loop (cdr remaining))))))]
            [effective-command
             (lambda (sequence)
-              (let ([binding
-                     (let loop ([remaining maps])
-                       (and (pair? remaining)
-                            (or (keymap-lookup (car remaining) sequence #f)
-                                (loop (cdr remaining)))))])
-                (and binding
-                     (let loop ([remaining maps])
-                       (if (null? remaining)
-                           binding
-                           (or (keymap-remap (car remaining) binding #f)
-                               (loop (cdr remaining))))))))])
+              (let loop ([remaining sequence] [prefix '()])
+                (and (pair? remaining)
+                     (let* ([next (append prefix (list (car remaining)))]
+                            [result (resolve-prefix next)])
+                       (and result
+                            (if (null? (cdr remaining))
+                                (and (eq? (car result) 'command)
+                                     (remap-command (cdr result)))
+                                (and (eq? (car result) 'prefix)
+                                     (loop (cdr remaining) next))))))))])
       (filter (lambda (sequence) (eq? (effective-command sequence) command))
               sequences)))
 
