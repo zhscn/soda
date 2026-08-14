@@ -14,6 +14,7 @@
           surface-remove-view-window!
           surface-push-interaction-view!
           surface-pop-interaction-view!
+          surface-remove-interaction-view!
           surface-route-display-request!
           make-display-request
           display-request?
@@ -148,6 +149,14 @@
       (assertion-violation 'surface-pop-interaction-view!
                            "expected a Surface and ViewService" surface views))
     (and (surface-pop-interaction! surface)
+         (surface-active-context surface views)))
+
+  (define (surface-remove-interaction-view! surface views view-id)
+    (unless (and (surface? surface) (view-service? views) (identity? view-id))
+      (assertion-violation 'surface-remove-interaction-view!
+                           "invalid Surface, ViewService, or View identity"
+                           surface views view-id))
+    (and (surface-remove-interaction! surface view-id)
          (surface-active-context surface views)))
 
   (define (window-for-buffer surface views buffer-id)

@@ -10,6 +10,7 @@
           make-remove-window-operation
           make-push-interaction-operation
           make-pop-interaction-operation
+          make-remove-interaction-operation
           make-display-request-operation
           make-resize-surface-operation
           make-invalidate-surface-operation

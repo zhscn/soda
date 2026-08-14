@@ -1945,7 +1945,27 @@
                (not (eq? (frame-cell-face (frame-cell-at frame 4 0))
                          'mode-line)))
     (error 'kernel-tests
-           "interaction Window did not reserve root, mode-line, and echo rows")))
+           "interaction Window did not reserve root, mode-line, and echo rows"))
+  (surface-set-feedback!
+    surface (make-user-feedback "older feedback" 'warning 'sticky))
+  (surface-push-interaction!
+    surface (view-id root-view) '(5 0 10 1))
+  (unless (surface-remove-interaction! surface (view-id prompt-view))
+    (error 'kernel-tests "specific interaction View was not removed"))
+  (let* ([interactions (surface-interaction-windows surface)]
+         [hidden (surface-render-frame
+                   (render-surface surface (host-state-views host)))])
+    (unless (and (= (length interactions) 1)
+                 (= (window-view-id (car interactions)) (view-id root-view))
+                 (string=? (frame-cell-grapheme (frame-cell-at hidden 5 0)) " "))
+      (error 'kernel-tests
+             "non-top interaction removal or feedback suppression differs")))
+  (surface-remove-interaction! surface (view-id root-view))
+  (let ([restored
+         (surface-render-frame (render-surface surface (host-state-views host)))])
+    (unless (string=? (frame-cell-grapheme (frame-cell-at restored 5 0)) "o")
+      (error 'kernel-tests
+             "feedback did not return after the interaction closed"))))
 
 ;; A ViewPlugin may project InputState even though core rendering does not.
 ;; Its published projection generation must invalidate only that View's render

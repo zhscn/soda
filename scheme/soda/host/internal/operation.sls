@@ -10,6 +10,7 @@
           make-remove-window-operation
           make-push-interaction-operation
           make-pop-interaction-operation
+          make-remove-interaction-operation
           make-display-request-operation
           make-resize-surface-operation
           make-invalidate-surface-operation
@@ -85,6 +86,13 @@
     (unless (identity? surface-id)
       (assertion-violation 'make-pop-interaction-operation "invalid Surface identity" surface-id))
     (%make-host-operation 'pop-interaction surface-id #f))
+
+  (define (make-remove-interaction-operation surface-id view-id)
+    (unless (and (identity? surface-id) (identity? view-id))
+      (assertion-violation 'make-remove-interaction-operation
+                           "invalid Surface or View identity"
+                           surface-id view-id))
+    (%make-host-operation 'remove-interaction surface-id view-id))
 
   (define (make-display-request-operation surface-id request)
     (unless (and (identity? surface-id) (display-request? request))

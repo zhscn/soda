@@ -37,6 +37,9 @@
            surface views (car value) (cadr value)))]
       [(pop-interaction)
        (surface-pop-interaction-view! surface views)]
+      [(remove-interaction)
+       (surface-remove-interaction-view!
+         surface views (host-operation-value operation))]
       [(display-request)
        (surface-route-display-request!
          surface views (host-operation-value operation))]

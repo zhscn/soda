@@ -43,6 +43,7 @@
           package-host-replace-window-view!
           package-host-push-interaction-view!
           package-host-pop-interaction-view!
+          package-host-remove-interaction-view!
           package-host-publish-feedback!
           package-host-publish-buffer-presentation!
           package-host-register-buffer-presentation-projector!
@@ -433,6 +434,11 @@
     (dispatcher-dispatch-host!
       (host-state-dispatch (package-host-state host))
       (make-pop-interaction-operation surface-id)))
+
+  (define (package-host-remove-interaction-view! host surface-id view-id)
+    (dispatcher-dispatch-host!
+      (host-state-dispatch (package-host-state host))
+      (make-remove-interaction-operation surface-id view-id)))
 
   (define (package-host-publish-feedback! host surface-id feedback)
     (unless (and (package-host? host) (user-feedback? feedback))

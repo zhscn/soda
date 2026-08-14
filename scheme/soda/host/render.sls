@@ -575,13 +575,15 @@
                  (shortcut-hint-text (surface-shortcut-hints surface)))]
            [input-message (surface-input-message surface views hint-message)]
            [feedback (surface-feedback surface)]
+           [interaction-active? (pair? (surface-interaction-windows surface))]
            [message
             ;; Active input guidance owns the echo area. A sticky feedback
             ;; value may survive input, but it must not obscure a prefix,
             ;; argument, minibuffer hint, or current shortcut guidance.
             (or input-message
-                (and feedback (user-feedback-text feedback))
-                position-message)]
+                (and (not interaction-active?) feedback
+                     (user-feedback-text feedback))
+                (and (not interaction-active?) position-message))]
            [message-face (if input-message 'message (feedback-face feedback))])
       (unless (and (nonnegative-exact-integer? width)
                    (nonnegative-exact-integer? height))

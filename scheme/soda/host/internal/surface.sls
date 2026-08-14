@@ -19,6 +19,7 @@
           surface-remove-window!
           surface-push-interaction!
           surface-pop-interaction!
+          surface-remove-interaction!
           surface-resize!
           surface-invalidate!
           surface-set-feedback!
@@ -250,6 +251,25 @@
              (surface-interaction-windows-set! surface (cdr interactions))
              (surface-generation-set! surface (+ 1 (surface-generation surface)))
              (car interactions)))))
+
+  (define (surface-remove-interaction! surface view-id)
+    (unless (and (surface? surface) (view-id? view-id))
+      (assertion-violation 'surface-remove-interaction!
+                           "invalid Surface or View identity" surface view-id))
+    (let ([target
+           (find
+             (lambda (window) (= (window-view-id window) view-id))
+             (surface-interaction-windows surface))])
+      (and target
+           (begin
+             (surface-interaction-windows-set!
+               surface
+               (filter
+                 (lambda (window) (not (eq? window target)))
+                 (surface-interaction-windows surface)))
+             (surface-generation-set!
+               surface (+ 1 (surface-generation surface)))
+             target))))
 
   ;; Rebuild only the ancestor path.  Existing leaves retain their identity,
   ;; which keeps an ActiveContext valid when a sibling is added or removed.

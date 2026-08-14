@@ -262,8 +262,10 @@
         (minibuffer-service-sessions-set!
           service (filter (lambda (item) (not (eq? item session)))
                           (minibuffer-service-sessions service)))
-        (package-host-pop-interaction-view!
-          (minibuffer-service-host service) (minibuffer-session-surface-id session))
+        (package-host-remove-interaction-view!
+          (minibuffer-service-host service)
+          (minibuffer-session-surface-id session)
+          (minibuffer-session-view-id session))
         (package-host-close-buffer! (minibuffer-service-host service)
                                     (minibuffer-session-buffer-id session)))))
   (define (invalid-input-feedback context)
