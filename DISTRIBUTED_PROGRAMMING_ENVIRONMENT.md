@@ -2,27 +2,63 @@
 
 ## 目的
 
-Soda 是一个随应用一起分发的分布式编程环境。单个原生可执行文件包含 Chez
-Scheme 运行时、基础 Scheme libraries、编辑器内核、静态分析、补全、REPL、检查器、
-调试器和 TUI 呈现能力。相同的程序可以作为交互式工作台、无界面控制端或计算节点
-启动。
+部署运维系统需要把目标配置、实际状态和跨节点动作组织成可重复的工作流。Terraform 式的环境
+以声明资源、读取状态、生成 plan 和 apply 变更覆盖可预先建模的操作；现场诊断、数据修复、迁移
+和新组件接入则经常需要立即增加查询与执行逻辑。扩展能力只有在运行环境同时提供 API 发现、
+编辑、验证、试运行和调试时，才能持续承载这类变化。
 
-系统把分布式节点视为可连接、可编程、可检查的 Scheme runtime，而不是只能接受固定
-命令的黑盒执行器。开发者可以从工作台编辑代码，把定义加载到一个运行时或一组运行时，
-执行分布式计算，并在远端计算发生 condition 时回到对应源码、栈帧和对象检查界面。
+Soda 把这套开发环境和被开发的程序一起分发。一个原生可执行文件包含 Chez Scheme runtime、
+静态分析、补全、REPL、检查器、调试器和 TUI。操作者可以编辑资源与动作定义，在单个节点试运行，
+查看 plan，再把同一份代码应用到 worker pool；远端 condition 会回到对应源码、栈帧和对象检查界面。
 
-这一设计覆盖以下能力：
+```text
+edit Scheme program -> analyze and complete -> plan -> apply to worker pool
+                                                        ├-> result stream
+                                                        └-> condition -> debugger
+```
 
-- 自包含、多平台的原生发行物；
-- 本地与远端持久 Scheme session；
-- 静态语义与运行时 binding 共同驱动的开发体验；
-- 版本化代码分发和增量开发 overlay；
-- worker pool、分布式 task 和结果流；
-- 远端 condition、栈帧、对象检查和恢复动作；
-- TUI、headless client 和自动化程序共享的开发协议。
+部署运维是这一环境的一个具体应用。相同的 capsule、session、远端求值、任务调度和 TUI 呈现机制
+也承载批处理、仿真、构建和其他分布式计算。跨节点边界传递可移植值、代码标识、task 和带生命周期
+的远端对象引用，不复制或持久化任意 Scheme heap。
 
-系统不把任意 Scheme heap 复制、迁移或持久化。跨节点边界传递可移植值、代码标识、
-task 和带生命周期的远端对象引用。
+## 方案比较
+
+这一环境的技术选择同时考虑发行物边界和开发模型。仅能执行动态代码不足以形成完整工作台；
+runtime、代码分发、API 发现、源码定位、检查器、调试器和呈现层需要使用一致的 identity 与生命周期。
+
+| 方案 | 分发模型 | 开发能力 | 适用边界 |
+|---|---|---|---|
+| 专用声明 DSL 与远端执行器 | 控制端和执行端可以保持精简 | schema、plan 和 apply 易于约束；临时逻辑需要扩展语言或外部工具 | 适合操作集合稳定、状态收敛优先的系统 |
+| Python | 解释器、项目环境、依赖和 native extension 共同构成发行物 | REPL、分析和调试成熟 | 适合依赖既有生态的应用；单文件自包含发行需要额外封装和版本约束 |
+| 嵌入式 Lua | runtime 小，易于静态链接和随宿主分发 | 动态加载和求值直接；补全、签名、源码索引与调试协议需要宿主提供 metadata | 适合为稳定 native application 增加轻量脚本扩展 |
+| QuickJS | runtime 紧凑，JavaScript module 易于嵌入 | `eval`、closure 和 Promise 足以覆盖多数编排；Tree-sitter 与 API schema 可以提供实用静态工具 | 适合“native host + guest script”；module 代际、远端检查和 live debugging 由宿主定义 |
+| Guile | runtime、module tree、load path 和 native dependency 共同构成运行环境 | REPL、宏、module 和 Scheme 扩展能力完整 | 适合以系统 Scheme 环境为基础的动态应用 |
+| Common Lisp（如 SBCL）与 Emacs/SLIME/Swank | Lisp runtime、systems、native library 和编辑器配置共同组成开发环境 | Lisp image、远端求值、检查器、栈帧和增量开发能力强；Swank Crew 把这些能力扩展到 worker pool | 适合已有完整 Lisp 开发设施的环境；目标节点分发边界较大 |
+| Chez Scheme 与 Soda | Chez boot、Soda boot、native ABI 和资源进入同一平台 executable | Scheme environment、静态语义、REPL、检查器、调试器和 TUI 使用同一对象模型 | 适合把应用本身做成可进入、可编程并可随程序分发的工作台 |
+
+### Swank Crew 参照
+
+[Swank Crew](https://github.com/brown/swank-crew) 是与本设计最接近的 Common Lisp 架构参照。
+master 通过 Swank 连接维护 worker pool，把 Lisp form 发送到远端 image，并提供 broadcast、parallel
+map/reduce 和持续产生结果的计算。需要在新 worker 上保持的 form 会进入 replay 序列；worker
+断线后，未完成求值可以迁移到其他连接。远端求值抛出异常时，调试事件经 master 转发到现有
+SLIME session，开发者可以从同一编辑器连接进入 worker 栈帧和调试上下文。具体接口位于
+[master.lisp](https://github.com/brown/swank-crew/blob/master/master.lisp) 和
+[worker.lisp](https://github.com/brown/swank-crew/blob/master/worker.lisp)。
+
+Soda 保留“运行时是可进入的 Lisp image”这一系统性质，并把分发与呈现边界收进同一个发行物。
+CodeContext 取代仅按执行历史 replay form 的代码身份，capsule 与 overlay hash chain 负责代码
+收敛，Soda TUI 直接承载源码、REPL、worker pool、检查器和调试器。工作台不要求目标环境另行安装
+Emacs、SLIME 或编辑器扩展。
+
+QuickJS 是嵌入脚本模型中的主要备选。若系统只要求配置、编排和少量现场扩展，JavaScript 加
+Tree-sitter、API schema 与 runtime binding catalog 可以覆盖大部分开发体验。该模型仍由 native
+host 拥有应用组合、生命周期和呈现，JavaScript 是被托管的 guest environment。
+
+Chez 适用于本设计的原因是 Scheme 同时拥有应用组合和开发环境。C/C++ 保留为窄 native
+mechanism，Scheme library、运行时 session、分布式 task、分析 metadata 与 TUI command 可以在
+同一语言层组合。平台 executable 提供稳定基座，capsule 和 session overlay 在该基座上提供可复现
+分发与 live development。
 
 ## 设计原则
 
