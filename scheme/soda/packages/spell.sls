@@ -16,13 +16,14 @@
           (soda kernel mode)
           (soda kernel view-state)
           (soda host command)
-          (soda host command-runtime)
+          (soda host command-message)
           (soda host feedback)
           (soda host buffer)
           (soda host input)
           (soda host input-event)
           (soda host location)
           (soda host package)
+          (soda host package-context)
           (soda host value)
           (soda host view)
           (soda packages generated-buffer)
@@ -38,7 +39,7 @@
   ;; process lifetime, stdin and event delivery.
   (define-record-type
     (spell-service %make-spell-service spell-service?)
-    (fields host owner processes keymap result-keymap result-mode authority
+    (fields host owner package-context processes keymap result-keymap result-mode authority
             (mutable generation spell-service-generation
                      spell-service-generation-set!)
             (mutable next-request-id spell-service-next-request-id
@@ -313,8 +314,8 @@
       (when (spell-finding? finding)
         (let ([source-context (open-finding! service finding context)])
           (when source-context
-            (command-runtime-enqueue!
-              (package-host-command-runtime (spell-service-host service))
+            (package-context-enqueue!
+              (spell-service-package-context service)
               (make-command-invoke-message
                 'spell.correct source-context (list finding) #t)))))
       (command-handled)))
@@ -384,8 +385,8 @@
            buffer)))
 
   (define (enqueue-spell-report! service request status output)
-    (command-runtime-enqueue-background!
-      (package-host-command-runtime (spell-service-host service))
+    (package-context-enqueue-background!
+      (spell-service-package-context service)
       (make-command-invoke-message
         'spell.publish-report (spell-request-context request)
         (list request status output) #f)))
@@ -424,13 +425,16 @@
                 (lambda (value) (make-interactive-ready (list value))))
               (assertion-violation 'spell.correct "missing spelling finding" finding))))))
 
-  (define (make-spell-service! host owner processes actions)
-    (unless (and (package-host? host) (owner? owner) (process-service? processes)
+  (define (make-spell-service! host package-context processes actions)
+    (unless (and (package-host? host)
+                 (package-context? package-context)
+                 (package-context-host? package-context host)
+                 (process-service? processes)
                  (buffer-item-action-service? actions))
       (assertion-violation 'make-spell-service!
-                           "expected host state, owner, process service, and item actions"
-                           host owner processes actions))
-    (let* ([runtime (package-host-command-runtime host)]
+                           "expected PackageHost, PackageContext, process service, and item actions"
+                           host package-context processes actions))
+    (let* ([owner (package-context-owner package-context)]
            [keymap (make-keymap 'spell)]
            [result-keymap (make-keymap 'spell-result)]
            [authority (make-edit-authority owner 'spell-report)]
@@ -448,7 +452,7 @@
               "Spell")]
            [service
             (%make-spell-service
-              host owner processes keymap result-keymap result-mode authority 0 0
+              host owner package-context processes keymap result-keymap result-mode authority 0 0
               (make-eqv-hashtable))])
       (package-host-register-mode! host owner result-mode)
       (keymap-bind! result-keymap (list (control-stroke #\r)) 'spell.correct-item)
@@ -458,8 +462,8 @@
       (buffer-item-action-register!
         actions owner 'spell 'correct
         (lambda (item context generation) (queue-correction! service item context generation)))
-      (define-command
-        runtime owner 'spell.correct-item (context)
+      (define-package-command
+        package-context 'spell.correct-item (context)
         (documentation "Prompt for a replacement of the spelling finding at point.")
         (class 'spell)
         (scope 'mode)
@@ -472,28 +476,28 @@
           (if item
               (or (buffer-item-action-invoke actions 'correct item context) (command-handled))
               (command-handled))))
-      (define-command
-        runtime owner 'spell.correct (context finding replacement)
+      (define-package-command
+        package-context 'spell.correct (context finding replacement)
         (documentation "Replace a spelling finding after choosing a correction.")
         (class 'tool)
         (visible #f)
         (interactive (make-interactive-plan (list (make-spell-replacement-reader))))
         (undo 'boundary)
         (apply-correction service context finding replacement))
-      (command-runtime-register-effect-handler!
-        runtime 'spell.check owner 'hunspell-check
+      (package-context-register-effect-handler!
+        package-context 'spell.check 'hunspell-check
         (lambda (ignored invocation effect)
           (start-spell-check! service (command-effect-payload effect))))
-      (define-command
-        runtime owner 'spell.publish-report (context request status output)
+      (define-package-command
+        package-context 'spell.publish-report (context request status output)
         (documentation "Publish a completed spelling report from native process output.")
         (class 'spell)
         (visible #f)
         (undo 'ignore)
         (show-spell-report! service request status output)
         (command-handled))
-      (define-command
-        runtime owner 'spell.check (context)
+      (define-package-command
+        package-context 'spell.check (context)
         (documentation "Check the active Buffer with Hunspell and show reported words.")
         (class 'tool)
         (undo 'ignore)

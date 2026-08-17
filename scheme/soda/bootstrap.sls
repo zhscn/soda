@@ -187,7 +187,8 @@
                [buffer-lists
                 (make-buffer-list-service! host package-context history buffer-item-actions)]
                [windows (make-window-service! host package-context)]
-               [spelling (make-spell-service! host owner processes buffer-item-actions)]
+               [spelling
+                (make-spell-service! host package-context processes buffer-item-actions)]
                [messages (make-message-service! host package-context)]
                [search
                 (make-search-service! host package-context)]
