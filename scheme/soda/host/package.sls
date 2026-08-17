@@ -5,6 +5,7 @@
           package-host-start-task!
           package-host-register-result-source!
           package-host-publish-result-source!
+          package-host-unregister-result-source!
           package-host-result-source
           package-host-result-sources
           package-host-register-analysis-provider!
@@ -138,6 +139,13 @@
                            "expected a PackageHost and Owner" host owner))
     (result-service-publish!
       (host-state-results (package-host-state host)) owner source))
+
+  (define (package-host-unregister-result-source! host owner id)
+    (unless (and (package-host? host) (owner? owner))
+      (assertion-violation 'package-host-unregister-result-source!
+                           "expected a PackageHost and Owner" host owner))
+    (result-service-unregister!
+      (host-state-results (package-host-state host)) owner id))
 
   (define package-host-result-source
     (case-lambda

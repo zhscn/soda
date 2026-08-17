@@ -12,6 +12,7 @@
           package-context-start-task!
           package-context-register-result-source!
           package-context-publish-result-source!
+          package-context-unregister-result-source!
           package-context-result-source
           package-context-result-sources
           package-context-command-definition
@@ -112,6 +113,11 @@
     (assert-context 'package-context-publish-result-source! context)
     (package-host-publish-result-source!
       (package-context-host context) (package-context-owner context) source))
+
+  (define (package-context-unregister-result-source! context id)
+    (assert-context 'package-context-unregister-result-source! context)
+    (package-host-unregister-result-source!
+      (package-context-host context) (package-context-owner context) id))
 
   (define package-context-result-source
     (case-lambda

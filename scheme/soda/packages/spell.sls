@@ -11,6 +11,7 @@
           (soda kernel location)
           (soda kernel range-set)
           (soda kernel resource)
+          (soda kernel result)
           (soda kernel selection)
           (soda kernel state)
           (soda kernel mode)
@@ -46,7 +47,8 @@
             (mutable next-request-id spell-service-next-request-id
                      spell-service-next-request-id-set!)
             (immutable latest-requests spell-service-latest-requests)
-            (immutable pending-output spell-service-pending-output)))
+            (immutable pending-output spell-service-pending-output)
+            (immutable result-sources spell-service-result-sources)))
 
   (define-record-type spell-request
     (fields id context buffer-id buffer-name buffer-revision source input))
@@ -205,7 +207,7 @@
                [text (string-append "Spelling report: "
                                     (spell-request-buffer-name request)
                                     "\nRET visits a finding; C-r replaces it; C-g closes this report.\n\n")]
-               [ranges '()] [serial 0])
+               [ranges '()] [items '()] [serial 0])
       (cond
         [(null? lines)
          (let ([tail
@@ -214,9 +216,10 @@
                                       (number->string status) "\n" output)]
                       [(null? ranges) "No unrecognized words.\n"]
                       [else ""])])
-           (cons (string-append text tail) (make-range-set (reverse ranges))))]
+           (list (string-append text tail) (make-range-set (reverse ranges))
+                 (reverse items)))]
         [(zero? (string-length (car lines)))
-         (loop (cdr lines) (+ source-line 1) text ranges serial)]
+         (loop (cdr lines) (+ source-line 1) text ranges items serial)]
         [(finding-line? (car lines))
          (let* ([protocol (car lines)]
                 [location (protocol-location protocol)]
@@ -248,10 +251,20 @@
                              start (+ start (bytevector-length (string->utf8 entry)))
                              (make-buffer-item 'spell serial 'finding finding '(visit) 'visit))
                            ranges)
-                     ranges)])
+                     ranges)]
+                [next-items
+                 (if finding
+                     (cons
+                       (make-result-item
+                         serial (spell-finding-location finding)
+                         (string-append "Line " (number->string source-line)
+                                        ": " (spell-finding-word finding))
+                         protocol 'info '((provider . spell)))
+                       items)
+                     items)])
            (loop (cdr lines) source-line (string-append text entry) next-ranges
-                 (+ serial 1)))]
-        [else (loop (cdr lines) source-line text ranges serial)])))
+                 next-items (+ serial 1)))]
+        [else (loop (cdr lines) source-line text ranges items serial)])))
 
   (define (spell-result-configuration service)
     (make-configuration
@@ -259,6 +272,28 @@
 
   (define (spell-result-key request)
     (make-buffer-key 'spell (spell-request-buffer-id request)))
+
+  (define (spell-result-source-id request)
+    (string->symbol
+      (string-append "spell." (number->string (spell-request-buffer-id request)))))
+
+  (define (publish-spell-results! service request items)
+    (let* ([buffer-id (spell-request-buffer-id request)]
+           [previous (hashtable-ref (spell-service-result-sources service) buffer-id #f)]
+           [next
+            (if previous
+                (result-source-revise previous items '((provider . spell)))
+                (make-result-source
+                  (spell-result-source-id request) 'spell
+                  (string-append "Spelling: " (spell-request-buffer-name request))
+                  0 items '((provider . spell))))])
+      (if previous
+          (package-context-publish-result-source!
+            (spell-service-package-context service) next)
+          (package-context-register-result-source!
+            (spell-service-package-context service) next))
+      (hashtable-set! (spell-service-result-sources service) buffer-id next)
+      next))
 
   ;; Completion order is not request order.  The service retains only the
   ;; latest request identity for each source Buffer, so an older native
@@ -384,7 +419,7 @@
                        (make-document "") configuration)))]
                 [generation (+ (spell-service-generation service) 1)]
                 [update
-                 (make-projection-update generation (car layout) (cdr layout) '() '())]
+                 (make-projection-update generation (car layout) (cadr layout) '() '())]
                 [published
                  (package-host-dispatch! host
                    (make-projection-transaction-spec
@@ -396,6 +431,7 @@
              (assertion-violation 'spell.process-event
                                   "spell projection was not published" request))
            (spell-service-generation-set! service generation)
+           (publish-spell-results! service request (caddr layout))
            (finish-spell-request! service request)
            (package-host-present-buffer-if-current!
              host (spell-service-owner service) buffer context configuration)
@@ -505,7 +541,7 @@
            [service
             (%make-spell-service
               host owner package-context processes keymap result-keymap result-mode authority 0 0
-              (make-eqv-hashtable) (make-eqv-hashtable))])
+              (make-eqv-hashtable) (make-eqv-hashtable) (make-eqv-hashtable))])
       (package-host-register-mode! host owner result-mode)
       (keymap-bind! result-keymap (list (control-stroke #\r)) 'spell.correct-item)
       (buffer-item-action-register!
@@ -572,5 +608,11 @@
                   (hashtable-ref (spell-service-latest-requests service) buffer-id #f)])
             (when request-id
               (hashtable-delete! (spell-service-latest-requests service) buffer-id)
-              (hashtable-delete! (spell-service-pending-output service) request-id)))))
+              (hashtable-delete! (spell-service-pending-output service) request-id))
+            (let ([source
+                   (hashtable-ref (spell-service-result-sources service) buffer-id #f)])
+              (when source
+                (package-context-unregister-result-source!
+                  package-context (result-source-id source))
+                (hashtable-delete! (spell-service-result-sources service) buffer-id))))))
       service)))

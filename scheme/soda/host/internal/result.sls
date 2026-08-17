@@ -3,6 +3,7 @@
           result-service?
           result-service-register!
           result-service-publish!
+          result-service-unregister!
           result-service-ref
           result-service-sources)
   (import (rnrs)
@@ -70,6 +71,21 @@
                              "ResultSource revision must advance" id))
       (result-entry-source-set! entry source)
       source))
+
+  (define (result-service-unregister! service owner id)
+    (unless (and (result-service? service) (owner? owner) (symbol? id))
+      (assertion-violation 'result-service-unregister!
+                           "expected a ResultService, Owner, and ResultSource id"
+                           service owner id))
+    (let ([entry (entry-ref service id)])
+      (and entry (eq? owner (result-entry-owner entry))
+           (begin
+             (hashtable-delete! (result-service-entries service) id)
+             (result-service-order-set!
+               service
+               (filter (lambda (candidate) (not (eq? candidate id)))
+                       (result-service-order service)))
+             #t))))
 
   (define result-service-ref
     (case-lambda
