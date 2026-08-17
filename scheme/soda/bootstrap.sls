@@ -129,7 +129,7 @@
           (raise condition)])
         (let* ([editing
                 (make-fundamental-editing!
-                  host owner)]
+                  host package-context)]
                [_fundamental-mode
                 (package-host-register-mode! host owner (fundamental-mode editing))]
                [whitespace

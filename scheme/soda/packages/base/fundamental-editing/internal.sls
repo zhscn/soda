@@ -26,11 +26,12 @@
           (soda packages base editing-context)
           (soda packages buffer-mode)
           (soda host command)
-          (soda host command-runtime)
+          (soda host command-message)
           (soda host context)
           (soda host input)
           (soda host input-event)
           (soda host package)
+          (soda host package-context)
           (soda host render)
           (soda host view)
           (soda host value)
@@ -51,11 +52,12 @@
 
   (define-syntax install-command!
     (syntax-rules (visible)
-      [(_ runtime owner name (context . arguments) documentation class (visible user-visible?) body ...)
-       (command-runtime-register-command!
-         runtime
+      [(_ package-context name (context . arguments) documentation class (visible user-visible?) body ...)
+       (package-context-register-command!
+         package-context
          (make-command-definition
-           name (lambda (context . arguments) body ...) owner
+           name (lambda (context . arguments) body ...)
+           (package-context-owner package-context)
            documentation class #f 'mode
            (make-command-policy
              name
@@ -63,15 +65,18 @@
              (if (memq class '(editing kill yank)) 'amalgamate 'ignore)
              #f #f)
            user-visible?))]
-      [(_ runtime owner name (context . arguments) documentation class body ...)
-       (install-command! runtime owner name (context . arguments) documentation class
+      [(_ package-context name (context . arguments) documentation class body ...)
+       (install-command! package-context name (context . arguments) documentation class
                          (visible #t) body ...)]))
 
-  (define (make-fundamental-editing! host owner)
-    (unless (and (package-host? host) (owner? owner))
-      (assertion-violation 'make-fundamental-editing! "expected a PackageHost and owner" host owner))
-    (let* ([runtime (package-host-command-runtime host)]
-           [keymap (make-keymap 'fundamental)]
+  (define (make-fundamental-editing! host package-context)
+    (unless (and (package-host? host)
+                 (package-context? package-context)
+                 (package-context-host? package-context host))
+      (assertion-violation 'make-fundamental-editing!
+                           "expected a PackageHost and its PackageContext"
+                           host package-context))
+    (let* ([keymap (make-keymap 'fundamental)]
            [mode
             (make-mode-spec
               'fundamental-mode 'major "Fundamental" #f
@@ -83,82 +88,82 @@
               '(editing motion selection kill yank viewport interface completion)
               "Fund")]
            [editing (%make-fundamental-editing keymap mode (make-kill-ring))])
-      (command-runtime-register-effect-handler!
-        runtime 'fundamental.record-kill owner 'fundamental-kill-ring
+      (package-context-register-effect-handler!
+        package-context 'fundamental.record-kill 'fundamental-kill-ring
         (lambda (service invocation effect)
           (record-kill! (fundamental-editing-kill-ring editing)
                         (command-effect-payload effect))))
-      (command-runtime-register-effect-handler!
-        runtime 'fundamental.redraw owner 'fundamental-surface-invalidation
+      (package-context-register-effect-handler!
+        package-context 'fundamental.redraw 'fundamental-surface-invalidation
         (lambda (ignored invocation effect)
           (package-host-invalidate-surface!
             host (command-effect-payload effect))))
       (install-command!
-        runtime owner 'fundamental.insert-text (context inserted)
+        package-context 'fundamental.insert-text (context inserted)
         "Insert committed text at every selection." 'editing (visible #f)
         (auto-fill-insert context inserted))
       (install-command!
-        runtime owner 'fundamental.newline (context)
+        package-context 'fundamental.newline (context)
         "Insert a newline and preserve leading indentation at every selection." 'editing
         (insert-newline context))
       (install-command!
-        runtime owner 'fundamental.insert-tab (context)
+        package-context 'fundamental.insert-tab (context)
         "Insert the configured indentation unit at every selection." 'editing
         (replace-selection context (indentation-bytes (context-indent-options context))))
       (install-command!
-        runtime owner 'fundamental.open-line (context)
+        package-context 'fundamental.open-line (context)
         "Insert a newline before every caret without moving it." 'editing
         (open-line context))
       (install-command!
-        runtime owner 'fundamental.delete-backward (context)
+        package-context 'fundamental.delete-backward (context)
         "Delete the active region or preceding grapheme." 'editing
         (delete-selection-or-character context 'backward))
       (install-command!
-        runtime owner 'fundamental.delete-forward (context)
+        package-context 'fundamental.delete-forward (context)
         "Delete the active region or following grapheme." 'editing
         (delete-selection-or-character context 'forward))
       (install-command!
-        runtime owner 'fundamental.backward-char (context)
+        package-context 'fundamental.backward-char (context)
         "Move every selection backward by one grapheme." 'motion
         (move-selection context 'backward))
       (install-command!
-        runtime owner 'fundamental.forward-char (context)
+        package-context 'fundamental.forward-char (context)
         "Move every selection forward by one grapheme." 'motion
         (move-selection context 'forward))
       (install-command!
-        runtime owner 'fundamental.backward-word (context)
+        package-context 'fundamental.backward-word (context)
         "Move every selection backward by one Unicode word." 'motion
         (move-word context 'backward))
       (install-command!
-        runtime owner 'fundamental.forward-word (context)
+        package-context 'fundamental.forward-word (context)
         "Move every selection forward by one Unicode word." 'motion
         (move-word context 'forward))
       (install-command!
-        runtime owner 'fundamental.beginning-of-line (context)
+        package-context 'fundamental.beginning-of-line (context)
         "Move every selection to the start of its logical line." 'motion
         (move-line-boundary context 'start))
       (install-command!
-        runtime owner 'fundamental.end-of-line (context)
+        package-context 'fundamental.end-of-line (context)
         "Move every selection to the end of its logical line." 'motion
         (move-line-boundary context 'end))
       (install-command!
-        runtime owner 'fundamental.previous-line (context)
+        package-context 'fundamental.previous-line (context)
         "Move every selection to the preceding logical line." 'motion
         (move-logical-line context -1))
       (install-command!
-        runtime owner 'fundamental.next-line (context)
+        package-context 'fundamental.next-line (context)
         "Move every selection to the following logical line." 'motion
         (move-logical-line context 1))
       (install-command!
-        runtime owner 'fundamental.beginning-of-buffer (context)
+        package-context 'fundamental.beginning-of-buffer (context)
         "Move every selection to the beginning of the Buffer." 'motion
         (move-buffer-boundary context #f))
       (install-command!
-        runtime owner 'fundamental.end-of-buffer (context)
+        package-context 'fundamental.end-of-buffer (context)
         "Move every selection to the end of the Buffer." 'motion
         (move-buffer-boundary context #t))
-      (define-command
-        runtime owner 'fundamental.goto-line (context line column)
+      (define-package-command
+        package-context 'fundamental.goto-line (context line column)
         (documentation "Move every selection to one-based LINE and optional COLUMN.")
         (class 'motion)
         (scope 'mode)
@@ -168,122 +173,122 @@
         (undo 'ignore)
         (goto-line-column context line column))
       (install-command!
-        runtime owner 'fundamental.indent-lines (context)
+        package-context 'fundamental.indent-lines (context)
         "Indent each logical line selected by the active regions." 'editing
         (shift-selected-lines context 'indent))
       (install-command!
-        runtime owner 'fundamental.unindent-lines (context)
+        package-context 'fundamental.unindent-lines (context)
         "Remove one tab or one configured space indentation from selected lines." 'editing
         (shift-selected-lines context 'unindent))
       (install-command!
-        runtime owner 'fundamental.matching-delimiter (context)
+        package-context 'fundamental.matching-delimiter (context)
         "Move point to the matching ASCII parenthesis, bracket, or brace." 'motion
         (move-matching-delimiter context))
       (install-command!
-        runtime owner 'fundamental.fill-paragraph (context)
+        package-context 'fundamental.fill-paragraph (context)
         "Reflow the active region or paragraph at point to eighty columns." 'editing
         (fill-paragraph context))
       (install-command!
-        runtime owner 'fundamental.transpose-characters (context)
+        package-context 'fundamental.transpose-characters (context)
         "Transpose the graphemes around point." 'editing
         (transpose-characters context))
       (install-command!
-        runtime owner 'fundamental.scroll-up (context)
+        package-context 'fundamental.scroll-up (context)
         "Scroll the Viewport toward the beginning of the Buffer." 'viewport
         (fundamental-scroll-visual context -1 #t))
       (install-command!
-        runtime owner 'fundamental.scroll-down (context)
+        package-context 'fundamental.scroll-down (context)
         "Scroll the Viewport toward the end of the Buffer." 'viewport
         (fundamental-scroll-visual context 1 #t))
       (install-command!
-        runtime owner 'fundamental.scroll-backward-line (context)
+        package-context 'fundamental.scroll-backward-line (context)
         "Scroll the Viewport backward by one visual row." 'viewport
         (fundamental-scroll-visual context -1 #f))
       (install-command!
-        runtime owner 'fundamental.scroll-forward-line (context)
+        package-context 'fundamental.scroll-forward-line (context)
         "Scroll the Viewport forward by one visual row." 'viewport
         (fundamental-scroll-visual context 1 #f))
       (install-command!
-        runtime owner 'fundamental.pointer-select (context)
+        package-context 'fundamental.pointer-select (context)
         "Select document content targeted by a pointer event." 'selection (visible #f)
         (fundamental-pointer-selection context))
       (install-command!
-        runtime owner 'fundamental.pointer-scroll (context amount page?)
+        package-context 'fundamental.pointer-scroll (context amount page?)
         "Scroll the targeted View from a pointer wheel event." 'viewport (visible #f)
         (fundamental-scroll-visual context amount page?))
       (install-command!
-        runtime owner 'fundamental.recenter (context)
+        package-context 'fundamental.recenter (context)
         "Center point vertically in the active Window." 'viewport
         (fundamental-recenter-viewport context 'center))
       (install-command!
-        runtime owner 'fundamental.recenter-top (context)
+        package-context 'fundamental.recenter-top (context)
         "Place point at the top of the active Window." 'viewport
         (fundamental-recenter-viewport context 'top))
       (install-command!
-        runtime owner 'fundamental.recenter-bottom (context)
+        package-context 'fundamental.recenter-bottom (context)
         "Place point at the bottom of the active Window." 'viewport
         (fundamental-recenter-viewport context 'bottom))
       (install-command!
-        runtime owner 'fundamental.move-to-window-top (context)
+        package-context 'fundamental.move-to-window-top (context)
         "Move point to the top visual row of the active Window." 'motion
         (fundamental-move-to-viewport-row context 'top))
       (install-command!
-        runtime owner 'fundamental.move-to-window-center (context)
+        package-context 'fundamental.move-to-window-center (context)
         "Move point to the center visual row of the active Window." 'motion
         (fundamental-move-to-viewport-row context 'center))
       (install-command!
-        runtime owner 'fundamental.move-to-window-bottom (context)
+        package-context 'fundamental.move-to-window-bottom (context)
         "Move point to the bottom visual row of the active Window." 'motion
         (fundamental-move-to-viewport-row context 'bottom))
       (install-command!
-        runtime owner 'fundamental.redraw (context)
+        package-context 'fundamental.redraw (context)
         "Request a fresh presentation of the active Surface." 'interface
         (let ([surface-id (command-context-surface-id context)])
           (if (and (integer? surface-id) (exact? surface-id) (>= surface-id 0))
               (make-command-effect 'fundamental.redraw surface-id)
               (command-handled))))
       (install-command!
-        runtime owner 'fundamental.set-mark (context)
+        package-context 'fundamental.set-mark (context)
         "Set the mark at every selection and activate the region." 'selection
         (fundamental-set-mark context))
       (install-command!
-        runtime owner 'fundamental.deactivate-mark (context)
+        package-context 'fundamental.deactivate-mark (context)
         "Deactivate every active region." 'selection
         (fundamental-deactivate-mark context))
       (install-command!
-        runtime owner 'fundamental.mark-whole-buffer (context)
+        package-context 'fundamental.mark-whole-buffer (context)
         "Select the whole Buffer." 'selection
         (fundamental-mark-whole-buffer context))
       (install-command!
-        runtime owner 'fundamental.exchange-point-and-mark (context)
+        package-context 'fundamental.exchange-point-and-mark (context)
         "Exchange point and mark in the primary region." 'selection
         (fundamental-exchange-point-and-mark context))
       (install-command!
-        runtime owner 'fundamental.copy-region (context)
+        package-context 'fundamental.copy-region (context)
         "Copy the primary active region to the kill ring and clipboard." 'kill
         (copy-region context))
       (install-command!
-        runtime owner 'fundamental.kill-region (context)
+        package-context 'fundamental.kill-region (context)
         "Kill the primary active region to the kill ring and clipboard." 'kill
         (kill-region context))
       (install-command!
-        runtime owner 'fundamental.kill-word (context)
+        package-context 'fundamental.kill-word (context)
         "Kill the active region or the following word." 'kill
         (kill-word context 'forward))
       (install-command!
-        runtime owner 'fundamental.backward-kill-word (context)
+        package-context 'fundamental.backward-kill-word (context)
         "Kill the active region or the preceding word." 'kill
         (kill-word context 'backward))
       (install-command!
-        runtime owner 'fundamental.kill-line (context)
+        package-context 'fundamental.kill-line (context)
         "Kill the active region or text through the next logical line boundary." 'kill
         (kill-line context))
       (install-command!
-        runtime owner 'fundamental.kill-whole-line (context)
+        package-context 'fundamental.kill-whole-line (context)
         "Kill the active region, or the complete current logical line." 'kill
         (kill-whole-line context))
       (install-command!
-        runtime owner 'fundamental.yank (context)
+        package-context 'fundamental.yank (context)
         "Insert the newest kill-ring entry at every selection." 'yank
         (yank context (fundamental-editing-kill-ring editing)))
       (install-fundamental-keymap! keymap)
