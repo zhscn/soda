@@ -4,6 +4,7 @@
           file-service-state
           file-service-host
           file-service-owner
+          file-service-package-context
           file-service-history
           file-keymap
           file-service-watch-service
@@ -18,6 +19,7 @@
       (immutable state file-service-state)
       (immutable host file-service-host)
       (immutable owner file-service-owner)
+      (immutable package-context file-service-package-context)
       (immutable history file-service-history)
       (immutable keymap file-keymap)
       (immutable watch-service file-service-watch-service)

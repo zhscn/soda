@@ -20,8 +20,9 @@
           (soda kernel state)
           (soda host buffer)
           (soda host command)
-          (soda host command-runtime)
+          (soda host command-message)
           (soda host package)
+          (soda host package-context)
           (soda packages base history)
           (soda packages file-format)
           (soda packages file-operation)
@@ -195,8 +196,8 @@
             ;; In particular, native I/O never opens a minibuffer or takes
             ;; focus from the current command.
             (when automatic?
-              (command-runtime-enqueue!
-                (package-host-command-runtime (file-service-host service))
+              (package-context-enqueue!
+                (file-service-package-context service)
                 (make-command-invoke-message
                   'file.external-auto-reload
                   context (list buffer-id (file-state-event-version event))
@@ -218,8 +219,8 @@
          (when events
            (for-each
              (lambda (state-event)
-               (command-runtime-enqueue-background!
-                 (package-host-command-runtime (file-service-host service))
+               (package-context-enqueue-background!
+                 (file-service-package-context service)
                  (make-command-invoke-message
                    'file.handle-state-event context (list state-event) #f)))
              events))
@@ -430,8 +431,8 @@
                   (if automatic? 'reloading 'pending))])
           (set-file-conflict! service buffer-id next)
           (when automatic?
-            (command-runtime-enqueue!
-              (package-host-command-runtime (file-service-host service))
+            (package-context-enqueue!
+              (file-service-package-context service)
               (make-command-invoke-message
                 'file.external-auto-reload context (list buffer-id version) #f)))))))
 

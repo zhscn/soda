@@ -175,7 +175,7 @@
                [_prefix-arguments
                 (make-prefix-argument-commands! package-context)]
                [files
-                (make-file-service! host owner history)]
+                (make-file-service! host package-context history)]
                [scheme-mode
                 (make-scheme-mode!
                   host files package-context

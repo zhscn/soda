@@ -37,9 +37,10 @@
           (soda kernel view-state)
           (soda kernel mode)
           (soda host command)
-          (soda host command-runtime)
+          (soda host command-message)
           (soda host buffer)
           (soda host package)
+          (soda host package-context)
           (soda host location)
           (soda host setting)
           (soda host value)
@@ -142,17 +143,19 @@
     (file-watch-service-add-listener!
       (file-service-watch-service service) owner procedure))
 
-  (define (install-file-command! runtime owner name documentation readers procedure)
-    (command-runtime-register-command! runtime
+  (define (install-file-command! package-context name documentation readers procedure)
+    (package-context-register-command! package-context
       (make-command-definition
-        name procedure owner documentation 'file (make-interactive-plan readers))))
+        name procedure (package-context-owner package-context)
+        documentation 'file (make-interactive-plan readers))))
 
   ;; FileService owns the save and resource-release effects, while Buffer kill
   ;; is a user operation over every Buffer kind.
-  (define (install-buffer-command! runtime owner name documentation readers procedure)
-    (command-runtime-register-command! runtime
+  (define (install-buffer-command! package-context name documentation readers procedure)
+    (package-context-register-command! package-context
       (make-command-definition
-        name procedure owner documentation 'buffer (make-interactive-plan readers))))
+        name procedure (package-context-owner package-context)
+        documentation 'buffer (make-interactive-plan readers))))
 
   (define (make-decision-request prompt)
     (make-choice-interaction-request
@@ -221,27 +224,29 @@
     (package-host-close-buffer-with-fallback!
       (file-service-host service) (file-service-owner service) target-id))
 
-  (define (make-file-service! host owner history)
-    (unless (and (package-host? host) (owner? owner)
+  (define (make-file-service! host package-context history)
+    (unless (and (package-host? host)
+                 (package-context? package-context)
+                 (package-context-host? package-context host)
                  (or (not history) (history? history)))
       (assertion-violation 'make-file-service! "invalid file service dependencies"
-                           host owner history))
-    (let* ([runtime (package-host-command-runtime host)]
+                           host package-context history))
+    (let* ([owner (package-context-owner package-context)]
            [keymap (make-file-keymap)]
            [watch-service (make-file-watch-service owner)]
            [service
             (make-file-service-value
-              (make-file-state) host owner history keymap watch-service #f
+              (make-file-state) host owner package-context history keymap watch-service #f
               (make-file-mode-registry))])
       (file-service-recovery-set!
         service
         (and history
              (make-recovery-service!
-               host owner history
+               host package-context history
                (lambda (buffer-id) (file-service-resource service buffer-id #f)))))
       (register-file-settings! host owner)
-      (command-runtime-register-effect-handler!
-        runtime 'file.external-resolution owner 'resolve-external-file
+      (package-context-register-effect-handler!
+        package-context 'file.external-resolution 'resolve-external-file
         (lambda (ignored invocation effect)
           (let ([request (command-effect-payload effect)])
             (if (automatic-reload-became-dirty? service request)
@@ -257,16 +262,16 @@
       ;; Native watchers decode immutable FileStateEvents only.  This command
       ;; is their command-loop handoff: it applies package policy after any
       ;; already queued user input and never opens an interaction by itself.
-      (define-command
-        runtime owner 'file.handle-state-event (context event)
+      (define-package-command
+        package-context 'file.handle-state-event (context event)
         (documentation "Apply one observed external file state event.")
         (class 'file)
         (visible #f)
         (undo 'ignore)
         (file-service-handle-state-event! service event context)
         (command-handled))
-      (define-command
-        runtime owner 'file.external-auto-reload (context buffer-id version)
+      (define-package-command
+        package-context 'file.external-auto-reload (context buffer-id version)
         (documentation "Reload an unmodified Buffer after a stable external change.")
         (class 'file)
         (visible #f)
@@ -274,8 +279,8 @@
         (make-command-effect
           'file.external-resolution
           (make-file-external-resolution buffer-id version 'reload #f #f)))
-      (define-command
-        runtime owner 'file.resolve-external-change
+      (define-package-command
+        package-context 'file.resolve-external-change
         (context buffer-id version action . arguments)
         (documentation "Resolve a changed-on-disk conflict without applying a stale decision.")
         (class 'file)
@@ -300,12 +305,12 @@
                'file.external-resolution
                (make-file-external-resolution
                  buffer-id version action destination destination-version)))]))
-      (command-runtime-register-effect-handler!
-        runtime 'file.visit owner 'open-file-buffer
+      (package-context-register-effect-handler!
+        package-context 'file.visit 'open-file-buffer
         (lambda (ignored invocation effect)
           (open-file-buffer! service (command-effect-payload effect))))
-      (command-runtime-register-effect-handler!
-        runtime 'file.location-open owner 'open-file-location
+      (package-context-register-effect-handler!
+        package-context 'file.location-open 'open-file-location
         (lambda (ignored invocation effect)
           (let ([request (command-effect-payload effect)])
             (unless (file-location-open? request)
@@ -334,8 +339,8 @@
           (lambda (location)
             (make-command-effect
               'file.location-open (make-file-location-open location)))))
-      (command-runtime-register-effect-handler!
-        runtime 'file.load owner 'bind-loaded-file
+      (package-context-register-effect-handler!
+        package-context 'file.load 'bind-loaded-file
         (lambda (ignored invocation effect)
           (let ([request (command-effect-payload effect)])
             (unless (file-load? request)
@@ -349,8 +354,8 @@
             (when (and (file-load-discard-history? request) history)
               (history-discard-buffer! history (file-load-buffer-id request)))
             (clear-recovery! service (file-load-buffer-id request)))))
-      (command-runtime-register-effect-handler!
-        runtime 'file.write owner 'write-file
+      (package-context-register-effect-handler!
+        package-context 'file.write 'write-file
         (lambda (ignored invocation effect)
           (let ([request (command-effect-payload effect)])
             (unless (file-write? request)
@@ -410,16 +415,16 @@
             (when history
               (history-mark-saved! history (file-write-buffer-id request)))
             (clear-recovery! service (file-write-buffer-id request)))))
-      (command-runtime-register-effect-handler!
-        runtime 'buffer.kill owner 'kill-buffer
+      (package-context-register-effect-handler!
+        package-context 'buffer.kill 'kill-buffer
         (lambda (ignored invocation effect)
           (let ([request (command-effect-payload effect)])
             (unless (file-close? request)
               (assertion-violation 'buffer.kill "invalid Buffer kill request" request))
             (close-buffer! service (file-close-buffer-id request)))))
-      (command-runtime-register-effect-handler!
-        runtime 'file.insert owner 'insert-file-contents
-        (lambda (runtime invocation effect)
+      (package-context-register-effect-handler!
+        package-context 'file.insert 'insert-file-contents
+        (lambda (ignored invocation effect)
           (let ([request (command-effect-payload effect)])
             (unless (file-insert? request)
               (assertion-violation 'file.insert "invalid file insert request" request))
@@ -438,20 +443,20 @@
                 (when
                   (package-host-command-context-current?
                     (file-service-host service) (file-insert-context request))
-                  (command-runtime-enqueue!
-                    runtime
+                  (package-context-enqueue!
+                    package-context
                     (make-command-invoke-message
                       'fundamental.insert-text
                       (file-insert-context request)
                       (list contents) #f))))))))
-      (install-file-command! runtime owner 'file.visit "Visit a file in the active Window."
+      (install-file-command! package-context 'file.visit "Visit a file in the active Window."
         (list (make-file-name-reader
                 "Visit file: "
                 (lambda (context) (file-prompt-directory service context))))
         (lambda (context path)
           (make-command-effect 'file.visit
             (make-file-visit context (canonical-file-resource path)))))
-      (install-file-command! runtime owner 'file.insert
+      (install-file-command! package-context 'file.insert
         "Insert a file's contents at every active selection."
         (list (make-file-name-reader
                 "Insert file: "
@@ -460,7 +465,7 @@
           (make-command-effect
             'file.insert
             (make-file-insert context (canonical-file-resource path)))))
-      (install-file-command! runtime owner 'file.revert "Reload the active Buffer's visited file." '()
+      (install-file-command! package-context 'file.revert "Reload the active Buffer's visited file." '()
         (lambda (context)
           (let ([binding (file-service-binding service (command-context-buffer-id context) #f)])
             (if (not binding)
@@ -478,11 +483,11 @@
                           (make-file-load
                             (command-context-buffer-id context)
                             resource version format #t))))))))))
-      (install-file-command! runtime owner 'file.toggle-backup
+      (install-file-command! package-context 'file.toggle-backup
         "Toggle adjacent backup creation before writing an existing file."
         '()
         (lambda (context) (toggle-file-backup context)))
-      (install-file-command! runtime owner 'file.save "Write the active Buffer to its visited file."
+      (install-file-command! package-context 'file.save "Write the active Buffer to its visited file."
         (list (make-save-file-name-reader service) (make-overwrite-reader service))
         (lambda (context . arguments)
           (let ([binding (file-service-binding service (command-context-buffer-id context) #f)])
@@ -505,7 +510,7 @@
                         (command-context-buffer-id context)
                         (command-context-buffer-state context)
                         resource #f #t)))))))
-      (install-file-command! runtime owner 'file.save-as "Write the active Buffer to a file and visit it."
+      (install-file-command! package-context 'file.save-as "Write the active Buffer to a file and visit it."
         (list (make-file-name-reader
                 "Write file: "
                 (lambda (context) (file-prompt-directory service context)))
@@ -521,7 +526,7 @@
                     service (command-context-buffer-id context)
                     (command-context-buffer-state context) resource #f #t))
                 (command-handled)))))
-      (install-buffer-command! runtime owner 'buffer.kill "Kill the active Buffer."
+      (install-buffer-command! package-context 'buffer.kill "Kill the active Buffer."
         (list (make-buffer-close-target-reader)
               (make-buffer-close-decision-reader service))
         (lambda (context target-id decision)
