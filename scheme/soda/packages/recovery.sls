@@ -17,9 +17,10 @@
           (soda kernel state)
           (soda host buffer)
           (soda host command)
-          (soda host command-runtime)
+          (soda host command-message)
           (soda host dispatch)
           (soda host package)
+          (soda host package-context)
           (soda host value)
           (soda host view)
           (soda packages base history)
@@ -54,7 +55,7 @@
 
   (define-record-type
     (recovery-service %make-recovery-service recovery-service?)
-    (fields host owner history resource-for-buffer directory pending queued live-artifacts
+    (fields host owner package-context history resource-for-buffer directory pending queued live-artifacts
             (mutable pending-artifacts recovery-service-pending-artifacts-raw
                                        recovery-service-pending-artifacts-set!)))
 
@@ -179,8 +180,8 @@
       ;; Snapshot persistence is an idle/background effect.  The pending slot
       ;; retains only the newest document state, so a burst of edits neither
       ;; schedules repeated writes nor extends the latency of its key actions.
-      (command-runtime-enqueue-background!
-        (package-host-command-runtime (recovery-service-host service))
+      (package-context-enqueue-background!
+        (recovery-service-package-context service)
         (make-command-invoke-message
           'recovery.flush (make-command-context #f buffer-id 'recovery)
           (list buffer-id) #f))))
@@ -391,41 +392,55 @@
        (assertion-violation 'recovery.restore
                             "unknown recovery decision" decision)]))
 
+  (define (recovery-package-context host context-or-owner)
+    (cond
+      [(and (package-context? context-or-owner)
+            (package-context-host? context-or-owner host))
+       context-or-owner]
+      [(owner? context-or-owner)
+       ;; Preserve the host-internal fixture shape without reintroducing a
+       ;; raw runtime dependency into the recovery package.
+       (make-package-context host context-or-owner)]
+      [else
+       (assertion-violation 'make-recovery-service!
+                            "expected a PackageContext or Owner"
+                            context-or-owner)]))
+
   (define make-recovery-service!
     (case-lambda
-      [(host owner history resource-for-buffer)
+      [(host context-or-owner history resource-for-buffer)
        (make-recovery-service!
-         host owner history resource-for-buffer (default-recovery-directory))]
-      [(host owner history resource-for-buffer directory)
-       (unless (and (package-host? host) (owner? owner) (history? history)
+         host context-or-owner history resource-for-buffer (default-recovery-directory))]
+      [(host context-or-owner history resource-for-buffer directory)
+       (unless (and (package-host? host) (history? history)
                     (procedure? resource-for-buffer)
                     (string? directory) (positive? (string-length directory)))
          (assertion-violation 'make-recovery-service!
                               "invalid recovery service dependencies"
-                              host owner history directory))
-       (owner-assert-active 'make-recovery-service! owner)
-       (let* ([resolved
+                              host context-or-owner history directory))
+       (let* ([package-context (recovery-package-context host context-or-owner)]
+              [owner (package-context-owner package-context)]
+              [resolved
                (vfs-resolve-path
                  (vfs-directory-path (current-directory)) directory)]
               [service
                (%make-recovery-service
-                 host owner history resource-for-buffer resolved
+                 host owner package-context history resource-for-buffer resolved
                  (make-eqv-hashtable) (make-eqv-hashtable)
-                 (make-eqv-hashtable) (discover-artifacts resolved))]
-              [runtime (package-host-command-runtime host)])
-         (define-command
-           runtime owner 'recovery.flush (context buffer-id)
+                 (make-eqv-hashtable) (discover-artifacts resolved))])
+         (define-package-command
+           package-context 'recovery.flush (context buffer-id)
            (visible #f)
            (documentation "Persist the latest coalesced recovery snapshot.")
            (class 'recovery)
            (undo 'ignore)
            (make-command-effect 'recovery.flush buffer-id))
-         (command-runtime-register-effect-handler!
-           runtime 'recovery.flush owner 'write-recovery-snapshot
+         (package-context-register-effect-handler!
+           package-context 'recovery.flush 'write-recovery-snapshot
            (lambda (ignored invocation effect)
              (flush-pending! service (command-effect-payload effect))))
-         (define-command
-           runtime owner 'recovery.restore (context artifact decision)
+         (define-package-command
+           package-context 'recovery.restore (context artifact decision)
            (documentation "Recover, discard, or defer a recovery artifact.")
            (class 'recovery)
            (interactive
@@ -435,8 +450,8 @@
            (undo 'ignore)
            (make-command-effect
              'recovery.restore (list artifact decision context)))
-         (command-runtime-register-effect-handler!
-           runtime 'recovery.restore owner 'restore-recovery-artifact
+         (package-context-register-effect-handler!
+           package-context 'recovery.restore 'restore-recovery-artifact
            (lambda (ignored invocation effect)
              (let ([payload (command-effect-payload effect)])
                (handle-recovery-decision!
