@@ -11,9 +11,10 @@
           (soda kernel state)
           (soda kernel view-state)
           (soda host command)
-          (soda host command-runtime)
+          (soda host command-message)
           (soda host buffer)
           (soda host package)
+          (soda host package-context)
           (soda host input)
           (soda host input-event)
           (soda host value)
@@ -32,7 +33,7 @@
   ;; packages.
   (define-record-type
     (buffer-list-service %make-buffer-list-service buffer-list-service?)
-    (fields host owner history actions keymap result-keymap authority mode lists))
+    (fields host owner package-context history actions keymap result-keymap authority mode lists))
 
   (define-record-type buffer-list-state
     (fields (mutable generation buffer-list-state-generation
@@ -288,8 +289,8 @@
             ;; The File package owns save decisions and close replacement.
             ;; Preserve the result Buffer's context while passing the selected
             ;; Buffer as an explicit command target.
-            (command-runtime-enqueue!
-              (package-host-command-runtime (buffer-list-service-host service))
+            (package-context-enqueue!
+              (buffer-list-service-package-context service)
               (make-command-invoke-message 'buffer.kill context (list target-id) #t))
             (command-handled)))))
 
@@ -306,13 +307,16 @@
               (command-handled))
           (command-handled))))
 
-  (define (make-buffer-list-service! host owner history actions)
-    (unless (and (package-host? host) (owner? owner) (history? history)
+  (define (make-buffer-list-service! host package-context history actions)
+    (unless (and (package-host? host)
+                 (package-context? package-context)
+                 (package-context-host? package-context host)
+                 (history? history)
                  (buffer-item-action-service? actions))
       (assertion-violation 'make-buffer-list-service!
-                           "expected HostState, owner, History, and BufferItem actions"
-                           host owner history actions))
-    (let* ([runtime (package-host-command-runtime host)]
+                           "expected PackageHost, PackageContext, History, and BufferItem actions"
+                           host package-context history actions))
+    (let* ([owner (package-context-owner package-context)]
            [keymap (make-keymap 'buffer-list)]
            [result-keymap (make-keymap 'buffer-list-result)]
            [authority (make-edit-authority owner 'buffer-list-refresh)]
@@ -330,7 +334,7 @@
               "Buffers")]
            [service
             (%make-buffer-list-service
-              host owner history actions keymap result-keymap authority mode
+              host owner package-context history actions keymap result-keymap authority mode
               (make-eqv-hashtable))])
       (package-host-register-mode! host owner mode)
       (keymap-bind! keymap
@@ -353,45 +357,45 @@
         actions owner 'buffer-list 'close
         (lambda (item context generation)
           (close-buffer! service item context generation)))
-      (command-runtime-register-effect-handler!
-        runtime 'buffer-list.open owner 'open-buffer-list
+      (package-context-register-effect-handler!
+        package-context 'buffer-list.open 'open-buffer-list
         (lambda (ignored invocation effect)
           (show-buffer-list! service (command-effect-payload effect))))
-      (command-runtime-register-effect-handler!
-        runtime 'buffer-list.refresh owner 'refresh-buffer-list
+      (package-context-register-effect-handler!
+        package-context 'buffer-list.refresh 'refresh-buffer-list
         (lambda (ignored invocation effect)
           (refresh-buffer-list! service (command-effect-payload effect))))
-      (define-command
-        runtime owner 'buffer.list (context)
+      (define-package-command
+        package-context 'buffer.list (context)
         (documentation "Show live Buffers in a generated Buffer List.")
         (class 'buffer)
         (undo 'ignore)
         (make-command-effect 'buffer-list.open (make-buffer-list-open-request context)))
-      (define-command
-        runtime owner 'buffer.switch (context buffer)
+      (define-package-command
+        package-context 'buffer.switch (context buffer)
         (documentation "Switch to a live Buffer selected with completion.")
         (class 'buffer)
         (interactive
           (make-interactive-plan (list (make-buffer-switch-reader service))))
         (undo 'ignore)
         (switch-buffer! service context buffer))
-      (define-command
-        runtime owner 'buffer.bury (context)
+      (define-package-command
+        package-context 'buffer.bury (context)
         (documentation "Leave the active Buffer displayed elsewhere without killing it.")
         (class 'buffer)
         (undo 'ignore)
         (package-host-bury-window! host context)
         (command-handled))
-      (define-command
-        runtime owner 'buffer-list.refresh (context)
+      (define-package-command
+        package-context 'buffer-list.refresh (context)
         (documentation "Refresh the generated Buffer List.")
         (class 'buffer-list)
         (scope 'mode)
         (undo 'ignore)
         (make-command-effect
           'buffer-list.refresh (make-buffer-list-refresh-request context)))
-      (define-command
-        runtime owner 'buffer-list.close-item (context)
+      (define-package-command
+        package-context 'buffer-list.close-item (context)
         (documentation "Close the Buffer item at point.")
         (class 'buffer-list)
         (scope 'mode)
