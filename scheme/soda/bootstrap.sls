@@ -164,7 +164,7 @@
                   '(80 . 24))]
                [options
                 (make-editor-options-service!
-                  host owner)]
+                  host package-context)]
                [history
                 (make-history! host owner
                                (lambda (buffer-id modified?)

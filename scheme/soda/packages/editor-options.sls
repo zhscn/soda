@@ -14,12 +14,12 @@
           (soda packages edit-policy)
           (soda packages interaction)
           (soda host command)
-          (soda host command-runtime)
           (soda host buffer)
           (soda host feedback)
           (soda host input)
           (soda host input-event)
           (soda host package)
+          (soda host package-context)
           (soda host setting)
           (soda host value)
           (soda view text-layout-options))
@@ -252,11 +252,11 @@
           (lambda (value)
             (make-interactive-ready (list (parse-fill-column value))))))))
 
-  (define (install-command! runtime owner name documentation procedure . readers)
-    (command-runtime-register-command!
-      runtime
+  (define (install-command! package-context name documentation procedure . readers)
+    (package-context-register-command!
+      package-context
       (make-command-definition
-        name procedure owner documentation 'option
+        name procedure (package-context-owner package-context) documentation 'option
         (and (pair? readers) (make-interactive-plan (car readers))))))
 
   (define (parse-positive-integer input)
@@ -301,11 +301,14 @@
     (register-setting! host owner 'editor.read-only 'boolean #f 'buffer
       parse-boolean make-buffer-read-only-setting-extension))
 
-  (define (make-editor-options-service! host owner)
-    (unless (and (package-host? host) (owner? owner))
+  (define (make-editor-options-service! host package-context)
+    (unless (and (package-host? host)
+                 (package-context? package-context)
+                 (package-context-host? package-context host))
       (assertion-violation 'make-editor-options-service!
-                           "expected a PackageHost and owner" host owner))
-    (let* ([runtime (package-host-command-runtime host)]
+                           "expected a PackageHost and its PackageContext"
+                           host package-context))
+    (let* ([owner (package-context-owner package-context)]
            [keymap (make-keymap 'editor-options)]
            [service (%make-editor-options-service keymap)])
       (register-editor-settings! host owner)
@@ -315,48 +318,48 @@
           (buffer-read-only?
             (buffer-state-configuration (buffer-state buffer)))))
       (install-command!
-        runtime owner 'editor.toggle-auto-indent
+        package-context 'editor.toggle-auto-indent
         "Toggle automatic leading indentation for the active Buffer."
         (lambda (context) (reconfigure-auto-indent context)))
       (install-command!
-        runtime owner 'editor.toggle-read-only
+        package-context 'editor.toggle-read-only
         "Toggle whether ordinary commands may change the active Buffer."
         (lambda (context) (toggle-read-only context)))
       (install-command!
-        runtime owner 'editor.toggle-soft-wrap
+        package-context 'editor.toggle-soft-wrap
         "Toggle visual line wrapping for the active View."
         (lambda (context) (toggle-soft-wrap context)))
       (install-command!
-        runtime owner 'editor.toggle-line-numbers
+        package-context 'editor.toggle-line-numbers
         "Toggle line-number gutter for the active View."
         (lambda (context) (toggle-line-numbers context)))
       (install-command!
-        runtime owner 'editor.toggle-guide-column
+        package-context 'editor.toggle-guide-column
         "Toggle an 80-column guide for the active View."
         (lambda (context) (toggle-guide-column context)))
-      (install-command! runtime owner 'editor.toggle-constant-position
+      (install-command! package-context 'editor.toggle-constant-position
         "Toggle persistent line and column display for the active View."
         (lambda (context) (toggle-constant-position context)))
       (install-command!
-        runtime owner 'editor.toggle-tab-to-spaces
+        package-context 'editor.toggle-tab-to-spaces
         "Toggle whether Tab inserts spaces or a tab in the active Buffer."
         (lambda (context) (toggle-tab-to-spaces context)))
       (install-command!
-        runtime owner 'editor.set-indent-width
+        package-context 'editor.set-indent-width
         "Set the space indentation width for the active Buffer."
         (lambda (context width) (set-indent-width context width))
         (list (make-indent-width-reader)))
       (install-command!
-        runtime owner 'editor.toggle-auto-fill
+        package-context 'editor.toggle-auto-fill
         "Toggle automatic hard wrapping for the active Buffer."
         (lambda (context) (toggle-auto-fill context)))
       (install-command!
-        runtime owner 'editor.set-fill-column
+        package-context 'editor.set-fill-column
         "Set the automatic wrapping and paragraph fill column for the active Buffer."
         (lambda (context column) (set-fill-column context column))
         (list (make-fill-column-reader)))
       (install-command!
-        runtime owner 'editor.set-tab-width
+        package-context 'editor.set-tab-width
         "Set the visual tab width for the active View."
         (lambda (context width) (set-tab-width context width))
         (list (make-tab-width-reader)))
