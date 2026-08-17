@@ -184,9 +184,9 @@
                [buffer-item-actions (make-buffer-item-action-service)]
                [directories (make-directory-service! host owner files buffer-item-actions)]
                [buffer-lists (make-buffer-list-service! host owner history buffer-item-actions)]
-               [windows (make-window-service! host owner)]
+               [windows (make-window-service! host package-context)]
                [spelling (make-spell-service! host owner processes buffer-item-actions)]
-               [messages (make-message-service! host owner)]
+               [messages (make-message-service! host package-context)]
                [search
                 (make-search-service! host owner)]
                [word-completion

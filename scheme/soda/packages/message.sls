@@ -9,11 +9,11 @@
           (soda kernel view-state)
           (soda packages base text-motion)
           (soda host command)
-          (soda host command-runtime)
           (soda host feedback)
           (soda host input)
           (soda host input-event)
           (soda host package)
+          (soda host package-context)
           (soda host value))
 
   ;; MessageService owns informational commands and their keymap.  A command
@@ -86,20 +86,23 @@
                           (+ characters 1)))))))
         (lambda () (text-close! text)))))
 
-  (define (make-message-service! host owner)
-    (unless (and (package-host? host) (owner? owner))
-      (assertion-violation 'make-message-service! "expected package host and owner" host owner))
-    (let* ([runtime (package-host-command-runtime host)]
-           [keymap (make-keymap 'message)]
+  (define (make-message-service! host package-context)
+    (unless (and (package-host? host)
+                 (package-context? package-context)
+                 (package-context-host? package-context host))
+      (assertion-violation 'make-message-service!
+                           "expected a PackageHost and its PackageContext"
+                           host package-context))
+    (let* ([keymap (make-keymap 'message)]
            [service (%make-message-service keymap)])
-      (define-command
-        runtime owner 'message.show-position (context)
+      (define-package-command
+        package-context 'message.show-position (context)
         (documentation "Show the active selection's one-based line and grapheme column.")
         (class 'message)
         (undo 'ignore)
         (make-user-feedback (position-message context) 'info))
-      (define-command
-        runtime owner 'message.count-words (context)
+      (define-package-command
+        package-context 'message.count-words (context)
         (documentation "Show line, Unicode word, and grapheme counts for the region or Buffer.")
         (class 'message)
         (undo 'ignore)
