@@ -16,12 +16,12 @@
           (soda kernel syntax-profile)
           (soda kernel view-state)
           (soda host command)
-          (soda host command-runtime)
           (soda host analysis)
           (soda host buffer)
           (soda host input)
           (soda host input-event)
           (soda host package)
+          (soda host package-context)
           (soda host value)
           (soda packages analysis-ui)
           (soda packages buffer-mode)
@@ -249,13 +249,15 @@
         (buffer-state-generation state) (make-change-set length '()) #f
         (list (set-buffer-major-mode-effect spec)) '())))
 
-  (define (make-scheme-mode! host files owner parent)
+  (define (make-scheme-mode! host files package-context parent)
     (unless (and (package-host? host) (file-service? files)
-                 (owner? owner) (mode-spec? parent)
+                 (package-context? package-context)
+                 (package-context-host? package-context host)
+                 (mode-spec? parent)
                  (eq? (mode-spec-kind parent) 'major))
       (assertion-violation 'make-scheme-mode!
-                           "expected PackageHost, FileService, owner, and parent major mode"))
-    (let* ([runtime (package-host-command-runtime host)]
+                           "expected PackageHost, FileService, PackageContext, and parent major mode"))
+    (let* ([owner (package-context-owner package-context)]
            [profile (make-scheme-syntax-profile)]
            [keymap (make-keymap 'scheme-mode)]
            [highlight-plugin
@@ -281,8 +283,8 @@
       (package-host-register-mode! host owner spec)
       (package-host-register-analysis-provider!
         host owner (make-scheme-highlight-provider host))
-      (define-command
-        runtime owner 'scheme-mode.activate (context)
+      (define-package-command
+        package-context 'scheme-mode.activate (context)
         (documentation "Select Scheme major mode for the active Buffer.")
         (class 'mode)
         (undo 'ignore)

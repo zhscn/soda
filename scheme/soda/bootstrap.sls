@@ -178,7 +178,7 @@
                 (make-file-service! host owner history)]
                [scheme-mode
                 (make-scheme-mode!
-                  host files owner
+                  host files package-context
                   (fundamental-mode editing))]
                [processes (make-process-service! host package-context)]
                [buffer-item-actions (make-buffer-item-action-service)]
