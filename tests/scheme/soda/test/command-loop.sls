@@ -214,17 +214,27 @@
            [command-context
             (make-command-context
               #f #f #f #f #f #f #f #f '() (make-prefix-argument) #f 'test #f)]
-           [calls 0])
+           [calls 0]
+           [effects 0]
+           [post-hooks 0])
       (dynamic-wind
         (lambda () #f)
         (lambda ()
+          (package-context-register-effect-handler!
+            context 'package-context.effect 'package-context-effect
+            (lambda (ignored invocation effect)
+              (set! effects (+ effects 1))))
+          (package-context-add-command-hook!
+            context 'post-command 'package-context-post-command
+            (lambda (invocation result)
+              (set! post-hooks (+ post-hooks 1))))
           (define-package-command
             context 'package-context.exercise (context)
             (documentation "Exercise PackageContext command registration.")
             (class 'test)
             (undo 'ignore)
             (set! calls (+ calls 1))
-            (command-handled))
+            (make-command-effect 'package-context.effect #f))
           (command-runtime-start! runtime 'package-context.exercise command-context)
           (let ([rejected?
                  (guard (condition [else #t])
@@ -234,14 +244,23 @@
                        'package-context.foreign (lambda (ignored) (command-handled))
                        other-owner))
                    #f)])
-            (check (and (= calls 1) rejected?
+            (check (and (= calls 1) (= effects 1) (= post-hooks 1) rejected?
                         (command-runtime-command-definition
                           runtime 'package-context.exercise #f))
-                   "PackageContext did not own its command registrations"))
+                   "PackageContext did not own its command lifecycle registrations"))
+          (define-command
+            runtime other-owner 'package-context.after-close (context)
+            (documentation "Verify that Owner cleanup removes package hooks.")
+            (class 'test)
+            (undo 'ignore)
+            (command-handled))
           (owner-close! owner)
           (check (not (command-runtime-command-definition
                         runtime 'package-context.exercise #f))
-                 "PackageContext command survived owner cleanup"))
+                 "PackageContext command survived owner cleanup")
+          (command-runtime-start! runtime 'package-context.after-close command-context)
+          (check (= post-hooks 1)
+                 "PackageContext hook survived owner cleanup"))
         (lambda ()
           (when (owner-active? other-owner) (owner-close! other-owner))
           (host-state-close! host)))))
