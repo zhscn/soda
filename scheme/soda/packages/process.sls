@@ -16,11 +16,12 @@
           (soda kernel state)
           (soda kernel view-state)
           (soda host command)
-          (soda host command-runtime)
+          (soda host command-message)
           (soda host buffer)
           (soda host input)
           (soda host input-event)
           (soda host package)
+          (soda host package-context)
           (soda host value)
           (soda host view)
           (soda packages buffer-mode)
@@ -33,7 +34,7 @@
   ;; time; commands do not otherwise depend on terminal implementation.
   (define-record-type
     (process-service %make-process-service process-service?)
-    (fields host owner keymap authority mode processes
+    (fields host owner package-context keymap authority mode processes
             (mutable runtime process-service-runtime process-service-runtime-set!)))
 
   ;; A ProcessJob is the package boundary for a finite, pipe-backed external
@@ -117,14 +118,14 @@
           #f)))
 
   (define (enqueue-output! service context buffer-id bytes)
-    (command-runtime-enqueue-background!
-      (package-host-command-runtime (process-service-host service))
+    (package-context-enqueue-background!
+      (process-service-package-context service)
       (make-command-invoke-message
         'process.append-output context (list buffer-id bytes) #f)))
 
   (define (enqueue-exit! service context buffer-id status)
-    (command-runtime-enqueue-background!
-      (package-host-command-runtime (process-service-host service))
+    (package-context-enqueue-background!
+      (process-service-package-context service)
       (make-command-invoke-message
         'process.append-exit context (list buffer-id status) #f)))
 
@@ -227,11 +228,13 @@
                 #t]
                [else #f])))))
 
-  (define (make-process-service! host owner)
-    (unless (and (package-host? host) (owner? owner))
+  (define (make-process-service! host package-context)
+    (unless (and (package-host? host)
+                 (package-context? package-context)
+                 (package-context-host? package-context host))
       (assertion-violation 'make-process-service! "invalid process service dependencies"
-                           host owner))
-    (let* ([runtime (package-host-command-runtime host)]
+                           host package-context))
+    (let* ([owner (package-context-owner package-context)]
            [keymap (make-keymap 'process)]
            [authority (make-edit-authority owner 'process-output)]
            [profile (make-generated-buffer-profile #f authority #f '())]
@@ -244,22 +247,22 @@
               "Process")]
            [service
             (%make-process-service
-              host owner keymap authority mode (make-eqv-hashtable) #f)])
+              host owner package-context keymap authority mode (make-eqv-hashtable) #f)])
       (package-host-register-mode! host owner mode)
-      (command-runtime-register-effect-handler!
-        runtime 'process.spawn owner 'native-process-spawn
+      (package-context-register-effect-handler!
+        package-context 'process.spawn 'native-process-spawn
         (lambda (ignored invocation effect)
           (start-process! service (command-effect-payload effect))))
-      (define-command
-        runtime owner 'process.append-output (context buffer-id bytes)
+      (define-package-command
+        package-context 'process.append-output (context buffer-id bytes)
         (documentation "Append one native process output chunk to its generated Buffer.")
         (class 'process)
         (visible #f)
         (undo 'ignore)
         (append-output! service buffer-id bytes)
         (command-handled))
-      (define-command
-        runtime owner 'process.append-exit (context buffer-id status)
+      (define-package-command
+        package-context 'process.append-exit (context buffer-id status)
         (documentation "Append native process completion status to its generated Buffer.")
         (class 'process)
         (visible #f)
@@ -270,8 +273,8 @@
             (string-append "\n[Process exited with status "
                            (number->string status) "]\n")))
         (command-handled))
-      (define-command
-        runtime owner 'process.execute (context command)
+      (define-package-command
+        package-context 'process.execute (context command)
         (documentation "Execute a shell command and display its output in a Buffer.")
         (class 'process)
         (interactive (make-interactive-plan (list (make-process-request-reader))))

@@ -180,7 +180,7 @@
                 (make-scheme-mode!
                   host files owner
                   (fundamental-mode editing))]
-               [processes (make-process-service! host owner)]
+               [processes (make-process-service! host package-context)]
                [buffer-item-actions (make-buffer-item-action-service)]
                [directories (make-directory-service! host owner files buffer-item-actions)]
                [buffer-lists (make-buffer-list-service! host owner history buffer-item-actions)]
