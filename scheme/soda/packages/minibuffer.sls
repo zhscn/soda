@@ -35,7 +35,6 @@
           (soda kernel viewport)
           (soda kernel view-state)
           (soda host command)
-          (soda host command-runtime)
           (soda host context)
           (soda host dispatch)
           (soda host feedback)
@@ -43,6 +42,7 @@
           (soda host input-event)
           (soda host buffer)
           (soda host package)
+          (soda host package-context)
           (soda host view)
           (soda host value)
           (soda packages interaction)
@@ -745,10 +745,12 @@
         result
         (command-handled)))
 
-  (define (make-minibuffer-service! host interactions owner)
-    (unless (and (package-host? host) (interaction-service? interactions) (owner? owner))
+  (define (make-minibuffer-service! host interactions context)
+    (unless (and (package-host? host) (interaction-service? interactions)
+                 (package-context? context) (package-context-host? context host))
       (assertion-violation 'make-minibuffer-service! "invalid minibuffer dependencies"))
-    (let ([keymap (make-keymap 'minibuffer)])
+    (let ([keymap (make-keymap 'minibuffer)]
+          [owner (package-context-owner context)])
       (keymap-bind! keymap (list (make-key-stroke 'enter #f 0)) 'minibuffer.accept)
       (keymap-bind! keymap (list (control-stroke #\j)) 'minibuffer.accept)
       (keymap-bind!
@@ -803,61 +805,61 @@
                 '() '() '() #f)])
       (package-host-register-mode! host owner mode)
       (package-host-register-mode! host owner completion-mode)
-      (define-command
-        (package-host-command-runtime host) owner 'minibuffer.accept (context)
+      (define-package-command
+        context 'minibuffer.accept (command-context)
         (documentation "Accept the current minibuffer input.")
         (class 'minibuffer)
         (scope 'mode)
         (undo 'ignore)
         (submission-command-outcome
-          (minibuffer-service-submit! service context)))
-      (define-command
-        (package-host-command-runtime host) owner 'minibuffer.complete (context)
+          (minibuffer-service-submit! service command-context)))
+      (define-package-command
+        context 'minibuffer.complete (command-context)
         (documentation "Apply the current prompt completion without accepting the prompt.")
         (class 'minibuffer)
         (scope 'mode)
         (undo 'ignore)
-        (minibuffer-service-complete! service context))
-      (define-command
-        (package-host-command-runtime host) owner 'minibuffer.accept-input (context)
+        (minibuffer-service-complete! service command-context))
+      (define-package-command
+        context 'minibuffer.accept-input (command-context)
         (documentation "Accept the minibuffer input without using the selected completion.")
         (class 'minibuffer)
         (scope 'mode)
         (undo 'ignore)
         (submission-command-outcome
-          (minibuffer-service-submit-value! service context #f)))
-      (define-command
-        (package-host-command-runtime host) owner 'minibuffer.next-completion (context)
+          (minibuffer-service-submit-value! service command-context #f)))
+      (define-package-command
+        context 'minibuffer.next-completion (command-context)
         (documentation "Select the next minibuffer completion candidate.")
         (class 'minibuffer)
         (scope 'mode)
         (undo 'ignore)
         (minibuffer-service-move-completion! service 1)
         (command-handled))
-      (define-command
-        (package-host-command-runtime host) owner 'minibuffer.previous-completion (context)
+      (define-package-command
+        context 'minibuffer.previous-completion (command-context)
         (documentation "Select the previous minibuffer completion candidate.")
         (class 'minibuffer)
         (scope 'mode)
         (undo 'ignore)
         (minibuffer-service-move-completion! service -1)
         (command-handled))
-      (define-command
-        (package-host-command-runtime host) owner 'minibuffer.previous-history (context)
+      (define-package-command
+        context 'minibuffer.previous-history (command-context)
         (documentation "Replace minibuffer input with an older history entry.")
         (class 'minibuffer)
         (scope 'mode)
         (undo 'ignore)
-        (minibuffer-service-move-history service context 1))
-      (define-command
-        (package-host-command-runtime host) owner 'minibuffer.next-history (context)
+        (minibuffer-service-move-history service command-context 1))
+      (define-package-command
+        context 'minibuffer.next-history (command-context)
         (documentation "Replace minibuffer input with a newer history entry or the saved draft.")
         (class 'minibuffer)
         (scope 'mode)
         (undo 'ignore)
-        (minibuffer-service-move-history service context -1))
-      (define-command
-        (package-host-command-runtime host) owner 'minibuffer.cancel (context)
+        (minibuffer-service-move-history service command-context -1))
+      (define-package-command
+        context 'minibuffer.cancel (command-context)
         (documentation "Cancel the current minibuffer input.")
         (class 'minibuffer)
         (scope 'mode)

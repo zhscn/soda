@@ -2,6 +2,7 @@
   (export make-package-context
           package-context?
           package-context-owner
+          package-context-host?
           package-context-register-command!
           package-context-register-effect-handler!
           package-context-add-command-hook!
@@ -47,6 +48,11 @@
                            "expected a PackageHost and Owner" host owner))
     (owner-assert-active 'make-package-context owner)
     (%make-package-context host owner))
+
+  (define (package-context-host? context host)
+    (and (package-host? host)
+         (eq? (package-context-host (assert-context 'package-context-host? context))
+              host)))
 
   (define (package-context-register-command! context definition)
     (assert-context 'package-context-register-command! context)

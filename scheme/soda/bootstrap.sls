@@ -196,7 +196,7 @@
                [_quit-command
                 (install-application-quit-command!
                   (host-state-command-runtime state) owner files)]
-               [minibuffer (make-minibuffer-service! host interaction owner)]
+               [minibuffer (make-minibuffer-service! host interaction package-context)]
                [_keyboard-quit
                 (install-keyboard-quit-command! host owner interaction)]
                [_navigation
