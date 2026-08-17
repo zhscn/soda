@@ -106,7 +106,7 @@
             (make-task-service owner runtime command-runtime conditions buffers views surfaces dispatch)]
            [results (make-result-service)]
            [events (make-event-service runtime conditions)]
-           [state-slots (make-state-slot-service buffers conditions)]
+           [state-slots (make-state-slot-service buffers views surfaces conditions)]
            [analyses
             (make-analysis-service buffers runtime conditions dispatch)])
       (surface-service-set-remove-handler!
@@ -153,7 +153,12 @@
       (view-service-add-close-listener!
         views owner
         (lambda (view)
+          (state-slot-service-discard-view! state-slots view)
           (event-service-publish-view-closed! events view)))
+      (surface-service-add-remove-listener!
+        surfaces owner
+        (lambda (surface)
+          (state-slot-service-discard-surface! state-slots surface)))
       (command-runtime-add-hook!
         command-runtime 'execution-record owner 'event-command-finished
         (lambda (record)

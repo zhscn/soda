@@ -35,6 +35,7 @@
           surface-service-view-placed?
           surface-service-view-retained?
           surface-service-set-remove-handler!
+          surface-service-add-remove-listener!
           surface-service-remove!
           surface-service-prune-view!
           make-surface-input-message
@@ -45,6 +46,7 @@
           (soda kernel value)
           (soda host feedback)
           (soda host input-event)
+          (soda host value)
           (soda host internal window))
 
   (define-record-type
@@ -469,10 +471,12 @@
     (surface-service %make-surface-service surface-service?)
     (fields table
             (mutable remove-handler surface-service-remove-handler
-                     surface-service-remove-handler-set!)))
+                     surface-service-remove-handler-set!)
+            (mutable remove-listeners surface-service-remove-listeners
+                     surface-service-remove-listeners-set!)))
 
   (define (make-surface-service)
-    (%make-surface-service (make-eqv-hashtable) (lambda (surface) #f)))
+    (%make-surface-service (make-eqv-hashtable) (lambda (surface) #f) '()))
 
   (define (surface-service-set-remove-handler! service handler)
     (unless (and (surface-service? service) (procedure? handler))
@@ -480,6 +484,23 @@
                            "expected a SurfaceService and procedure"))
     (surface-service-remove-handler-set! service handler)
     #t)
+
+  (define (surface-service-add-remove-listener! service owner procedure)
+    (unless (and (surface-service? service) (owner? owner) (procedure? procedure))
+      (assertion-violation 'surface-service-add-remove-listener!
+                           "expected a SurfaceService, Owner, and listener"
+                           service owner procedure))
+    (owner-assert-active 'surface-service-add-remove-listener! owner)
+    (let ([listener procedure])
+      (surface-service-remove-listeners-set!
+        service (append (surface-service-remove-listeners service) (list listener)))
+      (make-registration
+        owner
+        (lambda ()
+          (surface-service-remove-listeners-set!
+            service
+            (filter (lambda (item) (not (eq? item listener)))
+                    (surface-service-remove-listeners service)))))))
 
   (define (surface-service-register! service surface)
     (unless (and (surface-service? service) (surface? surface))
@@ -538,6 +559,10 @@
            (begin
              (hashtable-delete! (surface-service-table service) id)
              ((surface-service-remove-handler service) surface)
+             (for-each
+               (lambda (listener)
+                 (guard (ignored [else #f]) (listener surface)))
+               (surface-service-remove-listeners service))
              surface))))
 
   (define (surface-service-prune-view! service view-id)
