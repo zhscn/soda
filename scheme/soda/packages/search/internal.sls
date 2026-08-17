@@ -15,23 +15,23 @@
           (soda packages search-matcher)
           (soda packages search-workflow)
           (soda host command)
-          (soda host command-runtime)
           (soda host buffer)
           (soda host feedback)
           (soda host package)
+          (soda host package-context)
           (soda host value)
           (soda host view)
           (soda packages interaction))
 
   (define install-command!
     (case-lambda
-      [(runtime owner name documentation readers procedure)
-       (install-command! runtime owner name documentation readers procedure #t)]
-      [(runtime owner name documentation readers procedure user-visible?)
-       (command-runtime-register-command!
-         runtime
+      [(package-context name documentation readers procedure)
+       (install-command! package-context name documentation readers procedure #t)]
+      [(package-context name documentation readers procedure user-visible?)
+       (package-context-register-command!
+         package-context
          (make-command-definition
-           name procedure owner documentation 'search
+           name procedure (package-context-owner package-context) documentation 'search
            (and readers (make-interactive-plan readers))
            'global (make-command-policy) user-visible?))]))
 
@@ -83,52 +83,54 @@
               (string-append "Search regular-expression matching "
                              (if enabled? "disabled" "enabled")) 'info))))
 
-  (define (make-search-service! host owner)
-    (unless (and (package-host? host) (owner? owner))
-      (assertion-violation 'make-search-service! "expected a PackageHost and owner"
-                           host owner))
-    (let* ([runtime (package-host-command-runtime host)]
-           [keymap (make-search-keymap)]
+  (define (make-search-service! host package-context)
+    (unless (and (package-host? host)
+                 (package-context? package-context)
+                 (package-context-host? package-context host))
+      (assertion-violation 'make-search-service!
+                           "expected a PackageHost and its PackageContext"
+                           host package-context))
+    (let* ([keymap (make-search-keymap)]
            [service
             (make-search-service-value
-              host keymap (make-eqv-hashtable) (make-eqv-hashtable))]
+              host package-context keymap (make-eqv-hashtable) (make-eqv-hashtable))]
            [forward-reader (make-interaction-string-reader 'search "Search: ")]
            [backward-reader (make-interaction-string-reader 'search "Search backward: ")]
            [replace-reader (make-interaction-string-reader 'search "Replace: ")]
            [decision-reader (make-query-replace-decision-reader)])
-      (install-command! runtime owner 'search.forward "Search forward for text."
+      (install-command! package-context 'search.forward "Search forward for text."
                         (list forward-reader)
         (lambda (context value)
           (let ([query (remember-query! service context (make-query context value 'forward))])
             (select-match context query #f))))
-      (install-command! runtime owner 'search.backward "Search backward for text."
+      (install-command! package-context 'search.backward "Search backward for text."
                         (list backward-reader)
         (lambda (context value)
           (let ([query (remember-query! service context (make-query context value 'backward))])
             (select-match context query #f))))
-      (install-command! runtime owner 'search.next "Repeat the latest search forward." #f
+      (install-command! package-context 'search.next "Repeat the latest search forward." #f
         (lambda (context)
           (let ([query (remembered-query service context 'forward)])
             (if query (select-match context query #t) (command-handled)))))
-      (install-command! runtime owner 'search.previous "Repeat the latest search backward." #f
+      (install-command! package-context 'search.previous "Repeat the latest search backward." #f
         (lambda (context)
           (let ([query (remembered-query service context 'backward)])
             (if query (select-match context query #t) (command-handled)))))
-      (install-command! runtime owner 'search.toggle-case-sensitive
+      (install-command! package-context 'search.toggle-case-sensitive
                         "Toggle case-sensitive matching for new searches in the active View." #f
         (lambda (context) (toggle-case-sensitive context)))
-      (install-command! runtime owner 'search.toggle-whole-word
+      (install-command! package-context 'search.toggle-whole-word
                         "Toggle whole-word matching for new searches in the active View." #f
         (lambda (context) (toggle-whole-word context)))
-      (install-command! runtime owner 'search.toggle-regular-expression
+      (install-command! package-context 'search.toggle-regular-expression
                         "Toggle POSIX ERE matching for new searches in the active View." #f
         (lambda (context) (toggle-regular-expression context)))
-      (install-command! runtime owner 'search.replace-all "Replace every search match in the active Buffer."
+      (install-command! package-context 'search.replace-all "Replace every search match in the active Buffer."
                         (list forward-reader replace-reader)
         (lambda (context value replacement)
           (let ([query (remember-query! service context (make-query context value 'forward))])
             (replace-all context query replacement))))
-      (install-command! runtime owner 'search.query-replace
+      (install-command! package-context 'search.query-replace
                         "Replace search matches one at a time in the active Buffer."
                         (list forward-reader replace-reader)
         (lambda (context value replacement)
@@ -136,20 +138,20 @@
             (if session
                 (make-command-effect 'search.query-replace.advance session)
                 (command-handled)))))
-      (install-command! runtime owner 'search.query-replace.decision
+      (install-command! package-context 'search.query-replace.decision
                         "Apply the current query replace decision."
                         (list decision-reader)
         (lambda (context value)
           (query-replace-decision! service context value))
         #f)
-      (command-runtime-register-effect-handler!
-        runtime 'search.query-replace.advance owner 'query-replace-advance
+      (package-context-register-effect-handler!
+        package-context 'search.query-replace.advance 'query-replace-advance
         (lambda (ignored invocation effect)
           (let ([session (command-effect-payload effect)])
             (when (query-replace-session? session)
               (queue-query-replace-decision! service session)))))
-      (command-runtime-add-hook!
-        runtime 'command-cancel owner 'query-replace-cancel
+      (package-context-add-command-hook!
+        package-context 'command-cancel 'query-replace-cancel
         (lambda (invocation)
           (when (eq? (command-definition-name (command-invocation-definition invocation))
                      'search.query-replace.decision)

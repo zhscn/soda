@@ -188,7 +188,7 @@
                [spelling (make-spell-service! host owner processes buffer-item-actions)]
                [messages (make-message-service! host package-context)]
                [search
-                (make-search-service! host owner)]
+                (make-search-service! host package-context)]
                [word-completion
                 (make-word-completion-service! host package-context)]
                [interaction

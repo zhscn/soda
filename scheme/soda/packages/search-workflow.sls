@@ -28,8 +28,9 @@
           (soda packages search-options)
           (soda host buffer)
           (soda host command)
-          (soda host command-runtime)
+          (soda host command-message)
           (soda host package)
+          (soda host package-context)
           (soda host view)
           (soda packages interaction))
 
@@ -39,6 +40,7 @@
   (define-record-type
     (search-service make-search-service-value search-service?)
     (fields (immutable host search-service-host)
+            (immutable package-context search-service-package-context)
             (immutable keymap search-keymap)
             (immutable queries search-service-queries)
             (immutable query-replaces search-service-query-replaces)))
@@ -185,8 +187,8 @@
                         (let ([next-context
                                (query-replace-current-context service session)])
                           (when next-context
-                            (command-runtime-enqueue!
-                              (package-host-command-runtime (search-service-host service))
+                            (package-context-enqueue!
+                              (search-service-package-context service)
                               (make-command-invoke-message
                                 'search.query-replace.decision next-context '() #t)))))))))))))
 
