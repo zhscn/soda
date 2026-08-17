@@ -12,6 +12,7 @@
         (soda kernel extension)
         (soda kernel option)
         (soda kernel location)
+        (soda kernel result)
         (soda kernel range-set)
         (soda kernel resource)
         (soda kernel selection)
@@ -1109,6 +1110,31 @@
                                 #f 'after '())
                  #f))
     (error 'kernel-tests "Location coordinate or revision mapping differs")))
+
+(let* ([resource (make-resource 'buffer "7")]
+       [target
+        (make-location resource
+                       (make-byte-position 3) (make-byte-position 6)
+                       12 'after '((origin . search)))]
+       [match
+        (make-result-item 4 target "match" "line 2" 'info '((query . "needle")))]
+       [summary
+        (make-result-item 9 #f "2 matches" "" 'hint '())]
+       [source
+        (make-result-source 'search.current 'search "Search results" 3
+                            (list match summary) '((query . "needle")))]
+       [revised (result-source-revise source (list match) '((query . "other")))])
+  (unless (and (result-item=? match
+                              (make-result-item 4 target "renamed" "" 'warning '()))
+               (eq? (result-source-item source 4) match)
+               (not (result-source-item source 5 #f))
+               (= (result-source-revision revised) 4)
+               (equal? (result-source-metadata revised) '((query . "other")))
+               (guard (condition [else #t])
+                 (make-result-source 'invalid 'search "Invalid" 0
+                                     (list match match) '())
+                 #f))
+    (error 'kernel-tests "ResultSource identity or revision contract differs")))
 
 (define document (make-document "hello"))
 
