@@ -3,6 +3,7 @@
   (import (rnrs)
           (soda bootstrap)
           (soda kernel document)
+          (soda kernel result)
           (soda kernel state)
           (soda host internal buffer)
           (soda host internal surface)
@@ -212,6 +213,7 @@
            [owner (make-owner 'package-context-test)]
            [other-owner (make-owner 'package-context-other)]
            [context (make-package-context (make-package-host host) owner)]
+           [other-context (make-package-context (make-package-host host) other-owner)]
            [command-context
             (make-command-context
               #f #f #f #f #f #f #f #f '() (make-prefix-argument) #f 'test #f)]
@@ -237,6 +239,21 @@
             (set! calls (+ calls 1))
             (make-command-effect 'package-context.effect #f))
           (command-runtime-start! runtime 'package-context.exercise command-context)
+          (let* ([source
+                  (make-result-source
+                    'package-context.results 'test "Package results" 0 '() '())]
+                 [updated (result-source-revise source '() '((state . updated)))])
+            (package-context-register-result-source! context source)
+            (package-context-publish-result-source! context updated)
+            (let ([rejected?
+                   (guard (condition [else #t])
+                     (package-context-publish-result-source! context source)
+                     #f)])
+              (check (and rejected?
+                          (eq? (package-context-result-source
+                                context 'package-context.results)
+                               updated))
+                     "PackageContext did not publish its ResultSource revision")))
           (let ([rejected?
                  (guard (condition [else #t])
                    (package-context-register-command!
@@ -259,6 +276,9 @@
           (check (not (command-runtime-command-definition
                         runtime 'package-context.exercise #f))
                  "PackageContext command survived owner cleanup")
+          (check (not (package-context-result-source
+                        other-context 'package-context.results #f))
+                 "PackageContext ResultSource survived owner cleanup")
           (command-runtime-start! runtime 'package-context.after-close command-context)
           (check (= post-hooks 1)
                  "PackageContext hook survived owner cleanup"))

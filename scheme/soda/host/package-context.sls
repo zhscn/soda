@@ -10,6 +10,10 @@
           package-context-enqueue!
           package-context-enqueue-background!
           package-context-start-task!
+          package-context-register-result-source!
+          package-context-publish-result-source!
+          package-context-result-source
+          package-context-result-sources
           package-context-command-definition
           package-context-command-available?
           package-context-available-user-command-definitions
@@ -98,6 +102,27 @@
     (package-host-start-task!
       (package-context-host context) (package-context-owner context)
       name scope origin result-command result-arguments start))
+
+  (define (package-context-register-result-source! context source)
+    (assert-context 'package-context-register-result-source! context)
+    (package-host-register-result-source!
+      (package-context-host context) (package-context-owner context) source))
+
+  (define (package-context-publish-result-source! context source)
+    (assert-context 'package-context-publish-result-source! context)
+    (package-host-publish-result-source!
+      (package-context-host context) (package-context-owner context) source))
+
+  (define package-context-result-source
+    (case-lambda
+      [(context id) (package-context-result-source context id #f)]
+      [(context id default)
+       (assert-context 'package-context-result-source context)
+       (package-host-result-source (package-context-host context) id default)]))
+
+  (define (package-context-result-sources context)
+    (assert-context 'package-context-result-sources context)
+    (package-host-result-sources (package-context-host context)))
 
   (define package-context-command-definition
     (case-lambda

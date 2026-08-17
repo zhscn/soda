@@ -3,6 +3,10 @@
           package-host?
           package-host-command-runtime
           package-host-start-task!
+          package-host-register-result-source!
+          package-host-publish-result-source!
+          package-host-result-source
+          package-host-result-sources
           package-host-register-analysis-provider!
           package-host-request-analysis!
           package-host-stop-analysis!
@@ -85,6 +89,7 @@
           (soda host internal setting)
           (soda host internal state)
           (soda host internal task)
+          (soda host internal result)
           (soda host internal context)
           (soda host internal surface)
           (soda host internal view)
@@ -119,6 +124,33 @@
     (task-service-start!
       (host-state-tasks (package-host-state host))
       owner name scope origin command arguments start))
+
+  (define (package-host-register-result-source! host owner source)
+    (unless (and (package-host? host) (owner? owner))
+      (assertion-violation 'package-host-register-result-source!
+                           "expected a PackageHost and Owner" host owner))
+    (result-service-register!
+      (host-state-results (package-host-state host)) owner source))
+
+  (define (package-host-publish-result-source! host owner source)
+    (unless (and (package-host? host) (owner? owner))
+      (assertion-violation 'package-host-publish-result-source!
+                           "expected a PackageHost and Owner" host owner))
+    (result-service-publish!
+      (host-state-results (package-host-state host)) owner source))
+
+  (define package-host-result-source
+    (case-lambda
+      [(host id) (package-host-result-source host id #f)]
+      [(host id default)
+       (unless (package-host? host)
+         (assertion-violation 'package-host-result-source "expected a PackageHost" host))
+       (result-service-ref (host-state-results (package-host-state host)) id default)]))
+
+  (define (package-host-result-sources host)
+    (unless (package-host? host)
+      (assertion-violation 'package-host-result-sources "expected a PackageHost" host))
+    (result-service-sources (host-state-results (package-host-state host))))
 
   (define (package-host-register-analysis-provider! host owner provider)
     (analysis-service-register!

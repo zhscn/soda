@@ -4,6 +4,7 @@
           host-state-owner
           host-state-runtime
           host-state-tasks
+          host-state-results
           host-state-buffers
           host-state-buffer-attachments
           host-state-analyses
@@ -41,6 +42,7 @@
           (soda host internal mode)
           (soda host runtime)
           (soda host internal task)
+          (soda host internal result)
           (soda host internal surface)
           (soda host value)
           (soda host internal view))
@@ -51,6 +53,7 @@
       (immutable owner host-state-owner)
       (immutable runtime host-state-runtime)
       (immutable tasks host-state-tasks)
+      (immutable results host-state-results)
       (immutable buffers host-state-buffers)
       (immutable buffer-attachments host-state-buffer-attachments)
       (immutable analyses host-state-analyses)
@@ -95,6 +98,7 @@
              (make-command-runtime owner commands dispatch runtime conditions)]
            [tasks
             (make-task-service owner runtime command-runtime conditions buffers views surfaces dispatch)]
+           [results (make-result-service)]
            [analyses
             (make-analysis-service buffers runtime conditions dispatch)])
       (surface-service-set-remove-handler!
@@ -165,7 +169,7 @@
                  #t)
                (buffer-attachment-service-destroy-buffer! buffer-attachments buffer))))
       (%make-host-state
-        owner runtime tasks buffers buffer-attachments analyses modes mode-catalog locations navigation
+        owner runtime tasks results buffers buffer-attachments analyses modes mode-catalog locations navigation
         presentations settings views surfaces commands
         command-runtime conditions dispatch (make-eqv-hashtable) #f #f)))
 
