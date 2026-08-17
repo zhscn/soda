@@ -24,6 +24,7 @@
           command-resume-message-value make-command-cancel-message
           command-cancel-message? command-cancel-message-invocation-id
           command-runtime-enqueue! command-runtime-enqueue-background!
+          command-runtime-enqueue-after-current!
           command-runtime-handle-message!)
   (import (soda host command-runtime-registry)
           (soda host command-runtime-execution)

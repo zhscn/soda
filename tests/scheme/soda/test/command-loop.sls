@@ -2,6 +2,7 @@
   (export run-command-loop-tests!)
   (import (rnrs)
           (soda bootstrap)
+          (soda kernel change)
           (soda kernel document)
           (soda kernel result)
           (soda kernel state)
@@ -16,6 +17,8 @@
           (soda host input-event)
           (soda host package)
           (soda host package-context)
+          (soda host event)
+          (soda host state-slot)
           (soda host task)
           (soda host internal state)
           (soda host render)
@@ -449,6 +452,71 @@
           (when (owner-active? owner) (owner-close! owner))
           (soda-application-close! application)))))
 
+  (define (test-package-event-and-state-slot-boundary)
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [owner (make-owner 'package-event-slot-test)]
+           [context (make-package-context (make-package-host state) owner)]
+           [command-context (application-context application)]
+           [buffer-id (command-context-buffer-id command-context)]
+           [slot
+            (make-state-slot
+              'event-slot 'buffer
+              (lambda (id buffer-state) 0)
+              (lambda (value changes old-state new-state)
+                (+ value 1)))]
+           [observed '()])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          ;; Bootstrap creates the scratch Buffer before this package begins
+          ;; observing, so drain those unrelated committed observations first.
+          (host-state-run! state)
+          (package-context-register-state-slot! context slot)
+          (package-context-state-slot-set! context slot buffer-id 10)
+          (package-context-subscribe!
+            context 'buffer/changed
+            (lambda (event) (= (editor-event-subject-id event) buffer-id))
+            (lambda (event) (error 'event-subscriber "isolated failure")))
+          (package-context-subscribe!
+            context 'buffer/changed
+            (lambda (event)
+              (= (editor-event-subject-id event) buffer-id))
+            (lambda (event)
+              (set! observed
+                (append observed
+                        (list
+                          (list (editor-event-sequence event)
+                                (editor-event-topic event)
+                                (package-context-state-slot-ref
+                                  context slot buffer-id)))))))
+          (command-runtime-start!
+            runtime 'fundamental.insert-text command-context
+            (list (string->utf8 "x")))
+          ;; Slot mapping is part of committing the Buffer update, while the
+          ;; observer is still pending on Runtime at this point.
+          (check (and (= (package-context-state-slot-ref context slot buffer-id) 11)
+                      (null? observed))
+                 "event delivery reentered the source transaction" observed)
+          (host-state-run! state)
+          (check (and (= (length observed) 1)
+                      (let ([item (car observed)])
+                        (and (integer? (car item)) (> (car item) 0)
+                             (eq? (cadr item) 'buffer/changed)
+                             (= (caddr item) 11))))
+                 "event did not observe the committed StateSlot value" observed)
+          (owner-close! owner)
+          (command-runtime-start!
+            runtime 'fundamental.insert-text command-context
+            (list (string->utf8 "y")))
+          (host-state-run! state)
+          (check (= (length observed) 1)
+                 "closed Owner retained an event subscription" observed))
+        (lambda ()
+          (when (owner-active? owner) (owner-close! owner))
+          (soda-application-close! application)))))
+
   (define (test-prefix-argument-render-feedback)
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
@@ -558,6 +626,7 @@
     (test-prefix-argument-transient-map)
     (test-package-context-command-boundary)
     (test-package-task-boundary)
+    (test-package-event-and-state-slot-boundary)
     (test-runtime-state-record-and-repeat)
     (test-prefix-argument-render-feedback)
     (test-undo-amalgamation)

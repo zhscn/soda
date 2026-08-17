@@ -15,6 +15,10 @@
           package-context-unregister-result-source!
           package-context-result-source
           package-context-result-sources
+          package-context-subscribe!
+          package-context-register-state-slot!
+          package-context-state-slot-ref
+          package-context-state-slot-set!
           package-context-command-definition
           package-context-command-available?
           package-context-available-user-command-definitions
@@ -29,6 +33,8 @@
           (soda host command-runtime)
           (soda host package)
           (soda host task)
+          (soda host event)
+          (soda host state-slot)
           (soda host value))
 
   ;; PackageContext binds one host capability to the Owner responsible for
@@ -89,7 +95,9 @@
          name where procedure depth)]))
 
   (define (package-context-enqueue! context message)
-    (command-runtime-enqueue! (context-runtime context) message))
+    (if (event-delivery-active?)
+        (command-runtime-enqueue-after-current! (context-runtime context) message)
+        (command-runtime-enqueue! (context-runtime context) message)))
 
   (define (package-context-enqueue-background! context message)
     (command-runtime-enqueue-background! (context-runtime context) message))
@@ -129,6 +137,39 @@
   (define (package-context-result-sources context)
     (assert-context 'package-context-result-sources context)
     (package-host-result-sources (package-context-host context)))
+
+  (define package-context-subscribe!
+    (case-lambda
+      [(context topic procedure)
+       (package-context-subscribe! context topic #f procedure)]
+      [(context topic selector procedure)
+       (assert-context 'package-context-subscribe! context)
+       (package-host-subscribe!
+         (package-context-host context) (package-context-owner context)
+         topic selector procedure)]))
+
+  (define (package-context-register-state-slot! context slot)
+    (assert-context 'package-context-register-state-slot! context)
+    (package-host-register-state-slot!
+      (package-context-host context) (package-context-owner context) slot))
+
+  (define package-context-state-slot-ref
+    (case-lambda
+      [(context slot buffer-id)
+       (package-context-state-slot-ref context slot buffer-id #f)]
+      [(context slot buffer-id default)
+       (assert-context 'package-context-state-slot-ref context)
+       (package-host-state-slot-ref
+         (package-context-host context) (package-context-owner context)
+         slot buffer-id default)]))
+
+  ;; Slot writes belong in command work.  Event handlers should enqueue that
+  ;; command rather than mutating a slot while delivering an observation.
+  (define (package-context-state-slot-set! context slot buffer-id value)
+    (assert-context 'package-context-state-slot-set! context)
+    (package-host-state-slot-set!
+      (package-context-host context) (package-context-owner context)
+      slot buffer-id value))
 
   (define package-context-command-definition
     (case-lambda

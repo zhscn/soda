@@ -8,6 +8,10 @@
           package-host-unregister-result-source!
           package-host-result-source
           package-host-result-sources
+          package-host-subscribe!
+          package-host-register-state-slot!
+          package-host-state-slot-ref
+          package-host-state-slot-set!
           package-host-register-analysis-provider!
           package-host-request-analysis!
           package-host-stop-analysis!
@@ -91,6 +95,8 @@
           (soda host internal state)
           (soda host internal task)
           (soda host internal result)
+          (soda host internal event)
+          (soda host internal state-slot)
           (soda host internal context)
           (soda host internal surface)
           (soda host internal view)
@@ -159,6 +165,40 @@
     (unless (package-host? host)
       (assertion-violation 'package-host-result-sources "expected a PackageHost" host))
     (result-service-sources (host-state-results (package-host-state host))))
+
+  ;; Events are observed after their source transaction returns to the Runtime.
+  ;; A package handler may enqueue a command, but is never called by Dispatcher.
+  (define (package-host-subscribe! host owner topic selector procedure)
+    (unless (and (package-host? host) (owner? owner))
+      (assertion-violation 'package-host-subscribe!
+                           "expected a PackageHost and Owner" host owner))
+    (event-service-subscribe!
+      (host-state-events (package-host-state host)) owner topic selector procedure))
+
+  (define (package-host-register-state-slot! host owner slot)
+    (unless (and (package-host? host) (owner? owner))
+      (assertion-violation 'package-host-register-state-slot!
+                           "expected a PackageHost and Owner" host owner))
+    (state-slot-service-register!
+      (host-state-state-slots (package-host-state host)) owner slot))
+
+  (define package-host-state-slot-ref
+    (case-lambda
+      [(host owner slot buffer-id)
+       (package-host-state-slot-ref host owner slot buffer-id #f)]
+      [(host owner slot buffer-id default)
+       (unless (and (package-host? host) (owner? owner))
+         (assertion-violation 'package-host-state-slot-ref
+                              "expected a PackageHost and Owner" host owner))
+       (state-slot-service-ref
+         (host-state-state-slots (package-host-state host)) owner slot buffer-id default)]))
+
+  (define (package-host-state-slot-set! host owner slot buffer-id value)
+    (unless (and (package-host? host) (owner? owner))
+      (assertion-violation 'package-host-state-slot-set!
+                           "expected a PackageHost and Owner" host owner))
+    (state-slot-service-set!
+      (host-state-state-slots (package-host-state host)) owner slot buffer-id value))
 
   (define (package-host-register-analysis-provider! host owner provider)
     (analysis-service-register!

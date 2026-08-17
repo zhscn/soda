@@ -4,6 +4,7 @@
           runtime-enqueue!
           runtime-enqueue-input!
           runtime-enqueue-priority!
+          runtime-enqueue-after-current!
           make-runtime-request
           runtime-request?
           runtime-request-id
@@ -93,6 +94,15 @@
     (unless (and (runtime? runtime) (not (runtime-closed? runtime)))
       (assertion-violation 'runtime-enqueue-priority! "runtime is closed" runtime))
     (runtime-front-set! runtime (cons message (runtime-front runtime)))
+    message)
+
+  ;; Use this lane for a committed observation.  It runs before unrelated
+  ;; input, but behind already scheduled priority work, and preserves the
+  ;; order in which a transaction published its events.
+  (define (runtime-enqueue-after-current! runtime message)
+    (unless (and (runtime? runtime) (not (runtime-closed? runtime)))
+      (assertion-violation 'runtime-enqueue-after-current! "runtime is closed" runtime))
+    (runtime-front-set! runtime (append (runtime-front runtime) (list message)))
     message)
 
   (define (runtime-enqueue-request! runtime owner scope generation payload)

@@ -21,6 +21,7 @@
           (soda host feedback)
           (soda host buffer)
           (soda host dispatch)
+          (soda host event)
           (soda host input)
           (soda host input-event)
           (soda host location)
@@ -296,7 +297,7 @@
       next))
 
   ;; Completion order is not request order.  The service retains only the
-  ;; latest request identity for each source Buffer, so an older native
+  ;; latest request for each source Buffer, so an older native
   ;; process can never replace a newer report after it finishes.
   (define (make-spell-request! service context)
     (let* ([buffer-state (command-context-buffer-state context)]
@@ -311,7 +312,7 @@
               (snapshot-string (buffer-state-document buffer-state))
               (snapshot-bytevector (buffer-state-document buffer-state)))])
       (spell-service-next-request-id-set! service next-id)
-      (hashtable-set! (spell-service-latest-requests service) buffer-id next-id)
+      (hashtable-set! (spell-service-latest-requests service) buffer-id request)
       request))
 
   (define (spell-request-current? service request)
@@ -319,7 +320,8 @@
          (let ([current
                 (hashtable-ref (spell-service-latest-requests service)
                                (spell-request-buffer-id request) #f)])
-           (and current (= current (spell-request-id request))))))
+           (and (spell-request? current)
+                (= (spell-request-id current) (spell-request-id request))))))
 
   (define (finish-spell-request! service request)
     (hashtable-delete! (spell-service-pending-output service)
@@ -327,6 +329,31 @@
     (when (spell-request-current? service request)
       (hashtable-delete! (spell-service-latest-requests service)
                          (spell-request-buffer-id request))))
+
+  ;; This runs as a command enqueued by a committed lifecycle event.  Keeping
+  ;; it out of the event callback makes request retirement ordered with every
+  ;; other editor action and prevents a Dispatcher publication from reaching
+  ;; into package-owned mutable tables.
+  (define (invalidate-spell-buffer-state! service buffer-id revision closing?)
+    (let ([request
+           (hashtable-ref (spell-service-latest-requests service) buffer-id #f)])
+      ;; A delayed event from an older revision must not retire a request that
+      ;; was started after the user continued editing.
+      (when (and (spell-request? request)
+                 (or closing?
+                     (and revision
+                          (> revision (spell-request-buffer-revision request)))))
+        (hashtable-delete! (spell-service-latest-requests service) buffer-id)
+        (hashtable-delete! (spell-service-pending-output service)
+                           (spell-request-id request))))
+    (when closing?
+      (let ([source
+             (hashtable-ref (spell-service-result-sources service) buffer-id #f)])
+        (when source
+          (package-context-unregister-result-source!
+            (spell-service-package-context service) (result-source-id source))
+          (hashtable-delete! (spell-service-result-sources service) buffer-id))))
+    (command-handled))
 
   (define (spell-source-current? service request)
     (let ([buffer
@@ -585,34 +612,40 @@
         (accept-spell-process-event! service request event)
         (command-handled))
       (define-package-command
+        package-context 'spell.invalidate-buffer-state (context buffer-id revision closing?)
+        (documentation "Retire spelling state made stale by a committed Buffer event.")
+        (class 'spell)
+        (visible #f)
+        (undo 'ignore)
+        (invalidate-spell-buffer-state! service buffer-id revision closing?))
+      (define-package-command
         package-context 'spell.check (context)
         (documentation "Check the active Buffer with Hunspell and show reported words.")
         (class 'tool)
         (undo 'ignore)
         (make-command-effect 'spell.check (make-spell-request! service context)))
       (keymap-bind! keymap (list (control-stroke #\t)) 'spell.check)
-      (package-host-add-update-listener!
-        host owner
-        (lambda (update)
-          (let* ([buffer-id (editor-update-buffer-id update)]
-                 [request-id
-                  (hashtable-ref (spell-service-latest-requests service) buffer-id #f)])
-            (when request-id
-              (hashtable-delete! (spell-service-latest-requests service) buffer-id)
-              (hashtable-delete! (spell-service-pending-output service) request-id)))))
-      (package-host-add-buffer-close-listener!
-        host owner
-        (lambda (buffer)
-          (let* ([buffer-id (buffer-id buffer)]
-                 [request-id
-                  (hashtable-ref (spell-service-latest-requests service) buffer-id #f)])
-            (when request-id
-              (hashtable-delete! (spell-service-latest-requests service) buffer-id)
-              (hashtable-delete! (spell-service-pending-output service) request-id))
-            (let ([source
-                   (hashtable-ref (spell-service-result-sources service) buffer-id #f)])
-              (when source
-                (package-context-unregister-result-source!
-                  package-context (result-source-id source))
-                (hashtable-delete! (spell-service-result-sources service) buffer-id))))))
+      ;; Observers only translate immutable events into later command work.
+      ;; They never mutate request tables while Dispatcher is publishing.
+      (package-context-subscribe!
+        package-context 'buffer/changed
+        (lambda (event)
+          (let ([buffer-state (editor-event-after event)])
+            (package-context-enqueue!
+              package-context
+              (make-command-invoke-message
+                'spell.invalidate-buffer-state
+                (make-command-context #f (editor-event-subject-id event) 'event)
+                (list (editor-event-subject-id event)
+                      (snapshot-revision (buffer-state-document buffer-state))
+                      #f))))))
+      (package-context-subscribe!
+        package-context 'buffer/closed
+        (lambda (event)
+          (package-context-enqueue!
+            package-context
+            (make-command-invoke-message
+              'spell.invalidate-buffer-state
+              (make-command-context #f (editor-event-subject-id event) 'event)
+              (list (editor-event-subject-id event) #f #t)))))
       service)))

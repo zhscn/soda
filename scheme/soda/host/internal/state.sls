@@ -5,6 +5,8 @@
           host-state-runtime
           host-state-tasks
           host-state-results
+          host-state-events
+          host-state-state-slots
           host-state-buffers
           host-state-buffer-attachments
           host-state-analyses
@@ -43,6 +45,8 @@
           (soda host runtime)
           (soda host internal task)
           (soda host internal result)
+          (soda host internal event)
+          (soda host internal state-slot)
           (soda host internal surface)
           (soda host value)
           (soda host internal view))
@@ -54,6 +58,8 @@
       (immutable runtime host-state-runtime)
       (immutable tasks host-state-tasks)
       (immutable results host-state-results)
+      (immutable events host-state-events)
+      (immutable state-slots host-state-state-slots)
       (immutable buffers host-state-buffers)
       (immutable buffer-attachments host-state-buffer-attachments)
       (immutable analyses host-state-analyses)
@@ -99,6 +105,8 @@
            [tasks
             (make-task-service owner runtime command-runtime conditions buffers views surfaces dispatch)]
            [results (make-result-service)]
+           [events (make-event-service runtime conditions)]
+           [state-slots (make-state-slot-service buffers conditions)]
            [analyses
             (make-analysis-service buffers runtime conditions dispatch)])
       (surface-service-set-remove-handler!
@@ -122,6 +130,49 @@
             conditions owner (list 'dispatcher source condition)
             (lambda arguments #f)
             '(dismiss))))
+      ;; Slot mappers run before the queued package event observes this update.
+      (dispatcher-add-listener!
+        dispatch owner
+        (lambda (update)
+          (state-slot-service-apply-editor-update! state-slots update)))
+      ;; Dispatcher listeners below maintain Host invariants.  This listener
+      ;; only constructs Runtime-delivered, non-reentrant package events.
+      (dispatcher-add-listener!
+        dispatch owner
+        (lambda (update)
+          (event-service-publish-editor-update! events update)))
+      (dispatcher-add-host-listener!
+        dispatch owner
+        (lambda (update)
+          (event-service-publish-host-update! events update)))
+      (buffer-service-add-close-listener!
+        buffers owner
+        (lambda (buffer)
+          (state-slot-service-discard-buffer! state-slots buffer)
+          (event-service-publish-buffer-closed! events buffer)))
+      (view-service-add-close-listener!
+        views owner
+        (lambda (view)
+          (event-service-publish-view-closed! events view)))
+      (command-runtime-add-hook!
+        command-runtime 'execution-record owner 'event-command-finished
+        (lambda (record)
+          (event-service-publish!
+            events 'command/finished 'command
+            (command-execution-record-invocation-id record)
+            #f record #f 'command-runtime)))
+      (command-runtime-add-hook!
+        command-runtime 'command-error owner 'event-command-failed
+        (lambda (invocation condition)
+          (event-service-publish!
+            events 'command/failed 'command (command-invocation-id invocation)
+            #f condition #f 'command-runtime)))
+      (command-runtime-add-hook!
+        command-runtime 'command-cancel owner 'event-command-cancelled
+        (lambda (invocation)
+          (event-service-publish!
+            events 'command/cancelled 'command (command-invocation-id invocation)
+            #f #f #f 'command-runtime)))
       (dispatcher-register-global-operation-handler!
         dispatch owner 'configuration-source-reload '(configuration)
         (lambda (request)
@@ -132,6 +183,7 @@
           (mode-service-reconcile!
             modes buffer #f
             (buffer-state-configuration (buffer-state buffer)))
+          (state-slot-service-initialize-buffer! state-slots buffer)
           (buffer-presentation-service-refresh!
             presentations (buffer-id buffer) buffer)))
       (dispatcher-add-listener!
@@ -169,7 +221,7 @@
                  #t)
                (buffer-attachment-service-destroy-buffer! buffer-attachments buffer))))
       (%make-host-state
-        owner runtime tasks results buffers buffer-attachments analyses modes mode-catalog locations navigation
+        owner runtime tasks results events state-slots buffers buffer-attachments analyses modes mode-catalog locations navigation
         presentations settings views surfaces commands
         command-runtime conditions dispatch (make-eqv-hashtable) #f #f)))
 
@@ -217,6 +269,11 @@
                   (host-state-tasks state) message)
                 (command-runtime-handle-message!
                   (host-state-command-runtime state) message))
-            (handler message)))
+            ;; Event delivery is Runtime-owned work.  Frontends still receive
+            ;; their native messages through HANDLER, but cannot accidentally
+            ;; suppress a queued package observation.
+            (if (procedure? message)
+                (message)
+                (handler message))))
         limit)))
 )
