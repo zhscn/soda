@@ -6,8 +6,9 @@
           history-discard-buffer!)
   (import (rnrs)
           (soda kernel change) (soda kernel document) (soda kernel extension) (soda kernel state)
-          (soda host command) (soda host command-runtime)
+          (soda host command)
           (soda host dispatch) (soda host package)
+          (soda host package-context)
           (soda host value))
   (define-record-type history-entry (fields undo redo semantic invocation-id))
   (define-record-type history
@@ -93,19 +94,38 @@
     (make-transaction-spec (command-context-buffer-id context) (command-context-view-id context)
                            (buffer-state-generation (command-context-buffer-state context))
                            changes #f '() (list (make-annotation 'history.replay #t)) #f #f))
-  (define (install-history-command! runtime owner name doc procedure)
-    (command-runtime-register-command! runtime
-      (make-command-definition name procedure owner doc 'history #f)))
+  (define (install-history-command! package-context name doc procedure)
+    (package-context-register-command!
+      package-context
+      (make-command-definition
+        name procedure (package-context-owner package-context) doc 'history #f)))
+
+  (define (history-package-context host context-or-owner)
+    (cond
+      [(and (package-context? context-or-owner)
+            (package-context-host? context-or-owner host))
+       context-or-owner]
+      [(owner? context-or-owner)
+       ;; Host-internal callers can retain the historical constructor shape
+       ;; while every registration still enters through PackageContext.
+       (make-package-context host context-or-owner)]
+      [else
+       (assertion-violation 'make-history!
+                            "expected a PackageContext or Owner"
+                            context-or-owner)]))
+
   (define make-history!
     (case-lambda
-      [(host owner)
-       (make-history! host owner (lambda (buffer-id modified?) #f))]
-      [(host owner publish-modified!)
+      [(host context-or-owner)
+       (make-history! host context-or-owner (lambda (buffer-id modified?) #f))]
+      [(host context-or-owner publish-modified!)
        (unless (procedure? publish-modified!)
          (assertion-violation 'make-history! "expected a presentation publisher"
                               publish-modified!))
-       (let ([value (make-history (make-eqv-hashtable) (make-eqv-hashtable)
-                                  (make-eqv-hashtable) publish-modified! #f)])
+       (let* ([package-context (history-package-context host context-or-owner)]
+              [owner (package-context-owner package-context)]
+              [value (make-history (make-eqv-hashtable) (make-eqv-hashtable)
+                                   (make-eqv-hashtable) publish-modified! #f)])
       (history-registration-set! value
         (package-host-add-update-listener! host owner
           (lambda (update)
@@ -114,8 +134,8 @@
                               (editor-update-annotations update))
                 (unless (change-set-empty? (editor-update-changes update))
                   (push-update! value update)))))))
-      (install-history-command! (package-host-command-runtime host)
-                                owner 'history.undo "Undo the last Buffer transaction."
+      (install-history-command! package-context
+                                'history.undo "Undo the last Buffer transaction."
         (lambda (context)
           (let* ([id (command-context-buffer-id context)] [items (stack-ref (history-undo value) id)])
             (if (null? items) (command-handled)
@@ -126,8 +146,8 @@
                   ((history-publish-modified! value) id
                    (history-modified? value id))
                   (replay context (history-entry-undo (car items))))))))
-      (install-history-command! (package-host-command-runtime host)
-                                owner 'history.redo "Redo the next Buffer transaction."
+      (install-history-command! package-context
+                                'history.redo "Redo the next Buffer transaction."
         (lambda (context)
           (let* ([id (command-context-buffer-id context)] [items (stack-ref (history-redo value) id)])
             (if (null? items) (command-handled)

@@ -166,7 +166,7 @@
                 (make-editor-options-service!
                   host package-context)]
                [history
-                (make-history! host owner
+                (make-history! host package-context
                                (lambda (buffer-id modified?)
                                  (package-host-publish-buffer-presentation!
                                    host buffer-id 'modified modified?)))]
