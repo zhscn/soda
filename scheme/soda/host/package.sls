@@ -2,6 +2,7 @@
   (export make-package-host
           package-host?
           package-host-command-runtime
+          package-host-start-task!
           package-host-register-analysis-provider!
           package-host-request-analysis!
           package-host-stop-analysis!
@@ -83,6 +84,7 @@
           (soda host internal presentation)
           (soda host internal setting)
           (soda host internal state)
+          (soda host internal task)
           (soda host internal context)
           (soda host internal surface)
           (soda host internal view)
@@ -106,6 +108,17 @@
 
   (define (package-host-command-runtime host)
     (host-state-command-runtime (package-host-state host)))
+
+  ;; PackageContext owns the public entry point for this operation.  The host
+  ;; capability keeps the mutable TaskService private while allowing Context
+  ;; to bind every task to one Owner.
+  (define (package-host-start-task! host owner name scope origin command arguments start)
+    (unless (and (package-host? host) (owner? owner))
+      (assertion-violation 'package-host-start-task!
+                           "expected a PackageHost and Owner" host owner))
+    (task-service-start!
+      (host-state-tasks (package-host-state host))
+      owner name scope origin command arguments start))
 
   (define (package-host-register-analysis-provider! host owner provider)
     (analysis-service-register!

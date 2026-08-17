@@ -15,6 +15,7 @@
           (soda host input-event)
           (soda host package)
           (soda host package-context)
+          (soda host task)
           (soda host internal state)
           (soda host render)
           (soda host runtime)
@@ -355,6 +356,78 @@
         (view-id view) (buffer-id buffer) (buffer-state buffer) (view-state view)
         #f '() (make-prefix-argument) #f 'test #f)))
 
+  (define (test-package-task-boundary)
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [owner (make-owner 'package-task-test)]
+           [context (make-package-context (make-package-host state) owner)]
+           [received '()]
+           [publish #f]
+           [stale-publish #f]
+           [cancelled-publish #f]
+           [external-cancelled? #f])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (define-package-command
+            context 'package-task.result (command-context value)
+            (documentation "Accept a value published by a managed package task.")
+            (class 'test)
+            (undo 'ignore)
+            (set! received
+                  (append received
+                          (list (list value (command-context-source command-context)))))
+            (command-handled))
+          (package-context-start-task!
+            context 'package-task.live 'view (application-context application)
+            'package-task.result (lambda (value) (list value))
+            (lambda (publish-result finish fail)
+              (set! publish publish-result)
+              #f))
+          (publish 'delivered)
+          (host-state-run! state)
+          (check (equal? received '((delivered task)))
+                 "Task result did not reenter through its command boundary" received)
+
+          ;; A Buffer-scoped task must not apply an answer computed from an
+          ;; older document generation.
+          (package-context-start-task!
+            context 'package-task.stale 'buffer (application-context application)
+            'package-task.result (lambda (value) (list value))
+            (lambda (publish-result finish fail)
+              (set! stale-publish publish-result)
+              #f))
+          (command-runtime-start!
+            runtime 'fundamental.insert-text (application-context application)
+            (list (string->utf8 "changed")))
+          (stale-publish 'discarded)
+          (host-state-run! state)
+          (check (equal? received '((delivered task)))
+                 "Task result survived its Buffer revision" received)
+
+          ;; Cancellation detaches the publisher before an external worker
+          ;; observes it, and invokes the worker cleanup at most once.
+          (let ([handle
+                 (package-context-start-task!
+                   context 'package-task.cancelled 'none
+                   (application-context application)
+                   'package-task.result (lambda (value) (list value))
+                   (lambda (publish-result finish fail)
+                     (set! cancelled-publish publish-result)
+                     (lambda () (set! external-cancelled? #t))))])
+            (check (task-handle-cancel! handle)
+                   "TaskHandle did not cancel an active task")
+            (cancelled-publish 'ignored)
+            (host-state-run! state)
+            (check (and external-cancelled?
+                        (not (task-handle-active? handle))
+                        (equal? received '((delivered task))))
+                   "Cancelled task continued to publish a result" received)))
+        (lambda ()
+          (when (owner-active? owner) (owner-close! owner))
+          (soda-application-close! application)))))
+
   (define (test-prefix-argument-render-feedback)
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
@@ -463,6 +536,7 @@
     (test-standard-context-argument-reader)
     (test-prefix-argument-transient-map)
     (test-package-context-command-boundary)
+    (test-package-task-boundary)
     (test-runtime-state-record-and-repeat)
     (test-prefix-argument-render-feedback)
     (test-undo-amalgamation)

@@ -3,6 +3,7 @@
           host-state?
           host-state-owner
           host-state-runtime
+          host-state-tasks
           host-state-buffers
           host-state-buffer-attachments
           host-state-analyses
@@ -39,6 +40,7 @@
           (soda host internal setting)
           (soda host internal mode)
           (soda host runtime)
+          (soda host internal task)
           (soda host internal surface)
           (soda host value)
           (soda host internal view))
@@ -48,6 +50,7 @@
     (fields
       (immutable owner host-state-owner)
       (immutable runtime host-state-runtime)
+      (immutable tasks host-state-tasks)
       (immutable buffers host-state-buffers)
       (immutable buffer-attachments host-state-buffer-attachments)
       (immutable analyses host-state-analyses)
@@ -90,6 +93,8 @@
            [settings (make-setting-service)]
            [command-runtime
              (make-command-runtime owner commands dispatch runtime conditions)]
+           [tasks
+            (make-task-service runtime command-runtime conditions buffers views surfaces)]
            [analyses
             (make-analysis-service buffers runtime conditions dispatch)])
       (surface-service-set-remove-handler!
@@ -159,7 +164,7 @@
                  #t)
                (buffer-attachment-service-destroy-buffer! buffer-attachments buffer))))
       (%make-host-state
-        owner runtime buffers buffer-attachments analyses modes mode-catalog locations navigation
+        owner runtime tasks buffers buffer-attachments analyses modes mode-catalog locations navigation
         presentations settings views surfaces commands
         command-runtime conditions dispatch (make-eqv-hashtable) #f #f)))
 
@@ -203,6 +208,8 @@
           (unless
             (or (analysis-service-handle-message!
                   (host-state-analyses state) message)
+                (task-service-handle-message!
+                  (host-state-tasks state) message)
                 (command-runtime-handle-message!
                   (host-state-command-runtime state) message))
             (handler message)))

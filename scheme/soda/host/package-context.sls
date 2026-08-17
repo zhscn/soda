@@ -9,6 +9,7 @@
           package-context-add-command-advice!
           package-context-enqueue!
           package-context-enqueue-background!
+          package-context-start-task!
           package-context-command-definition
           package-context-command-available?
           package-context-available-user-command-definitions
@@ -22,6 +23,7 @@
           (soda host command-declaration)
           (soda host command-runtime)
           (soda host package)
+          (soda host task)
           (soda host value))
 
   ;; PackageContext binds one host capability to the Owner responsible for
@@ -86,6 +88,16 @@
 
   (define (package-context-enqueue-background! context message)
     (command-runtime-enqueue-background! (context-runtime context) message))
+
+  ;; External callbacks receive only PUBLISH!, FINISH!, and FAIL! closures.
+  ;; The host validates the declared scope and enqueues RESULT-COMMAND later;
+  ;; task code cannot mutate editor state from its native callback.
+  (define (package-context-start-task!
+            context name scope origin result-command result-arguments start)
+    (assert-context 'package-context-start-task! context)
+    (package-host-start-task!
+      (package-context-host context) (package-context-owner context)
+      name scope origin result-command result-arguments start))
 
   (define package-context-command-definition
     (case-lambda
