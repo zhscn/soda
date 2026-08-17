@@ -210,7 +210,7 @@
                   buffer-lists windows default-keymap)]
                [_help
                 (make-help-service!
-                  host owner application-input-layers)]
+                  host package-context application-input-layers)]
                [_command-ui
                 (make-command-ui!
                   package-context application-input-layers)])

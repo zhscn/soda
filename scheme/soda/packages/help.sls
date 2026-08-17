@@ -7,11 +7,11 @@
           (soda kernel range-set)
           (soda kernel state)
           (soda host command)
-          (soda host command-runtime)
           (soda host buffer)
           (soda host input)
           (soda host input-event)
           (soda host package)
+          (soda host package-context)
           (soda host value)
           (soda host view)
           (soda packages buffer-mode)
@@ -21,10 +21,10 @@
           (soda packages buffer-item))
 
   (define (help-text service context)
-    (let* ([runtime (package-host-command-runtime (help-service-host service))]
-           [accesses
+    (let* ([accesses
             (command-context-command-accesses
-              runtime context (help-service-fallback-layers service))])
+              (help-service-context service)
+              context (help-service-fallback-layers service))])
       (string-append
         "Soda Help\n\n"
         "Commands available in the current context:\n\n"
@@ -47,7 +47,7 @@
             accesses)))))
 
   (define-record-type help-service
-    (fields host owner keymap mode fallback-layers authority
+    (fields host context owner keymap mode fallback-layers authority
             (mutable generation help-service-generation
                      help-service-generation-set!)))
 
@@ -93,12 +93,14 @@
           (assertion-violation
             'help.show "origin Window is no longer available" context)))))
 
-  (define (make-help-service! host owner fallback-layers)
-    (unless (and (package-host? host) (owner? owner)
+  (define (make-help-service! host context fallback-layers)
+    (unless (and (package-host? host) (package-context? context)
+                 (package-context-host? context host)
                  (list? fallback-layers) (for-all input-layer? fallback-layers))
       (assertion-violation 'make-help-service!
-                           "expected a PackageHost, Owner, and application InputLayers"))
-    (let* ([keymap (make-keymap 'help)]
+                           "expected a matching PackageContext and application InputLayers"))
+    (let* ([owner (package-context-owner context)]
+           [keymap (make-keymap 'help)]
            [authority (make-edit-authority owner 'help-refresh)]
            [profile
             (make-generated-buffer-profile
@@ -113,13 +115,13 @@
               "Help")]
            [service
             (make-help-service
-              host owner keymap mode fallback-layers authority 0)])
+              host context owner keymap mode fallback-layers authority 0)])
       (package-host-register-mode! host owner mode)
-      (define-command
-        (package-host-command-runtime host) owner 'help.show (context)
+      (define-package-command
+        context 'help.show (command-context)
         (documentation "Show commands and active key bindings for the current context.")
         (class 'help)
         (undo 'ignore)
-        (open-help! service context))
+        (open-help! service command-context))
       service))
 )
