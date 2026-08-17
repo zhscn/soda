@@ -12,10 +12,10 @@
           (soda kernel state)
           (soda kernel view-state)
           (soda host command)
-          (soda host command-runtime)
           (soda host input)
           (soda host input-event)
           (soda host package)
+          (soda host package-context)
           (soda host value))
 
   (define-record-type
@@ -158,23 +158,24 @@
                 #f '() '())))
           (lambda () (text-close! text))))))
 
-  (define (make-comment-service! host owner)
-    (unless (and (package-host? host) (owner? owner))
+  (define (make-comment-service! host package-context)
+    (unless (and (package-host? host)
+                 (package-context? package-context)
+                 (package-context-host? package-context host))
       (assertion-violation 'make-comment-service!
-                           "expected a PackageHost and Owner" host owner))
-    (owner-assert-active 'make-comment-service! owner)
-    (let ([keymap (make-keymap 'comment)]
-          [runtime (package-host-command-runtime host)])
-      (define-command
-        runtime owner 'comment.add (context)
+                           "expected a PackageHost and its PackageContext"
+                           host package-context))
+    (let ([keymap (make-keymap 'comment)])
+      (define-package-command
+        package-context 'comment.add (context)
         (documentation "Comment every logical line covered by the active selections.")
         (class 'editing)
         (scope 'mode)
         (repeatable #t)
         (undo 'amalgamate)
         (comment-transaction context #f))
-      (define-command
-        runtime owner 'comment.remove (context)
+      (define-package-command
+        package-context 'comment.remove (context)
         (documentation "Remove mode-defined comments from the selected logical lines.")
         (class 'editing)
         (scope 'mode)

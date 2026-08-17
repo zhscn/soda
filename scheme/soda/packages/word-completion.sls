@@ -13,10 +13,10 @@
           (soda kernel view-state)
           (soda host buffer)
           (soda host command)
-          (soda host command-runtime)
           (soda host input)
           (soda host input-event)
           (soda host package)
+          (soda host package-context)
           (soda host setting)
           (soda host value)
           (soda packages completion)
@@ -175,12 +175,14 @@
               (list (make-text-change from point inserted)))
             selection '() '())))))
 
-  (define (make-word-completion-service! host owner)
-    (unless (and (package-host? host) (owner? owner))
+  (define (make-word-completion-service! host package-context)
+    (unless (and (package-host? host)
+                 (package-context? package-context)
+                 (package-context-host? package-context host))
       (assertion-violation 'make-word-completion-service!
-                           "expected a PackageHost and Owner" host owner))
-    (owner-assert-active 'make-word-completion-service! owner)
-    (let* ([runtime (package-host-command-runtime host)]
+                           "expected a PackageHost and its PackageContext"
+                           host package-context))
+    (let* ([owner (package-context-owner package-context)]
            [keymap (make-keymap 'word-completion)]
            [service (make-word-completion-service host owner keymap)])
       (package-host-register-setting-schema!
@@ -189,8 +191,8 @@
           'completion.related-buffers 'boolean #t '(buffer) parse-boolean #f
           (lambda (value scope)
             (make-facet-provider related-buffers-facet value))))
-      (define-command
-        runtime owner 'word.complete (context prefix)
+      (define-package-command
+        package-context 'word.complete (context prefix)
         (documentation "Complete the word before point from words in editor Buffers.")
         (class 'completion)
         (scope 'mode)

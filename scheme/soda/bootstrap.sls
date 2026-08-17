@@ -135,7 +135,7 @@
                [whitespace
                 (make-whitespace-service! host owner)]
                [comments
-                (make-comment-service! host owner)]
+                (make-comment-service! host package-context)]
                [keyboard-macros
                 (make-keyboard-macro-service! host owner)]
                [configuration
@@ -190,7 +190,7 @@
                [search
                 (make-search-service! host owner)]
                [word-completion
-                (make-word-completion-service! host owner)]
+                (make-word-completion-service! host package-context)]
                [interaction
                 (make-interaction-service! package-context)]
                [_quit-command
