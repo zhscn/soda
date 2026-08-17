@@ -137,7 +137,7 @@
                [comments
                 (make-comment-service! host package-context)]
                [keyboard-macros
-                (make-keyboard-macro-service! host owner)]
+                (make-keyboard-macro-service! host package-context)]
                [configuration
                 (make-configuration
                   (list (buffer-item-field-extension)

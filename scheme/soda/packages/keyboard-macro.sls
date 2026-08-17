@@ -7,10 +7,11 @@
           keyboard-macro-step-count)
   (import (rnrs)
           (soda host command)
-          (soda host command-runtime)
+          (soda host command-message)
           (soda host input)
           (soda host input-event)
           (soda host package)
+          (soda host package-context)
           (soda host value))
 
   (define-record-type macro-step
@@ -19,7 +20,7 @@
   (define-record-type
     (keyboard-macro-service %make-keyboard-macro-service
                             keyboard-macro-service?)
-    (fields host owner
+    (fields host package-context
             (immutable keymap keyboard-macro-keymap)
             (mutable recording? keyboard-macro-recording?
                      keyboard-macro-recording?-set!)
@@ -88,9 +89,8 @@
                 (stop-playback! service)
                 (begin
                   (keyboard-macro-remaining-set! service (cdr remaining))
-                  (command-runtime-enqueue!
-                    (package-host-command-runtime
-                      (keyboard-macro-service-host service))
+                  (package-context-enqueue!
+                    (keyboard-macro-service-package-context service)
                     (make-command-invoke-message
                       'macro.step context (list step) #f))
                   #t))))))
@@ -129,21 +129,22 @@
           (enqueue-next! service)
           (command-handled))))
 
-  (define (make-keyboard-macro-service! host owner)
-    (unless (and (package-host? host) (owner? owner))
+  (define (make-keyboard-macro-service! host package-context)
+    (unless (and (package-host? host)
+                 (package-context? package-context)
+                 (package-context-host? package-context host))
       (assertion-violation 'make-keyboard-macro-service!
-                           "expected a PackageHost and Owner" host owner))
-    (owner-assert-active 'make-keyboard-macro-service! owner)
-    (let* ([runtime (package-host-command-runtime host)]
-           [keymap (make-keymap 'keyboard-macro)]
+                           "expected a PackageHost and its PackageContext"
+                           host package-context))
+    (let* ([keymap (make-keymap 'keyboard-macro)]
            [service
             (%make-keyboard-macro-service
-              host owner keymap #f #f '() '() '() #f)])
-      (command-runtime-add-hook!
-        runtime 'execution-record owner 'keyboard-macro-record
+              host package-context keymap #f #f '() '() '() #f)])
+      (package-context-add-command-hook!
+        package-context 'execution-record 'keyboard-macro-record
         (lambda (record) (record-execution! service record)))
-      (command-runtime-add-hook!
-        runtime 'post-command owner 'keyboard-macro-advance
+      (package-context-add-command-hook!
+        package-context 'post-command 'keyboard-macro-advance
         (lambda (invocation result)
           (let ([name
                  (command-definition-name
@@ -151,16 +152,16 @@
             (when (and (keyboard-macro-playing? service)
                        (not (macro-command? name)))
               (enqueue-next! service)))))
-      (command-runtime-add-hook!
-        runtime 'command-error owner 'keyboard-macro-error
+      (package-context-add-command-hook!
+        package-context 'command-error 'keyboard-macro-error
         (lambda (invocation condition)
           (when (keyboard-macro-playing? service) (stop-playback! service))))
-      (command-runtime-add-hook!
-        runtime 'command-cancel owner 'keyboard-macro-command-cancel
+      (package-context-add-command-hook!
+        package-context 'command-cancel 'keyboard-macro-command-cancel
         (lambda (invocation)
           (when (keyboard-macro-playing? service) (stop-playback! service))))
-      (define-command
-        runtime owner 'macro.step (context step)
+      (define-package-command
+        package-context 'macro.step (context step)
         (documentation "Run one cancellable keyboard macro step.")
         (class 'macro)
         (visible #f)
@@ -168,43 +169,43 @@
         (if (keyboard-macro-playing? service)
             (make-command-effect 'macro.invoke-step (cons step context))
             (command-handled)))
-      (command-runtime-register-effect-handler!
-        runtime 'macro.invoke-step owner 'keyboard-macro-invoke-step
-        (lambda (runtime invocation effect)
+      (package-context-register-effect-handler!
+        package-context 'macro.invoke-step 'keyboard-macro-invoke-step
+        (lambda (ignored invocation effect)
           (when (keyboard-macro-playing? service)
             (let* ([payload (command-effect-payload effect)]
                    [step (car payload)]
                    [context (cdr payload)])
-              (command-runtime-enqueue!
-                runtime
+              (package-context-enqueue!
+                package-context
                 (let ([name (macro-step-name step)])
-                  (unless (command-runtime-command-definition runtime name #f)
+                  (unless (package-context-command-definition package-context name #f)
                     (stop-playback! service)
                     (assertion-violation
                       'macro.play "recorded command is no longer registered" name))
                   (make-command-invoke-message
                     name context
                     (copy-value (macro-step-arguments step)) #f)))))))
-      (define-command
-        runtime owner 'macro.start (context)
+      (define-package-command
+        package-context 'macro.start (context)
         (documentation "Start recording resolved command invocations.")
         (class 'macro)
         (undo 'ignore)
         (start-recording! service))
-      (define-command
-        runtime owner 'macro.end (context)
+      (define-package-command
+        package-context 'macro.end (context)
         (documentation "Finish the current keyboard macro.")
         (class 'macro)
         (undo 'ignore)
         (end-recording! service))
-      (define-command
-        runtime owner 'macro.play (context . counts)
+      (define-package-command
+        package-context 'macro.play (context . counts)
         (documentation "Queue playback of the last keyboard macro.")
         (class 'macro)
         (undo 'ignore)
         (play! service context (if (null? counts) 1 (car counts))))
-      (define-command
-        runtime owner 'macro.cancel (context)
+      (define-package-command
+        package-context 'macro.cancel (context)
         (documentation "Cancel recording or queued macro playback.")
         (class 'macro)
         (undo 'ignore)
