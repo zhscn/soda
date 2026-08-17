@@ -6,6 +6,7 @@
           make-process-job
           process-job?
           process-service-run!
+          process-service-cancel!
           process-service-handle-runtime-event!)
   (import (rnrs)
           (only (chezscheme) current-directory)
@@ -171,6 +172,20 @@
           (hashtable-set! (process-service-processes service) source
                           (make-process-task source job))
           source))))
+
+  ;; Cancellation removes routing first because native runtimes may emit a
+  ;; final process event synchronously while a source is being cancelled.
+  (define (process-service-cancel! service source)
+    (unless (process-service? service)
+      (assertion-violation 'process-service-cancel!
+                           "expected a process service" service))
+    (let ([task (hashtable-ref (process-service-processes service) source #f)]
+          [runtime (process-service-runtime service)])
+      (and task runtime
+           (begin
+             (hashtable-delete! (process-service-processes service) source)
+             (native:runtime-cancel! runtime source)
+             #t))))
 
   (define (start-process! service request)
     (unless (process-request? request)

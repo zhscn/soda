@@ -19,6 +19,7 @@
           (soda host command-message)
           (soda host feedback)
           (soda host buffer)
+          (soda host dispatch)
           (soda host input)
           (soda host input-event)
           (soda host location)
@@ -44,10 +45,16 @@
                      spell-service-generation-set!)
             (mutable next-request-id spell-service-next-request-id
                      spell-service-next-request-id-set!)
-            (immutable latest-requests spell-service-latest-requests)))
+            (immutable latest-requests spell-service-latest-requests)
+            (immutable pending-output spell-service-pending-output)))
 
   (define-record-type spell-request
     (fields id context buffer-id buffer-name buffer-revision source input))
+
+  ;; Process callbacks publish these values unchanged.  Accumulation and
+  ;; report construction happen later in a package command on the host loop.
+  (define-record-type spell-process-event
+    (fields kind payload))
 
   ;; A finding names its source through a revisioned Location.  Result Buffers
   ;; therefore navigate by the same coordinate contract as diagnostics and
@@ -280,9 +287,19 @@
            (and current (= current (spell-request-id request))))))
 
   (define (finish-spell-request! service request)
+    (hashtable-delete! (spell-service-pending-output service)
+                       (spell-request-id request))
     (when (spell-request-current? service request)
       (hashtable-delete! (spell-service-latest-requests service)
                          (spell-request-buffer-id request))))
+
+  (define (spell-source-current? service request)
+    (let ([buffer
+           (package-host-buffer-ref
+             (spell-service-host service) (spell-request-buffer-id request) #f)])
+      (and buffer
+           (= (snapshot-revision (buffer-state-document (buffer-state buffer)))
+              (spell-request-buffer-revision request)))))
 
   (define (source-selection offset)
     (make-selection (list (make-selection-range offset offset))))
@@ -376,7 +393,7 @@
                        (make-edit-authority-annotation
                          (spell-service-authority service)))))])
            (unless published
-             (assertion-violation 'spell.publish-report
+             (assertion-violation 'spell.process-event
                                   "spell projection was not published" request))
            (spell-service-generation-set! service generation)
            (finish-spell-request! service request)
@@ -384,32 +401,67 @@
              host (spell-service-owner service) buffer context configuration)
            buffer)))
 
-  (define (enqueue-spell-report! service request status output)
-    (package-context-enqueue-background!
-      (spell-service-package-context service)
-      (make-command-invoke-message
-        'spell.publish-report (spell-request-context request)
-        (list request status output) #f)))
+  (define (accept-spell-process-event! service request event)
+    (unless (and (spell-request? request) (spell-process-event? event))
+      (assertion-violation 'spell.process-event
+                           "invalid spelling request or process event" request event))
+    (let ([request-id (spell-request-id request)])
+      (case (spell-process-event-kind event)
+        [(output)
+         (if (spell-request-current? service request)
+             (hashtable-set!
+               (spell-service-pending-output service) request-id
+               (cons (spell-process-event-payload event)
+                     (hashtable-ref
+                       (spell-service-pending-output service) request-id '())))
+             (hashtable-delete! (spell-service-pending-output service) request-id))]
+        [(exit)
+         (let ([chunks
+                (reverse
+                  (hashtable-ref (spell-service-pending-output service) request-id '()))])
+           (hashtable-delete! (spell-service-pending-output service) request-id)
+           (when (spell-request-current? service request)
+             (if (spell-source-current? service request)
+                 (show-spell-report!
+                   service request (spell-process-event-payload event)
+                   (utf8->string (concatenate-bytevectors chunks)))
+                 (finish-spell-request! service request))))]
+        [else
+         (assertion-violation 'spell.process-event
+                              "unknown spelling process event"
+                              (spell-process-event-kind event))])))
 
   (define (start-spell-check! service request)
     (unless (spell-request? request)
       (assertion-violation 'spell.check "invalid spelling request" request))
-    (let ([chunks '()])
-      (guard
-        (condition
-          [else
-           (finish-spell-request! service request)
-           (raise condition)])
-        (process-service-run!
-          (spell-service-processes service)
-          (make-process-job
-            (list "hunspell" "-a") (current-directory) (spell-request-input request)
-            (lambda (event)
-              (set! chunks (cons (native:event-data event) chunks)))
-            (lambda (status flags)
-              (enqueue-spell-report!
-                service request status
-                (utf8->string (concatenate-bytevectors (reverse chunks))))))))))
+    (package-context-start-task!
+      (spell-service-package-context service)
+      'spell.hunspell 'buffer (spell-request-context request)
+      'spell.process-event (lambda (event) (list request event))
+      (lambda (publish finish fail)
+        (let ([source #f])
+          (guard
+            (condition
+              [else
+               (fail condition)
+               #f])
+            (set! source
+                  (process-service-run!
+                    (spell-service-processes service)
+                    (make-process-job
+                      (list "hunspell" "-a") (current-directory)
+                      (spell-request-input request)
+                      (lambda (event)
+                        (publish
+                          (make-spell-process-event
+                            'output (native:event-data event))))
+                      (lambda (status flags)
+                        (publish (make-spell-process-event 'exit status))
+                        (finish)))))
+            (lambda ()
+              (and source
+                   (process-service-cancel!
+                     (spell-service-processes service) source))))))))
 
   (define (make-spell-replacement-reader)
     (make-interactive-reader
@@ -453,7 +505,7 @@
            [service
             (%make-spell-service
               host owner package-context processes keymap result-keymap result-mode authority 0 0
-              (make-eqv-hashtable))])
+              (make-eqv-hashtable) (make-eqv-hashtable))])
       (package-host-register-mode! host owner result-mode)
       (keymap-bind! result-keymap (list (control-stroke #\r)) 'spell.correct-item)
       (buffer-item-action-register!
@@ -489,12 +541,12 @@
         (lambda (ignored invocation effect)
           (start-spell-check! service (command-effect-payload effect))))
       (define-package-command
-        package-context 'spell.publish-report (context request status output)
-        (documentation "Publish a completed spelling report from native process output.")
+        package-context 'spell.process-event (context request event)
+        (documentation "Accept one Hunspell process event for the active spelling request.")
         (class 'spell)
         (visible #f)
         (undo 'ignore)
-        (show-spell-report! service request status output)
+        (accept-spell-process-event! service request event)
         (command-handled))
       (define-package-command
         package-context 'spell.check (context)
@@ -503,4 +555,22 @@
         (undo 'ignore)
         (make-command-effect 'spell.check (make-spell-request! service context)))
       (keymap-bind! keymap (list (control-stroke #\t)) 'spell.check)
+      (package-host-add-update-listener!
+        host owner
+        (lambda (update)
+          (let* ([buffer-id (editor-update-buffer-id update)]
+                 [request-id
+                  (hashtable-ref (spell-service-latest-requests service) buffer-id #f)])
+            (when request-id
+              (hashtable-delete! (spell-service-latest-requests service) buffer-id)
+              (hashtable-delete! (spell-service-pending-output service) request-id)))))
+      (package-host-add-buffer-close-listener!
+        host owner
+        (lambda (buffer)
+          (let* ([buffer-id (buffer-id buffer)]
+                 [request-id
+                  (hashtable-ref (spell-service-latest-requests service) buffer-id #f)])
+            (when request-id
+              (hashtable-delete! (spell-service-latest-requests service) buffer-id)
+              (hashtable-delete! (spell-service-pending-output service) request-id)))))
       service)))

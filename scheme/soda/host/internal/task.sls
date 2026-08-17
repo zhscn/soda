@@ -2,6 +2,9 @@
   (export make-task-service
           task-service?
           task-service-start!
+          task-service-cancel-buffer!
+          task-service-cancel-view!
+          task-service-cancel-surface!
           task-service-handle-message!)
   (import (rnrs)
           (soda kernel state)
@@ -10,6 +13,7 @@
           (soda host command-message)
           (soda host command-runtime)
           (soda host condition)
+          (soda host dispatch)
           (soda host internal buffer)
           (soda host internal context)
           (soda host internal surface)
@@ -38,13 +42,29 @@
             (mutable next-id task-service-next-id task-service-next-id-set!)
             (immutable entries task-service-entries)))
 
-  (define (make-task-service runtime commands conditions buffers views surfaces)
-    (unless (and (runtime? runtime) (command-runtime? commands)
+  (define (make-task-service owner runtime commands conditions buffers views surfaces dispatcher)
+    (unless (and (owner? owner) (runtime? runtime) (command-runtime? commands)
                  (condition-service? conditions) (buffer-service? buffers)
-                 (view-service? views) (surface-service? surfaces))
+                 (view-service? views) (surface-service? surfaces)
+                 (dispatcher? dispatcher))
       (assertion-violation 'make-task-service "invalid host task dependencies"))
-    (%make-task-service runtime commands conditions buffers views surfaces 0
-                        (make-eqv-hashtable)))
+    (let ([service
+           (%make-task-service runtime commands conditions buffers views surfaces 0
+                               (make-eqv-hashtable))])
+      (buffer-service-add-close-listener!
+        buffers owner
+        (lambda (buffer)
+          (task-service-cancel-buffer! service (buffer-id buffer))))
+      (view-service-add-close-listener!
+        views owner
+        (lambda (view)
+          (task-service-cancel-view! service (view-id view))))
+      (dispatcher-add-listener!
+        dispatcher owner
+        (lambda (update)
+          (task-service-cancel-stale-buffer!
+            service (editor-update-buffer-id update))))
+      service))
 
   (define (task-entry-ref service id)
     (hashtable-ref (task-service-entries service) id #f))
@@ -70,6 +90,42 @@
               [else (capture-task-condition! service entry 'cancel condition)])
             (cancel))))
       #t))
+
+  (define (task-service-cancel-where! service predicate)
+    (let-values ([(ids entries) (hashtable-entries (task-service-entries service))])
+      (for-each
+        (lambda (entry)
+          (when (predicate entry)
+            (retire-task! service entry #t)))
+        (vector->list entries))))
+
+  (define (task-service-cancel-buffer! service buffer-id)
+    (task-service-cancel-where!
+      service
+      (lambda (entry)
+        (= (command-context-buffer-id (task-entry-origin entry)) buffer-id))))
+
+  (define (task-service-cancel-view! service view-id)
+    (task-service-cancel-where!
+      service
+      (lambda (entry)
+        (= (command-context-view-id (task-entry-origin entry)) view-id))))
+
+  ;; Results scoped to a document revision cannot remain useful after the
+  ;; source Buffer advances.  Cancelling the worker also prevents it from
+  ;; consuming resources only to publish an answer that must be discarded.
+  (define (task-service-cancel-stale-buffer! service buffer-id)
+    (task-service-cancel-where!
+      service
+      (lambda (entry)
+        (and (not (eq? (task-entry-scope entry) 'none))
+             (= (command-context-buffer-id (task-entry-origin entry)) buffer-id)))))
+
+  (define (task-service-cancel-surface! service surface-id)
+    (task-service-cancel-where!
+      service
+      (lambda (entry)
+        (= (command-context-surface-id (task-entry-origin entry)) surface-id))))
 
   (define (task-scope-current? service entry buffer view)
     (let* ([origin (task-entry-origin entry)]
@@ -132,8 +188,13 @@
              (command-context-input-layers origin)))))
 
   (define (enqueue-task-message! service id kind value)
-    (runtime-enqueue!
-      (task-service-runtime service) (%make-task-message id kind value)))
+    ;; A native runtime may report a late event after cancellation.  It has no
+    ;; editor consequence and must not re-open a closed runtime through an
+    ;; exception in its callback.
+    (when (task-entry-ref service id)
+      (guard (ignored [else #f])
+        (runtime-enqueue!
+          (task-service-runtime service) (%make-task-message id kind value)))))
 
   (define (task-service-start! service owner name scope origin command arguments start)
     (unless (and (task-service? service) (owner? owner) (symbol? name)

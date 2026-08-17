@@ -94,12 +94,13 @@
            [command-runtime
              (make-command-runtime owner commands dispatch runtime conditions)]
            [tasks
-            (make-task-service runtime command-runtime conditions buffers views surfaces)]
+            (make-task-service owner runtime command-runtime conditions buffers views surfaces dispatch)]
            [analyses
             (make-analysis-service buffers runtime conditions dispatch)])
       (surface-service-set-remove-handler!
         surfaces
         (lambda (surface)
+          (task-service-cancel-surface! tasks (surface-id surface))
           (command-runtime-forget-surface! command-runtime (surface-id surface))))
       (view-service-set-plugin-error-handler!
         views

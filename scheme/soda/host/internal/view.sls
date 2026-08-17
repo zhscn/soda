@@ -21,6 +21,7 @@
           view-service-publish-occurrences!
           view-service-set-plugin-error-handler!
           view-service-set-close-handler!
+          view-service-add-close-listener!
           view-service-close-view!)
   (import (rnrs)
           (soda kernel selection)
@@ -263,12 +264,15 @@
             (immutable table view-service-table)
             (mutable plugin-error! view-service-plugin-error!
                      view-service-plugin-error!-set!)
-            (mutable close! view-service-close-handler view-service-close-handler-set!)))
+            (mutable close! view-service-close-handler view-service-close-handler-set!)
+            (mutable close-listeners view-service-close-listeners
+                     view-service-close-listeners-set!)))
 
   (define (make-view-service)
     (%make-view-service (make-identity-source) (make-eqv-hashtable)
                         (lambda (view phase condition) #f)
-                        (lambda (view) #f)))
+                        (lambda (view) #f)
+                        '()))
 
   (define (view-service-set-plugin-error-handler! service handler)
     (unless (and (view-service? service) (procedure? handler))
@@ -284,6 +288,25 @@
                            "expected a ViewService and close handler" service handler))
     (view-service-close-handler-set! service handler)
     handler)
+
+  ;; The primary close handler preserves surface placement.  Listeners run
+  ;; after it and before the View leaves the service catalog.
+  (define (view-service-add-close-listener! service owner procedure)
+    (unless (and (view-service? service) (owner? owner) (procedure? procedure))
+      (assertion-violation 'view-service-add-close-listener!
+                           "expected a ViewService, owner, and procedure"
+                           service owner procedure))
+    (owner-assert-active 'view-service-add-close-listener! owner)
+    (let ([listener procedure])
+      (view-service-close-listeners-set!
+        service (append (view-service-close-listeners service) (list listener)))
+      (make-registration
+        owner
+        (lambda ()
+          (view-service-close-listeners-set!
+            service
+            (filter (lambda (item) (not (eq? item listener)))
+                    (view-service-close-listeners service)))))))
 
   (define (view-service-create! service owner buffer configuration . input-state)
     (unless (view-service? service)
@@ -404,6 +427,10 @@
            (let ([closed? (view-close! view)])
              (when closed?
                ((view-service-close-handler service) view)
+               (for-each
+                 (lambda (listener)
+                   (guard (ignored [else #f]) (listener view)))
+                 (view-service-close-listeners service))
                (hashtable-delete! (view-service-table service) id))
              closed?))))
 )

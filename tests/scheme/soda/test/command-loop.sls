@@ -365,6 +365,7 @@
            [received '()]
            [publish #f]
            [stale-publish #f]
+           [stale-cancelled? #f]
            [cancelled-publish #f]
            [external-cancelled? #f])
       (dynamic-wind
@@ -397,13 +398,13 @@
             'package-task.result (lambda (value) (list value))
             (lambda (publish-result finish fail)
               (set! stale-publish publish-result)
-              #f))
+              (lambda () (set! stale-cancelled? #t))))
           (command-runtime-start!
             runtime 'fundamental.insert-text (application-context application)
             (list (string->utf8 "changed")))
           (stale-publish 'discarded)
           (host-state-run! state)
-          (check (equal? received '((delivered task)))
+          (check (and stale-cancelled? (equal? received '((delivered task))))
                  "Task result survived its Buffer revision" received)
 
           ;; Cancellation detaches the publisher before an external worker
