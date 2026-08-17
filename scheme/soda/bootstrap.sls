@@ -213,7 +213,7 @@
                   host owner application-input-layers)]
                [_command-ui
                 (make-command-ui!
-                  (host-state-command-runtime state) owner application-input-layers)])
+                  package-context application-input-layers)])
           (install-buffer-item-commands!
             (host-state-command-runtime state) owner buffer-item-actions host)
           (surface-service-register! (host-state-surfaces state) surface)

@@ -12,6 +12,7 @@
           (soda kernel state)
           (soda host command)
           (soda host command-runtime)
+          (soda host package-context)
           (soda host input)
           (soda host input-event)
           (soda packages buffer-mode))
@@ -93,17 +94,37 @@
   ;; Temporary interfaces such as the minibuffer intentionally omit M-x, so
   ;; presenting their unrelated global commands as "M-x only" would invent a
   ;; path the user cannot take.
-  (define (extended-command-reachable? runtime context keymaps)
-    (and (command-runtime-command-available?
-           runtime 'command.execute-extended context)
+  ;; A command projection may be queried by host composition through the raw
+  ;; runtime or by a package through its owner-bound PackageContext.  Both
+  ;; expose only the availability projection needed for presentation.
+  (define (command-source-command-available? source name context)
+    (cond
+      [(command-runtime? source)
+       (command-runtime-command-available? source name context)]
+      [(package-context? source)
+       (package-context-command-available? source name context)]
+      [else
+       (assertion-violation 'command-context-command-accesses
+                            "expected a CommandRuntime or PackageContext" source)]))
+
+  (define (command-source-user-definitions source context)
+    (cond
+      [(command-runtime? source)
+       (command-runtime-available-user-command-definitions source context)]
+      [(package-context? source)
+       (package-context-available-user-command-definitions source context)]
+      [else
+       (assertion-violation 'command-context-command-accesses
+                            "expected a CommandRuntime or PackageContext" source)]))
+
+  (define (extended-command-reachable? source context keymaps)
+    (and (command-source-command-available?
+           source 'command.execute-extended context)
          (pair? (keymap-where-is keymaps 'command.execute-extended))))
 
-  (define (command-context-command-accesses runtime context fallback-layers)
-    (unless (command-runtime? runtime)
-      (assertion-violation 'command-context-command-accesses
-                           "expected a CommandRuntime" runtime))
+  (define (command-context-command-accesses source context fallback-layers)
     (let* ([keymaps (command-context-keymaps context fallback-layers)]
-           [extended? (extended-command-reachable? runtime context keymaps)])
+           [extended? (extended-command-reachable? source context keymaps)])
       (list-sort
         access<?
         (filter
@@ -115,14 +136,14 @@
                        keymaps (command-definition-name definition))])
                 (and (or (pair? keys) extended?)
                      (%make-command-access definition keys))))
-            (command-runtime-available-user-command-definitions runtime context))))))
+            (command-source-user-definitions source context))))))
 
-  (define (command-context-command-access runtime context fallback-layers name)
+  (define (command-context-command-access source context fallback-layers name)
     (unless (symbol? name)
       (assertion-violation 'command-context-command-access
                            "expected a command name" name))
     (find
       (lambda (access)
         (eq? (command-definition-name (command-access-definition access)) name))
-      (command-context-command-accesses runtime context fallback-layers)))
+      (command-context-command-accesses source context fallback-layers)))
 )

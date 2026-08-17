@@ -8,6 +8,9 @@
           package-context-add-command-advice!
           package-context-enqueue!
           package-context-enqueue-background!
+          package-context-command-definition
+          package-context-command-available?
+          package-context-available-user-command-definitions
           package-context-invocation
           package-context-set-interaction-handler!
           package-context-repeat-last!
@@ -77,6 +80,21 @@
 
   (define (package-context-enqueue-background! context message)
     (command-runtime-enqueue-background! (context-runtime context) message))
+
+  (define package-context-command-definition
+    (case-lambda
+      [(context name)
+       (package-context-command-definition context name #f)]
+      [(context name default)
+       (command-runtime-command-definition (context-runtime context) name default)]))
+
+  (define (package-context-command-available? context definition-or-name command-context)
+    (command-runtime-command-available?
+      (context-runtime context) definition-or-name command-context))
+
+  (define (package-context-available-user-command-definitions context command-context)
+    (command-runtime-available-user-command-definitions
+      (context-runtime context) command-context))
 
   (define package-context-invocation
     (case-lambda

@@ -2,11 +2,11 @@
   (export make-command-ui!)
   (import (rnrs)
           (soda host command)
-          (soda host command-runtime)
+          (soda host command-message)
           (soda host feedback)
           (soda host input)
           (soda host input-event)
-          (soda host value)
+          (soda host package-context)
           (soda packages command-presentation)
           (soda packages edit-policy)
           (soda packages generated-buffer)
@@ -22,7 +22,7 @@
                            (substring value index (+ index (string-length needle))))
                  (loop (+ index 1)))))))
 
-  (define (command-source runtime context fallback-layers)
+  (define (command-source package-context context fallback-layers)
     (make-completion-source
       (lambda (snapshot)
         (let ([query (prompt-snapshot-input snapshot)])
@@ -40,28 +40,28 @@
                   (symbol->string
                     (command-definition-name (command-access-definition access)))
                   query))
-              (command-context-command-accesses runtime context fallback-layers)))))
+              (command-context-command-accesses package-context context fallback-layers)))))
       #f #f #f
       (lambda (input snapshot)
         (command-context-command-access
-          runtime context fallback-layers (string->symbol input)))))
+          package-context context fallback-layers (string->symbol input)))))
 
-  (define (make-command-reader runtime name prompt fallback-layers)
+  (define (make-command-reader package-context name prompt fallback-layers)
     (make-interactive-reader
       name
       (lambda (context arguments)
         (make-interactive-suspend
           (make-interaction-request
-            'command prompt "" (command-source runtime context fallback-layers) 'must-match
+            'command prompt "" (command-source package-context context fallback-layers) 'must-match
             (lambda (input snapshot)
               (command-context-command-access
-                runtime context fallback-layers (string->symbol input)))
+                package-context context fallback-layers (string->symbol input)))
             'extended-command)
           (lambda (value)
             (make-interactive-ready (list (string->symbol value))))))))
 
-  (define (description runtime name)
-    (let ([definition (command-runtime-command-definition runtime name #f)])
+  (define (description package-context name)
+    (let ([definition (package-context-command-definition package-context name #f)])
       (if definition
           (string-append
             (symbol->string name) " ["
@@ -74,42 +74,42 @@
                 "No documentation."))
           (string-append "Unknown command: " (symbol->string name)))))
 
-  (define (make-command-ui! runtime owner fallback-layers)
-    (unless (and (command-runtime? runtime) (owner? owner)
+  (define (make-command-ui! package-context fallback-layers)
+    (unless (and (package-context? package-context)
                  (list? fallback-layers) (for-all input-layer? fallback-layers))
       (assertion-violation 'make-command-ui!
-                           "expected a runtime, owner, and application InputLayers"))
+                           "expected a PackageContext and application InputLayers"))
     (let ([execute-reader
-           (make-command-reader runtime 'extended-command "M-x " fallback-layers)]
+           (make-command-reader package-context 'extended-command "M-x " fallback-layers)]
           [describe-reader
-           (make-command-reader runtime 'describe-command "Describe command: " fallback-layers)]
+           (make-command-reader package-context 'describe-command "Describe command: " fallback-layers)]
           [where-reader
-           (make-command-reader runtime 'where-is "Where is command: " fallback-layers)])
-      (define-command
-        runtime owner 'command.execute-extended (context name)
+           (make-command-reader package-context 'where-is "Where is command: " fallback-layers)])
+      (define-package-command
+        package-context 'command.execute-extended (context name)
         (documentation "Read and enqueue an available command for interactive execution.")
         (class 'command)
         (interactive (make-interactive-plan (list execute-reader)))
         (undo 'ignore)
-        (command-runtime-enqueue!
-          runtime (make-command-invoke-message name context '() #t))
+        (package-context-enqueue!
+          package-context (make-command-invoke-message name context '() #t))
         (command-handled))
-      (define-command
-        runtime owner 'command.describe (context name)
+      (define-package-command
+        package-context 'command.describe (context name)
         (documentation "Describe an available command.")
         (class 'command)
         (interactive (make-interactive-plan (list describe-reader)))
         (undo 'ignore)
-        (make-user-feedback (description runtime name) 'info))
-      (define-command
-        runtime owner 'command.where-is (context name)
+        (make-user-feedback (description package-context name) 'info))
+      (define-package-command
+        package-context 'command.where-is (context name)
         (documentation "Show active key sequences bound to an available command.")
         (class 'command)
         (interactive (make-interactive-plan (list where-reader)))
         (undo 'ignore)
         (let ([access
                (command-context-command-access
-                 runtime context fallback-layers name)])
+                 package-context context fallback-layers name)])
           (unless access
             (assertion-violation 'command.where-is
                                  "command is not available to the user" name))
