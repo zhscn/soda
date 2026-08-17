@@ -43,6 +43,7 @@
           (soda host internal view)
           (soda host internal window)
           (soda host package)
+          (soda host package-context)
           (soda host operation)
           (soda host value)
           (soda packages base fundamental-editing)
@@ -112,6 +113,7 @@
     (let* ([state (make-host-state)]
            [host (make-package-host state)]
            [owner (make-owner 'soda-application)]
+           [package-context (make-package-context host owner)]
            [document #f]
            [document-owned? #t])
       (guard
@@ -169,10 +171,9 @@
                                  (package-host-publish-buffer-presentation!
                                    host buffer-id 'modified modified?)))]
                [_repeat
-                (make-repeat-command! (host-state-command-runtime state) owner)]
+                (make-repeat-command! package-context)]
                [_prefix-arguments
-                (make-prefix-argument-commands!
-                  (host-state-command-runtime state) owner)]
+                (make-prefix-argument-commands! package-context)]
                [files
                 (make-file-service! host owner history)]
                [scheme-mode

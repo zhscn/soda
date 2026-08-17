@@ -13,6 +13,8 @@
           (soda host context)
           (soda host input)
           (soda host input-event)
+          (soda host package)
+          (soda host package-context)
           (soda host internal state)
           (soda host render)
           (soda host runtime)
@@ -176,11 +178,12 @@
   (define (test-prefix-argument-transient-map)
     (let* ([host (make-host-state)]
            [runtime (host-state-command-runtime host)]
-           [owner (make-owner 'prefix-argument-test)])
+           [owner (make-owner 'prefix-argument-test)]
+           [context (make-package-context (make-package-host host) owner)])
       (dynamic-wind
         (lambda () #f)
         (lambda ()
-          (let* ([state (make-prefix-argument-commands! runtime owner)]
+          (let* ([state (make-prefix-argument-commands! context)]
                  [map (car (input-state-keymaps state))]
                  [definition
                   (command-runtime-command-definition runtime 'argument.digit)]
@@ -200,6 +203,47 @@
               "prefix argument commands did not declare a reentrant input map")))
         (lambda ()
           (owner-close! owner)
+          (host-state-close! host)))))
+
+  (define (test-package-context-command-boundary)
+    (let* ([host (make-host-state)]
+           [runtime (host-state-command-runtime host)]
+           [owner (make-owner 'package-context-test)]
+           [other-owner (make-owner 'package-context-other)]
+           [context (make-package-context (make-package-host host) owner)]
+           [command-context
+            (make-command-context
+              #f #f #f #f #f #f #f #f '() (make-prefix-argument) #f 'test #f)]
+           [calls 0])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (define-package-command
+            context 'package-context.exercise (context)
+            (documentation "Exercise PackageContext command registration.")
+            (class 'test)
+            (undo 'ignore)
+            (set! calls (+ calls 1))
+            (command-handled))
+          (command-runtime-start! runtime 'package-context.exercise command-context)
+          (let ([rejected?
+                 (guard (condition [else #t])
+                   (package-context-register-command!
+                     context
+                     (make-command-definition
+                       'package-context.foreign (lambda (ignored) (command-handled))
+                       other-owner))
+                   #f)])
+            (check (and (= calls 1) rejected?
+                        (command-runtime-command-definition
+                          runtime 'package-context.exercise #f))
+                   "PackageContext did not own its command registrations"))
+          (owner-close! owner)
+          (check (not (command-runtime-command-definition
+                        runtime 'package-context.exercise #f))
+                 "PackageContext command survived owner cleanup"))
+        (lambda ()
+          (when (owner-active? other-owner) (owner-close! other-owner))
           (host-state-close! host)))))
 
   (define (test-runtime-state-record-and-repeat)
@@ -399,6 +443,7 @@
     (test-transient-input-exits-after-command)
     (test-standard-context-argument-reader)
     (test-prefix-argument-transient-map)
+    (test-package-context-command-boundary)
     (test-runtime-state-record-and-repeat)
     (test-prefix-argument-render-feedback)
     (test-undo-amalgamation)
