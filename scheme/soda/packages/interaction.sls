@@ -40,9 +40,10 @@
   (import (rnrs)
           (soda host command)
           (soda host command-argument)
-          (soda host command-runtime)
+          (soda host command-message)
           (soda host input)
           (soda host input-event)
+          (soda host package-context)
           (soda host value))
 
   ;; InteractionSession is the frontend-neutral representation of one
@@ -71,14 +72,14 @@
   (define-record-type
     (interaction-service %make-interaction-service interaction-service?)
     (fields
-      (immutable runtime interaction-service-runtime)
+      (immutable context interaction-service-context)
       (mutable sessions interaction-service-sessions interaction-service-sessions-set!)
       (mutable listeners interaction-service-listeners interaction-service-listeners-set!)
       (mutable registration interaction-service-registration interaction-service-registration-set!)))
 
   (define (session-active? service session)
-    (and (command-runtime-invocation
-           (interaction-service-runtime service)
+    (and (package-context-invocation
+           (interaction-service-context service)
            (interaction-session-invocation-id session) #f)
          #t))
 
@@ -337,8 +338,8 @@
                  'interaction-service-submit!
                  "choice submission must be an action identifier" value))
              (begin
-               (command-runtime-enqueue!
-                 (interaction-service-runtime service)
+               (package-context-enqueue!
+                 (interaction-service-context service)
                  (make-command-resume-message
                    (interaction-session-invocation-id session) value))
                (transition-session! session 'submitting)
@@ -361,8 +362,8 @@
          (and session (eq? (interaction-session-status session) 'open)
               (begin
                 (interaction-session-cancellation-completion-set! session completion)
-                (command-runtime-enqueue!
-                  (interaction-service-runtime service)
+                (package-context-enqueue!
+                  (interaction-service-context service)
                   (make-command-cancel-message
                     (interaction-session-invocation-id session)))
                 (transition-session! session 'cancelling)
@@ -379,21 +380,20 @@
       ;; cancellation observes the presentation stack from inner to outer.
       (for-each
         (lambda (session)
-          (command-runtime-enqueue!
-            (interaction-service-runtime service)
+          (package-context-enqueue!
+            (interaction-service-context service)
             (make-command-cancel-message (interaction-session-invocation-id session)))
           (transition-session! session 'cancelling))
         (reverse sessions))
       sessions))
 
-  (define (make-interaction-service! runtime owner)
-    (unless (and (command-runtime? runtime) (owner? owner))
+  (define (make-interaction-service! context)
+    (unless (package-context? context)
       (assertion-violation 'make-interaction-service!
-                           "expected a command runtime and owner" runtime owner))
-    (owner-assert-active 'make-interaction-service! owner)
-    (let ([service (%make-interaction-service runtime '() '() #f)])
-      (define-command
-        runtime owner 'interaction.submit-key (context codepoint)
+                           "expected a PackageContext" context))
+    (let ([service (%make-interaction-service context '() '() #f)])
+      (define-package-command
+        context 'interaction.submit-key (command-context codepoint)
         (documentation "Submit a discrete answer accepted by the active interaction.")
         (class 'interaction)
         (visible #f)
@@ -412,12 +412,12 @@
           (command-handled)))
       (interaction-service-registration-set!
         service
-        (command-runtime-set-interaction-handler!
-          runtime owner
+        (package-context-set-interaction-handler!
+          context
           (lambda (ignored invocation request)
             (open-session! service invocation request))))
-      (command-runtime-add-hook!
-        runtime 'before-outcomes owner 'accept-interaction-session
+      (package-context-add-command-hook!
+        context 'before-outcomes 'accept-interaction-session
         (lambda (invocation result)
           (let ([session
                  (interaction-service-session-for-id
@@ -425,15 +425,15 @@
             (when (and session
                        (eq? (interaction-session-status session) 'submitting))
               (remove-session! service session 'accepted)))))
-      (command-runtime-add-hook!
-        runtime 'command-error owner 'reject-interaction-session
+      (package-context-add-command-hook!
+        context 'command-error 'reject-interaction-session
         (lambda (invocation condition)
           (let ([session
                  (interaction-service-session-for-id
                    service (command-invocation-id invocation))])
             (when session (remove-session! service session 'cancelled)))))
-      (command-runtime-add-hook!
-        runtime 'command-cancel owner 'close-interaction-session
+      (package-context-add-command-hook!
+        context 'command-cancel 'close-interaction-session
         (lambda (invocation)
           (let ([session
                  (interaction-service-session-for-id

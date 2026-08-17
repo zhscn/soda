@@ -192,7 +192,7 @@
                [word-completion
                 (make-word-completion-service! host owner)]
                [interaction
-                (make-interaction-service! (host-state-command-runtime state) owner)]
+                (make-interaction-service! package-context)]
                [_quit-command
                 (install-application-quit-command!
                   (host-state-command-runtime state) owner files)]

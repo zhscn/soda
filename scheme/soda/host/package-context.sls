@@ -8,6 +8,8 @@
           package-context-add-command-advice!
           package-context-enqueue!
           package-context-enqueue-background!
+          package-context-invocation
+          package-context-set-interaction-handler!
           package-context-repeat-last!
           package-context-set-repeat-state!
           define-package-command)
@@ -75,6 +77,17 @@
 
   (define (package-context-enqueue-background! context message)
     (command-runtime-enqueue-background! (context-runtime context) message))
+
+  (define package-context-invocation
+    (case-lambda
+      [(context invocation-id)
+       (package-context-invocation context invocation-id #f)]
+      [(context invocation-id default)
+       (command-runtime-invocation (context-runtime context) invocation-id default)]))
+
+  (define (package-context-set-interaction-handler! context handler)
+    (command-runtime-set-interaction-handler!
+      (context-runtime context) (package-context-owner context) handler))
 
   (define (package-context-repeat-last! context command-context)
     (command-runtime-repeat-last! (context-runtime context) command-context))

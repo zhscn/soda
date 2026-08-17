@@ -32,6 +32,7 @@
         (soda host navigation)
         (soda host internal navigation)
         (soda host package)
+        (soda host package-context)
         (soda host internal buffer)
         (soda host input)
         (soda host input-event)
@@ -3094,7 +3095,7 @@
                 next-host next-owner next-history (lambda (buffer-id) #f) directory)]
              [interactions
               (make-interaction-service!
-                (host-state-command-runtime next-state) next-owner)]
+                (make-package-context next-host next-owner))]
              [context
               (make-command-context
                 #f (surface-id surface) (window-id (surface-active-window surface))
