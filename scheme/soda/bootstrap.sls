@@ -133,7 +133,7 @@
                [_fundamental-mode
                 (package-host-register-mode! host owner (fundamental-mode editing))]
                [whitespace
-                (make-whitespace-service! host owner)]
+                (make-whitespace-service! host package-context)]
                [comments
                 (make-comment-service! host package-context)]
                [keyboard-macros

@@ -12,11 +12,11 @@
           (soda kernel view-state)
           (soda host buffer)
           (soda host command)
-          (soda host command-runtime)
           (soda host feedback)
           (soda host input)
           (soda host input-event)
           (soda host package)
+          (soda host package-context)
           (soda host setting)
           (soda host value)
           (soda host view)
@@ -177,12 +177,15 @@
             (make-user-feedback
               (string-append "Whitespace display: " (symbol->string next)) 'info))))
 
-  (define (make-whitespace-service! host owner)
-    (unless (and (package-host? host) (owner? owner))
+  (define (make-whitespace-service! host package-context)
+    (unless (and (package-host? host)
+                 (package-context? package-context)
+                 (package-context-host? package-context host))
       (assertion-violation 'make-whitespace-service!
-                           "expected a PackageHost and Owner" host owner))
-    (owner-assert-active 'make-whitespace-service! owner)
-    (let* ([keymap (make-keymap 'whitespace)]
+                           "expected a PackageHost and its PackageContext"
+                           host package-context))
+    (let* ([owner (package-context-owner package-context)]
+           [keymap (make-keymap 'whitespace)]
            [service
             (%make-whitespace-service keymap (make-whitespace-plugin))])
       (package-host-register-setting-schema!
@@ -190,8 +193,8 @@
         (make-setting-schema
           'editor.whitespace 'symbol 'none '(view) parse-policy #f
           (lambda (value scope) (policy-extension value))))
-      (define-command
-        (package-host-command-runtime host) owner 'whitespace.toggle (context)
+      (define-package-command
+        package-context 'whitespace.toggle (context)
         (documentation "Cycle tab, trailing-whitespace, and space visualization.")
         (class 'display)
         (undo 'ignore)
