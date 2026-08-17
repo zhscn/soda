@@ -13,10 +13,11 @@
           (soda kernel state)
           (soda kernel view-state)
           (soda host command)
-          (soda host command-runtime)
+          (soda host command-message)
           (soda host feedback)
           (soda host buffer)
           (soda host package)
+          (soda host package-context)
           (soda host input)
           (soda host input-event)
           (soda host value)
@@ -36,7 +37,7 @@
   ;; input loop.
   (define-record-type
     (directory-service %make-directory-service directory-service?)
-    (fields host owner files actions keymap result-keymap authority mode directories))
+    (fields host owner package-context files actions keymap result-keymap authority mode directories))
 
   (define-record-type directory-state
     (fields (mutable path directory-state-path directory-state-path-set!)
@@ -321,13 +322,12 @@
           (directory-mutation-request-context request)))))
 
   (define (activate-directory-entry! service item context ignored)
-    (let ([entry (buffer-item-payload item)]
-          [runtime (package-host-command-runtime (directory-service-host service))])
+    (let ([entry (buffer-item-payload item)])
       (if (not (directory-entry? entry))
           (command-handled)
           (begin
-            (command-runtime-enqueue!
-              runtime
+            (package-context-enqueue!
+              (directory-service-package-context service)
               (make-command-invoke-message
                 (if (eq? (directory-entry-kind entry) 'directory)
                     'directory.browse
@@ -335,13 +335,16 @@
                 context (list (directory-entry-path entry)) #f))
             (command-handled)))))
 
-  (define (make-directory-service! host owner files actions)
-    (unless (and (package-host? host) (owner? owner) (file-service? files)
+  (define (make-directory-service! host package-context files actions)
+    (unless (and (package-host? host)
+                 (package-context? package-context)
+                 (package-context-host? package-context host)
+                 (file-service? files)
                  (buffer-item-action-service? actions))
       (assertion-violation 'make-directory-service!
-                           "expected HostState, owner, file service, and BufferItem actions"
-                           host owner files actions))
-    (let* ([runtime (package-host-command-runtime host)]
+                           "expected PackageHost, PackageContext, file service, and BufferItem actions"
+                           host package-context files actions))
+    (let* ([owner (package-context-owner package-context)]
            [keymap (make-keymap 'directory)]
            [result-keymap (make-keymap 'directory-result)]
            [authority (make-edit-authority owner 'directory-refresh)]
@@ -359,7 +362,7 @@
               "Directory")]
            [service
             (%make-directory-service
-              host owner files actions keymap result-keymap authority mode
+              host owner package-context files actions keymap result-keymap authority mode
               (make-eqv-hashtable))])
       (package-host-register-mode! host owner mode)
       (keymap-bind! keymap
@@ -382,20 +385,20 @@
         actions owner 'directory 'open
         (lambda (item context generation)
           (activate-directory-entry! service item context generation)))
-      (command-runtime-register-effect-handler!
-        runtime 'directory.open owner 'open-directory
+      (package-context-register-effect-handler!
+        package-context 'directory.open 'open-directory
         (lambda (ignored invocation effect)
           (open-directory! service (command-effect-payload effect))))
-      (command-runtime-register-effect-handler!
-        runtime 'directory.refresh owner 'refresh-directory
+      (package-context-register-effect-handler!
+        package-context 'directory.refresh 'refresh-directory
         (lambda (ignored invocation effect)
           (refresh-directory! service (command-effect-payload effect))))
-      (command-runtime-register-effect-handler!
-        runtime 'directory.mutate owner 'mutate-directory
+      (package-context-register-effect-handler!
+        package-context 'directory.mutate 'mutate-directory
         (lambda (ignored invocation effect)
           (mutate-directory! service (command-effect-payload effect))))
-      (define-command
-        runtime owner 'directory.browse (context . requested)
+      (define-package-command
+        package-context 'directory.browse (context . requested)
         (documentation "Browse a directory in a generated read-only Buffer.")
         (class 'directory)
         (undo 'ignore)
@@ -408,15 +411,15 @@
                                            requested)])])
           (make-command-effect 'directory.open
             (make-directory-open-request context path))))
-      (define-command
-        runtime owner 'directory.refresh (context)
+      (define-package-command
+        package-context 'directory.refresh (context)
         (documentation "Refresh the directory entries in the current Directory Buffer.")
         (class 'directory)
         (scope 'mode)
         (undo 'ignore)
         (make-command-effect 'directory.refresh (make-directory-refresh-request context)))
-      (define-command
-        runtime owner 'directory.create-directory (context name)
+      (define-package-command
+        package-context 'directory.create-directory (context name)
         (documentation "Create a directory and refresh the current browser.")
         (class 'directory)
         (scope 'mode)
@@ -435,8 +438,8 @@
             'directory.mutate
             (make-directory-mutation-request
               'create context (vfs-resolve-path base name) #f))))
-      (define-command
-        runtime owner 'directory.rename (context source destination)
+      (define-package-command
+        package-context 'directory.rename (context source destination)
         (documentation "Rename the entry at point without replacing an existing path.")
         (class 'directory)
         (scope 'mode)
@@ -456,8 +459,8 @@
             (make-directory-mutation-request
               'rename context (capture-directory-target 'directory.rename source)
               (vfs-resolve-path base destination)))))
-      (define-command
-        runtime owner 'directory.delete (context path decision)
+      (define-package-command
+        package-context 'directory.delete (context path decision)
         (documentation "Delete the entry at point after confirmation.")
         (class 'directory)
         (scope 'mode)

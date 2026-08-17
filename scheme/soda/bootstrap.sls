@@ -182,7 +182,8 @@
                   (fundamental-mode editing))]
                [processes (make-process-service! host package-context)]
                [buffer-item-actions (make-buffer-item-action-service)]
-               [directories (make-directory-service! host owner files buffer-item-actions)]
+               [directories
+                (make-directory-service! host package-context files buffer-item-actions)]
                [buffer-lists
                 (make-buffer-list-service! host package-context history buffer-item-actions)]
                [windows (make-window-service! host package-context)]
