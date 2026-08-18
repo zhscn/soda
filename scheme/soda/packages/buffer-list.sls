@@ -13,6 +13,7 @@
           (soda host command)
           (soda host command-message)
           (soda host buffer)
+          (soda host event)
           (soda host package)
           (soda host package-context)
           (soda host input)
@@ -401,9 +402,22 @@
         (scope 'mode)
         (undo 'ignore)
         (close-item-at-point! service context))
-      (package-host-add-buffer-close-listener!
-        host owner
-        (lambda (buffer)
-          (hashtable-delete! (buffer-list-service-lists service) (buffer-id buffer))))
+      (define-package-command
+        package-context 'buffer-list.forget-buffer (context buffer-id)
+        (documentation "Release Buffer List state for a closed Buffer.")
+        (class 'buffer-list)
+        (visible #f)
+        (undo 'ignore)
+        (hashtable-delete! (buffer-list-service-lists service) buffer-id)
+        (command-handled))
+      (package-context-subscribe!
+        package-context 'buffer/closed
+        (lambda (event)
+          (package-context-enqueue!
+            package-context
+            (make-command-invoke-message
+              'buffer-list.forget-buffer
+              (make-command-context #f (editor-event-subject-id event) 'event)
+              (list (editor-event-subject-id event))))))
       service))
 )

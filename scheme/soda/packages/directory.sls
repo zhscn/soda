@@ -16,6 +16,7 @@
           (soda host command-message)
           (soda host feedback)
           (soda host buffer)
+          (soda host event)
           (soda host package)
           (soda host package-context)
           (soda host input)
@@ -475,9 +476,22 @@
               (make-directory-mutation-request
                 'delete context (capture-directory-target 'directory.delete path) #f))
             (command-handled)))
-      (package-host-add-buffer-close-listener!
-        host owner
-        (lambda (buffer)
-          (hashtable-delete! (directory-service-directories service) (buffer-id buffer))))
+      (define-package-command
+        package-context 'directory.forget-buffer (context buffer-id)
+        (documentation "Release directory state for a closed Buffer.")
+        (class 'directory)
+        (visible #f)
+        (undo 'ignore)
+        (hashtable-delete! (directory-service-directories service) buffer-id)
+        (command-handled))
+      (package-context-subscribe!
+        package-context 'buffer/closed
+        (lambda (event)
+          (package-context-enqueue!
+            package-context
+            (make-command-invoke-message
+              'directory.forget-buffer
+              (make-command-context #f (editor-event-subject-id event) 'event)
+              (list (editor-event-subject-id event))))))
       service))
 )
