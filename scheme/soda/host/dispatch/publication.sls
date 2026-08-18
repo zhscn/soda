@@ -5,6 +5,7 @@
           dispatch-publication-set-error-reporter!
           dispatch-publication-set-editor-listener!
           dispatch-publication-set-host-listener!
+          dispatch-publication-add-commit-participant!
           dispatch-publication-add-editor-listener!
           dispatch-publication-add-host-listener!
           dispatch-publication-publish-host!
@@ -28,6 +29,11 @@
                dispatch-publication-editor-listener-set!)
       (mutable host-listener dispatch-publication-host-listener
                dispatch-publication-host-listener-set!)
+      ;; Commit participants run after the transaction has published immutable
+      ;; Buffer/View state and before plugins or ordinary observers see it.
+      ;; They maintain transaction-coupled package state such as savepoints.
+      (mutable commit-participants dispatch-publication-commit-participants
+               dispatch-publication-commit-participants-set!)
       (mutable editor-observers dispatch-publication-editor-observers
                dispatch-publication-editor-observers-set!)
       (mutable host-observers dispatch-publication-host-observers
@@ -39,7 +45,7 @@
         'make-dispatch-publication "expected a listener or #f" editor-listener))
     (%make-dispatch-publication
       (make-dispatch-gate) (lambda (source condition) #f)
-      editor-listener #f '() '()))
+      editor-listener #f '() '() '()))
 
   (define (dispatch-publication-run! publication thunk)
     (dispatch-gate-run! (dispatch-publication-gate publication) thunk))
@@ -94,6 +100,12 @@
       dispatch-publication-editor-observers
       dispatch-publication-editor-observers-set!))
 
+  (define (dispatch-publication-add-commit-participant! publication owner listener)
+    (add-observer!
+      'dispatch-publication-add-commit-participant! publication owner listener
+      dispatch-publication-commit-participants
+      dispatch-publication-commit-participants-set!))
+
   (define (dispatch-publication-add-host-listener! publication owner listener)
     (add-observer!
       'dispatch-publication-add-host-listener! publication owner listener
@@ -137,6 +149,9 @@
     (dispatch-gate-notify!
       (dispatch-publication-gate publication)
       (lambda ()
+        (notify-observers!
+          publication '(editor commit-participant)
+          (dispatch-publication-commit-participants publication) update)
         (notify-plugins! update)
         (let ([listener (dispatch-publication-editor-listener publication)])
           (when listener

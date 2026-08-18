@@ -4,6 +4,7 @@
           (soda bootstrap)
           (soda kernel change)
           (soda kernel document)
+          (soda kernel extension)
           (soda kernel result)
           (soda kernel state)
           (soda host internal buffer)
@@ -13,6 +14,7 @@
           (soda host command-argument)
           (soda host command-runtime)
           (soda host context)
+          (soda host dispatch)
           (soda host input)
           (soda host input-event)
           (soda host package)
@@ -561,6 +563,72 @@
                  "amalgamated edit commands did not form one undo unit"))
         (lambda () (soda-application-close! application)))))
 
+  (define (test-package-commit-participant-order)
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [first-owner (make-owner 'first-commit-participant)]
+           [second-owner (make-owner 'second-commit-participant)]
+           [host (make-package-host state)]
+           [first (make-package-context host first-owner)]
+           [second (make-package-context host second-owner)]
+           [buffer-id (command-context-buffer-id (application-context application))]
+           [observed '()])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (host-state-run! state)
+          (package-context-add-commit-participant!
+            first
+            (lambda (update)
+              (when (= (editor-update-buffer-id update) buffer-id)
+                (set! observed (append observed '(first))))))
+          (package-context-add-commit-participant!
+            second
+            (lambda (update)
+              (when (= (editor-update-buffer-id update) buffer-id)
+                (set! observed (append observed '(second))))))
+          (command-runtime-start!
+            runtime 'fundamental.insert-text (application-context application)
+            (list (string->utf8 "x")))
+          (check (equal? observed '(first second))
+                 "commit participants did not run in declaration order" observed))
+        (lambda ()
+          (owner-close! first-owner)
+          (owner-close! second-owner)
+          (soda-application-close! application)))))
+
+  (define (test-package-buffer-close-finalizer-phase)
+    (let* ([state (make-host-state)]
+           [host (make-package-host state)]
+           [owner (make-owner 'buffer-close-finalizer-owner)]
+           [context (make-package-context host owner)]
+           [buffer
+            (buffer-service-create!
+              (host-state-buffers state) owner "*close-finalizer*"
+              (make-document "contents") (make-configuration '()))]
+           [seen #f])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (package-context-add-buffer-close-finalizer!
+            context
+            (lambda (closing)
+              (set! seen
+                (and (eq? (buffer-lifecycle closing) 'closing)
+                     (string=?
+                       (snapshot-string
+                         (buffer-state-document (buffer-state closing)))
+                       "contents")))))
+          (check (and (buffer-service-close-buffer!
+                        (host-state-buffers state) (buffer-id buffer))
+                      seen
+                      (eq? (buffer-lifecycle buffer) 'closed))
+                 "buffer close finalizer did not run before Document release"))
+        (lambda ()
+          (owner-close! owner)
+          (host-state-close! state)))))
+
   ;; Runtime lanes make input latency a scheduling contract: an input burst is
   ;; FIFO, preempts background work, and still yields to the priority command
   ;; and cycle boundary emitted by its current action.
@@ -630,6 +698,8 @@
     (test-runtime-state-record-and-repeat)
     (test-prefix-argument-render-feedback)
     (test-undo-amalgamation)
+    (test-package-commit-participant-order)
+    (test-package-buffer-close-finalizer-phase)
     (test-runtime-input-lane)
     (test-invalid-command-result-is-atomic))
 )

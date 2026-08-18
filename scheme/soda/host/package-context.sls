@@ -7,6 +7,8 @@
           package-context-register-effect-handler!
           package-context-add-command-hook!
           package-context-add-command-advice!
+          package-context-add-commit-participant!
+          package-context-add-buffer-close-finalizer!
           package-context-enqueue!
           package-context-enqueue-background!
           package-context-start-task!
@@ -93,6 +95,20 @@
        (command-runtime-add-advice!
          (context-runtime context) command (package-context-owner context)
          name where procedure depth)]))
+
+  ;; A commit participant sees the immutable update inside its originating
+  ;; Dispatcher transaction, before asynchronous package events.  It is for
+  ;; transaction-coupled bookkeeping only; editor work still goes through a
+  ;; command or effect boundary.
+  (define (package-context-add-commit-participant! context procedure)
+    (assert-context 'package-context-add-commit-participant! context)
+    (package-host-add-commit-participant!
+      (package-context-host context) (package-context-owner context) procedure))
+
+  (define (package-context-add-buffer-close-finalizer! context procedure)
+    (assert-context 'package-context-add-buffer-close-finalizer! context)
+    (package-host-add-buffer-close-finalizer!
+      (package-context-host context) (package-context-owner context) procedure))
 
   (define (package-context-enqueue! context message)
     (if (event-delivery-active?)

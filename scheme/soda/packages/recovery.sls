@@ -456,8 +456,8 @@
              (let ([payload (command-effect-payload effect)])
                (handle-recovery-decision!
                  service (car payload) (cadr payload) (caddr payload)))))
-         (package-host-add-update-listener!
-           host owner
+         (package-context-add-commit-participant!
+           package-context
            (lambda (update)
              (unless (change-set-empty? (editor-update-changes update))
                (let* ([buffer-id (editor-update-buffer-id update)]

@@ -7,5 +7,6 @@
           view-state-update-new-state make-dispatcher dispatcher?
           dispatcher-set-error-reporter! dispatcher-set-listener!
           dispatcher-set-host-listener! dispatcher-add-listener!
+          dispatcher-add-commit-participant!
           dispatcher-add-host-listener!)
   (import (soda host dispatch internal)))

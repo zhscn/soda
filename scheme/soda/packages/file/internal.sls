@@ -548,8 +548,8 @@
                        (make-command-effect 'buffer.kill (make-file-close target-id)))))]
             [else
              (make-command-effect 'buffer.kill (make-file-close target-id))])))
-      (package-host-add-buffer-close-listener!
-        host owner
+      (package-context-add-buffer-close-finalizer!
+        package-context
         (lambda (buffer)
           (let ([binding (file-service-binding service (buffer-id buffer) #f)])
             (when binding (release-file-lock! (file-binding-lock binding))))

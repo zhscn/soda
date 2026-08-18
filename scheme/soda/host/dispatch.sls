@@ -10,7 +10,8 @@
           dispatcher-dispatch-host!
           dispatcher-publish-buffer-damage! dispatcher-set-error-reporter!
           dispatcher-set-listener! dispatcher-set-host-listener!
-          dispatcher-add-listener! dispatcher-add-host-listener!
+          dispatcher-add-listener! dispatcher-add-commit-participant!
+          dispatcher-add-host-listener!
           dispatcher-register-global-operation-handler!)
   (import (soda host dispatch-core)
           (soda host dispatch-transaction)

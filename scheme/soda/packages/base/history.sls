@@ -123,11 +123,10 @@
          (assertion-violation 'make-history! "expected a presentation publisher"
                               publish-modified!))
        (let* ([package-context (history-package-context host context-or-owner)]
-              [owner (package-context-owner package-context)]
               [value (make-history (make-eqv-hashtable) (make-eqv-hashtable)
                                    (make-eqv-hashtable) publish-modified! #f)])
       (history-registration-set! value
-        (package-host-add-update-listener! host owner
+        (package-context-add-commit-participant! package-context
           (lambda (update)
             (let ([id (editor-update-buffer-id update)])
               (unless (exists (lambda (a) (eq? (annotation-key a) 'history.replay))

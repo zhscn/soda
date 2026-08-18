@@ -26,6 +26,7 @@
           buffer-service-set-create-handler!
           buffer-service-set-close-query-handler!
           buffer-service-set-close-handler!
+          buffer-service-add-close-finalizer!
           buffer-service-add-close-listener!
           buffer-service-close-buffer!)
   (import (rnrs)
@@ -188,14 +189,17 @@
     (buffer-service-close-handler-set! service handler)
     handler)
 
-  ;; The primary close handler preserves host invariants; package listeners
-  ;; run after it and before the Buffer releases its document resources.
-  (define (buffer-service-add-close-listener! service owner procedure)
+  ;; A close finalizer runs only after the close query has accepted and the
+  ;; primary handler has removed every View placement.  The Buffer and its
+  ;; immutable state are still available, while catalog identity and Document
+  ;; resources have not yet been released.  Finalizers detach package-owned
+  ;; external resources; they cannot veto or repair the close.
+  (define (buffer-service-add-close-finalizer! service owner procedure)
     (unless (and (buffer-service? service) (owner? owner) (procedure? procedure))
-      (assertion-violation 'buffer-service-add-close-listener!
+      (assertion-violation 'buffer-service-add-close-finalizer!
                            "expected a BufferService, owner, and procedure"
                            service owner procedure))
-    (owner-assert-active 'buffer-service-add-close-listener! owner)
+    (owner-assert-active 'buffer-service-add-close-finalizer! owner)
     (let ([listener procedure])
       (buffer-service-close-listeners-set!
         service (append (buffer-service-close-listeners service) (list listener)))
@@ -206,6 +210,10 @@
             service
             (filter (lambda (item) (not (eq? item listener)))
                     (buffer-service-close-listeners service)))))))
+
+  ;; Internal compatibility for Host services still using the old spelling.
+  (define (buffer-service-add-close-listener! service owner procedure)
+    (buffer-service-add-close-finalizer! service owner procedure))
 
   (define (buffer-service-name-used? service candidate)
     (exists

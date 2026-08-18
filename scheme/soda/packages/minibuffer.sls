@@ -35,12 +35,14 @@
           (soda kernel viewport)
           (soda kernel view-state)
           (soda host command)
+          (soda host command-message)
           (soda host context)
           (soda host dispatch)
           (soda host feedback)
           (soda host input)
           (soda host input-event)
           (soda host buffer)
+          (soda host event)
           (soda host package)
           (soda host package-context)
           (soda host view)
@@ -745,6 +747,44 @@
         result
         (command-handled)))
 
+  ;; This is command work because completion and history state are mutable
+  ;; temporary UI state.  The event subscriber below only transfers an
+  ;; immutable committed EditorUpdate across the command-loop boundary.
+  (define (minibuffer-service-observe-update! service update)
+    (let ([session (minibuffer-service-current service)])
+      (when (and session
+                 (= (editor-update-buffer-id update)
+                    (minibuffer-session-buffer-id session)))
+        (let ([document-changed?
+               (not (change-set-empty? (editor-update-changes update)))]
+              [selection-changed?
+               (exists
+                 (lambda (view-update)
+                   (and (= (view-state-update-view-id view-update)
+                           (minibuffer-session-view-id session))
+                        (not
+                          (equal?
+                            (view-state-selection
+                              (view-state-update-old-state view-update))
+                            (view-state-selection
+                              (view-state-update-new-state view-update))))))
+                 (editor-update-views update))])
+          (when document-changed?
+            (unless (exists
+                      (lambda (annotation)
+                        (eq? (annotation-key annotation) 'minibuffer.history))
+                      (editor-update-annotations update))
+              (minibuffer-session-history-index-set! session #f)
+              (minibuffer-session-history-draft-set!
+                session
+                (snapshot-string
+                  (buffer-state-document
+                    (editor-update-new-buffer-state update))))))
+          (when (and (or document-changed? selection-changed?)
+                     (minibuffer-session-completion session))
+            (minibuffer-service-refresh-completion! service)))))
+    (command-handled))
+
   (define (make-minibuffer-service! host interactions context)
     (unless (and (package-host? host) (interaction-service? interactions)
                  (package-context? context) (package-context-host? context host))
@@ -805,6 +845,15 @@
                 '() '() '() #f)])
       (package-host-register-mode! host owner mode)
       (package-host-register-mode! host owner completion-mode)
+      (define-package-command
+        context 'minibuffer.observe-update (command-context update)
+        (documentation "Apply a committed minibuffer Buffer or View update.")
+        (class 'minibuffer)
+        (visible #f)
+        (undo 'ignore)
+        (if (editor-update? update)
+            (minibuffer-service-observe-update! service update)
+            (command-handled)))
       (define-package-command
         context 'minibuffer.accept (command-context)
         (documentation "Accept the current minibuffer input.")
@@ -877,40 +926,16 @@
                          (fail-open! service interaction)))]
                   [(memq kind '(accepted cancelled))
                    (close! service interaction kind)]))))
-      (package-host-add-update-listener!
-        host owner
-        (lambda (update)
-          (let ([session (minibuffer-service-current service)])
-            (when (and session
-                       (= (editor-update-buffer-id update)
-                          (minibuffer-session-buffer-id session)))
-              (let ([document-changed?
-                     (not (change-set-empty? (editor-update-changes update)))]
-                    [selection-changed?
-                     (exists
-                       (lambda (view-update)
-                         (and (= (view-state-update-view-id view-update)
-                                 (minibuffer-session-view-id session))
-                              (not
-                                (equal?
-                                  (view-state-selection
-                                    (view-state-update-old-state view-update))
-                                  (view-state-selection
-                                    (view-state-update-new-state view-update))))))
-                       (editor-update-views update))])
-                (when document-changed?
-                  (unless (exists
-                            (lambda (annotation)
-                              (eq? (annotation-key annotation) 'minibuffer.history))
-                            (editor-update-annotations update))
-                    (minibuffer-session-history-index-set! session #f)
-                    (minibuffer-session-history-draft-set!
-                      session
-                      (snapshot-string
-                        (buffer-state-document
-                          (editor-update-new-buffer-state update))))))
-                (when (and (or document-changed? selection-changed?)
-                           (minibuffer-session-completion session))
-                  (minibuffer-service-refresh-completion! service)))))))
+      (package-context-subscribe!
+        context 'buffer/changed
+        (lambda (event)
+          (let ([update (editor-event-payload event)])
+            (when (editor-update? update)
+              (package-context-enqueue!
+                context
+                (make-command-invoke-message
+                  'minibuffer.observe-update
+                  (make-command-context #f (editor-event-subject-id event) 'event)
+                  (list update)))))))
       service)))
 )

@@ -24,6 +24,7 @@
           dispatcher-set-error-reporter!
           dispatcher-set-listener!
           dispatcher-set-host-listener!
+          dispatcher-add-commit-participant!
           dispatcher-add-listener!
           dispatcher-add-host-listener!
           dispatcher-register-global-operation-handler!)
@@ -101,6 +102,13 @@
       (assertion-violation 'dispatcher-add-listener!
                            "expected a dispatcher" dispatcher))
     (dispatch-publication-add-editor-listener!
+      (dispatcher-publication dispatcher) owner listener))
+
+  (define (dispatcher-add-commit-participant! dispatcher owner listener)
+    (unless (dispatcher? dispatcher)
+      (assertion-violation 'dispatcher-add-commit-participant!
+                           "expected a dispatcher" dispatcher))
+    (dispatch-publication-add-commit-participant!
       (dispatcher-publication dispatcher) owner listener))
 
   (define (dispatcher-add-host-listener! dispatcher owner listener)

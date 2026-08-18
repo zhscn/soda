@@ -38,7 +38,7 @@
           package-host-navigate-forward!
           package-host-dispatch!
           package-host-dispatch-view!
-          package-host-add-update-listener!
+          package-host-add-commit-participant!
           package-host-buffer-ref
           package-host-buffers
           package-host-buffers-for-surface
@@ -46,7 +46,7 @@
           package-host-create-buffer!
           package-host-close-buffer!
           package-host-close-buffer-with-fallback!
-          package-host-add-buffer-close-listener!
+          package-host-add-buffer-close-finalizer!
           package-host-find-buffer-key
           package-host-rebind-buffer-key!
           package-host-view-ref
@@ -485,12 +485,12 @@
   (define (package-host-dispatch-view! host specification)
     (dispatcher-dispatch-view! (host-state-dispatch (package-host-state host)) specification))
 
-  (define (package-host-add-update-listener! host owner procedure)
+  (define (package-host-add-commit-participant! host owner procedure)
     (unless (and (package-host? host) (owner? owner) (procedure? procedure))
-      (assertion-violation 'package-host-add-update-listener!
-                           "expected a PackageHost, Owner, and update listener"
+      (assertion-violation 'package-host-add-commit-participant!
+                           "expected a PackageHost, Owner, and participant"
                            host owner procedure))
-    (dispatcher-add-listener!
+    (dispatcher-add-commit-participant!
       (host-state-dispatch (package-host-state host)) owner procedure))
 
   (define (package-host-buffer-ref host id . default)
@@ -633,8 +633,12 @@
                      buffers (scratch-buffer-key) replacement-buffer))
                  closed?))))))
 
-  (define (package-host-add-buffer-close-listener! host owner procedure)
-    (buffer-service-add-close-listener!
+  (define (package-host-add-buffer-close-finalizer! host owner procedure)
+    (unless (and (package-host? host) (owner? owner) (procedure? procedure))
+      (assertion-violation 'package-host-add-buffer-close-finalizer!
+                           "expected a PackageHost, Owner, and finalizer"
+                           host owner procedure))
+    (buffer-service-add-close-finalizer!
       (host-state-buffers (package-host-state host)) owner procedure))
 
   (define (package-host-find-buffer-key host key . default)

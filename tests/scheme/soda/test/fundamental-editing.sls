@@ -2349,6 +2349,10 @@
           (command-runtime-start!
             runtime 'fundamental.beginning-of-buffer
             (application-command-context application))
+          ;; Buffer/View observations cross the event boundary after the
+          ;; command commits.  Drain that boundary before inspecting the
+          ;; temporary minibuffer presentation state.
+          (host-state-run! state)
           (let* ([current (minibuffer-session-completion
                             (minibuffer-service-current minibuffer))]
                  [candidate (car (completion-controller-candidates current))])
@@ -2557,6 +2561,7 @@
       (command-runtime-start!
         runtime 'fundamental.insert-text (application-command-context application)
         (list (string->utf8 "message.show-position")))
+      (host-state-run! state)
       (unless (not (completion-controller-selected-index controller))
         (error 'fundamental-editing-tests
                "editing minibuffer input retained a stale completion selection")))
