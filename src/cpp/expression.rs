@@ -467,23 +467,6 @@ impl Replay<'_> {
         f.indent
     }
 }
-fn block(k: N) -> bool {
-    matches!(
-        k,
-        N::TranslationUnit
-            | N::CompoundStatement
-            | N::NamespaceBody
-            | N::ClassBody
-            | N::CaseSection
-    )
-}
-fn group(k: N) -> bool {
-    matches!(
-        k,
-        N::ParenGroup | N::BracketGroup | N::BraceGroup | N::TemplateArgumentList
-    )
-}
-
 pub(super) struct ContinuationColumn {
     pub target: usize,
     pub structural: usize,
@@ -499,7 +482,7 @@ pub(super) fn continuation(
 ) -> Option<ContinuationColumn> {
     let mut region = controlling;
     while let Some(parent) = tree.nodes[region].parent {
-        if block(tree.nodes[parent].kind) {
+        if tree.nodes[parent].kind.is_layout_boundary() {
             break;
         }
         region = parent;
@@ -585,27 +568,18 @@ pub(super) fn continuation(
             - s.column;
         s.newline = token_line != previous_line;
         previous_line = token_line;
-        let deepest = tree.node_at(t.range.start);
+        let deepest = tree.token_owner(i);
         let n = &tree.nodes[deepest];
-        if i == n.tokens.start {
-            match n.kind {
-                N::IfStatement => s.kind = K::IfKw,
-                N::ForStatement => s.kind = K::ForKw,
-                _ => {}
-            }
-        }
+        s.kind = tree.format_kind(i);
 
         if bounds.contains(&i) {
             s.scope = if t.kind == K::LBrace { 1 } else { -1 };
             s.block = true;
-        } else if group(n.kind) && i == n.tokens.start {
+        } else if n.kind.is_group() && i == n.tokens.start {
             s.scope = 1;
             s.braced = n.kind == N::BraceGroup;
-            s.multi = (n.tokens.start + 1..n.tokens.end.saturating_sub(1)).any(|j| {
-                tree.tokens[j].kind == K::Comma
-                    && tree.node_at(tree.tokens[j].range.start) == deepest
-            });
-        } else if group(n.kind)
+            s.multi = tree.has_direct_comma(deepest);
+        } else if n.kind.is_group()
             && i + 1 == n.tokens.end
             && matches!(
                 t.kind,
@@ -617,7 +591,7 @@ pub(super) fn continuation(
             let mut parent = n.parent;
             while let Some(id) = parent {
                 let n = &tree.nodes[id];
-                if !group(n.kind) || i + 1 != n.tokens.end {
+                if !n.kind.is_group() || i + 1 != n.tokens.end {
                     break;
                 }
                 s.close_count += 1;
@@ -628,10 +602,7 @@ pub(super) fn continuation(
             let prev = sim.last();
             let operand = prev.is_some_and(Sim::operand);
             if t.kind == K::Colon {
-                if n.kind == N::CtorInitializerList
-                    || n.parent
-                        .is_some_and(|p| tree.nodes[p].kind == N::CtorInitializerList)
-                {
+                if tree.is_constructor_colon(i) {
                     s.ctor = true;
                 } else if questions.pop().is_some() {
                     s.colon = true;

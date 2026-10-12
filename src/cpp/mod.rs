@@ -5,14 +5,12 @@ mod lexer;
 mod parser;
 mod rules;
 mod style;
+mod syntax;
 mod whitespace;
 
 pub use indent::{IndentDecision, IndentRole, compute_indent, enter, reindent, type_char};
 pub use lexer::{Token, TokenKind, lex};
-pub use parser::{
-    Node, NodeKind, SyntaxTree, parse, parse_snapshot, parse_snapshot_with_options,
-    parse_with_options,
-};
+pub use parser::{parse, parse_snapshot, parse_snapshot_with_options, parse_with_options};
 pub use style::{
     AccessIndent, ConstructorInitializers, CppStyle, NamespaceIndentation, PPDirectiveIndent,
     TabPolicy,
@@ -24,3 +22,5 @@ pub use rules::{
     InitializerLayout, InitializerPolicy, OperandAlignment, ParserOptions, StructurePolicy,
     WhitespacePolicy,
 };
+
+pub use syntax::{Node, NodeKind, SyntaxTree};

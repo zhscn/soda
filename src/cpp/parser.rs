@@ -1,0 +1,964 @@
+use super::{Node, NodeKind as N, ParserOptions, SyntaxTree, TokenKind as K, lex};
+use crate::core::Snapshot;
+use std::sync::Arc;
+
+const MAX_NESTING: usize = 128;
+const TEMPLATE_LOOKAHEAD: usize = 200;
+
+pub fn parse(source: &str) -> SyntaxTree {
+    parse_with_options(source, &ParserOptions::default())
+}
+
+pub fn parse_snapshot(snapshot: &Snapshot) -> SyntaxTree {
+    parse_snapshot_with_options(snapshot, &ParserOptions::default())
+}
+
+pub fn parse_with_options(source: &str, options: &ParserOptions) -> SyntaxTree {
+    parse_shared(source.into(), options)
+}
+pub fn parse_snapshot_with_options(snapshot: &Snapshot, options: &ParserOptions) -> SyntaxTree {
+    parse_shared(snapshot.shared_text(), options)
+}
+fn parse_shared(source: Arc<str>, options: &ParserOptions) -> SyntaxTree {
+    let mut p = Parser::new(source, options);
+    p.open(N::TranslationUnit);
+    p.tree.nodes[0].tokens.start = 0;
+    p.items(false);
+    p.tree.nodes[0].tokens.end = p.tree.tokens.len();
+    p.tree.index_tokens();
+    p.tree
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DirectiveKind {
+    Other,
+    ConditionalStart,
+    ConditionalBranch,
+    ConditionalEnd,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DirectiveStep {
+    Unhandled,
+    Consumed,
+    LeaveScope,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LinkageHead {
+    Other,
+    Extern,
+    ExternString,
+}
+
+#[derive(Clone, Copy)]
+struct PPFrame {
+    depth: usize,
+    braces: usize,
+}
+#[derive(Clone, Copy)]
+struct ReopenedScope {
+    depth: usize,
+    branch_depth: usize,
+}
+struct Parser {
+    tree: SyntaxTree,
+    pos: usize,
+    stack: Vec<usize>,
+    enum_body: bool,
+    pp: Vec<PPFrame>,
+    phantoms: Vec<ReopenedScope>,
+    unwind: Option<usize>,
+}
+impl Parser {
+    fn new(source: Arc<str>, options: &ParserOptions) -> Self {
+        Self {
+            tree: SyntaxTree {
+                tokens: lex(&source),
+                parser_options: options.clone(),
+                source,
+                nodes: vec![],
+                token_owners: vec![],
+            },
+            pos: 0,
+            stack: vec![],
+            enum_body: false,
+            pp: vec![],
+            phantoms: vec![],
+            unwind: None,
+        }
+    }
+
+    fn skip(&mut self) {
+        while self.tree.tokens[self.pos].kind.is_trivia() {
+            self.pos += 1;
+        }
+    }
+    fn kind(&mut self) -> K {
+        self.skip();
+        self.tree.tokens[self.pos].kind
+    }
+    fn at(&mut self, k: K) -> bool {
+        self.kind() == k
+    }
+    fn advance(&mut self) {
+        self.skip();
+        if !self.at(K::EndOfFile) {
+            self.pos += 1;
+        }
+    }
+    fn text(&self, i: usize) -> &str {
+        &self.tree.source[self.tree.tokens[i].range.clone()]
+    }
+    fn open(&mut self, kind: N) -> usize {
+        self.skip();
+        let id = self.tree.nodes.len();
+        let parent = self.stack.last().copied();
+        self.tree.nodes.push(Node {
+            kind,
+            tokens: self.pos..self.pos,
+            parent,
+            children: vec![],
+            incomplete: false,
+            reclassified: false,
+            whitespace_sensitive: false,
+            extern_linkage: false,
+            expected: None,
+        });
+        if let Some(parent) = parent {
+            self.tree.nodes[parent].children.push(id);
+        }
+        self.stack.push(id);
+        id
+    }
+    fn close(&mut self, id: usize) {
+        let node = &self.tree.nodes[id];
+        let floor = node
+            .children
+            .last()
+            .map(|&c| self.tree.nodes[c].tokens.end)
+            .unwrap_or(node.tokens.start);
+        let mut end = self.pos;
+        while end > floor && self.tree.tokens[end - 1].kind.is_trivia() {
+            end -= 1;
+        }
+        self.tree.nodes[id].tokens.end = end;
+        assert_eq!(self.stack.pop(), Some(id));
+    }
+    fn incomplete(&mut self, id: usize) {
+        self.tree.nodes[id].incomplete = true;
+    }
+    fn missing(&mut self, expected: K) {
+        let id = self.open(N::MissingToken);
+        self.tree.nodes[id].expected = Some(expected);
+        self.incomplete(id);
+        self.close(id);
+        if let Some(&parent) = self.stack.last() {
+            self.incomplete(parent);
+        }
+    }
+    fn expect(&mut self, k: K) {
+        if self.at(k) {
+            self.advance();
+        } else {
+            self.missing(k);
+        }
+    }
+    fn guarded(&mut self) {
+        self.skip();
+        let before = self.pos;
+        // Bounded nesting protects the editor from adversarial input. The
+        // fallback consumes a token without manufacturing source text.
+        if self.stack.len() < MAX_NESTING {
+            self.item();
+        }
+        if before == self.pos {
+            let id = self.open(N::Error);
+            self.advance();
+            self.close(id);
+        }
+    }
+    fn items(&mut self, case: bool) {
+        loop {
+            let k = self.kind();
+            if k == K::EndOfFile
+                || (k == K::RBrace && self.stack.len() > 1)
+                || (case && matches!(k, K::CaseKw | K::DefaultKw))
+            {
+                break;
+            }
+            match self.pp_item() {
+                DirectiveStep::Consumed => continue,
+                DirectiveStep::LeaveScope => break,
+                _ => {}
+            }
+            self.guarded();
+            if let Some(depth) = self.unwind {
+                if self.stack.len() > depth {
+                    break;
+                }
+                self.unwind = None;
+            }
+        }
+    }
+    fn item(&mut self) {
+        let kind = self.kind();
+        if kind == K::Identifier {
+            let name = self.text(self.pos);
+            let control = if self
+                .tree
+                .parser_options
+                .loop_macros
+                .iter()
+                .any(|s| s == name)
+            {
+                Some(K::ForKw)
+            } else if self
+                .tree
+                .parser_options
+                .conditional_macros
+                .iter()
+                .any(|s| s == name)
+            {
+                Some(K::IfKw)
+            } else {
+                None
+            };
+            if let Some(control) = control {
+                self.control(control);
+                return;
+            }
+            if self
+                .tree
+                .parser_options
+                .namespace_macros
+                .iter()
+                .any(|s| s == name)
+            {
+                self.namespace_macro();
+                return;
+            }
+        }
+        match kind {
+            K::PreprocessorHash => self.directive(),
+            K::NamespaceKw => self.namespace(),
+            K::ClassKw | K::StructKw | K::EnumKw | K::UnionKw => self.class(),
+            K::PublicKw | K::ProtectedKw | K::PrivateKw => {
+                let id = self.open(N::AccessSpecifierLabel);
+                self.advance();
+                while self.at(K::Identifier) {
+                    self.advance();
+                }
+                self.expect(K::Colon);
+                self.close(id);
+            }
+            K::TemplateKw => {
+                let id = self.open(N::OpaqueDeclaration);
+                self.advance();
+                if self.at(K::Less) && !self.template_args() {
+                    self.advance();
+                }
+                self.close(id);
+            }
+            k @ (K::IfKw | K::ForKw | K::WhileKw | K::DoKw | K::SwitchKw) => self.control(k),
+            K::CaseKw | K::DefaultKw => self.case(),
+            K::LBrace => self.body(N::CompoundStatement),
+            K::Semicolon => {
+                let id = self.open(N::OpaqueDeclaration);
+                self.advance();
+                self.close(id);
+            }
+            K::RBrace | K::EndOfFile => {}
+            _ => self.generic(),
+        }
+    }
+    fn line_start(&self) -> bool {
+        for t in self.tree.tokens[..self.pos].iter().rev() {
+            if t.kind == K::Newline {
+                return true;
+            }
+            if !t.kind.is_trivia() {
+                return false;
+            }
+        }
+        true
+    }
+    fn newline_ahead(&self) -> bool {
+        for t in &self.tree.tokens[self.pos..] {
+            if matches!(t.kind, K::Newline | K::EndOfFile) {
+                return true;
+            }
+            if !t.kind.is_trivia() {
+                return false;
+            }
+        }
+        true
+    }
+    fn delimiter(opener: K) -> (N, K) {
+        match opener {
+            K::LParen => (N::ParenGroup, K::RParen),
+            K::LBracket => (N::BracketGroup, K::RBracket),
+            K::LBrace => (N::BraceGroup, K::RBrace),
+            _ => unreachable!("group requires an opening delimiter"),
+        }
+    }
+    fn suffix(k: K) -> bool {
+        matches!(
+            k,
+            K::Identifier | K::ColonColon | K::Arrow | K::Amp | K::AmpAmp | K::Star
+        )
+    }
+    fn directive(&mut self) {
+        let id = self.open(N::PreprocessorDirective);
+        while self.pos + 1 < self.tree.tokens.len() && self.tree.tokens[self.pos].preprocessor {
+            let k = self.tree.tokens[self.pos].kind;
+            if matches!(k, K::LParen | K::LBracket | K::LBrace) {
+                self.pp_group(k);
+            } else {
+                self.pos += 1;
+            }
+        }
+        self.close(id);
+    }
+    fn pp_group(&mut self, k: K) {
+        let (n, closer) = Self::delimiter(k);
+        let id = self.open(n);
+        self.pos += 1;
+        while self.pos + 1 < self.tree.tokens.len() && self.tree.tokens[self.pos].preprocessor {
+            let k = self.tree.tokens[self.pos].kind;
+            if k == closer {
+                self.pos += 1;
+                self.close(id);
+                return;
+            }
+            if matches!(k, K::LParen | K::LBracket | K::LBrace) && self.stack.len() < MAX_NESTING {
+                self.pp_group(k);
+            } else {
+                self.pos += 1;
+            }
+        }
+        self.missing(closer);
+        self.close(id);
+    }
+    fn pp_category(&self, hash: usize) -> DirectiveKind {
+        let i = (hash + 1..self.tree.tokens.len())
+            .take_while(|&i| self.tree.tokens[i].preprocessor)
+            .find(|&i| !self.tree.tokens[i].kind.is_trivia());
+        match i.map(|i| self.text(i)) {
+            Some("if" | "ifdef" | "ifndef") => DirectiveKind::ConditionalStart,
+            Some("else" | "elif" | "elifdef" | "elifndef") => DirectiveKind::ConditionalBranch,
+            Some("endif") => DirectiveKind::ConditionalEnd,
+            _ => DirectiveKind::Other,
+        }
+    }
+    fn braces(&self) -> usize {
+        self.stack
+            .iter()
+            .filter(|&&id| {
+                matches!(
+                    self.tree.nodes[id].kind,
+                    N::CompoundStatement | N::NamespaceBody | N::ClassBody | N::PPReopenedScope
+                )
+            })
+            .count()
+    }
+    fn pp_item(&mut self) -> DirectiveStep {
+        if !self.at(K::PreprocessorHash) {
+            return DirectiveStep::Unhandled;
+        }
+        let depth = self.stack.len();
+        match self.pp_category(self.pos) {
+            DirectiveKind::ConditionalStart => {
+                self.directive();
+                self.pp.push(PPFrame {
+                    depth,
+                    braces: self.braces(),
+                });
+                DirectiveStep::Consumed
+            }
+            DirectiveKind::ConditionalBranch => {
+                let Some(frame) = self.pp.last().copied() else {
+                    return DirectiveStep::Unhandled;
+                };
+                if frame.depth < depth {
+                    self.unwind = Some(frame.depth);
+                    return DirectiveStep::LeaveScope;
+                }
+                self.unwind = None;
+                self.directive();
+                if frame.braces > self.braces() {
+                    self.reopen(frame.braces - self.braces());
+                }
+                DirectiveStep::Consumed
+            }
+            DirectiveKind::ConditionalEnd => {
+                if let Some(scope) = self.phantoms.last()
+                    && self.pp.len() <= scope.branch_depth
+                {
+                    self.unwind = Some(scope.depth);
+                    return DirectiveStep::LeaveScope;
+                }
+                self.pp.pop();
+                self.directive();
+                DirectiveStep::Consumed
+            }
+            _ => DirectiveStep::Unhandled,
+        }
+    }
+    fn reopen(&mut self, count: usize) {
+        if self.stack.len() >= MAX_NESTING {
+            return;
+        }
+        let id = self.open(N::PPReopenedScope);
+        let frames = self.pp.len();
+        self.phantoms.push(ReopenedScope {
+            depth: self.stack.len(),
+            branch_depth: frames,
+        });
+        if count > 1 {
+            self.reopen(count - 1);
+        }
+        loop {
+            let k = self.kind();
+            if matches!(k, K::EndOfFile | K::RBrace)
+                || (k == K::PreprocessorHash
+                    && self.pp.len() <= frames
+                    && matches!(
+                        self.pp_category(self.pos),
+                        DirectiveKind::ConditionalBranch | DirectiveKind::ConditionalEnd
+                    ))
+            {
+                break;
+            }
+            match self.pp_item() {
+                DirectiveStep::Consumed => continue,
+                DirectiveStep::LeaveScope => break,
+                _ => self.guarded(),
+            }
+            if let Some(depth) = self.unwind {
+                if self.stack.len() > depth {
+                    break;
+                }
+                self.unwind = None;
+            }
+        }
+        self.expect(K::RBrace);
+        self.phantoms.pop();
+        self.close(id);
+    }
+    fn body(&mut self, kind: N) {
+        let id = self.open(kind);
+        self.advance();
+        self.items(false);
+        self.expect(K::RBrace);
+        self.close(id);
+    }
+    fn namespace_macro(&mut self) {
+        let id = self.open(N::NamespaceDecl);
+        self.advance();
+        if self.at(K::LParen) {
+            self.group(K::LParen);
+        } else {
+            self.missing(K::LParen);
+        }
+        if self.at(K::LBrace) {
+            self.body(N::NamespaceBody);
+        } else {
+            self.missing(K::LBrace);
+        }
+        self.close(id);
+    }
+    fn namespace(&mut self) {
+        let id = self.open(N::NamespaceDecl);
+        self.advance();
+        while matches!(self.kind(), K::Identifier | K::ColonColon) {
+            self.advance();
+        }
+        if self.at(K::Equals) {
+            while !matches!(self.kind(), K::EndOfFile | K::Semicolon | K::RBrace)
+                && !self.kind().sync()
+            {
+                self.advance();
+            }
+            if self.at(K::Semicolon) {
+                self.advance();
+            }
+        } else if self.at(K::LBrace) {
+            self.body(N::NamespaceBody);
+        } else {
+            self.missing(K::LBrace);
+        }
+        self.close(id);
+    }
+    fn class(&mut self) {
+        let id = self.open(N::ClassDecl);
+        let is_enum = self.at(K::EnumKw);
+        self.advance();
+        let mut equals = false;
+        while !matches!(
+            self.kind(),
+            K::EndOfFile | K::LBrace | K::Semicolon | K::RBrace | K::NamespaceKw
+        ) {
+            if self.at(K::LParen) {
+                self.group(K::LParen);
+            } else if self.at(K::Less) {
+                if !self.template_args() {
+                    self.advance();
+                }
+            } else {
+                equals |= self.at(K::Equals);
+                self.advance();
+            }
+        }
+        if self.at(K::LBrace) {
+            if equals {
+                self.tree.nodes[id].kind = N::OpaqueDeclaration;
+                self.group(K::LBrace);
+            } else {
+                let saved = self.enum_body;
+                self.enum_body = is_enum;
+                self.body(N::ClassBody);
+                self.enum_body = saved;
+            }
+            if self.at(K::Semicolon) {
+                self.advance();
+            }
+        } else if self.at(K::Semicolon) {
+            self.advance();
+        } else {
+            self.incomplete(id);
+        }
+        self.close(id);
+    }
+    fn embedded(&mut self, id: usize) {
+        while self.at(K::PreprocessorHash) {
+            match self.pp_category(self.pos) {
+                DirectiveKind::ConditionalEnd => {
+                    if self
+                        .phantoms
+                        .last()
+                        .is_some_and(|scope| self.pp.len() <= scope.branch_depth)
+                    {
+                        self.incomplete(id);
+                        return;
+                    }
+                    self.pp.pop();
+                    self.directive();
+                }
+                DirectiveKind::ConditionalBranch => {
+                    self.incomplete(id);
+                    return;
+                }
+                _ => break,
+            }
+        }
+        if matches!(
+            self.kind(),
+            K::RBrace | K::EndOfFile | K::ElseKw | K::CaseKw | K::DefaultKw
+        ) {
+            self.incomplete(id);
+        } else {
+            self.guarded();
+        }
+    }
+    fn control(&mut self, k: K) {
+        let n = match k {
+            K::IfKw => N::IfStatement,
+            K::ForKw => N::ForStatement,
+            K::WhileKw => N::WhileStatement,
+            K::DoKw => N::DoStatement,
+            _ => N::SwitchStatement,
+        };
+        let id = self.open(n);
+        self.advance();
+        if k == K::IfKw {
+            while self.at(K::Identifier) {
+                self.advance();
+            }
+        }
+        if k != K::DoKw {
+            if self.at(K::LParen) {
+                self.group(K::LParen);
+            } else {
+                self.missing(K::LParen);
+            }
+        }
+        if k == K::SwitchKw {
+            if self.at(K::LBrace) {
+                self.body(N::CompoundStatement);
+            } else {
+                self.incomplete(id);
+            }
+        } else if k != K::DoKw || !self.at(K::WhileKw) {
+            self.embedded(id);
+        }
+        if k == K::IfKw && self.at(K::ElseKw) {
+            let e = self.open(N::ElseClause);
+            self.advance();
+            self.embedded(e);
+            self.close(e);
+        }
+        if k == K::DoKw {
+            if self.at(K::WhileKw) {
+                self.advance();
+                if self.at(K::LParen) {
+                    self.group(K::LParen);
+                } else {
+                    self.missing(K::LParen);
+                }
+                self.expect(K::Semicolon);
+            } else {
+                self.incomplete(id);
+            }
+        }
+        self.close(id);
+    }
+    fn case(&mut self) {
+        let section = self.open(N::CaseSection);
+        let label = self.open(N::CaseLabel);
+        self.advance();
+        while !matches!(
+            self.kind(),
+            K::EndOfFile | K::Colon | K::Semicolon | K::LBrace | K::RBrace
+        ) {
+            if self.at(K::LParen) {
+                self.group(K::LParen);
+            } else {
+                self.advance();
+            }
+        }
+        self.expect(K::Colon);
+        self.close(label);
+        self.items(true);
+        self.close(section);
+    }
+    fn group(&mut self, opener: K) {
+        if self.stack.len() >= MAX_NESTING {
+            let id = self.open(N::Error);
+            self.advance();
+            self.close(id);
+            return;
+        }
+        let (kind, closer) = Self::delimiter(opener);
+        let id = self.open(kind);
+        self.advance();
+        let mut pending = false;
+        loop {
+            let k = self.kind();
+            if k == K::EndOfFile {
+                break;
+            }
+            if k == closer {
+                self.advance();
+                self.close(id);
+                return;
+            }
+            if matches!(k, K::LParen | K::LBracket) {
+                self.group(k);
+                pending = true;
+                continue;
+            }
+            if k == K::LBrace && opener != K::LBracket {
+                if pending {
+                    self.body(N::CompoundStatement);
+                } else {
+                    self.group(k);
+                }
+                pending = false;
+                continue;
+            }
+            if opener == K::LParen
+                && (matches!(k, K::RBrace | K::NamespaceKw)
+                    || (matches!(k, K::ClassKw | K::StructKw) && self.line_start()))
+            {
+                break;
+            }
+            if opener == K::LBracket
+                && (matches!(k, K::Semicolon | K::LBrace | K::RBrace) || k.sync())
+            {
+                break;
+            }
+            if opener == K::LBrace {
+                if matches!(
+                    k,
+                    K::Semicolon
+                        | K::ReturnKw
+                        | K::IfKw
+                        | K::WhileKw
+                        | K::ForKw
+                        | K::DoKw
+                        | K::SwitchKw
+                ) {
+                    self.tree.nodes[id].kind = N::CompoundStatement;
+                    self.tree.nodes[id].reclassified = true;
+                    self.items(false);
+                    self.expect(closer);
+                    self.close(id);
+                    return;
+                }
+                if k == K::PreprocessorHash {
+                    self.directive();
+                    continue;
+                }
+                if k.sync() {
+                    break;
+                }
+            }
+            pending &= Self::suffix(k);
+            self.advance();
+        }
+        self.missing(closer);
+        self.close(id);
+    }
+    fn template_args(&mut self) -> bool {
+        self.skip();
+        let mut angle = 0isize;
+        let mut paren = 0;
+        let mut bracket = 0;
+        let mut count = 0;
+        let mut end = None;
+        for i in self.pos..self.tree.tokens.len() {
+            let k = self.tree.tokens[i].kind;
+            if k.is_trivia() {
+                continue;
+            }
+            count += 1;
+            if count > TEMPLATE_LOOKAHEAD {
+                break;
+            }
+            match k {
+                K::Less => angle += 1,
+                K::Greater => {
+                    angle -= 1;
+                    if angle == 0 {
+                        end = Some(i + 1);
+                        break;
+                    }
+                }
+                K::GreaterGreater => {
+                    angle -= 2;
+                    if angle <= 0 {
+                        end = Some(i + 1);
+                        break;
+                    }
+                }
+                K::LParen => paren += 1,
+                K::RParen => {
+                    if paren == 0 {
+                        break;
+                    }
+                    paren -= 1;
+                }
+                K::LBracket => bracket += 1,
+                K::RBracket => {
+                    if bracket == 0 {
+                        break;
+                    }
+                    bracket -= 1;
+                }
+                K::Semicolon | K::LBrace | K::RBrace | K::EndOfFile => break,
+                _ => {}
+            }
+        }
+        let Some(end) = end else {
+            return false;
+        };
+        let id = self.open(N::TemplateArgumentList);
+        self.pos = end;
+        self.close(id);
+        true
+    }
+    fn ctor(&mut self) {
+        let list = self.open(N::CtorInitializerList);
+        self.advance();
+        let mut expect = true;
+        loop {
+            let k = self.kind();
+            if matches!(k, K::EndOfFile | K::LBrace | K::RBrace | K::Semicolon) || k.sync() {
+                break;
+            }
+            if k == K::Comma {
+                self.advance();
+                expect = true;
+                continue;
+            }
+            let before = self.pos;
+            let item = self.open(N::CtorInitializer);
+            let mut named = false;
+            while matches!(self.kind(), K::Identifier | K::ColonColon) {
+                self.advance();
+                named = true;
+            }
+            if named && self.at(K::Less) {
+                self.template_args();
+            }
+            if self.at(K::LParen) {
+                self.group(K::LParen);
+            } else if named && self.at(K::LBrace) {
+                self.group(K::LBrace);
+            } else {
+                self.incomplete(item);
+            }
+            if self.pos == before {
+                self.advance();
+            }
+            expect = false;
+            if self.tree.nodes[item].incomplete {
+                self.incomplete(list);
+            }
+            self.close(item);
+        }
+        if expect {
+            self.incomplete(list);
+        }
+        self.close(list);
+    }
+    fn statement_macro(&self, spelling: &str) -> bool {
+        let options = &self.tree.parser_options;
+        if options.attribute_macros.iter().any(|name| name == spelling) {
+            return false;
+        }
+        options.statement_macros.iter().any(|name| name == spelling)
+            // Unconfigured all-caps invocations may be standalone statements.
+            // This fallback only ends a unit when a call is followed by a newline.
+            || (spelling.len() >= 3 && spelling.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_'))
+    }
+
+    fn generic(&mut self) {
+        let id = self.open(N::OpaqueDeclaration);
+        self.tree.nodes[id].whitespace_sensitive = self
+            .tree
+            .parser_options
+            .whitespace_sensitive_macros
+            .iter()
+            .any(|name| name == self.text(self.pos));
+        let mut prev = K::EndOfFile;
+        let mut has_question = false;
+        let mut terminated = false;
+        let mut body_candidate = false;
+        let mut standalone_macro = false;
+        let mut label_candidate = false;
+        let mut linkage = LinkageHead::Other;
+        loop {
+            let k = self.kind();
+            if k == K::EndOfFile {
+                break;
+            }
+            if k == K::Semicolon || (k == K::Comma && self.enum_body) {
+                self.advance();
+                terminated = true;
+                break;
+            }
+            if k == K::RBrace {
+                terminated = self.enum_body;
+                break;
+            }
+            if k.sync() {
+                if k == K::DefaultKw && prev == K::Equals {
+                    self.advance();
+                    prev = k;
+                    continue;
+                }
+                break;
+            }
+            if k == K::LParen {
+                self.group(k);
+                if standalone_macro && self.newline_ahead() {
+                    terminated = true;
+                    break;
+                }
+                standalone_macro = false;
+                label_candidate = false;
+                prev = K::RParen;
+                body_candidate = true;
+                continue;
+            }
+            if k == K::LBracket {
+                let lambda = matches!(prev, K::EndOfFile | K::Equals | K::Comma | K::ReturnKw);
+                self.group(k);
+                standalone_macro = false;
+                label_candidate = false;
+                prev = K::RBracket;
+                body_candidate |= lambda;
+                continue;
+            }
+            if k == K::LBrace {
+                if linkage == LinkageHead::ExternString {
+                    self.tree.nodes[id].kind = N::NamespaceDecl;
+                    self.tree.nodes[id].extern_linkage = true;
+                    self.body(N::NamespaceBody);
+                    terminated = true;
+                    break;
+                }
+                if body_candidate {
+                    self.tree.nodes[id].kind = N::FunctionDefinition;
+                    self.body(N::CompoundStatement);
+                    terminated = true;
+                    break;
+                }
+                self.group(k);
+                label_candidate = false;
+                prev = K::RBrace;
+                continue;
+            }
+            if k == K::Colon && label_candidate {
+                self.advance();
+                terminated = true;
+                break;
+            }
+            if k == K::Colon && body_candidate && !has_question {
+                self.tree.nodes[id].kind = N::FunctionDefinition;
+                self.ctor();
+                if self.at(K::LBrace) {
+                    self.body(N::CompoundStatement);
+                } else {
+                    self.missing(K::LBrace);
+                }
+                terminated = true;
+                break;
+            }
+            if k == K::Less && matches!(prev, K::Identifier | K::TemplateKw) && self.template_args()
+            {
+                label_candidate = false;
+                prev = K::Greater;
+                continue;
+            }
+            has_question |= k == K::Question;
+            body_candidate &= Self::suffix(k);
+            let first = prev == K::EndOfFile && k == K::Identifier;
+            let spelling = self.text(self.pos);
+            standalone_macro = first && self.statement_macro(spelling);
+            label_candidate = first;
+            linkage = if first && self.text(self.pos) == "extern" {
+                LinkageHead::Extern
+            } else if linkage == LinkageHead::Extern && k == K::StringLiteral {
+                LinkageHead::ExternString
+            } else {
+                LinkageHead::Other
+            };
+            self.advance();
+            prev = k;
+        }
+        if !terminated {
+            self.incomplete(id);
+        }
+        self.close(id);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn directive_classification_stops_at_its_logical_line() {
+        for (source, expected) in [
+            ("#\nif (x) {}", DirectiveKind::Other),
+            ("# /* comment */\nelse {}", DirectiveKind::Other),
+            ("# /* comment */ if X", DirectiveKind::ConditionalStart),
+            ("#\\\nif X", DirectiveKind::ConditionalStart),
+            ("#elif X", DirectiveKind::ConditionalBranch),
+            ("#endif", DirectiveKind::ConditionalEnd),
+        ] {
+            let parser = Parser::new(source.into(), &ParserOptions::default());
+            assert_eq!(parser.pp_category(0), expected, "{source}");
+        }
+    }
+}

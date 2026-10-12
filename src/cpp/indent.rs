@@ -2,7 +2,7 @@ use super::indent_rules::{
     AlignmentAnchor, IndentRule, IndentSegment, IndentSlot as S, OffsetRule, offset, rule,
 };
 use super::{
-    CppRules, NodeKind as N, PPDirectiveIndent, SyntaxTree, TokenKind as K, column_width,
+    CppRules, NodeKind as N, PPDirectiveIndent, SyntaxTree, TokenKind as K, column_width, lex,
     materialize, parse_snapshot_with_options, parse_with_options,
 };
 use crate::core::{Change, EditError, EditorState, Selection, Snapshot, Transaction};
@@ -249,7 +249,7 @@ impl Computer<'_> {
         let first = self.first(self.line);
         if let Some(i) = first {
             let token = &self.tree.tokens[i];
-            let id = self.tree.node_at(token.range.start);
+            let id = self.tree.token_owner(i);
             match token.kind {
                 K::RBrace | K::RParen | K::RBracket
                     if matches!(
@@ -782,21 +782,23 @@ pub fn enter(state: &EditorState, style: &CppRules) -> Result<Transaction, EditE
     let mut base = source.to_owned();
     base.replace_range(range.clone(), "");
     let caret = range.start;
-    let tree = parse_with_options(&base, &style.parser);
-    let prev = tree
-        .tokens
+    let tokens = lex(&base);
+    let prev = tokens
         .iter()
-        .rfind(|t| t.range.end <= caret && !t.kind.is_trivia() && t.kind != K::EndOfFile);
-    let next = tree
-        .tokens
+        .enumerate()
+        .rfind(|(_, t)| t.range.end <= caret && !t.kind.is_trivia() && t.kind != K::EndOfFile);
+    let next = tokens
         .iter()
         .find(|t| t.range.start >= caret && !t.kind.is_trivia() && t.kind != K::EndOfFile);
     let between = match (prev, next) {
-        (Some(left), Some(right)) if left.kind == K::LBrace && right.kind == K::RBrace => {
-            let id = tree.node_at(left.range.start);
-            tree.range(id).end == right.range.end
+        (Some((left_index, left)), Some(right))
+            if left.kind == K::LBrace
+                && right.kind == K::RBrace
                 && !base[left.range.end..right.range.start].contains(['\n', '\r'])
-                && base[left.range.end..right.range.start].trim().is_empty()
+                && base[left.range.end..right.range.start].trim().is_empty() =>
+        {
+            let tree = parse_with_options(&base, &style.parser);
+            tree.range(tree.token_owner(left_index)).end == right.range.end
         }
         _ => false,
     };
