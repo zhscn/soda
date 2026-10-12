@@ -38,6 +38,13 @@ impl Change {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UserEvent {
+    Input,
+    DeleteBackward,
+    DeleteForward,
+}
+
 /// All ranges refer to the same base snapshot. Adjacent changes are allowed;
 /// two changes starting at the same byte are rejected as ambiguous.
 #[derive(Clone, Debug)]
@@ -47,6 +54,7 @@ pub struct Transaction {
     /// Explicit selection is in the resulting text's coordinates.
     pub selection: Option<Selection>,
     pub history_group: Option<u64>,
+    pub user_event: Option<UserEvent>,
 }
 impl Transaction {
     pub fn new(base_version: u64, changes: Vec<Change>) -> Self {
@@ -55,6 +63,7 @@ impl Transaction {
             changes,
             selection: None,
             history_group: None,
+            user_event: None,
         }
     }
 }

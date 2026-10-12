@@ -1,3 +1,5 @@
+mod position;
+pub use position::{column_at, column_width, deletion_range, position_at_column, step_grapheme};
 mod history;
 pub(crate) use history::History;
 mod changes;
@@ -8,5 +10,6 @@ mod text;
 
 pub use state::{
     Association, Change, ChangeMap, EditError, Editor, EditorState, Selection, Transaction,
+    UserEvent,
 };
 pub use text::Snapshot;

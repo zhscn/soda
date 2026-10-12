@@ -13,6 +13,8 @@ use std::collections::BTreeMap;
 pub struct EditorSession {
     id: SessionId,
     state: EditorState,
+    pub(super) goal_column: Option<usize>,
+    pub(super) search: super::search::SearchState,
 }
 impl EditorSession {
     pub fn id(&self) -> SessionId {
@@ -20,6 +22,9 @@ impl EditorSession {
     }
     pub fn state(&self) -> &EditorState {
         &self.state
+    }
+    pub fn search(&self) -> &super::search::SearchState {
+        &self.search
     }
     pub fn selection(&self) -> Selection {
         self.state.selection()
@@ -40,7 +45,15 @@ impl EditorModel {
             EditorState::from_snapshot(document.snapshot().clone(), Selection::caret(0)).unwrap();
         Self {
             document,
-            sessions: BTreeMap::from([(id, EditorSession { id, state })]),
+            sessions: BTreeMap::from([(
+                id,
+                EditorSession {
+                    id,
+                    state,
+                    goal_column: None,
+                    search: super::search::SearchState::default(),
+                },
+            )]),
             default_session: id,
         }
     }
@@ -84,7 +97,15 @@ impl EditorModel {
     pub(super) fn add_session(&mut self, selection: Selection) -> Result<SessionId, EditError> {
         let state = EditorState::from_snapshot(self.document.snapshot().clone(), selection)?;
         let id = SessionId::allocate()?;
-        self.sessions.insert(id, EditorSession { id, state });
+        self.sessions.insert(
+            id,
+            EditorSession {
+                id,
+                state,
+                goal_column: None,
+                search: super::search::SearchState::default(),
+            },
+        );
         Ok(id)
     }
     pub(super) fn set_selection(
@@ -97,11 +118,13 @@ impl EditorModel {
             .get_mut(&id)
             .ok_or(EditError::UnknownSession)?
             .state = state;
+        self.sessions.get_mut(&id).unwrap().goal_column = None;
         self.document.break_group();
         Ok(())
     }
     pub(super) fn install(&mut self, commit: &Commit) {
         for session in self.sessions.values_mut() {
+            session.goal_column = None;
             let selection = if session.id == commit.restore_selection.0 {
                 commit.restore_selection.1
             } else {

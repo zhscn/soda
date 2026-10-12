@@ -42,7 +42,7 @@ impl FileState {
     pub(crate) fn is_dirty(&self, current: &Snapshot) -> bool {
         match &self.saved {
             Some(saved) => saved.bom != self.bom || !saved.snapshot.content_eq(current),
-            None => !current.is_empty() || self.bom,
+            None => self.path.is_some() || !current.is_empty() || self.bom,
         }
     }
 }

@@ -1,15 +1,20 @@
-use super::{TabPolicy, WhitespacePolicy};
 use std::num::NonZeroUsize;
-use unicode_width::UnicodeWidthStr;
 
-/// Logical display columns, separate from UTF-8 byte offsets.
-pub fn column_width(text: &str, start: usize, tab_width: NonZeroUsize) -> usize {
-    let width = tab_width.get();
-    text.split('\t').enumerate().fold(start, |c, (index, run)| {
-        c + if index == 0 { 0 } else { width - c % width } + run.width()
-    })
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TabPolicy {
+    Never,
+    ForIndentation,
+    ForContinuationAndIndentation,
+    AlignWithSpaces,
+    Always,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WhitespacePolicy {
+    pub indent_width: usize,
+    pub tab_width: NonZeroUsize,
+    pub tabs: TabPolicy,
+}
 /// Structural, fixed continuation and alignment columns remain distinct.
 /// Tabs are emitted only when their entire next stop fits the permitted region.
 pub fn materialize(

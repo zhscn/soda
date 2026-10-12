@@ -1,5 +1,7 @@
 //! Language-neutral suggestions in the request snapshot's UTF-8 coordinates.
+mod whitespace;
 use crate::core::Change;
+pub use whitespace::{TabPolicy, WhitespacePolicy, materialize};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum IndentTrigger {

@@ -4,9 +4,9 @@
 // This Rust adaptation replays user-selected line breaks and actual columns;
 // it does not run the formatter's line-breaking optimizer.
 
-use super::whitespace::column_width;
 use super::{CppRules, NodeKind as N, SyntaxTree, TokenKind as K};
 use crate::core::Snapshot;
+use crate::core::column_width;
 
 #[derive(Clone, Debug)]
 struct Sim {

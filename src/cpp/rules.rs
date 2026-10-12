@@ -1,8 +1,6 @@
 use super::{
     AccessIndent, ConstructorInitializers, CppStyle, NamespaceIndentation, PPDirectiveIndent,
-    TabPolicy,
 };
-use std::num::NonZeroUsize;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ParserOptions {
@@ -14,12 +12,7 @@ pub struct ParserOptions {
     pub whitespace_sensitive_macros: Vec<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct WhitespacePolicy {
-    pub indent_width: usize,
-    pub tab_width: NonZeroUsize,
-    pub tabs: TabPolicy,
-}
+pub use crate::language::WhitespacePolicy;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OperandAlignment {
     None,

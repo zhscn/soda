@@ -6,7 +6,7 @@ use super::{
     },
     state::{DiskImage, FileState},
 };
-use crate::editor::{Command, DocumentId, Editor, Language};
+use crate::editor::{Command, DocumentId, Editor, EditorUpdate, Language};
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
@@ -30,6 +30,10 @@ pub struct FileUpdate {
 pub struct FileResult {
     pub document_id: DocumentId,
     pub result: Result<FileUpdate, FileError>,
+}
+pub struct ReloadUpdate {
+    pub edit: EditorUpdate,
+    pub file: FileUpdate,
 }
 struct PendingSave {
     token: u64,
@@ -106,6 +110,98 @@ impl Workspace {
                 self.finish_open(completion)
             }
         }
+    }
+    /// Opens an existing file or registers an empty, unsaved named document.
+    pub fn open_or_create(&mut self, path: &Path) -> Result<DocumentId, FileError> {
+        self.collect_events();
+        let path = self.service.resolve_path(path)?;
+        match self.open(&path) {
+            Ok(id) => Ok(id),
+            Err(FileError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {
+                let configuration = self.service.configuration(&path)?;
+                let mut editor = Editor::new("", FileService::language(&configuration));
+                let id = editor.model().document().id();
+                editor.bind_file(FileState {
+                    path: Some(path.clone()),
+                    configuration,
+                    ..Default::default()
+                });
+                self.paths.insert(path, id);
+                self.editors.insert(id, editor);
+                Ok(id)
+            }
+            Err(error) => Err(error),
+        }
+    }
+    /// Explicit disk reload. Local edits require discard=true; history retains
+    /// the replaced contents as one undo unit and document identity is stable.
+    pub fn reload(&mut self, id: DocumentId, discard: bool) -> Result<ReloadUpdate, FileError> {
+        self.collect_events();
+        if self.pending.contains_key(&id) {
+            return Err(FileError::Busy);
+        }
+        let document = self
+            .editors
+            .get(&id)
+            .ok_or(FileError::UnknownDocument)?
+            .model()
+            .document();
+        if document.is_dirty() && !discard {
+            return Err(FileError::UnsavedChanges);
+        }
+        let path = document
+            .file()
+            .path()
+            .ok_or(FileError::Untitled)?
+            .to_owned();
+        let loaded = self.service.read(&path)?;
+        if self
+            .paths
+            .get(&loaded.path)
+            .is_some_and(|owner| *owner != id)
+        {
+            return Err(FileError::PathInUse(loaded.path));
+        }
+        let language = FileService::language(&loaded.configuration);
+        let document = self.editors.get(&id).unwrap().model().document();
+        if document.language() != language {
+            document
+                .config_generation()
+                .checked_add(1)
+                .ok_or(crate::core::EditError::VersionExhausted)?;
+        }
+        let editor = self.editors.get_mut(&id).unwrap();
+        let mut edit = editor.execute(Command::ReloadText(loaded.text))?;
+        let language_changed = editor
+            .execute(Command::SetLanguage(language))?
+            .language_changed;
+        edit.language_changed = language_changed;
+        edit.config_generation = editor.model().document().config_generation();
+        let snapshot = editor.model().document().snapshot().for_history();
+        let revision = snapshot.version();
+        editor.bind_file(FileState {
+            path: Some(loaded.path.clone()),
+            bom: loaded.bom,
+            saved: Some(DiskImage {
+                snapshot,
+                bom: loaded.bom,
+            }),
+            saved_revision: Some(revision),
+            configuration: loaded.configuration,
+        });
+        editor.checkpoint_history();
+        self.paths.remove(&path);
+        self.paths.insert(loaded.path.clone(), id);
+        Ok(ReloadUpdate {
+            edit,
+            file: FileUpdate {
+                document_id: id,
+                path: loaded.path,
+                saved_revision: revision,
+                dirty: false,
+                language_changed,
+            },
+        })
     }
     pub fn prepare_open(&mut self, path: &Path) -> Result<OpenPreparation, FileError> {
         self.collect_events();

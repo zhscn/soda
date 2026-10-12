@@ -57,6 +57,16 @@ impl LanguageSession {
             session.invalidate();
         }
     }
+    pub fn whitespace(&self) -> crate::language::WhitespacePolicy {
+        match &self.inner {
+            Session::Cpp(session) => session.rules().whitespace().clone(),
+            Session::PlainText => crate::language::WhitespacePolicy {
+                indent_width: 4,
+                tab_width: std::num::NonZeroUsize::new(4).unwrap(),
+                tabs: crate::language::TabPolicy::Never,
+            },
+        }
+    }
     pub fn triggers(&self, ch: char) -> bool {
         match &self.inner {
             Session::PlainText => false,

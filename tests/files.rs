@@ -601,3 +601,116 @@ fn requests_do_not_start_io_after_their_workspace_is_dropped() {
         Err(FileError::StaleCompletion)
     ));
 }
+
+#[test]
+fn open_or_create_registers_named_empty_file_and_loads_path_configuration() {
+    let directory = tempdir().unwrap();
+    fs::write(directory.path().join(".clang-format"), "IndentWidth: 3\n").unwrap();
+    let path = directory.path().join("new.cpp");
+    let mut workspace = Workspace::default();
+    let id = workspace.open_or_create(&path).unwrap();
+    assert!(!path.exists());
+    assert!(workspace.editor(id).unwrap().model().document().is_dirty());
+    assert_eq!(workspace.open_or_create(&path).unwrap(), id);
+    match workspace.editor(id).unwrap().model().language() {
+        Language::Cpp(rules) => assert_eq!(rules.whitespace().indent_width, 3),
+        _ => panic!("expected C++"),
+    }
+    workspace.save(id, None).unwrap();
+    assert!(path.exists());
+    assert_eq!(fs::read(&path).unwrap(), b"");
+    assert!(!workspace.editor(id).unwrap().model().document().is_dirty());
+}
+
+#[test]
+fn explicit_reload_guards_dirty_content_and_preserves_identity_and_undo() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("file.txt");
+    fs::write(&path, "prefix old suffix\r\n").unwrap();
+    let mut workspace = Workspace::default();
+    let id = workspace.open(&path).unwrap();
+    workspace
+        .editor_mut(id)
+        .unwrap()
+        .execute(Command::TypeChar('x'))
+        .unwrap();
+    fs::write(&path, b"\xef\xbb\xbfprefix new suffix\r\n").unwrap();
+    assert!(matches!(
+        workspace.reload(id, false),
+        Err(FileError::UnsavedChanges)
+    ));
+    let update = workspace.reload(id, true).unwrap();
+    assert_eq!(update.file.document_id, id);
+    assert!(update.edit.text_changed);
+    assert_eq!(
+        workspace.editor(id).unwrap().state().snapshot().text(),
+        "prefix new suffix\r\n"
+    );
+    assert!(
+        workspace
+            .editor(id)
+            .unwrap()
+            .model()
+            .document()
+            .file()
+            .has_utf8_bom()
+    );
+    assert!(!workspace.externally_modified(id).unwrap());
+    workspace
+        .editor_mut(id)
+        .unwrap()
+        .execute(Command::Undo)
+        .unwrap();
+    assert_eq!(
+        workspace.editor(id).unwrap().state().snapshot().text(),
+        "xprefix old suffix\r\n"
+    );
+    assert!(workspace.editor(id).unwrap().model().document().is_dirty());
+    workspace
+        .editor_mut(id)
+        .unwrap()
+        .execute(Command::Redo)
+        .unwrap();
+    assert!(!workspace.editor(id).unwrap().model().document().is_dirty());
+}
+
+#[test]
+fn reload_preserves_unmodified_positions_and_failures_leave_state_intact() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("file.txt");
+    fs::write(&path, "prefix old suffix").unwrap();
+    let mut workspace = Workspace::default();
+    let id = workspace.open(&path).unwrap();
+    let other = workspace
+        .editor_mut(id)
+        .unwrap()
+        .add_session(Selection::caret(3))
+        .unwrap();
+    fs::write(&path, "prefix new suffix").unwrap();
+    workspace.reload(id, false).unwrap();
+    assert_eq!(
+        workspace
+            .editor(id)
+            .unwrap()
+            .model()
+            .session(other)
+            .unwrap()
+            .selection()
+            .head,
+        3
+    );
+    let revision = workspace.editor(id).unwrap().model().text_revision();
+    fs::write(&path, [0xff]).unwrap();
+    assert!(matches!(
+        workspace.reload(id, false),
+        Err(FileError::InvalidUtf8(_))
+    ));
+    assert_eq!(
+        workspace.editor(id).unwrap().model().text_revision(),
+        revision
+    );
+    assert_eq!(
+        workspace.editor(id).unwrap().state().snapshot().text(),
+        "prefix new suffix"
+    );
+}

@@ -16,7 +16,7 @@ struct Entry<Owner> {
 pub(crate) struct History<Owner> {
     undo: Vec<Entry<Owner>>,
     redo: Vec<Entry<Owner>>,
-    group: Option<(Owner, u64)>,
+    group: Option<(Owner, u64, Option<super::UserEvent>)>,
 }
 impl<Owner> Default for History<Owner> {
     fn default() -> Self {
@@ -46,7 +46,7 @@ impl<Owner: Copy + Eq> History<Owner> {
         after: &EditorState,
         tx: &Transaction,
     ) -> Result<(), EditError> {
-        let group = tx.history_group.map(|id| (owner, id));
+        let group = tx.history_group.map(|id| (owner, id, tx.user_event));
         let merge = group.is_some() && self.group == group;
         let entry = if merge {
             let previous = self.undo.last().unwrap();

@@ -1,4 +1,8 @@
 //! UI-independent model, command controller and atomic input planning.
+mod commands;
+mod history;
+pub mod search;
+pub use commands::{Direction, Motion};
 mod controller;
 mod document;
 mod language;

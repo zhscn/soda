@@ -11,4 +11,4 @@ pub use request::{
 };
 pub use service::{FileError, FileService, LoadedFile};
 pub use state::FileState;
-pub use workspace::{FileResult, FileUpdate, Workspace};
+pub use workspace::{FileResult, FileUpdate, ReloadUpdate, Workspace};

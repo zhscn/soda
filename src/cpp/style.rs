@@ -20,14 +20,7 @@ pub enum ConstructorInitializers {
     AlignAfterColon,
     AlignWithColon,
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum TabPolicy {
-    Never,
-    ForIndentation,
-    ForContinuationAndIndentation,
-    AlignWithSpaces,
-    Always,
-}
+pub use crate::language::TabPolicy;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AccessIndent {
