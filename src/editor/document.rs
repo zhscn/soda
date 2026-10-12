@@ -63,6 +63,7 @@ pub struct Document {
     redo: Vec<HistoryEntry>,
     group: Option<(SessionId, u64)>,
     config_generation: u64,
+    pub(crate) file: crate::files::FileState,
 }
 impl Document {
     pub(super) fn new(text: impl Into<String>, language: Language) -> Self {
@@ -80,7 +81,14 @@ impl Document {
             redo: vec![],
             group: None,
             config_generation: 0,
+            file: crate::files::FileState::default(),
         }
+    }
+    pub fn file(&self) -> &crate::files::FileState {
+        &self.file
+    }
+    pub fn is_dirty(&self) -> bool {
+        self.file.is_dirty(&self.snapshot)
     }
     pub fn id(&self) -> DocumentId {
         self.id

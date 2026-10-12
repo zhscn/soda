@@ -48,6 +48,47 @@ impl Editor {
     pub fn from_model(model: EditorModel) -> Self {
         Self { model }
     }
+    pub(crate) fn checkpoint_history(&mut self) {
+        self.model.document.break_group();
+    }
+    pub(crate) fn bind_file(&mut self, file: crate::files::FileState) {
+        self.model.document.file = file;
+    }
+    pub(crate) fn confirm_save(
+        &mut self,
+        request: &crate::files::SaveRequest,
+    ) -> Result<bool, EditError> {
+        let document = &mut self.model.document;
+        let changing_path = document.file.path.as_deref() != Some(request.path.as_path());
+        let language_changed =
+            if changing_path && document.config_generation() == request.config_generation {
+                document.configure(crate::files::FileService::language(&request.configuration))?
+            } else {
+                false
+            };
+        document.file.path = Some(request.path.clone());
+        document.file.saved = Some(crate::files::state::DiskImage {
+            snapshot: request.image.snapshot.for_history(),
+            bom: request.image.bom,
+        });
+        document.file.saved_revision = Some(request.image.snapshot.version());
+        if changing_path {
+            document.file.configuration = request.configuration.clone();
+        }
+        document.break_group();
+        Ok(language_changed)
+    }
+    pub(crate) fn reload_file_configuration(
+        &mut self,
+        configuration: Option<crate::config::ResolvedConfig>,
+    ) -> Result<bool, EditError> {
+        let changed = self
+            .model
+            .document
+            .configure(crate::files::FileService::language(&configuration))?;
+        self.model.document.file.configuration = configuration;
+        Ok(changed)
+    }
     pub fn model(&self) -> &EditorModel {
         &self.model
     }

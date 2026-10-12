@@ -70,6 +70,10 @@ impl Snapshot {
         }
         Some(self.storage.rope.byte_slice(range))
     }
+    /// Compares content without materializing either snapshot as one string.
+    pub fn content_eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.storage, &other.storage) || self.storage.rope == other.storage.rope
+    }
     pub fn version(&self) -> u64 {
         self.version
     }

@@ -5,3 +5,5 @@ pub mod cpp;
 
 pub mod editor;
 pub mod language;
+
+pub mod files;
