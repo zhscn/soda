@@ -1,5 +1,10 @@
+mod coordinate;
+pub use coordinate::{ByteOffset, LogicalColumn, TextPoint};
 mod position;
-pub use position::{column_at, column_width, deletion_range, position_at_column, step_grapheme};
+pub use position::{
+    clip_grapheme_offset, column_width, deletion_range, logical_column_at,
+    offset_at_logical_column, step_grapheme,
+};
 mod history;
 pub(crate) use history::History;
 mod changes;

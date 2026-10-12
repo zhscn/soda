@@ -1,7 +1,7 @@
 use super::language::LanguageSession;
 use crate::core::{
-    Change, EditError, EditorState, Selection, Transaction, column_at, column_width,
-    position_at_column, step_grapheme,
+    ByteOffset, Change, EditError, EditorState, LogicalColumn, Selection, Transaction,
+    logical_column_at, offset_at_logical_column, step_grapheme,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -25,16 +25,19 @@ pub(super) fn move_selection(
     state: &EditorState,
     motion: Motion,
     extend: bool,
-    goal: Option<usize>,
+    goal: Option<LogicalColumn>,
     language: &LanguageSession,
-) -> Result<(Selection, Option<usize>), EditError> {
+) -> Result<(Selection, Option<LogicalColumn>), EditError> {
     let snapshot = state.snapshot();
     let selection = state.selection();
     let head = selection.head;
     let line = snapshot.line_of(head).unwrap();
     let vertical = matches!(motion, Motion::Up | Motion::Down);
     let goal = if vertical {
-        Some(goal.unwrap_or(column_at(snapshot, head, language.whitespace().tab_width)?))
+        Some(match goal {
+            Some(goal) => goal,
+            None => logical_column_at(snapshot, ByteOffset(head), language.whitespace().tab_width)?,
+        })
     } else {
         None
     };
@@ -50,7 +53,7 @@ pub(super) fn move_selection(
     } else {
         match motion {
             Motion::Backward | Motion::Forward => {
-                step_grapheme(snapshot, head, motion == Motion::Forward)?
+                step_grapheme(snapshot, ByteOffset(head), motion == Motion::Forward)?.0
             }
             Motion::Up | Motion::Down => {
                 let target = if motion == Motion::Up {
@@ -58,12 +61,13 @@ pub(super) fn move_selection(
                 } else {
                     (line + 1).min(snapshot.line_count() - 1)
                 };
-                position_at_column(
+                offset_at_logical_column(
                     snapshot,
                     target,
                     goal.unwrap(),
                     language.whitespace().tab_width,
                 )?
+                .0
             }
             Motion::LineStart => snapshot.line_start(line).unwrap(),
             Motion::LineEnd => snapshot.line_content_range(line).unwrap().end,
@@ -83,12 +87,6 @@ pub(super) fn move_selection(
         goal,
     ))
 }
-fn prefix(text: &str) -> &str {
-    &text[..text
-        .bytes()
-        .take_while(|byte| matches!(byte, b' ' | b'\t'))
-        .count()]
-}
 fn whitespace(target: usize, language: &LanguageSession) -> String {
     crate::language::materialize(target, 0, target, &language.whitespace())
 }
@@ -106,10 +104,18 @@ pub(super) fn delete(
             let snapshot = state.snapshot();
             let line = snapshot.line_of(position).unwrap();
             let start = snapshot.line_start(line).unwrap();
-            let before = snapshot.byte_slice(start..position).unwrap().to_string();
+            let before = snapshot.byte_slice(start..position).unwrap();
             let width = language.whitespace().indent_width;
-            if position > start && width > 0 && prefix(&before) == before {
-                let column = column_width(&before, 0, language.whitespace().tab_width);
+            if position > start
+                && width > 0
+                && before.bytes().all(|byte| matches!(byte, b' ' | b'\t'))
+            {
+                let column = logical_column_at(
+                    snapshot,
+                    ByteOffset(position),
+                    language.whitespace().tab_width,
+                )?
+                .0;
                 let target = column.saturating_sub(1) / width * width;
                 let inserted = whitespace(target, language);
                 let mut tx = Transaction::new(
@@ -122,7 +128,7 @@ pub(super) fn delete(
         }
         range = crate::core::deletion_range(
             state.snapshot(),
-            position,
+            ByteOffset(position),
             direction == Direction::Forward,
         )?;
     }
@@ -142,13 +148,10 @@ pub(super) fn insert_tab(
     literal: bool,
     language: &LanguageSession,
 ) -> Transaction {
+    if literal {
+        return super::operations::prepare_insert(state, "\t".into());
+    }
     let settings = language.whitespace();
-    let column = column_at(
-        state.snapshot(),
-        state.selection().range().start,
-        settings.tab_width,
-    )
-    .unwrap();
     let position = state.selection().range().start;
     let line = state.snapshot().line_of(position).unwrap();
     let leading = state
@@ -163,6 +166,9 @@ pub(super) fn insert_tab(
     let text = if use_tab {
         "\t".to_owned()
     } else {
+        let column = logical_column_at(state.snapshot(), ByteOffset(position), settings.tab_width)
+            .unwrap()
+            .0;
         " ".repeat(settings.tab_width.get() - column % settings.tab_width.get())
     };
     super::operations::prepare_insert(state, text)
@@ -185,9 +191,15 @@ pub(super) fn indent_selection(
     }
     let mut changes = Vec::new();
     for line in first..=last {
-        let text = snapshot.line(line).unwrap();
-        let old = prefix(&text);
-        let column = column_width(old, 0, settings.tab_width);
+        let old = snapshot.leading_whitespace(line).unwrap();
+        let start = snapshot.line_start(line).unwrap();
+        let column = logical_column_at(
+            snapshot,
+            ByteOffset(start + old.len_bytes()),
+            settings.tab_width,
+        )
+        .unwrap()
+        .0;
         let target = if outdent {
             column.saturating_sub(settings.indent_width)
         } else {
@@ -196,7 +208,7 @@ pub(super) fn indent_selection(
         let inserted = whitespace(target, language);
         if old != inserted {
             let start = snapshot.line_start(line).unwrap();
-            changes.push(Change::new(start..start + old.len(), inserted));
+            changes.push(Change::new(start..start + old.len_bytes(), inserted));
         }
     }
     Transaction::new(snapshot.version(), changes)

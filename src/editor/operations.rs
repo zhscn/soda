@@ -4,13 +4,6 @@ use crate::{
     language::{IndentAdvice, IndentRequest, IndentTrigger, NewlineIndent},
 };
 
-fn leading(text: &str) -> &str {
-    &text[..text
-        .bytes()
-        .take_while(|b| matches!(b, b' ' | b'\t'))
-        .count()]
-}
-
 /// Compose one user replacement with corrections in its speculative snapshot.
 /// The resulting transaction always addresses the original state, and its
 /// selection is mapped through both edits rather than inferred from byte deltas.
@@ -62,24 +55,23 @@ fn prefix_changes(
     auxiliary: Option<Change>,
     preserve_suffix: bool,
 ) -> Result<Vec<Change>, EditError> {
-    let content = snapshot.line(line).ok_or(EditError::InvalidRange)?;
+    let content = snapshot
+        .line_content_range(line)
+        .ok_or(EditError::InvalidRange)?;
     let start = snapshot.line_start(line).unwrap();
-    let old = if preserve_suffix {
-        ""
-    } else {
-        leading(&content)
-    };
-    let prefix_range = start..start + old.len();
+    let old = snapshot.leading_whitespace(line).unwrap();
+    let length = if preserve_suffix { 0 } else { old.len_bytes() };
+    let prefix_range = start..start + length;
     if !prefix.bytes().all(|b| matches!(b, b' ' | b'\t')) {
         return Err(EditError::InvalidRange);
     }
     let mut changes = Vec::new();
-    if old != prefix {
+    if (preserve_suffix && !prefix.is_empty()) || (!preserve_suffix && old != prefix) {
         changes.push(Change::new(prefix_range.clone(), prefix));
     }
     if let Some(auxiliary) = auxiliary {
         if auxiliary.range.start < prefix_range.end
-            || auxiliary.range.end > start + content.len()
+            || auxiliary.range.end > content.end
             || !auxiliary.insert.bytes().all(|b| matches!(b, b' ' | b'\t'))
             || !snapshot
                 .byte_slice(auxiliary.range.clone())
@@ -110,21 +102,15 @@ fn advice_changes(
             newline: NewlineIndent::Inherit { preserve_suffix },
         } if enter => {
             let previous = snapshot
-                .line(line.checked_sub(1).ok_or(EditError::InvalidRange)?)
+                .leading_whitespace(line.checked_sub(1).ok_or(EditError::InvalidRange)?)
                 .ok_or(EditError::InvalidRange)?;
-            prefix_changes(
-                snapshot,
-                line,
-                leading(&previous).to_owned(),
-                None,
-                preserve_suffix,
-            )
+            prefix_changes(snapshot, line, previous.to_string(), None, preserve_suffix)
         }
         IndentAdvice::Unavailable if enter => {
             let previous = snapshot
-                .line(line.checked_sub(1).ok_or(EditError::InvalidRange)?)
+                .leading_whitespace(line.checked_sub(1).ok_or(EditError::InvalidRange)?)
                 .ok_or(EditError::InvalidRange)?;
-            prefix_changes(snapshot, line, leading(&previous).to_owned(), None, false)
+            prefix_changes(snapshot, line, previous.to_string(), None, false)
         }
         _ => Ok(vec![]),
     }
@@ -189,7 +175,7 @@ pub(super) fn prepare_enter(
     );
     let caret = position
         + if consumes_prefix {
-            leading(&snapshot.line(line).unwrap()).len()
+            snapshot.leading_whitespace(line).unwrap().len_bytes()
         } else {
             0
         };

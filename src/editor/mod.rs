@@ -1,4 +1,6 @@
 //! UI-independent model, command controller and atomic input planning.
+mod position;
+pub use position::DocumentPosition;
 mod commands;
 mod history;
 pub mod search;

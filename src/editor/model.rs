@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 pub struct EditorSession {
     id: SessionId,
     state: EditorState,
-    pub(super) goal_column: Option<usize>,
+    pub(super) goal_column: Option<crate::core::LogicalColumn>,
     pub(super) search: super::search::SearchState,
 }
 impl EditorSession {

@@ -60,15 +60,13 @@ impl Snapshot {
     pub fn chunks(&self) -> impl Iterator<Item = &str> {
         self.storage.rope.chunks()
     }
+    pub(crate) fn chunk_at_byte(&self, offset: usize) -> (&str, usize) {
+        let (chunk, start, _, _) = self.storage.rope.chunk_at_byte(offset);
+        (chunk, start)
+    }
     /// Byte ranges must be ordered, in bounds and on UTF-8 character boundaries.
     pub fn byte_slice(&self, range: Range<usize>) -> Option<RopeSlice<'_>> {
-        if range.start > range.end
-            || !self.is_char_boundary(range.start)
-            || !self.is_char_boundary(range.end)
-        {
-            return None;
-        }
-        Some(self.storage.rope.byte_slice(range))
+        self.storage.rope.get_byte_slice(range)
     }
     /// Compares content without materializing either snapshot as one string.
     pub fn content_eq(&self, other: &Self) -> bool {
@@ -104,6 +102,16 @@ impl Snapshot {
             return None;
         }
         Some(self.storage.rope.byte_to_line(offset))
+    }
+    /// Borrows the leading tab/space prefix, even for a line spanning chunks.
+    pub fn leading_whitespace(&self, line: usize) -> Option<RopeSlice<'_>> {
+        let range = self.line_content_range(line)?;
+        let length = self
+            .byte_slice(range.clone())?
+            .bytes()
+            .take_while(|byte| matches!(byte, b' ' | b'\t'))
+            .count();
+        self.byte_slice(range.start..range.start + length)
     }
     /// Borrows a contiguous line or copies just that line if it spans chunks.
     /// The line terminator is excluded; empty and trailing lines are included.
@@ -186,6 +194,31 @@ mod tests {
         );
         editor.redo().unwrap();
         assert!(editor.state().snapshot().storage.contiguous.get().is_none());
+    }
+
+    #[test]
+    fn coordinates_and_navigation_leave_contiguous_cache_uninitialized() {
+        use crate::core::{
+            Association, ByteOffset, LogicalColumn, clip_grapheme_offset, logical_column_at,
+            offset_at_logical_column, step_grapheme,
+        };
+        use std::num::NonZeroUsize;
+        let state = EditorState::new(format!("{}e\u{301}\t界", "a".repeat(100_000)));
+        let snapshot = state.snapshot();
+        let end = ByteOffset(snapshot.len_bytes());
+        snapshot.text_point(end).unwrap();
+        step_grapheme(snapshot, end, false).unwrap();
+        clip_grapheme_offset(snapshot, ByteOffset(100_001), Association::After).unwrap();
+        logical_column_at(snapshot, end, NonZeroUsize::new(4).unwrap()).unwrap();
+        offset_at_logical_column(
+            snapshot,
+            0,
+            LogicalColumn(10),
+            NonZeroUsize::new(4).unwrap(),
+        )
+        .unwrap();
+        snapshot.leading_whitespace(0).unwrap();
+        assert!(snapshot.storage.contiguous.get().is_none());
     }
 
     #[test]

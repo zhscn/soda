@@ -77,6 +77,7 @@ pub enum EditError {
     InvalidSelection,
     VersionExhausted,
     UnknownSession,
+    WrongDocument,
 }
 impl fmt::Display for EditError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

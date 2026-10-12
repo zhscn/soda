@@ -4,7 +4,7 @@
 
 ## 位置与选区
 
-所有公开文本位置使用 UTF-8 字节偏移。core 提供字符簇步进、逻辑列计算与列到位置转换。字符簇使用 unicode-segmentation，列宽使用 unicode-width，tab 前进到下一个 tab stop。LF 和 CRLF 各作为一次跨行移动与删除，原文件字节保留。
+所有公开文本位置使用 UTF-8 字节偏移。core 提供字符簇步进、逻辑列计算与列到位置转换。字符簇使用 unicode-segmentation 的 rope cursor，逻辑列逐簇累加 unicode-width 格宽，tab 前进到下一个 tab stop。完整表示、clipping 与列规则见[坐标契约](coordinates.md)。LF 和 CRLF 各作为一次跨行移动与删除，原文件字节保留。
 
 `Move` 分别表达 Backward、Forward、Up、Down、LineStart、LineEnd 和文档边界。`extend` 保持 anchor 并移动 head；不扩展的水平移动先将已有选区收拢到相应端点。上下移动在 EditorSession 中保留期望列，短行不会永久改变该列。目标列位于 tab 或宽字符内部时落在其前方。
 

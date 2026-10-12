@@ -4,7 +4,7 @@
 
 ## 状态与事务
 
-`EditorState` 持有 `Snapshot` 和一个带方向的 `Selection`。位置使用 UTF-8 字节偏移，编辑范围与选区必须落在字符边界。`Snapshot` 保留 LF/CRLF 和原有 tab/space 字节，并提供逻辑行索引。
+`EditorState` 持有 `Snapshot` 和一个带方向的 `Selection`。位置使用 UTF-8 字节偏移，编辑范围与选区必须落在字符边界。ByteOffset、TextPoint 和 LogicalColumn 分别表达文档字节、行内字节与逻辑列，长期保留位置使用 DocumentPosition，见[坐标契约](coordinates.md)。`Snapshot` 保留 LF/CRLF 和原有 tab/space 字节，并提供逻辑行索引。
 
 `Transaction` 的所有修改范围指向同一基准版本。提交前统一校验版本、范围、重叠和结果选区，校验失败保留原状态。相邻修改可以组合，同一位置的多次插入需要由发起者先合并。显式结果选区使用修改后坐标，未提供时由 `ChangeMap` 映射原选区。
 
