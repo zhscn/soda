@@ -1,0 +1,205 @@
+//! Document-local C++ analysis and editing suggestions. All queries are read-only
+//! with respect to the document; a cloned session isolates speculative analysis.
+use super::{
+    CppRules, IndentRole, SyntaxTree, TokenKind as K, compute_indent, lex,
+    parse_snapshot_with_options,
+};
+use crate::{
+    core::{EditError, Snapshot},
+    language::{EnterAdvice, IndentAdvice, IndentRequest, IndentTrigger, NewlineIndent},
+};
+use std::sync::Arc;
+
+#[derive(Clone)]
+pub struct CppSession {
+    rules: Arc<CppRules>,
+    analysis: Option<Arc<SyntaxTree>>,
+}
+impl CppSession {
+    pub fn new(rules: Arc<CppRules>) -> Self {
+        Self {
+            rules,
+            analysis: None,
+        }
+    }
+    pub fn rules(&self) -> &Arc<CppRules> {
+        &self.rules
+    }
+    pub fn set_rules(&mut self, rules: Arc<CppRules>) {
+        if self.rules.parser_options() != rules.parser_options() {
+            self.invalidate();
+        }
+        self.rules = rules;
+    }
+    pub fn invalidate(&mut self) {
+        self.analysis = None;
+    }
+    pub fn triggers(&self, ch: char) -> bool {
+        self.rules.enabled() && matches!(ch, ':' | '}' | '#')
+    }
+    fn matches(&self, snapshot: &Snapshot) -> bool {
+        self.analysis.as_ref().is_some_and(|tree| {
+            std::ptr::eq(tree.source(), snapshot.text()) || tree.source() == snapshot.text()
+        })
+    }
+    fn analyze(&mut self, snapshot: &Snapshot) -> Arc<SyntaxTree> {
+        if !self.matches(snapshot) {
+            self.analysis = Some(Arc::new(parse_snapshot_with_options(
+                snapshot,
+                self.rules.parser_options(),
+            )));
+        }
+        self.analysis.as_ref().unwrap().clone()
+    }
+    pub fn enter_advice(
+        &mut self,
+        snapshot: &Snapshot,
+        position: usize,
+    ) -> Result<EnterAdvice, EditError> {
+        if !snapshot.is_char_boundary(position) {
+            return Err(EditError::InvalidRange);
+        }
+        let known = self
+            .analysis
+            .as_ref()
+            .filter(|_| self.matches(snapshot))
+            .cloned();
+        let scanned;
+        let tokens = match &known {
+            Some(tree) => tree.tokens(),
+            None => {
+                scanned = lex(snapshot.text());
+                &scanned
+            }
+        };
+        let verbatim = tokens.iter().any(|token| {
+            token.range.start < position
+                && (position < token.range.end
+                    || (token.unterminated && position == token.range.end))
+                && matches!(
+                    token.kind,
+                    K::RawStringLiteral | K::StringLiteral | K::CharacterLiteral
+                )
+        });
+        let left = tokens.iter().enumerate().rfind(|(_, t)| {
+            t.range.end <= position && !t.kind.is_trivia() && t.kind != K::EndOfFile
+        });
+        let right = tokens
+            .iter()
+            .find(|t| t.range.start >= position && !t.kind.is_trivia() && t.kind != K::EndOfFile);
+        let expand_pair = match (left, right) {
+            (Some((index, left)), Some(right))
+                if left.kind == K::LBrace
+                    && right.kind == K::RBrace
+                    && snapshot.text()[left.range.end..right.range.start]
+                        .bytes()
+                        .all(|b| matches!(b, b' ' | b'\t')) =>
+            {
+                let tree = known.clone().unwrap_or_else(|| self.analyze(snapshot));
+                tree.range(tree.token_owner(index)).end == right.range.end
+            }
+            _ => false,
+        };
+        Ok(EnterAdvice {
+            expand_pair,
+            verbatim,
+        })
+    }
+    pub fn indent(
+        &mut self,
+        snapshot: &Snapshot,
+        request: IndentRequest,
+    ) -> Result<IndentAdvice, EditError> {
+        let start = snapshot
+            .line_start(request.line)
+            .ok_or(EditError::InvalidRange)?;
+        if snapshot.line_of(request.position) != Some(request.line) {
+            return Err(EditError::InvalidRange);
+        }
+        let tree = self.analyze(snapshot);
+        if let IndentTrigger::Typed(ch) = request.trigger {
+            let expected = match ch {
+                ':' => K::Colon,
+                '}' => K::RBrace,
+                '#' => K::PreprocessorHash,
+                _ => return Ok(IndentAdvice::Unavailable),
+            };
+            if !tree
+                .tokens()
+                .iter()
+                .any(|token| token.range.start == request.position && token.kind == expected)
+                || (ch != ':'
+                    && !snapshot
+                        .byte_slice(start..request.position)
+                        .unwrap()
+                        .bytes()
+                        .all(|b| matches!(b, b' ' | b'\t')))
+            {
+                return Ok(IndentAdvice::Unavailable);
+            }
+        }
+        let decision = compute_indent(snapshot, &tree, request.line, &self.rules)?;
+        if decision.preserve {
+            let newline = match decision.role {
+                IndentRole::PreservedBlockComment | IndentRole::PreservedMacro => {
+                    NewlineIndent::Inherit {
+                        preserve_suffix: true,
+                    }
+                }
+                IndentRole::Opaque if !self.rules.enabled() => NewlineIndent::Inherit {
+                    preserve_suffix: false,
+                },
+                _ => NewlineIndent::Verbatim,
+            };
+            return Ok(IndentAdvice::Preserve { newline });
+        }
+        if request.trigger == IndentTrigger::Typed(':')
+            && !matches!(
+                decision.role,
+                IndentRole::CaseLabel
+                    | IndentRole::AccessSpecifierLabel
+                    | IndentRole::ConstructorInitializerIntro
+            )
+        {
+            return Ok(IndentAdvice::Unavailable);
+        }
+        Ok(IndentAdvice::Set {
+            prefix: decision.whitespace,
+            auxiliary: decision.directive_spacing,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cpp::CppStyle;
+
+    #[test]
+    fn analysis_reuse_depends_on_text_and_grammar_and_forks_are_isolated() {
+        let snapshot = Snapshot::new("void f() {}".into(), 0);
+        let mut session = CppSession::new(Arc::new(CppStyle::default().compile().unwrap()));
+        let first = session.analyze(&snapshot);
+        let style = CppStyle {
+            indent_width: 2,
+            ..CppStyle::default()
+        };
+        session.set_rules(Arc::new(style.compile().unwrap()));
+        assert!(Arc::ptr_eq(&first, &session.analyze(&snapshot)));
+        let mut fork = session.clone();
+        fork.analyze(&Snapshot::new("int value;".into(), 1));
+        assert!(Arc::ptr_eq(&first, &session.analyze(&snapshot)));
+        session.invalidate();
+        assert!(!Arc::ptr_eq(&first, &session.analyze(&snapshot)));
+        let mut style = style;
+        style.parser.loop_macros.push("REPEAT".into());
+        session.set_rules(Arc::new(style.compile().unwrap()));
+        assert!(session.analysis.is_none());
+        // A distinct text snapshot always requires new structure analysis.
+        let current = session.analyze(&snapshot);
+        assert!(!Arc::ptr_eq(
+            &current,
+            &session.analyze(&Snapshot::new("int x;".into(), 2))
+        ));
+    }
+}

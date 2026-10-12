@@ -1,3 +1,4 @@
+use soda::editor::enter;
 use soda::{config::*, core::*, cpp::*};
 fn config(yaml: &str) -> ClangConfig {
     parse_config(

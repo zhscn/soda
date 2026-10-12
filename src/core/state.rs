@@ -67,6 +67,7 @@ pub enum EditError {
     OverlappingChanges,
     InvalidSelection,
     VersionExhausted,
+    UnknownSession,
 }
 impl fmt::Display for EditError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -107,6 +108,18 @@ impl ChangeMap {
         }
         position - removed + inserted
     }
+    /// Returns None when a replacement deletes the original position's context.
+    pub fn map_tracked(&self, position: usize, association: Association) -> Option<usize> {
+        if self
+            .spans
+            .iter()
+            .any(|(range, _)| range.start < position && position < range.end)
+        {
+            None
+        } else {
+            Some(self.map(position, association))
+        }
+    }
     pub fn map_selection(&self, selection: Selection) -> Selection {
         if selection.anchor == selection.head {
             return Selection::caret(self.map(selection.head, Association::After));
@@ -144,6 +157,18 @@ impl EditorState {
             snapshot: Snapshot::new(text.into(), 0),
             selection: Selection::caret(0),
         }
+    }
+    /// A read-only editing projection of a document and a session selection.
+    pub fn from_snapshot(snapshot: Snapshot, selection: Selection) -> Result<Self, EditError> {
+        if !snapshot.is_char_boundary(selection.anchor)
+            || !snapshot.is_char_boundary(selection.head)
+        {
+            return Err(EditError::InvalidSelection);
+        }
+        Ok(Self {
+            snapshot,
+            selection,
+        })
     }
     pub fn snapshot(&self) -> &Snapshot {
         &self.snapshot

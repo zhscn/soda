@@ -1,3 +1,4 @@
+use soda::editor::{enter, reindent, type_char};
 use soda::{core::*, cpp::*};
 use std::num::NonZeroUsize;
 fn col(text: &str, line: usize, style: &CppStyle) -> IndentDecision {
@@ -12,7 +13,7 @@ fn enter_at(input: &str, style: &CppStyle) -> String {
     let mut tx = Transaction::new(0, vec![]);
     tx.selection = Some(Selection::caret(p));
     e.dispatch(tx).unwrap();
-    e.dispatch(enter(e.state(), &style.compile().unwrap()).unwrap())
+    e.dispatch(enter(e.state(), style.compile().unwrap()).unwrap())
         .unwrap();
     let mut out = e.state().snapshot().text().to_owned();
     out.insert(e.state().selection().head, '^');
@@ -63,7 +64,7 @@ fn expression_replay_uses_actual_layout() {
     }
     let mut e = Editor::new("  return WithColor(OS)\n.get()\n<< \"e\";\n");
     for line in [1, 2] {
-        e.dispatch(reindent(e.state(), line, &s.compile().unwrap()).unwrap())
+        e.dispatch(reindent(e.state(), line, s.compile().unwrap()).unwrap())
             .unwrap();
     }
     assert_eq!(
@@ -150,7 +151,7 @@ fn macro_continuation_and_conditional_reconciliation() {
         let mut e = Editor::new(text);
         let lines = e.state().snapshot().line_count();
         for line in 0..lines - 1 {
-            e.dispatch(reindent(e.state(), line, &s.compile().unwrap()).unwrap())
+            e.dispatch(reindent(e.state(), line, s.compile().unwrap()).unwrap())
                 .unwrap();
             assert_eq!(e.state().snapshot().text(), text, "line {line}");
         }
@@ -240,7 +241,7 @@ fn stale_analysis_is_rejected_and_literal_contents_are_preserved() {
     );
     for text in ["auto s = R\"d(\n  keep\n)d\";", "/* a\n  keep\n*/"] {
         let mut e = Editor::new(text);
-        e.dispatch(reindent(e.state(), 1, &CppStyle::default().compile().unwrap()).unwrap())
+        e.dispatch(reindent(e.state(), 1, CppStyle::default().compile().unwrap()).unwrap())
             .unwrap();
         assert_eq!(e.state().snapshot().text(), text);
     }
@@ -292,7 +293,7 @@ fn typed_labels_and_closers_are_atomic_and_protected() {
         for ch in typed.chars() {
             let before = e.state().snapshot().text().to_owned();
             let selection = e.state().selection();
-            let tx = type_char(e.state(), ch, &CppStyle::default().compile().unwrap()).unwrap();
+            let tx = type_char(e.state(), ch, CppStyle::default().compile().unwrap()).unwrap();
             e.dispatch(tx).unwrap();
             let after = e.state().snapshot().text().to_owned();
             e.undo().unwrap();
@@ -315,8 +316,8 @@ fn enter_on_each_input_prefix_is_safe_and_reversible() {
         let mut select = Transaction::new(0, vec![]);
         select.selection = Some(Selection::caret(p));
         e.dispatch(select).unwrap();
-        let a = enter(e.state(), &CppStyle::default().compile().unwrap()).unwrap();
-        let b = enter(e.state(), &CppStyle::default().compile().unwrap()).unwrap();
+        let a = enter(e.state(), CppStyle::default().compile().unwrap()).unwrap();
+        let b = enter(e.state(), CppStyle::default().compile().unwrap()).unwrap();
         assert_eq!(a.changes, b.changes);
         assert_eq!(a.selection, b.selection);
         e.dispatch(a).unwrap();

@@ -1,3 +1,4 @@
+use soda::editor::{enter, reindent, type_char};
 use soda::{config::*, core::*, cpp::*};
 use std::{
     fs,
