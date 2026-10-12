@@ -2,7 +2,7 @@ use soda::{core::*, cpp::*};
 use std::num::NonZeroUsize;
 fn col(text: &str, line: usize, style: &CppStyle) -> IndentDecision {
     let s = EditorState::new(text);
-    compute_indent(s.snapshot(), &parse(text), line, &style.compile()).unwrap()
+    compute_indent(s.snapshot(), &parse(text), line, &style.compile().unwrap()).unwrap()
 }
 fn enter_at(input: &str, style: &CppStyle) -> String {
     let p = input.find('^').unwrap();
@@ -12,7 +12,7 @@ fn enter_at(input: &str, style: &CppStyle) -> String {
     let mut tx = Transaction::new(0, vec![]);
     tx.selection = Some(Selection::caret(p));
     e.dispatch(tx).unwrap();
-    e.dispatch(enter(e.state(), &style.compile()).unwrap())
+    e.dispatch(enter(e.state(), &style.compile().unwrap()).unwrap())
         .unwrap();
     let mut out = e.state().snapshot().text().to_owned();
     out.insert(e.state().selection().head, '^');
@@ -63,7 +63,7 @@ fn expression_replay_uses_actual_layout() {
     }
     let mut e = Editor::new("  return WithColor(OS)\n.get()\n<< \"e\";\n");
     for line in [1, 2] {
-        e.dispatch(reindent(e.state(), line, &s.compile()).unwrap())
+        e.dispatch(reindent(e.state(), line, &s.compile().unwrap()).unwrap())
             .unwrap();
     }
     assert_eq!(
@@ -81,7 +81,7 @@ fn expression_style_and_ctor_variants() {
     s.align_open_bracket = false;
     assert_eq!(
         enter_at("int y = f(aa,^ bb);\n", &s),
-        "int y = f(aa,\n    ^ bb);\n"
+        "int y = f(aa,\n    ^bb);\n"
     );
     s = CppStyle {
         indent_width: 2,
@@ -150,7 +150,7 @@ fn macro_continuation_and_conditional_reconciliation() {
         let mut e = Editor::new(text);
         let lines = e.state().snapshot().line_count();
         for line in 0..lines - 1 {
-            e.dispatch(reindent(e.state(), line, &s.compile()).unwrap())
+            e.dispatch(reindent(e.state(), line, &s.compile().unwrap()).unwrap())
                 .unwrap();
             assert_eq!(e.state().snapshot().text(), text, "line {line}");
         }
@@ -191,7 +191,12 @@ fn mixed_tabs_keep_structural_continuation_and_alignment_distinct() {
         s.indent_width = iw;
         s.tab_width = NonZeroUsize::new(tw).unwrap();
         assert_eq!(
-            materialize(structure, structure, target, s.compile().whitespace()),
+            materialize(
+                structure,
+                structure,
+                target,
+                s.compile().unwrap().whitespace()
+            ),
             expected
         );
         assert_eq!(column_width(expected, 0, s.tab_width), target);
@@ -206,9 +211,15 @@ fn mixed_tabs_keep_structural_continuation_and_alignment_distinct() {
         "Foo::Foo()\n\t: a_(1),\n      ^\n{\n}\n"
     );
     s.tabs = TabPolicy::ForContinuationAndIndentation;
-    assert_eq!(materialize(4, 8, 11, s.compile().whitespace()), "\t\t   ");
+    assert_eq!(
+        materialize(4, 8, 11, s.compile().unwrap().whitespace()),
+        "\t\t   "
+    );
     s.tabs = TabPolicy::AlignWithSpaces;
-    assert_eq!(materialize(4, 8, 11, s.compile().whitespace()), "\t\t   ");
+    assert_eq!(
+        materialize(4, 8, 11, s.compile().unwrap().whitespace()),
+        "\t\t   "
+    );
     assert_eq!(
         column_width("界\te\u{301}", 0, NonZeroUsize::new(8).unwrap()),
         9
@@ -222,14 +233,14 @@ fn stale_analysis_is_rejected_and_literal_contents_are_preserved() {
             state.snapshot(),
             &parse("int y;"),
             0,
-            &CppStyle::default().compile()
+            &CppStyle::default().compile().unwrap()
         )
         .unwrap_err(),
         EditError::AnalysisMismatch
     );
     for text in ["auto s = R\"d(\n  keep\n)d\";", "/* a\n  keep\n*/"] {
         let mut e = Editor::new(text);
-        e.dispatch(reindent(e.state(), 1, &CppStyle::default().compile()).unwrap())
+        e.dispatch(reindent(e.state(), 1, &CppStyle::default().compile().unwrap()).unwrap())
             .unwrap();
         assert_eq!(e.state().snapshot().text(), text);
     }
@@ -281,7 +292,7 @@ fn typed_labels_and_closers_are_atomic_and_protected() {
         for ch in typed.chars() {
             let before = e.state().snapshot().text().to_owned();
             let selection = e.state().selection();
-            let tx = type_char(e.state(), ch, &CppStyle::default().compile()).unwrap();
+            let tx = type_char(e.state(), ch, &CppStyle::default().compile().unwrap()).unwrap();
             e.dispatch(tx).unwrap();
             let after = e.state().snapshot().text().to_owned();
             e.undo().unwrap();
@@ -304,8 +315,8 @@ fn enter_on_each_input_prefix_is_safe_and_reversible() {
         let mut select = Transaction::new(0, vec![]);
         select.selection = Some(Selection::caret(p));
         e.dispatch(select).unwrap();
-        let a = enter(e.state(), &CppStyle::default().compile()).unwrap();
-        let b = enter(e.state(), &CppStyle::default().compile()).unwrap();
+        let a = enter(e.state(), &CppStyle::default().compile().unwrap()).unwrap();
+        let b = enter(e.state(), &CppStyle::default().compile().unwrap()).unwrap();
         assert_eq!(a.changes, b.changes);
         assert_eq!(a.selection, b.selection);
         e.dispatch(a).unwrap();
@@ -358,8 +369,153 @@ fn unicode_sequences_and_single_column_tabs_follow_policy() {
         tabs: TabPolicy::ForIndentation,
         ..CppStyle::default()
     };
-    assert_eq!(materialize(2, 2, 2, style.compile().whitespace()), "\t\t");
+    assert_eq!(
+        materialize(2, 2, 2, style.compile().unwrap().whitespace()),
+        "\t\t"
+    );
     style.tabs = TabPolicy::Always;
-    assert_eq!(materialize(1, 1, 1, style.compile().whitespace()), " ");
-    assert_eq!(materialize(2, 2, 2, style.compile().whitespace()), "\t\t");
+    assert_eq!(
+        materialize(1, 1, 1, style.compile().unwrap().whitespace()),
+        " "
+    );
+    assert_eq!(
+        materialize(2, 2, 2, style.compile().unwrap().whitespace()),
+        "\t\t"
+    );
+}
+
+fn assert_atomic_input(
+    input: &str,
+    selected_bytes: usize,
+    typed: Option<char>,
+    style: &CppStyle,
+    expected: &str,
+) {
+    let caret = input.find('^').unwrap();
+    let text = input.replacen('^', "", 1);
+    let selection = Selection {
+        anchor: caret + selected_bytes,
+        head: caret,
+    };
+    let mut editor = Editor::new(text.clone());
+    let mut select = Transaction::new(0, vec![]);
+    select.selection = Some(selection);
+    editor.dispatch(select).unwrap();
+    let rules = style.compile().unwrap();
+    let tx = match typed {
+        Some(ch) => type_char(editor.state(), ch, &rules),
+        None => enter(editor.state(), &rules),
+    }
+    .unwrap();
+    editor.dispatch(tx).unwrap();
+    let mut result = editor.state().snapshot().text().to_owned();
+    result.insert(editor.state().selection().head, '^');
+    assert_eq!(result, expected, "{input}");
+    assert!(editor.undo().unwrap());
+    assert_eq!(editor.state().snapshot().text(), text);
+    assert_eq!(editor.state().selection(), selection);
+    assert!(!editor.undo().unwrap());
+}
+
+#[test]
+fn enter_replaces_existing_code_prefix_and_composes_auxiliary_spacing() {
+    for disable_format in [false, true] {
+        let style = CppStyle {
+            disable_format,
+            ..CppStyle::default()
+        };
+        for (input, selected_bytes, expected) in [
+            (
+                "void f() {\n    ^ \tfoo();\n}",
+                0,
+                "void f() {\n    \n    ^foo();\n}",
+            ),
+            (
+                "void f() {\n^old\ntext    foo();\n}",
+                8,
+                if disable_format {
+                    "void f() {\n\n^foo();\n}"
+                } else {
+                    "void f() {\n\n    ^foo();\n}"
+                },
+            ),
+        ] {
+            assert_atomic_input(input, selected_bytes, None, &style, expected);
+        }
+    }
+    for (input, expected) in [
+        ("void f() {\n^    foo();\n}", "void f() {\n\n    ^foo();\n}"),
+        (
+            "void f() {\r\n^ \tfoo();\r\n}",
+            "void f() {\r\n\r\n    ^foo();\r\n}",
+        ),
+    ] {
+        assert_atomic_input(input, 0, None, &CppStyle::default(), expected);
+    }
+    let style = CppStyle {
+        indent_width: 3,
+        pp_directive_indent: PPDirectiveIndent::AfterHash,
+        ..CppStyle::default()
+    };
+    assert_atomic_input(
+        "#if X\n^old\ntext \t#define Y\n#endif",
+        8,
+        None,
+        &style,
+        "#if X\n\n^#   define Y\n#endif",
+    );
+}
+
+#[test]
+fn enter_preserves_literal_suffix_bytes_with_formatting_enabled_or_disabled() {
+    for disable_format in [false, true] {
+        let style = CppStyle {
+            disable_format,
+            ..CppStyle::default()
+        };
+        for (input, selected_bytes, expected) in [
+            (
+                "    auto s = R\"(a^  \tb)\";",
+                0,
+                "    auto s = R\"(a\n^  \tb)\";",
+            ),
+            (
+                "    auto s = R\"(a^xxx  b)\";",
+                3,
+                "    auto s = R\"(a\n^  b)\";",
+            ),
+            ("    auto s = R\"(a^", 0, "    auto s = R\"(a\n^"),
+            ("    auto s = \"a^  b\";", 0, "    auto s = \"a\n^  b\";"),
+            (
+                "    auto s = R\"(a\nb^  c)\";",
+                0,
+                "    auto s = R\"(a\nb\n^  c)\";",
+            ),
+        ] {
+            assert_atomic_input(input, selected_bytes, None, &style, expected);
+        }
+        assert_atomic_input("    /* a^  b */", 0, None, &style, "    /* a\n    ^  b */");
+    }
+}
+
+#[test]
+fn punctuation_inside_literals_comments_and_compound_tokens_does_not_trigger_indent() {
+    for input in [
+        "switch (x) {\n    case f(\"a^b\"):\n        break;\n}",
+        "switch (x) {\n    case '^': break;\n}",
+        "switch (x) {\n    case f(R\"(a^b)\"):\n        break;\n}",
+        "switch (x) {\n    case 1: // a^b\n        break;\n}",
+        "switch (x) {\n    case 1: /* a^b */ break;\n}",
+        "switch (x) {\n    case ns^:value: break;\n}",
+    ] {
+        let expected = input.replace('^', ":^");
+        assert_atomic_input(input, 0, Some(':'), &CppStyle::default(), &expected);
+    }
+    assert_atomic_input(
+        "switch (x) {\n    case 1^\n}",
+        0,
+        Some(':'),
+        &CppStyle::default(),
+        "switch (x) {\ncase 1:^\n}",
+    );
 }

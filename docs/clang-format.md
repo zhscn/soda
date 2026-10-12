@@ -28,7 +28,7 @@ clang-format 配置是项目兼容层，完整选项树用于展示来源、继�
 | `PPIndentWidth: -1` | 加载时解析为最终 IndentWidth |
 | `BracedInitializerIndentWidth: -1` | 续行式列表采用最终续行宽度；块式列表采用结构宽度 |
 
-Rust 内置模块可以通过 `CppStyle::compile` 生成同一策略表示。builder 的 `access_specifier_offset` 相对声明基准，编译时转换为策略中相对普通成员的偏移；clang-format 适配器直接保留 `AccessModifierOffset` 的成员相对语义。配置查找与 YAML 兼容由配置模块负责，求解过程与加载过程独立。目标查询契约见[交互缩进设计与契约](indentation.md)。
+Rust 内置模块通过 `CppStyle::compile` 生成同一策略表示，返回 `Result<CppRules, StyleError>`。builder 与 YAML 适配器共用宽度和成员相对偏移校验，非法值在编辑前返回错误。builder 的 `access_specifier_offset` 相对声明基准，编译时转换为策略中相对普通成员的偏移；clang-format 适配器直接保留 `AccessModifierOffset` 的成员相对语义。配置查找与 YAML 兼容由配置模块负责，求解过程与加载过程独立。目标查询契约见[交互缩进设计与契约](indentation.md)。
 
 ## 文件查找与继承
 
@@ -74,7 +74,9 @@ LLVM 当前映射里的旧字段拼写保留在已知选项表中。未知顶层
 
 完整选项树保留列宽、排序、换行及其他排版配置，缩进器只使用与当前交互能力相关的字段。配置层没有实现完整 formatter 的语义校验与跨字段约束。
 
-`IndentCaseBlocks`、`IndentGotoLabels`、`IndentRequiresClause`、`LambdaBodyIndentation`、`MacroBlockBegin` 和 `MacroBlockEnd` 等选项目前会返回尚未参与交互缩进的诊断。`AlignOperands: AlignAfterOperator` 编译为独立的 AfterOperator 策略值，目前执行时采用 Align 的续行规则，并返回诊断。GNU 或自定义额外 brace indentation 同样需要后续语言规则实现。
+显式配置 `IndentCaseBlocks`、`IndentGotoLabels`、`IndentRequiresClause`、`LambdaBodyIndentation`、`MacroBlockBegin` 和 `MacroBlockEnd`，或预设对这些选项采用不同于 LLVM 基线的值时，会返回尚未参与交互缩进的诊断。`AlignOperands: AlignAfterOperator` 编译为独立的 AfterOperator 策略值，目前执行时采用 Align 的续行规则，并返回诊断。GNU 或自定义额外 brace indentation 同样需要后续语言规则实现。
+
+能力诊断根据最终有效配置重新生成，覆盖语言分段、目录继承和预设选择。覆盖为受支持的策略后，先前的能力诊断消失。诊断保留有效选项的 YAML 文档编号，预设自带的诊断使用编号 0。
 
 查询以用户指定的换行位置为输入，不根据排版配置另行选择换行位置。旧版 AlwaysBreak/BlockIndent 配置在解析层按新版兼容语义保存，参数对齐使用转换后的设置。
 

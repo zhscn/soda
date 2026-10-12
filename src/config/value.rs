@@ -24,15 +24,10 @@ pub(super) fn integer(value: &Value, doc: usize, key: &str) -> Result<i64, Confi
 }
 pub(super) fn size(value: &Value, doc: usize, key: &str) -> Result<usize, ConfigError> {
     let n = integer(value, doc, key)?;
-    // A style value must not trigger unbounded allocation on a keystroke.
-    if !(0..=4096).contains(&n) {
-        return Err(ConfigError::key(
-            doc,
-            key,
-            "expected a width between 0 and 4096",
-        ));
-    }
-    Ok(n as usize)
+    let width = usize::try_from(n)
+        .map_err(|_| ConfigError::key(doc, key, "expected a width between 0 and 4096"))?;
+    crate::cpp::validate_width(width).map_err(|message| ConfigError::key(doc, key, message))?;
+    Ok(width)
 }
 pub(super) fn choice<'a>(
     value: &'a Value,

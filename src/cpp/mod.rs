@@ -13,7 +13,7 @@ pub use lexer::{Token, TokenKind, lex};
 pub use parser::{parse, parse_snapshot, parse_snapshot_with_options, parse_with_options};
 pub use style::{
     AccessIndent, ConstructorInitializers, CppStyle, NamespaceIndentation, PPDirectiveIndent,
-    TabPolicy,
+    StyleError, TabPolicy,
 };
 pub use whitespace::{column_width, materialize};
 
@@ -24,3 +24,5 @@ pub use rules::{
 };
 
 pub use syntax::{Node, NodeKind, SyntaxTree};
+
+pub(crate) use style::{validate_offset, validate_width};

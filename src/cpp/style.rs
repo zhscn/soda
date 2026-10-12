@@ -1,4 +1,4 @@
-use std::num::NonZeroUsize;
+use std::{fmt, num::NonZeroUsize};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NamespaceIndentation {
@@ -91,5 +91,60 @@ impl Default for CppStyle {
             pp_indent_width: None,
             constructor_initializers: ConstructorInitializers::AlignFirstInitializer,
         }
+    }
+}
+
+/// Invalid editor-authored style; no executable policy is produced.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StyleError {
+    pub field: &'static str,
+    pub message: &'static str,
+}
+impl fmt::Display for StyleError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.field, self.message)
+    }
+}
+impl std::error::Error for StyleError {}
+
+pub(crate) fn validate_width(width: usize) -> Result<(), &'static str> {
+    if width <= 4096 {
+        Ok(())
+    } else {
+        Err("expected a width between 0 and 4096")
+    }
+}
+pub(crate) fn validate_offset(offset: isize) -> Result<(), &'static str> {
+    if (-4096..=4096).contains(&offset) {
+        Ok(())
+    } else {
+        Err("offset is outside the supported range")
+    }
+}
+impl CppStyle {
+    pub(super) fn validate(&self) -> Result<(), StyleError> {
+        for (field, width) in [
+            ("indent_width", Some(self.indent_width)),
+            ("continuation_indent", Some(self.continuation_indent)),
+            ("tab_width", Some(self.tab_width.get())),
+            ("constructor_indent", self.constructor_indent),
+            ("braced_initializer_indent", self.braced_initializer_indent),
+            ("pp_indent_width", self.pp_indent_width),
+        ] {
+            if let Some(width) = width {
+                validate_width(width).map_err(|message| StyleError { field, message })?;
+            }
+        }
+        let offset = self
+            .access_specifier_offset
+            .checked_sub(self.indent_width as isize)
+            .ok_or(StyleError {
+                field: "access_specifier_offset",
+                message: "offset is outside the supported range",
+            })?;
+        validate_offset(offset).map_err(|message| StyleError {
+            field: "access_specifier_offset",
+            message,
+        })
     }
 }

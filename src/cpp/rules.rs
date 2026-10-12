@@ -115,11 +115,12 @@ impl CppRules {
     }
 }
 impl CppStyle {
-    /// Resolve editor-authored behavior and optional widths before editing.
-    pub fn compile(&self) -> CppRules {
+    /// Validate and resolve editor-authored behavior before editing.
+    pub fn compile(&self) -> Result<CppRules, super::StyleError> {
+        self.validate()?;
         let w = self.indent_width;
         let cont = self.continuation_indent;
-        CppRules {
+        Ok(CppRules {
             enabled: !self.disable_format,
             whitespace: WhitespacePolicy {
                 indent_width: w,
@@ -167,11 +168,13 @@ impl CppStyle {
                 width: self.pp_indent_width.unwrap_or(w),
                 layout: self.pp_directive_indent,
             },
-        }
+        })
     }
 }
 impl Default for CppRules {
     fn default() -> Self {
-        CppStyle::default().compile()
+        CppStyle::default()
+            .compile()
+            .expect("valid default C++ style")
     }
 }

@@ -447,3 +447,156 @@ fn indent(rules: &CppRules, text: &str, line: usize) -> usize {
         .unwrap()
         .target_column
 }
+
+#[test]
+fn capability_diagnostics_follow_effective_presets_overrides_and_sources() {
+    let base = preset("LLVM").unwrap();
+    let from_preset = preset("GNU").unwrap();
+    assert!(
+        from_preset
+            .diagnostics
+            .iter()
+            .any(|d| d.option == "BraceWrapping" && d.document == 0)
+    );
+    for yaml in ["BasedOnStyle: GNU", "BreakBeforeBraces: GNU"] {
+        let c = parsed(yaml);
+        assert!(
+            c.diagnostics
+                .iter()
+                .any(|d| d.option == "BraceWrapping" && d.document == 1)
+        );
+    }
+    let inherited = parsed("BreakBeforeBraces: GNU\nAlignOperands: AlignAfterOperator");
+    let c = parse_config(
+        "IndentWidth: 3",
+        &inherited,
+        "Cpp",
+        false,
+        UnknownOptions::Error,
+    )
+    .unwrap()
+    .unwrap();
+    assert!(c.diagnostics.iter().any(|d| d.option == "BraceWrapping"));
+    assert!(c.diagnostics.iter().any(|d| d.option == "AlignOperands"));
+    let c = parse_config(
+        "BreakBeforeBraces: Attach\nAlignOperands: DontAlign",
+        &inherited,
+        "Cpp",
+        false,
+        UnknownOptions::Error,
+    )
+    .unwrap()
+    .unwrap();
+    assert!(
+        !c.diagnostics
+            .iter()
+            .any(|d| matches!(d.option.as_str(), "BraceWrapping" | "AlignOperands"))
+    );
+    let c = parse_config(
+        "AlignOperands: AlignAfterOperator\n---\nLanguage: Cpp\nIndentWidth: 3",
+        &base,
+        "Cpp",
+        false,
+        UnknownOptions::Error,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(
+        c.diagnostics
+            .iter()
+            .find(|d| d.option == "AlignOperands")
+            .unwrap()
+            .document,
+        1
+    );
+    let c = parsed(
+        "BraceWrapping: {IndentBraces: true}\n---\nLanguage: Cpp\nBreakBeforeBraces: Custom",
+    );
+    assert_eq!(
+        c.diagnostics
+            .iter()
+            .find(|d| d.option == "BraceWrapping")
+            .unwrap()
+            .document,
+        1
+    );
+    let c = parsed("BasedOnStyle: GNU\nBreakBeforeBraces: Attach");
+    assert!(!c.diagnostics.iter().any(|d| d.option == "BraceWrapping"));
+}
+
+#[test]
+fn native_and_yaml_styles_reject_invalid_widths_before_editing() {
+    for key in [
+        "IndentWidth",
+        "ContinuationIndentWidth",
+        "TabWidth",
+        "ConstructorInitializerIndentWidth",
+        "BracedInitializerIndentWidth",
+        "PPIndentWidth",
+    ] {
+        assert!(
+            parse_config(
+                &format!("{key}: 4097"),
+                &preset("LLVM").unwrap(),
+                "Cpp",
+                false,
+                UnknownOptions::Error
+            )
+            .is_err(),
+            "{key}"
+        );
+    }
+    let candidates = [
+        CppStyle {
+            indent_width: usize::MAX,
+            access_indent: AccessIndent::Always,
+            ..CppStyle::default()
+        },
+        CppStyle {
+            continuation_indent: usize::MAX,
+            ..CppStyle::default()
+        },
+        CppStyle {
+            tab_width: std::num::NonZeroUsize::new(usize::MAX).unwrap(),
+            ..CppStyle::default()
+        },
+        CppStyle {
+            constructor_indent: Some(4097),
+            ..CppStyle::default()
+        },
+        CppStyle {
+            braced_initializer_indent: Some(4097),
+            ..CppStyle::default()
+        },
+        CppStyle {
+            pp_indent_width: Some(4097),
+            ..CppStyle::default()
+        },
+        CppStyle {
+            access_specifier_offset: isize::MIN,
+            ..CppStyle::default()
+        },
+        CppStyle {
+            access_specifier_offset: isize::MAX,
+            ..CppStyle::default()
+        },
+    ];
+    for style in candidates {
+        assert!(style.compile().is_err());
+    }
+    for width in [0, 4096] {
+        let style = CppStyle {
+            indent_width: width,
+            access_specifier_offset: 0,
+            ..CppStyle::default()
+        };
+        assert!(style.compile().is_ok());
+        assert!(
+            parsed(&format!(
+                "IndentWidth: {width}\nAccessModifierOffset: -{width}"
+            ))
+            .rules
+            .enabled()
+        );
+    }
+}

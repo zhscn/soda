@@ -173,7 +173,8 @@ fn file_and_editor_styles_produce_identical_atomic_edits_with_mixed_tabs() {
             constructor_initializers: ConstructorInitializers::AlignWithColon,
             ..CppStyle::default()
         }
-        .compile();
+        .compile()
+        .unwrap();
         assert_eq!(native.structure(), c.rules.structure());
         assert_eq!(native.expression(), c.rules.expression());
         assert_eq!(native.initializer(), c.rules.initializer());

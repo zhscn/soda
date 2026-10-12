@@ -4,7 +4,11 @@ use super::{
 };
 use crate::cpp::CppRules;
 use serde_json::{Map, Value};
-use std::{collections::HashSet, fmt, sync::OnceLock};
+use std::{
+    collections::{BTreeMap, HashSet},
+    fmt,
+    sync::OnceLock,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UnknownOptions {
@@ -26,6 +30,7 @@ impl Default for ConfigOptions {
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConfigDiagnostic {
+    /// One-based YAML document number; zero denotes a bundled preset.
     pub document: usize,
     pub option: String,
     pub message: String,
@@ -72,6 +77,8 @@ pub struct ClangConfig {
     pub rules: CppRules,
     pub inherit: Option<String>,
     pub diagnostics: Vec<ConfigDiagnostic>,
+    explicit_options: BTreeMap<String, usize>,
+    preset_document: usize,
 }
 fn presets() -> &'static Map<String, Value> {
     static PRESETS: OnceLock<Map<String, Value>> = OnceLock::new();
@@ -92,12 +99,16 @@ pub fn preset(name: &str) -> Result<ClangConfig, ConfigError> {
         merge(&mut values, overrides.as_object().unwrap());
     }
     let rules = to_rules(&values, 0)?;
-    Ok(ClangConfig {
+    let mut config = ClangConfig {
         values,
         rules,
         inherit: None,
         diagnostics: vec![],
-    })
+        explicit_options: BTreeMap::new(),
+        preset_document: 0,
+    };
+    refresh_diagnostics(&mut config);
+    Ok(config)
 }
 fn merge(base: &mut Map<String, Value>, patch: &Map<String, Value>) {
     for (key, value) in patch {
@@ -141,6 +152,91 @@ fn validate_shape(
     }
     Ok(())
 }
+const UNSUPPORTED: [&str; 6] = [
+    "IndentCaseBlocks",
+    "IndentGotoLabels",
+    "IndentRequiresClause",
+    "LambdaBodyIndentation",
+    "MacroBlockBegin",
+    "MacroBlockEnd",
+];
+
+fn record_explicit(
+    origins: &mut BTreeMap<String, usize>,
+    key: &str,
+    value: &Value,
+    document: usize,
+) {
+    origins.insert(key.into(), document);
+    if let Value::Object(fields) = value {
+        for (name, value) in fields {
+            record_explicit(origins, &format!("{key}.{name}"), value, document);
+        }
+    }
+}
+
+/// Recompute capability diagnostics after inheritance and overrides. Explicit
+/// unsupported choices and deviations from the implementation's baseline are
+/// reported; sources remain attached to the effective options.
+fn refresh_diagnostics(config: &mut ClangConfig) {
+    config.diagnostics.retain(|diagnostic| {
+        !UNSUPPORTED.contains(&diagnostic.option.as_str())
+            && !matches!(
+                diagnostic.option.as_str(),
+                "AlignOperands" | "BraceWrapping"
+            )
+    });
+    let source = |key: &str| {
+        config
+            .explicit_options
+            .get(key)
+            .copied()
+            .unwrap_or(config.preset_document)
+    };
+    for key in UNSUPPORTED {
+        if config.explicit_options.contains_key(key)
+            || config.values.get(key) != presets()["llvm"].get(key)
+        {
+            config.diagnostics.push(ConfigDiagnostic {
+                document: source(key), option: key.into(),
+                message: "parsed and retained; interactive indentation does not yet implement this option".into(),
+            });
+        }
+    }
+    if config.rules.expression().operand_alignment == crate::cpp::OperandAlignment::AfterOperator {
+        config.diagnostics.push(ConfigDiagnostic {
+            document: source("AlignOperands"),
+            option: "AlignOperands".into(),
+            message: "AlignAfterOperator currently uses Align continuation rules".into(),
+        });
+    }
+    let brace_style = config
+        .values
+        .get("BreakBeforeBraces")
+        .and_then(Value::as_str);
+    let extra_indent = brace_style == Some("GNU")
+        || (brace_style == Some("Custom")
+            && boolean(
+                &config.values["BraceWrapping"]["IndentBraces"],
+                0,
+                "BraceWrapping.IndentBraces",
+            )
+            .unwrap_or(false));
+    if extra_indent {
+        config.diagnostics.push(ConfigDiagnostic {
+            document: source(if brace_style == Some("Custom") {
+                "BraceWrapping.IndentBraces"
+            } else {
+                "BreakBeforeBraces"
+            }),
+            option: "BraceWrapping".into(),
+            message:
+                "brace indentation is retained; not yet implemented in interactive indentation"
+                    .into(),
+        });
+    }
+}
+
 fn patch(
     mut base: ClangConfig,
     doc: &Map<String, Value>,
@@ -166,6 +262,7 @@ fn patch(
             base.inherit = Some(dir.into());
         } else {
             base = preset(based).map_err(|e| ConfigError::key(index, "BasedOnStyle", e.message))?;
+            base.preset_document = index;
         }
     }
     let mut values = doc.clone();
@@ -196,42 +293,10 @@ fn patch(
     }
     merge(&mut base.values, &values);
     base.rules = to_rules(&base.values, index)?;
-    // Formatting-only fields stay in the option tree. Flag indentation fields
-    // that need further parser work instead of claiming that they take effect.
-    for key in [
-        "IndentCaseBlocks",
-        "IndentGotoLabels",
-        "IndentRequiresClause",
-        "LambdaBodyIndentation",
-        "MacroBlockBegin",
-        "MacroBlockEnd",
-    ] {
-        if doc.contains_key(key) {
-            base.diagnostics.push(ConfigDiagnostic {document:index,option:key.into(),message:"parsed and retained; interactive indentation does not yet implement this option".into()});
-        }
+    for (key, value) in &values {
+        record_explicit(&mut base.explicit_options, key, value, index);
     }
-    if doc.get("AlignOperands").and_then(Value::as_str) == Some("AlignAfterOperator") {
-        base.diagnostics.push(ConfigDiagnostic {
-            document: index,
-            option: "AlignOperands".into(),
-            message: "AlignAfterOperator currently uses Align continuation rules".into(),
-        });
-    }
-    if doc
-        .get("BraceWrapping")
-        .and_then(|v| v.get("IndentBraces"))
-        .and_then(Value::as_bool)
-        == Some(true)
-        || doc.get("BreakBeforeBraces").and_then(Value::as_str) == Some("GNU")
-    {
-        base.diagnostics.push(ConfigDiagnostic {
-            document: index,
-            option: "BraceWrapping".into(),
-            message:
-                "brace indentation is retained; not yet implemented in interactive indentation"
-                    .into(),
-        });
-    }
+    refresh_diagnostics(&mut base);
 
     Ok(base)
 }

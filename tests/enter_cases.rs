@@ -84,7 +84,7 @@ fn enter_regression_corpus() {
         (
             "statement continuation",
             "foo(a,^ b);\n",
-            "foo(a,\n    ^ b);\n",
+            "foo(a,\n    ^b);\n",
         ),
         (
             "wrapped signature anchors the body on the declaration line",
@@ -99,7 +99,7 @@ fn enter_regression_corpus() {
         (
             "open-bracket alignment",
             "int y = f(aa,^ bb);\n",
-            "int y = f(aa,\n          ^ bb);\n",
+            "int y = f(aa,\n          ^bb);\n",
         ),
         ("open-bracket alignment", "foo(^a);\n", "foo(\n    ^a);\n"),
         (
@@ -152,7 +152,7 @@ fn enter_regression_corpus() {
         let mut select = Transaction::new(0, vec![]);
         select.selection = Some(Selection::caret(caret));
         editor.dispatch(select).unwrap();
-        let tx = enter(editor.state(), &CppStyle::default().compile()).unwrap();
+        let tx = enter(editor.state(), &CppStyle::default().compile().unwrap()).unwrap();
         editor.dispatch(tx).unwrap();
         let mut output = editor.state().snapshot().text().to_owned();
         output.insert(editor.state().selection().head, '^');

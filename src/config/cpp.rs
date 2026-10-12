@@ -75,14 +75,16 @@ pub(super) fn to_rules(v: &Map<String, Value>, doc: usize) -> Result<CppRules, C
         },
     };
     let offset = integer(get!("AccessModifierOffset"), doc, "AccessModifierOffset")?;
-    if !(-4096..=4096).contains(&offset) {
-        return Err(ConfigError::key(
+    let offset = isize::try_from(offset).map_err(|_| {
+        ConfigError::key(
             doc,
             "AccessModifierOffset",
             "offset is outside the supported range",
-        ));
-    }
-    policy.structure.access_offset = offset as isize;
+        )
+    })?;
+    crate::cpp::validate_offset(offset)
+        .map_err(|message| ConfigError::key(doc, "AccessModifierOffset", message))?;
+    policy.structure.access_offset = offset;
     policy.structure.indent_case_labels =
         boolean(get!("IndentCaseLabels"), doc, "IndentCaseLabels")?;
     policy.structure.indent_wrapped_function_names = boolean(

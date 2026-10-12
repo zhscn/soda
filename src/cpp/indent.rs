@@ -208,12 +208,6 @@ impl Computer<'_> {
             })
     }
     fn run(&self) -> IndentDecision {
-        if !self.style.enabled {
-            let mut d = self.fixed(IndentRole::Opaque, self.indent(self.line), None);
-            d.preserve = true;
-            d.whitespace = leading(self.snapshot.line(self.line).unwrap()).into();
-            return d;
-        }
         let start = self.snapshot.line_start(self.line).unwrap();
         if let Some(t) = self.tree.tokens.iter().find(|t| {
             t.range.start < start
@@ -245,6 +239,12 @@ impl Computer<'_> {
                 return decision;
             }
             enclosing = self.tree.nodes[id].parent;
+        }
+        if !self.style.enabled {
+            let mut d = self.fixed(IndentRole::Opaque, self.indent(self.line), None);
+            d.preserve = true;
+            d.whitespace = leading(self.snapshot.line(self.line).unwrap()).into();
+            return d;
         }
         let first = self.first(self.line);
         if let Some(i) = first {
@@ -783,6 +783,17 @@ pub fn enter(state: &EditorState, style: &CppRules) -> Result<Transaction, EditE
     base.replace_range(range.clone(), "");
     let caret = range.start;
     let tokens = lex(&base);
+    let literal_split = tokens
+        .iter()
+        .find(|token| {
+            token.range.start < caret
+                && (caret < token.range.end || (token.unterminated && caret == token.range.end))
+                && matches!(
+                    token.kind,
+                    K::RawStringLiteral | K::StringLiteral | K::CharacterLiteral
+                )
+        })
+        .map(|token| token.kind);
     let prev = tokens
         .iter()
         .enumerate()
@@ -816,12 +827,21 @@ pub fn enter(state: &EditorState, style: &CppRules) -> Result<Transaction, EditE
     let spec = EditorState::new(base);
     let analysis = parse_snapshot_with_options(spec.snapshot(), &style.parser);
     let middle = spec.snapshot().line_of(caret + newline.len()).unwrap();
-    let d = compute_indent(spec.snapshot(), &analysis, middle, style)?;
+    let mut d = compute_indent(spec.snapshot(), &analysis, middle, style)?;
+    if let Some(kind) = literal_split {
+        d.role = if kind == K::RawStringLiteral {
+            IndentRole::PreservedRawString
+        } else {
+            IndentRole::PreservedString
+        };
+        d.preserve = true;
+        d.directive_spacing = None;
+    }
     let ws = if d.preserve {
         if matches!(
             d.role,
             IndentRole::PreservedBlockComment | IndentRole::PreservedMacro
-        ) || !style.enabled
+        ) || (d.role == IndentRole::Opaque && !style.enabled)
         {
             leading(spec.snapshot().line(middle - 1).unwrap()).to_owned()
         } else {
@@ -836,10 +856,11 @@ pub fn enter(state: &EditorState, style: &CppRules) -> Result<Transaction, EditE
         let close = compute_indent(spec.snapshot(), &analysis, middle + 1, style)?;
         replacement.push_str(newline);
         replacement.push_str(&close.whitespace);
-        // Replace the existing inter-brace spaces rather than duplicating them.
-        while end < source.len() && matches!(source.as_bytes()[end], b' ' | b'\t') {
-            end += 1;
-        }
+    }
+    // Replace the new line's existing prefix in code. Protected content keeps
+    // its suffix bytes; disabled formatting uses the basic inherited prefix.
+    if between || !d.preserve || (d.role == IndentRole::Opaque && !style.enabled) {
+        end += leading(&source[end..]).len();
     }
     let mut changes = vec![Change::new(range.start..end, replacement)];
     if !between && let Some(spacing) = d.directive_spacing {
@@ -901,6 +922,19 @@ pub fn type_char(
         return Ok(insert);
     }
     let tree = parse_snapshot_with_options(spec.snapshot(), &style.parser);
+    let expected = match ch {
+        ':' => K::Colon,
+        '}' => K::RBrace,
+        '#' => K::PreprocessorHash,
+        _ => unreachable!(),
+    };
+    if !tree
+        .tokens
+        .iter()
+        .any(|token| token.range.start == range.start && token.kind == expected)
+    {
+        return Ok(insert);
+    }
     let decision = compute_indent(spec.snapshot(), &tree, line, style)?;
     if decision.preserve
         || (ch == ':'
