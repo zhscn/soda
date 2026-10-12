@@ -60,7 +60,7 @@ impl Computer<'_> {
     }
     fn indent(&self, line: usize) -> usize {
         column_width(
-            leading(self.snapshot.line(line).unwrap()),
+            leading(&self.snapshot.line(line).unwrap()),
             0,
             self.style.whitespace.tab_width,
         )
@@ -222,7 +222,7 @@ impl Computer<'_> {
             if let Some(role) = role {
                 let mut d = self.fixed(role, self.indent(self.line), Some(t.range.start));
                 d.preserve = true;
-                d.whitespace = leading(self.snapshot.line(self.line).unwrap()).into();
+                d.whitespace = leading(&self.snapshot.line(self.line).unwrap()).into();
                 return d;
             }
         }
@@ -235,7 +235,7 @@ impl Computer<'_> {
                     Some(self.tree.range(id).start),
                 );
                 decision.preserve = true;
-                decision.whitespace = leading(self.snapshot.line(self.line).unwrap()).into();
+                decision.whitespace = leading(&self.snapshot.line(self.line).unwrap()).into();
                 return decision;
             }
             enclosing = self.tree.nodes[id].parent;
@@ -243,7 +243,7 @@ impl Computer<'_> {
         if !self.style.enabled {
             let mut d = self.fixed(IndentRole::Opaque, self.indent(self.line), None);
             d.preserve = true;
-            d.whitespace = leading(self.snapshot.line(self.line).unwrap()).into();
+            d.whitespace = leading(&self.snapshot.line(self.line).unwrap()).into();
             return d;
         }
         let first = self.first(self.line);
@@ -341,7 +341,8 @@ impl Computer<'_> {
                 _ => {}
             }
         } else {
-            let line = self.snapshot.line(self.line).unwrap().trim_start();
+            let content = self.snapshot.line(self.line).unwrap();
+            let line = content.trim_start();
             if line.starts_with("//") || line.starts_with("/*") {
                 for next in self.line + 1..self.snapshot.line_count() {
                     if self.first(next).is_some() {
@@ -843,7 +844,7 @@ pub fn enter(state: &EditorState, style: &CppRules) -> Result<Transaction, EditE
             IndentRole::PreservedBlockComment | IndentRole::PreservedMacro
         ) || (d.role == IndentRole::Opaque && !style.enabled)
         {
-            leading(spec.snapshot().line(middle - 1).unwrap()).to_owned()
+            leading(&spec.snapshot().line(middle - 1).unwrap()).to_owned()
         } else {
             String::new()
         }
@@ -884,7 +885,7 @@ pub fn reindent(
     let tree = parse_snapshot_with_options(snapshot, &style.parser);
     let d = compute_indent(snapshot, &tree, line, style)?;
     let start = snapshot.line_start(line).ok_or(EditError::InvalidRange)?;
-    let len = leading(snapshot.line(line).unwrap()).len();
+    let len = leading(&snapshot.line(line).unwrap()).len();
     let mut changes = if d.preserve || snapshot.text()[start..start + len] == d.whitespace {
         vec![]
     } else {
@@ -947,11 +948,11 @@ pub fn type_char(
     {
         return Ok(insert);
     }
-    let prefix_len = leading(spec.snapshot().line(line).unwrap()).len();
+    let prefix_len = leading(&spec.snapshot().line(line).unwrap()).len();
     if range.start < start + prefix_len {
         return Ok(insert);
     }
-    if leading(spec.snapshot().line(line).unwrap()) == decision.whitespace
+    if leading(&spec.snapshot().line(line).unwrap()) == decision.whitespace
         && decision.directive_spacing.is_none()
     {
         return Ok(insert);

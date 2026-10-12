@@ -648,9 +648,9 @@ pub(super) fn continuation(
     .parse(0);
     let synthetic = Sim::new(K::Identifier);
     let query = query.map(|i| &sim[i]).unwrap_or(&synthetic);
+    let first_line_text = snapshot.line(first_line)?;
     let first_indent = column_width(
-        &snapshot.line(first_line)?[..snapshot
-            .line(first_line)?
+        &first_line_text[..first_line_text
             .bytes()
             .take_while(|&b| b == b' ' || b == b'\t')
             .count()],

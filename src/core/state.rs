@@ -151,16 +151,22 @@ impl EditorState {
     pub fn selection(&self) -> Selection {
         self.selection
     }
+    fn for_history(&self) -> Self {
+        Self {
+            snapshot: self.snapshot.for_history(),
+            selection: self.selection,
+        }
+    }
     pub fn apply(&self, mut tx: Transaction) -> Result<(Self, ChangeMap), EditError> {
         if tx.base_version != self.snapshot.version() {
             return Err(EditError::StaleVersion);
         }
-        let text = self.snapshot.text();
+        let snapshot = &self.snapshot;
         if tx.changes.is_empty() {
             let selection = tx.selection.unwrap_or(self.selection);
             if [selection.anchor, selection.head]
                 .iter()
-                .any(|&p| p > text.len() || !text.is_char_boundary(p))
+                .any(|&p| !snapshot.is_char_boundary(p))
             {
                 return Err(EditError::InvalidSelection);
             }
@@ -181,9 +187,9 @@ impl EditorState {
         let mut previous: Option<&Change> = None;
         for c in &tx.changes {
             if c.range.start > c.range.end
-                || c.range.end > text.len()
-                || !text.is_char_boundary(c.range.start)
-                || !text.is_char_boundary(c.range.end)
+                || c.range.end > snapshot.len_bytes()
+                || !snapshot.is_char_boundary(c.range.start)
+                || !snapshot.is_char_boundary(c.range.end)
             {
                 return Err(EditError::InvalidRange);
             }
@@ -201,31 +207,23 @@ impl EditorState {
                 .map(|c| (c.range.clone(), c.insert.len()))
                 .collect(),
         };
-        let mut output = String::new();
-        let mut cursor = 0;
-        for c in tx.changes {
-            output.push_str(&text[cursor..c.range.start]);
-            output.push_str(&c.insert);
-            cursor = c.range.end;
-        }
-        output.push_str(&text[cursor..]);
+        let version = snapshot
+            .version()
+            .checked_add(1)
+            .ok_or(EditError::VersionExhausted)?;
+        let output = snapshot.edited(&tx.changes, version);
         let selection = tx
             .selection
             .unwrap_or_else(|| map.map_selection(self.selection));
         if [selection.anchor, selection.head]
             .iter()
-            .any(|&p| p > output.len() || !output.is_char_boundary(p))
+            .any(|&p| !output.is_char_boundary(p))
         {
             return Err(EditError::InvalidSelection);
         }
-        let version = self
-            .snapshot
-            .version()
-            .checked_add(1)
-            .ok_or(EditError::VersionExhausted)?;
         Ok((
             Self {
-                snapshot: Snapshot::new(output, version),
+                snapshot: output,
                 selection,
             },
             map,
@@ -259,7 +257,7 @@ impl Editor {
         let (next, map) = self.state.apply(tx)?;
         if modifies_text {
             if group.is_none() || group != self.group {
-                self.undo.push(self.state.clone());
+                self.undo.push(self.state.for_history());
             }
             self.redo.clear();
         }
@@ -288,9 +286,9 @@ impl Editor {
         restored.snapshot = restored.snapshot.with_version(version);
         let prior = std::mem::replace(&mut self.state, restored);
         if redo {
-            self.undo.push(prior);
+            self.undo.push(prior.for_history());
         } else {
-            self.redo.push(prior);
+            self.redo.push(prior.for_history());
         }
         self.group = None;
         Ok(true)

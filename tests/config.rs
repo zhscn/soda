@@ -297,7 +297,10 @@ fn config_widths_access_levels_and_disabled_format_reach_editor() {
     editor
         .dispatch(reindent(editor.state(), 1, &c.rules).unwrap())
         .unwrap();
-    assert_eq!(editor.state().snapshot().line(1), Some("        public:"));
+    assert_eq!(
+        editor.state().snapshot().line(1).as_deref(),
+        Some("        public:")
+    );
 }
 #[test]
 fn bundled_presets_match_llvm_23_when_reference_tool_is_available() {

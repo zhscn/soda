@@ -88,9 +88,9 @@ fn snapshots_index_crlf_trailing_lines_and_unicode_bytes() {
     let state = EditorState::new("界\r\n\t\n");
     let s = state.snapshot();
     assert_eq!(s.line_count(), 3);
-    assert_eq!(s.line(0), Some("界"));
-    assert_eq!(s.line(1), Some("\t"));
-    assert_eq!(s.line(2), Some(""));
+    assert_eq!(s.line(0).as_deref(), Some("界"));
+    assert_eq!(s.line(1).as_deref(), Some("\t"));
+    assert_eq!(s.line(2).as_deref(), Some(""));
     assert_eq!(s.line_of(2), None);
     assert_eq!(s.line_of(5), Some(1));
     assert_eq!(s.line_of(7), Some(2));
