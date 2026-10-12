@@ -1,7 +1,10 @@
+use super::request::{
+    OpenCompletion, OpenRequest, SaveCompletion, SavePayload, SavePlan, SaveRequest,
+};
 use super::state::DiskImage;
 use crate::{
     config::{ConfigError, ConfigOptions, ResolvedConfig, resolve_config},
-    editor::{DocumentId, Language},
+    editor::Language,
 };
 use std::{
     fmt, fs,
@@ -21,6 +24,7 @@ pub enum FileError {
     PathInUse(PathBuf),
     StaleCompletion,
     UnsavedChanges,
+    Interrupted,
     Edit(crate::core::EditError),
 }
 impl fmt::Display for FileError {
@@ -81,39 +85,6 @@ impl LoadedFile {
     }
     pub fn has_utf8_bom(&self) -> bool {
         self.bom
-    }
-}
-
-/// A single-use immutable save request; its snapshot may outlive further edits.
-#[must_use = "write the request or cancel it through the workspace"]
-pub struct SaveRequest {
-    pub(crate) token: u64,
-    pub(crate) document_id: DocumentId,
-    pub(crate) path: PathBuf,
-    pub(crate) image: DiskImage,
-    pub(crate) expected: Option<DiskImage>,
-    pub(crate) configuration: Option<ResolvedConfig>,
-    pub(crate) config_generation: u64,
-}
-impl SaveRequest {
-    pub fn document_id(&self) -> DocumentId {
-        self.document_id
-    }
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-    pub fn revision(&self) -> u64 {
-        self.image.snapshot.version()
-    }
-}
-#[must_use = "apply the completion through the originating workspace"]
-pub struct SaveCompletion {
-    pub(crate) request: SaveRequest,
-    pub(crate) result: Result<(), FileError>,
-}
-impl SaveCompletion {
-    pub fn result(&self) -> Result<(), &FileError> {
-        self.result.as_ref().map(|_| ())
     }
 }
 
@@ -215,11 +186,40 @@ impl FileService {
             Err(error) => Err(io_error(path, error)),
         }
     }
-    pub fn write(&self, request: SaveRequest) -> SaveCompletion {
-        let result = self.write_snapshot(&request);
-        SaveCompletion { request, result }
+    pub fn read_request(&self, mut request: OpenRequest) -> OpenCompletion {
+        let owner = request.route.lease();
+        let result = if owner.is_some() {
+            self.read(&request.path)
+        } else {
+            Err(FileError::StaleCompletion)
+        };
+        request.active = false;
+        OpenCompletion {
+            id: request.id,
+            path: request.path.clone(),
+            result: Some(result),
+            route: request.route.clone(),
+        }
     }
-    fn write_snapshot(&self, request: &SaveRequest) -> Result<(), FileError> {
+    pub fn write(&self, mut request: SaveRequest) -> SaveCompletion {
+        request.started = true;
+        // The request keeps its reservation throughout synchronous I/O. A panic
+        // leaves disk state uncertain; normal results transfer all confirmation data.
+        let owner = request.route.lease();
+        let result = if owner.is_some() {
+            self.write_snapshot(request.plan.as_ref().unwrap())
+        } else {
+            Err(FileError::StaleCompletion)
+        };
+        SaveCompletion {
+            payload: Some(SavePayload {
+                plan: request.plan.take().unwrap(),
+                result,
+            }),
+            route: request.route.clone(),
+        }
+    }
+    fn write_snapshot(&self, request: &SavePlan) -> Result<(), FileError> {
         let path = &request.path;
         if !self.check(path, request.expected.as_ref())? {
             return Err(FileError::Conflict(path.clone()));

@@ -1,11 +1,20 @@
 use super::{
-    FileError, FileService, LoadedFile, SaveCompletion, SaveRequest,
+    Editing, FileError, FileService, LoadedFile, SaveCompletion, SaveRequest,
+    request::{
+        FileEvent, FileRoute, OpenCompletion, OpenId, OpenPreparation, OpenRequest, SavePayload,
+        SavePlan,
+    },
     state::{DiskImage, FileState},
 };
-use crate::editor::{DocumentId, Editor, Language};
+use crate::editor::{Command, DocumentId, Editor, Language};
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
+    sync::mpsc::{self, Receiver},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 #[derive(Clone, Debug)]
@@ -17,6 +26,11 @@ pub struct FileUpdate {
     pub dirty: bool,
     pub language_changed: bool,
 }
+#[derive(Debug)]
+pub struct FileResult {
+    pub document_id: DocumentId,
+    pub result: Result<FileUpdate, FileError>,
+}
 struct PendingSave {
     token: u64,
     path: PathBuf,
@@ -24,20 +38,47 @@ struct PendingSave {
 
 /// Document registry and file lifecycle coordinator. Editing remains in each
 /// document's controller; the file service performs reads and writes separately.
-#[derive(Default)]
 pub struct Workspace {
     service: FileService,
     editors: BTreeMap<DocumentId, Editor>,
     paths: BTreeMap<PathBuf, DocumentId>,
     pending: BTreeMap<DocumentId, PendingSave>,
     next_save: u64,
+    open_requests: BTreeMap<OpenId, PathBuf>,
+    route: FileRoute,
+    _owner: Arc<AtomicBool>,
+    events: Receiver<FileEvent>,
+    ready_results: Vec<FileResult>,
+}
+impl Drop for Workspace {
+    fn drop(&mut self) {
+        self._owner.store(false, Ordering::Release);
+    }
+}
+impl Default for Workspace {
+    fn default() -> Self {
+        let (sender, events) = mpsc::channel();
+        let owner = Arc::new(AtomicBool::new(true));
+        let route = FileRoute::new(sender, &owner);
+        Self {
+            service: FileService::default(),
+            editors: BTreeMap::new(),
+            paths: BTreeMap::new(),
+            pending: BTreeMap::new(),
+            next_save: 0,
+            open_requests: BTreeMap::new(),
+            route,
+            _owner: owner,
+            events,
+            ready_results: Vec::new(),
+        }
+    }
 }
 impl Workspace {
     pub fn new(service: FileService) -> Self {
-        Self {
-            service,
-            ..Self::default()
-        }
+        let mut workspace = Self::default();
+        workspace.service = service;
+        workspace
     }
     pub fn service(&self) -> &FileService {
         &self.service
@@ -45,8 +86,8 @@ impl Workspace {
     pub fn editor(&self, id: DocumentId) -> Option<&Editor> {
         self.editors.get(&id)
     }
-    pub fn editor_mut(&mut self, id: DocumentId) -> Option<&mut Editor> {
-        self.editors.get_mut(&id)
+    pub fn editor_mut(&mut self, id: DocumentId) -> Option<Editing<'_>> {
+        self.editors.get_mut(&id).map(|editor| Editing { editor })
     }
     pub fn documents(&self) -> impl Iterator<Item = DocumentId> + '_ {
         self.editors.keys().copied()
@@ -58,18 +99,49 @@ impl Workspace {
         id
     }
     pub fn open(&mut self, path: &Path) -> Result<DocumentId, FileError> {
+        match self.prepare_open(path)? {
+            OpenPreparation::Existing(id) => Ok(id),
+            OpenPreparation::Request(request) => {
+                let completion = self.service.read_request(request);
+                self.finish_open(completion)
+            }
+        }
+    }
+    pub fn prepare_open(&mut self, path: &Path) -> Result<OpenPreparation, FileError> {
+        self.collect_events();
         let path = self.service.resolve_path(path)?;
         if let Some(id) = self.paths.get(&path) {
-            return Ok(*id);
+            return Ok(OpenPreparation::Existing(*id));
         }
         if self.pending.values().any(|pending| pending.path == path) {
             return Err(FileError::PathInUse(path));
         }
-        let loaded = self.service.read(&path)?;
-        self.accept_loaded(loaded)
+        if self.open_requests.values().any(|pending| *pending == path) {
+            return Err(FileError::Busy);
+        }
+        let id = OpenId::allocate()?;
+        self.open_requests.insert(id, path.clone());
+        Ok(OpenPreparation::Request(OpenRequest {
+            id,
+            path,
+            route: self.route.clone(),
+            active: true,
+        }))
     }
-    /// Applies a completed read without replacing an already open document.
-    pub fn accept_loaded(&mut self, loaded: LoadedFile) -> Result<DocumentId, FileError> {
+    /// Cancelling a read invalidates its result even while the service is running.
+    pub fn cancel_open(&mut self, id: OpenId) -> Result<(), FileError> {
+        self.open_requests
+            .remove(&id)
+            .map(|_| ())
+            .ok_or(FileError::StaleCompletion)
+    }
+    pub fn finish_open(&mut self, mut completion: OpenCompletion) -> Result<DocumentId, FileError> {
+        self.collect_events();
+        if self.open_requests.get(&completion.id) != Some(&completion.path) {
+            return Err(FileError::StaleCompletion);
+        }
+        self.open_requests.remove(&completion.id);
+        let loaded = completion.result.take().unwrap()?;
         if let Some(id) = self.paths.get(&loaded.path) {
             return Ok(*id);
         }
@@ -80,6 +152,9 @@ impl Workspace {
         {
             return Err(FileError::PathInUse(loaded.path));
         }
+        self.insert_loaded(loaded)
+    }
+    fn insert_loaded(&mut self, loaded: LoadedFile) -> Result<DocumentId, FileError> {
         let mut editor = Editor::new(loaded.text, FileService::language(&loaded.configuration));
         let id = editor.model().document().id();
         let snapshot = editor.model().document().snapshot().for_history();
@@ -98,6 +173,7 @@ impl Workspace {
         Ok(id)
     }
     pub fn close(&mut self, id: DocumentId) -> Result<(), FileError> {
+        self.collect_events();
         if self.pending.contains_key(&id) {
             return Err(FileError::Busy);
         }
@@ -115,6 +191,7 @@ impl Workspace {
     }
     /// Explicitly discard local edits. Outstanding saves must finish first.
     pub fn discard_document(&mut self, id: DocumentId) -> Result<(), FileError> {
+        self.collect_events();
         if self.pending.contains_key(&id) {
             return Err(FileError::Busy);
         }
@@ -131,6 +208,7 @@ impl Workspace {
         id: DocumentId,
         target: Option<&Path>,
     ) -> Result<SaveRequest, FileError> {
+        self.collect_events();
         if self.pending.contains_key(&id) {
             return Err(FileError::Busy);
         }
@@ -146,6 +224,7 @@ impl Workspace {
         let path = self.service.resolve_path(target)?;
         if self.paths.get(&path).is_some_and(|owner| *owner != id)
             || self.pending.values().any(|pending| pending.path == path)
+            || self.open_requests.values().any(|pending| *pending == path)
         {
             return Err(FileError::PathInUse(path));
         }
@@ -165,7 +244,7 @@ impl Workspace {
         let next = token
             .checked_add(1)
             .ok_or(crate::core::EditError::VersionExhausted)?;
-        let request = SaveRequest {
+        let plan = SavePlan {
             token,
             document_id: id,
             path: path.clone(),
@@ -184,50 +263,127 @@ impl Workspace {
         self.editors.get_mut(&id).unwrap().checkpoint_history();
         self.pending.insert(id, PendingSave { token, path });
         self.next_save = next;
-        Ok(request)
+        Ok(SaveRequest {
+            plan: Some(plan),
+            route: self.route.clone(),
+            started: false,
+        })
     }
     /// Releases an unexecuted request. Consuming it prevents a later write.
     pub fn cancel_save(&mut self, request: SaveRequest) -> Result<(), FileError> {
-        let pending = self
-            .pending
-            .get(&request.document_id)
-            .ok_or(FileError::StaleCompletion)?;
-        if pending.token != request.token || pending.path != request.path {
-            return Err(FileError::StaleCompletion);
-        }
-        self.pending.remove(&request.document_id);
+        let plan = request.plan.as_ref().unwrap();
+        self.validate_save(plan)?;
+        drop(request);
+        self.collect_events();
         Ok(())
     }
-    /// Confirms only the snapshot that was written. A failed write releases
-    /// the reservation and leaves the file binding and saved baseline intact.
-    pub fn finish_save(&mut self, completion: SaveCompletion) -> Result<FileUpdate, FileError> {
-        let SaveCompletion { request, result } = completion;
+    fn validate_save(&self, plan: &SavePlan) -> Result<(), FileError> {
         let pending = self
             .pending
-            .get(&request.document_id)
+            .get(&plan.document_id)
             .ok_or(FileError::StaleCompletion)?;
-        if pending.token != request.token || pending.path != request.path {
+        if pending.token != plan.token || pending.path != plan.path {
             return Err(FileError::StaleCompletion);
         }
-        self.pending.remove(&request.document_id);
+        Ok(())
+    }
+    pub fn finish_save(&mut self, mut completion: SaveCompletion) -> Result<FileUpdate, FileError> {
+        self.collect_events();
+        self.validate_save(&completion.payload.as_ref().unwrap().plan)?;
+        self.apply_save(completion.payload.take().unwrap())
+    }
+    fn apply_save(&mut self, payload: SavePayload) -> Result<FileUpdate, FileError> {
+        let SavePayload { plan, result } = payload;
+        self.validate_save(&plan)?;
+        self.pending.remove(&plan.document_id);
         result?;
         let editor = self
             .editors
-            .get_mut(&request.document_id)
+            .get_mut(&plan.document_id)
             .ok_or(FileError::UnknownDocument)?;
         let old_path = editor.model().document().file().path().map(Path::to_owned);
-        let language_changed = editor.confirm_save(&request)?;
+        let changing_path = old_path.as_deref() != Some(plan.path.as_path());
+        let language_changed = if changing_path
+            && editor.model().document().config_generation() == plan.config_generation
+        {
+            editor
+                .execute(Command::SetLanguage(FileService::language(
+                    &plan.configuration,
+                )))?
+                .language_changed
+        } else {
+            false
+        };
+        let file = editor.file_state_mut();
+        file.path = Some(plan.path.clone());
+        file.saved = Some(DiskImage {
+            snapshot: plan.image.snapshot.for_history(),
+            bom: plan.image.bom,
+        });
+        file.saved_revision = Some(plan.image.snapshot.version());
+        if changing_path {
+            file.configuration = plan.configuration;
+        }
+        editor.checkpoint_history();
         if let Some(old_path) = old_path {
             self.paths.remove(&old_path);
         }
-        self.paths.insert(request.path.clone(), request.document_id);
+        self.paths.insert(plan.path.clone(), plan.document_id);
         Ok(FileUpdate {
-            document_id: request.document_id,
-            path: request.path,
-            saved_revision: request.image.snapshot.version(),
+            document_id: plan.document_id,
+            path: plan.path,
+            saved_revision: plan.image.snapshot.version(),
             dirty: editor.model().document().is_dirty(),
             language_changed,
         })
+    }
+    /// Applies drop notifications on the owner thread. Successful writes retain
+    /// their exact saved baseline even when the completion was abandoned.
+    pub fn poll_file_results(&mut self) -> Vec<FileResult> {
+        self.collect_events();
+        std::mem::take(&mut self.ready_results)
+    }
+    fn collect_events(&mut self) {
+        let mut results = Vec::new();
+        while let Ok(event) = self.events.try_recv() {
+            match event {
+                FileEvent::CancelSave { token, document_id } => {
+                    if self
+                        .pending
+                        .get(&document_id)
+                        .is_some_and(|pending| pending.token == token)
+                    {
+                        self.pending.remove(&document_id);
+                    }
+                }
+                FileEvent::FinishSave(payload) => {
+                    let document_id = payload.plan.document_id;
+                    results.push(FileResult {
+                        document_id,
+                        result: self.apply_save(*payload),
+                    });
+                }
+                FileEvent::CancelOpen(id) => {
+                    self.open_requests.remove(&id);
+                }
+                FileEvent::RecoverSave(plan) => {
+                    let result = match self.service.check(&plan.path, Some(&plan.image)) {
+                        Ok(true) => Ok(()),
+                        Ok(false) => Err(FileError::Interrupted),
+                        Err(error) => Err(error),
+                    };
+                    let document_id = plan.document_id;
+                    results.push(FileResult {
+                        document_id,
+                        result: self.apply_save(SavePayload {
+                            plan: *plan,
+                            result,
+                        }),
+                    });
+                }
+            }
+        }
+        self.ready_results.extend(results);
     }
     pub fn save(&mut self, id: DocumentId, target: Option<&Path>) -> Result<FileUpdate, FileError> {
         let request = self.prepare_save(id, target)?;
@@ -263,7 +419,45 @@ impl Workspace {
             .to_owned();
         let configuration = self.service.configuration(&path)?;
         let editor = self.editors.get_mut(&id).unwrap();
-        let changed = editor.reload_file_configuration(configuration)?;
+        let changed = editor
+            .execute(Command::SetLanguage(FileService::language(&configuration)))?
+            .language_changed;
+        editor.file_state_mut().configuration = configuration;
         Ok(changed)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn interrupted_writes_reconcile_disk_before_releasing_reservation() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("new.txt");
+        let mut workspace = Workspace::default();
+        let id = workspace.new_document(Language::PlainText);
+        workspace
+            .editor_mut(id)
+            .unwrap()
+            .execute(Command::InsertText("saved".into()))
+            .unwrap();
+        let mut request = workspace.prepare_save(id, Some(&path)).unwrap();
+        request.started = true;
+        std::fs::write(&path, "saved").unwrap();
+        drop(request);
+        let result = workspace.poll_file_results().pop().unwrap().result.unwrap();
+        assert!(!result.dirty);
+        workspace.close(id).unwrap();
+        let id = workspace.new_document(Language::PlainText);
+        let mut request = workspace
+            .prepare_save(id, Some(&directory.path().join("missing.txt")))
+            .unwrap();
+        request.started = true;
+        drop(request);
+        assert!(matches!(
+            workspace.poll_file_results().pop().unwrap().result,
+            Err(FileError::Interrupted)
+        ));
+        workspace.close(id).unwrap();
     }
 }

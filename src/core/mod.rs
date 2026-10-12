@@ -1,6 +1,8 @@
+mod history;
+pub(crate) use history::History;
 mod changes;
 pub use changes::compose_changes;
-pub(crate) use changes::invert_changes;
+pub(crate) use changes::{ValidatedChanges, compose_validated, invert_changes};
 mod state;
 mod text;
 

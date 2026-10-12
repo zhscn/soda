@@ -1,4 +1,4 @@
-use super::{Change, EditError, EditorState, Snapshot, Transaction};
+use super::{Change, ChangeMap, EditError, Snapshot};
 use std::ops::Range;
 
 #[derive(Clone)]
@@ -57,22 +57,30 @@ pub fn compose_changes(
     first: &[Change],
     second: &[Change],
 ) -> Result<Vec<Change>, EditError> {
-    let state = EditorState::from_snapshot(base.with_version(0), super::Selection::caret(0))?;
-    let mut first = first.to_vec();
-    first.sort_by_key(|change| change.range.start);
-    let (middle, _) = state.apply(Transaction::new(0, first.clone()))?;
-    let mut second = second.to_vec();
-    second.sort_by_key(|change| change.range.start);
-    middle.apply(Transaction::new(
-        middle.snapshot().version(),
-        second.clone(),
-    ))?;
+    let first = ValidatedChanges::new(base, first.to_vec())?;
+    let middle = base.edited(&first.changes, 0);
+    let second = ValidatedChanges::new(&middle, second.to_vec())?;
+    Ok(compose_validated(
+        base,
+        &first.changes,
+        middle.len_bytes(),
+        &second.changes,
+    ))
+}
+
+/// Inputs have already been validated against their corresponding snapshots.
+pub(crate) fn compose_validated(
+    base: &Snapshot,
+    first: &[Change],
+    middle_len: usize,
+    second: &[Change],
+) -> Vec<Change> {
     let pieces = apply(
         &[Piece::Original(0..base.len_bytes())],
-        &first,
+        first,
         base.len_bytes(),
     );
-    let pieces = apply(&pieces, &second, middle.snapshot().len_bytes());
+    let pieces = apply(&pieces, second, middle_len);
     let mut changes = Vec::new();
     let mut position = 0;
     let mut inserted = String::new();
@@ -93,7 +101,7 @@ pub fn compose_changes(
     if position != base.len_bytes() || !inserted.is_empty() {
         changes.push(Change::new(position..base.len_bytes(), inserted));
     }
-    Ok(changes)
+    changes
 }
 
 /// Invert validated, sorted changes using only replaced slices of the base.
@@ -122,4 +130,41 @@ pub(crate) fn invert_changes(base: &Snapshot, changes: &[Change]) -> Vec<Change>
         }
     }
     inverse
+}
+
+/// Canonical sorted changes and their mapping, validated without editing text.
+pub(crate) struct ValidatedChanges {
+    pub changes: Vec<Change>,
+    pub mapping: ChangeMap,
+}
+impl ValidatedChanges {
+    pub fn new(snapshot: &Snapshot, mut changes: Vec<Change>) -> Result<Self, EditError> {
+        changes.sort_by_key(|change| change.range.start);
+        let mut previous: Option<&Change> = None;
+        let mut result_len = snapshot.len_bytes();
+        for change in &changes {
+            if change.range.start > change.range.end
+                || change.range.end > snapshot.len_bytes()
+                || !snapshot.is_char_boundary(change.range.start)
+                || !snapshot.is_char_boundary(change.range.end)
+            {
+                return Err(EditError::InvalidRange);
+            }
+            if previous.is_some_and(|previous| {
+                previous.range.end > change.range.start
+                    || previous.range.start == change.range.start
+            }) {
+                return Err(EditError::OverlappingChanges);
+            }
+            result_len = result_len
+                .checked_sub(change.range.len())
+                .and_then(|length| length.checked_add(change.insert.len()))
+                .ok_or(EditError::InvalidRange)?;
+            previous = Some(change);
+        }
+        Ok(Self {
+            mapping: ChangeMap::from_sorted(&changes),
+            changes,
+        })
+    }
 }

@@ -1,7 +1,6 @@
 use super::{Language, language::LanguageSession};
 use crate::core::{
-    Change, ChangeMap, EditError, EditorState, Selection, Snapshot, Transaction, compose_changes,
-    invert_changes,
+    Change, ChangeMap, EditError, EditorState, History, Selection, Snapshot, Transaction,
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -41,14 +40,6 @@ pub struct DocumentUpdate {
     pub changes: Vec<Change>,
     pub mapping: ChangeMap,
 }
-struct HistoryEntry {
-    base: Snapshot,
-    forward: Vec<Change>,
-    inverse: Vec<Change>,
-    owner: SessionId,
-    before_selection: Selection,
-    after_selection: Selection,
-}
 pub(super) struct Commit {
     pub update: DocumentUpdate,
     pub restore_selection: (SessionId, Selection),
@@ -59,9 +50,7 @@ pub struct Document {
     id: DocumentId,
     snapshot: Snapshot,
     pub(super) language: LanguageSession,
-    undo: Vec<HistoryEntry>,
-    redo: Vec<HistoryEntry>,
-    group: Option<(SessionId, u64)>,
+    history: History<SessionId>,
     config_generation: u64,
     pub(crate) file: crate::files::FileState,
 }
@@ -77,9 +66,7 @@ impl Document {
             id: DocumentId(id),
             snapshot: EditorState::new(text).snapshot().clone(),
             language: LanguageSession::new(language),
-            undo: vec![],
-            redo: vec![],
-            group: None,
+            history: History::default(),
             config_generation: 0,
             file: crate::files::FileState::default(),
         }
@@ -112,11 +99,11 @@ impl Document {
             .ok_or(EditError::VersionExhausted)?;
         self.language.configure(language);
         self.config_generation = generation;
-        self.group = None;
+        self.history.break_group();
         Ok(true)
     }
     pub(super) fn break_group(&mut self) {
-        self.group = None;
+        self.history.break_group();
     }
     pub(super) fn commit(
         &mut self,
@@ -127,29 +114,7 @@ impl Document {
     ) -> Result<Commit, EditError> {
         tx.changes.sort_by_key(|change| change.range.start);
         let (next, mapping) = state.apply(tx.clone())?;
-        let group = tx.history_group.map(|group| (owner, group));
-        let merge = group.is_some() && self.group == group;
-        let entry = if merge {
-            let previous = self.undo.last().unwrap();
-            let forward = compose_changes(&previous.base, &previous.forward, &tx.changes)?;
-            HistoryEntry {
-                inverse: invert_changes(&previous.base, &forward),
-                base: previous.base.clone(),
-                forward,
-                owner,
-                before_selection: previous.before_selection,
-                after_selection: next.selection(),
-            }
-        } else {
-            HistoryEntry {
-                base: self.snapshot.for_history(),
-                inverse: invert_changes(&self.snapshot, &tx.changes),
-                forward: tx.changes.clone(),
-                owner,
-                before_selection: state.selection(),
-                after_selection: next.selection(),
-            }
-        };
+        self.history.record(owner, state, &next, &tx)?;
         let update = DocumentUpdate {
             document_id: self.id,
             session_id: owner,
@@ -159,12 +124,6 @@ impl Document {
             changes: tx.changes,
             mapping,
         };
-        if merge {
-            self.undo.pop();
-        }
-        self.undo.push(entry);
-        self.redo.clear();
-        self.group = group;
         self.snapshot = next.snapshot().clone();
         self.language.invalidate();
         Ok(Commit {
@@ -177,22 +136,11 @@ impl Document {
         requester: SessionId,
         redo: bool,
     ) -> Result<Option<Commit>, EditError> {
-        let source = if redo { &self.redo } else { &self.undo };
-        let Some(entry) = source.last() else {
+        let Some(restored) = self.history.restore(&self.snapshot, redo)? else {
             return Ok(None);
         };
-        let changes = if redo { &entry.forward } else { &entry.inverse };
-        let state = EditorState::from_snapshot(self.snapshot.clone(), Selection::caret(0))?;
-        let (next, mapping) =
-            state.apply(Transaction::new(self.snapshot.version(), changes.clone()))?;
-        let restore_selection = (
-            entry.owner,
-            if redo {
-                entry.after_selection
-            } else {
-                entry.before_selection
-            },
-        );
+        let next = restored.state;
+        let restore_selection = (restored.owner, next.selection());
         let update = DocumentUpdate {
             document_id: self.id,
             session_id: requester,
@@ -203,21 +151,11 @@ impl Document {
             } else {
                 EditOrigin::Undo
             },
-            changes: changes.clone(),
-            mapping,
+            changes: restored.changes,
+            mapping: restored.mapping,
         };
-        let entry = if redo {
-            self.redo.pop().unwrap()
-        } else {
-            self.undo.pop().unwrap()
-        };
-        if redo {
-            self.undo.push(entry);
-        } else {
-            self.redo.push(entry);
-        }
         self.snapshot = next.snapshot().clone();
-        self.group = None;
+        self.history.break_group();
         self.language.invalidate();
         Ok(Some(Commit {
             update,

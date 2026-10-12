@@ -37,11 +37,17 @@ impl<'a> InputEdit<'a> {
             tx.selection = Some(self.speculative.selection());
             return Ok(tx);
         }
-        let tx = Transaction::new(self.speculative.snapshot().version(), corrections.clone());
-        let (_, mapping) = self.speculative.apply(tx)?;
-        let caret = mapping.map(self.speculative.selection().head, Association::After);
-        let changes =
-            crate::core::compose_changes(self.base.snapshot(), &[self.input], &corrections)?;
+        let corrections =
+            crate::core::ValidatedChanges::new(self.speculative.snapshot(), corrections)?;
+        let caret = corrections
+            .mapping
+            .map(self.speculative.selection().head, Association::After);
+        let changes = crate::core::compose_validated(
+            self.base.snapshot(),
+            &[self.input],
+            self.speculative.snapshot().len_bytes(),
+            &corrections.changes,
+        );
         let mut tx = Transaction::new(self.base.snapshot().version(), changes);
         tx.selection = Some(Selection::caret(caret));
         Ok(tx)
@@ -201,9 +207,10 @@ pub(super) fn prepare_enter(
             false,
         )?);
     }
-    let mut selection = Transaction::new(input.speculative.snapshot().version(), vec![]);
-    selection.selection = Some(Selection::caret(caret));
-    input.speculative = input.speculative.apply(selection)?.0;
+    input.speculative = EditorState::from_snapshot(
+        input.speculative.snapshot().clone(),
+        Selection::caret(caret),
+    )?;
     input.finish(corrections)
 }
 

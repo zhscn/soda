@@ -95,3 +95,32 @@ fn snapshots_index_crlf_trailing_lines_and_unicode_bytes() {
     assert_eq!(s.line_of(5), Some(1));
     assert_eq!(s.line_of(7), Some(2));
 }
+
+#[test]
+fn selection_transactions_do_not_advance_text_revision() {
+    let mut editor = Editor::new("abc");
+    let mut tx = Transaction::new(0, vec![]);
+    tx.selection = Some(Selection::caret(2));
+    editor.dispatch(tx).unwrap();
+    assert_eq!(editor.state().snapshot().version(), 0);
+    assert_eq!(editor.state().selection(), Selection::caret(2));
+}
+
+#[test]
+fn net_zero_history_groups_still_advance_revision_on_restore() {
+    let mut editor = Editor::new("abc");
+    for (range, text) in [(1..1, "x"), (1..2, "")] {
+        let mut tx = Transaction::new(
+            editor.state().snapshot().version(),
+            vec![Change::new(range, text)],
+        );
+        tx.history_group = Some(1);
+        editor.dispatch(tx).unwrap();
+    }
+    let revision = editor.state().snapshot().version();
+    editor.undo().unwrap();
+    assert_eq!(editor.state().snapshot().text(), "abc");
+    assert_eq!(editor.state().snapshot().version(), revision + 1);
+    editor.redo().unwrap();
+    assert_eq!(editor.state().snapshot().version(), revision + 2);
+}

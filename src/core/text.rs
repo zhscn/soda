@@ -198,7 +198,10 @@ mod tests {
         let source = old.shared_text();
         assert!(Arc::ptr_eq(&source, &moved.snapshot().shared_text()));
         let (edited, _) = moved
-            .apply(Transaction::new(1, vec![Change::new(1..4, "文")]))
+            .apply(Transaction::new(
+                moved.snapshot().version(),
+                vec![Change::new(1..4, "文")],
+            ))
             .unwrap();
         assert!(edited.snapshot().storage.contiguous.get().is_none());
         assert!(!Arc::ptr_eq(&source, &edited.snapshot().shared_text()));

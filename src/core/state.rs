@@ -81,6 +81,14 @@ pub struct ChangeMap {
     spans: Vec<(Range<usize>, usize)>,
 }
 impl ChangeMap {
+    pub(crate) fn from_sorted(changes: &[Change]) -> Self {
+        Self {
+            spans: changes
+                .iter()
+                .map(|change| (change.range.clone(), change.insert.len()))
+                .collect(),
+        }
+    }
     pub fn map(&self, position: usize, association: Association) -> usize {
         let mut removed = 0;
         let mut inserted = 0;
@@ -176,13 +184,7 @@ impl EditorState {
     pub fn selection(&self) -> Selection {
         self.selection
     }
-    fn for_history(&self) -> Self {
-        Self {
-            snapshot: self.snapshot.for_history(),
-            selection: self.selection,
-        }
-    }
-    pub fn apply(&self, mut tx: Transaction) -> Result<(Self, ChangeMap), EditError> {
+    pub fn apply(&self, tx: Transaction) -> Result<(Self, ChangeMap), EditError> {
         if tx.base_version != self.snapshot.version() {
             return Err(EditError::StaleVersion);
         }
@@ -195,48 +197,21 @@ impl EditorState {
             {
                 return Err(EditError::InvalidSelection);
             }
-            let version = self
-                .snapshot
-                .version()
-                .checked_add(1)
-                .ok_or(EditError::VersionExhausted)?;
             return Ok((
                 Self {
-                    snapshot: self.snapshot.with_version(version),
+                    snapshot: self.snapshot.clone(),
                     selection,
                 },
                 ChangeMap { spans: vec![] },
             ));
         }
-        tx.changes.sort_by_key(|c| c.range.start);
-        let mut previous: Option<&Change> = None;
-        for c in &tx.changes {
-            if c.range.start > c.range.end
-                || c.range.end > snapshot.len_bytes()
-                || !snapshot.is_char_boundary(c.range.start)
-                || !snapshot.is_char_boundary(c.range.end)
-            {
-                return Err(EditError::InvalidRange);
-            }
-            if previous
-                .is_some_and(|p| p.range.end > c.range.start || p.range.start == c.range.start)
-            {
-                return Err(EditError::OverlappingChanges);
-            }
-            previous = Some(c);
-        }
-        let map = ChangeMap {
-            spans: tx
-                .changes
-                .iter()
-                .map(|c| (c.range.clone(), c.insert.len()))
-                .collect(),
-        };
+        let validated = super::ValidatedChanges::new(snapshot, tx.changes)?;
+        let map = validated.mapping;
         let version = snapshot
             .version()
             .checked_add(1)
             .ok_or(EditError::VersionExhausted)?;
-        let output = snapshot.edited(&tx.changes, version);
+        let output = snapshot.edited(&validated.changes, version);
         let selection = tx
             .selection
             .unwrap_or_else(|| map.map_selection(self.selection));
@@ -256,37 +231,29 @@ impl EditorState {
     }
 }
 
-/// Mutable history owner around immutable states. Undo/redo advances version
-/// so asynchronous work cannot mistake a restored state for its old snapshot.
+/// Single-session adapter using the same history as document controllers.
 pub struct Editor {
     state: EditorState,
-    undo: Vec<EditorState>,
-    redo: Vec<EditorState>,
-    group: Option<u64>,
+    history: super::History<()>,
 }
 impl Editor {
     pub fn new(text: impl Into<String>) -> Self {
         Self {
             state: EditorState::new(text),
-            undo: Vec::new(),
-            redo: Vec::new(),
-            group: None,
+            history: super::History::default(),
         }
     }
     pub fn state(&self) -> &EditorState {
         &self.state
     }
-    pub fn dispatch(&mut self, tx: Transaction) -> Result<ChangeMap, EditError> {
-        let group = tx.history_group;
-        let modifies_text = !tx.changes.is_empty();
-        let (next, map) = self.state.apply(tx)?;
-        if modifies_text {
-            if group.is_none() || group != self.group {
-                self.undo.push(self.state.for_history());
-            }
-            self.redo.clear();
+    pub fn dispatch(&mut self, mut tx: Transaction) -> Result<ChangeMap, EditError> {
+        tx.changes.sort_by_key(|change| change.range.start);
+        let (next, map) = self.state.apply(tx.clone())?;
+        if tx.changes.is_empty() {
+            self.history.break_group();
+        } else {
+            self.history.record((), &self.state, &next, &tx)?;
         }
-        self.group = if modifies_text { group } else { None };
         self.state = next;
         Ok(map)
     }
@@ -297,25 +264,10 @@ impl Editor {
         self.restore(true)
     }
     fn restore(&mut self, redo: bool) -> Result<bool, EditError> {
-        let source = if redo { &mut self.redo } else { &mut self.undo };
-        if source.is_empty() {
+        let Some(restored) = self.history.restore(self.state.snapshot(), redo)? else {
             return Ok(false);
-        }
-        let version = self
-            .state
-            .snapshot
-            .version()
-            .checked_add(1)
-            .ok_or(EditError::VersionExhausted)?;
-        let mut restored = source.pop().unwrap();
-        restored.snapshot = restored.snapshot.with_version(version);
-        let prior = std::mem::replace(&mut self.state, restored);
-        if redo {
-            self.undo.push(prior.for_history());
-        } else {
-            self.redo.push(prior.for_history());
-        }
-        self.group = None;
+        };
+        self.state = restored.state;
         Ok(true)
     }
 }

@@ -86,7 +86,7 @@ fn save_confirms_only_the_requested_snapshot_and_undo_can_be_clean() {
     fs::write(&path, "a").unwrap();
     let mut workspace = Workspace::default();
     let id = workspace.open(&path).unwrap();
-    let editor = workspace.editor_mut(id).unwrap();
+    let mut editor = workspace.editor_mut(id).unwrap();
     editor
         .execute(Command::SetSelection(Selection::caret(1)))
         .unwrap();
@@ -108,7 +108,7 @@ fn save_confirms_only_the_requested_snapshot_and_undo_can_be_clean() {
     assert_eq!(update.saved_revision, revision);
     assert!(update.dirty);
     assert_eq!(fs::read_to_string(&path).unwrap(), "ab");
-    let editor = workspace.editor_mut(id).unwrap();
+    let mut editor = workspace.editor_mut(id).unwrap();
     editor.execute(Command::Undo).unwrap();
     assert_eq!(editor.state().snapshot().text(), "ab");
     assert!(!editor.model().document().is_dirty());
@@ -422,8 +422,182 @@ fn preparing_save_seals_history_group_at_the_saved_snapshot() {
         .unwrap();
     let completion = workspace.service().write(request);
     workspace.finish_save(completion).unwrap();
-    let editor = workspace.editor_mut(id).unwrap();
+    let mut editor = workspace.editor_mut(id).unwrap();
     editor.execute(Command::Undo).unwrap();
     assert_eq!(editor.state().snapshot().text(), "ab");
     assert!(!editor.model().document().is_dirty());
+}
+
+#[test]
+fn dropped_save_request_releases_reservation_without_writing() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("new.txt");
+    let mut workspace = Workspace::default();
+    let id = workspace.new_document(Language::PlainText);
+    drop(workspace.prepare_save(id, Some(&path)).unwrap());
+    assert!(!path.exists());
+    let request = workspace.prepare_save(id, Some(&path)).unwrap();
+    drop(request);
+    workspace.close(id).unwrap();
+}
+
+#[test]
+fn dropped_completed_save_confirms_its_snapshot_and_keeps_notifications() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("new.txt");
+    let mut workspace = Workspace::default();
+    let id = workspace.new_document(Language::PlainText);
+    workspace
+        .editor_mut(id)
+        .unwrap()
+        .execute(Command::TypeChar('a'))
+        .unwrap();
+    let request = workspace.prepare_save(id, Some(&path)).unwrap();
+    let revision = request.revision();
+    workspace
+        .editor_mut(id)
+        .unwrap()
+        .execute(Command::TypeChar('b'))
+        .unwrap();
+    drop(workspace.service().write(request));
+    // A lifecycle operation drains events but retains notifications for the UI.
+    assert_eq!(workspace.open(&path).unwrap(), id);
+    let results = workspace.poll_file_results();
+    let update = results.into_iter().next().unwrap().result.unwrap();
+    assert_eq!(update.saved_revision, revision);
+    assert!(update.dirty);
+    assert_eq!(fs::read_to_string(&path).unwrap(), "a");
+    workspace
+        .editor_mut(id)
+        .unwrap()
+        .execute(Command::Undo)
+        .unwrap();
+    assert!(!workspace.editor(id).unwrap().model().document().is_dirty());
+    workspace.close(id).unwrap();
+}
+
+#[test]
+fn dropped_failed_save_reports_error_and_releases_reservation() {
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("new.txt");
+    let mut workspace = Workspace::default();
+    let id = workspace.new_document(Language::PlainText);
+    let request = workspace.prepare_save(id, Some(&path)).unwrap();
+    fs::write(&path, "external").unwrap();
+    drop(workspace.service().write(request));
+    let results = workspace.poll_file_results();
+    assert!(matches!(
+        results.into_iter().next().unwrap().result,
+        Err(FileError::Conflict(_))
+    ));
+    workspace.close(id).unwrap();
+}
+
+#[test]
+fn cancelled_open_results_cannot_resurrect_a_closed_document() {
+    use soda::files::OpenPreparation;
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("file.txt");
+    fs::write(&path, "old").unwrap();
+    let mut workspace = Workspace::default();
+    let OpenPreparation::Request(request) = workspace.prepare_open(&path).unwrap() else {
+        panic!("expected read");
+    };
+    let token = request.id();
+    let stale = workspace.service().read_request(request);
+    workspace.cancel_open(token).unwrap();
+    let id = workspace.open(&path).unwrap();
+    workspace.close(id).unwrap();
+    fs::write(&path, "new").unwrap();
+    assert!(matches!(
+        workspace.finish_open(stale),
+        Err(FileError::StaleCompletion)
+    ));
+    assert_eq!(workspace.documents().count(), 0);
+    let id = workspace.open(&path).unwrap();
+    assert_eq!(
+        workspace.editor(id).unwrap().state().snapshot().text(),
+        "new"
+    );
+}
+
+#[test]
+fn open_request_drop_and_wrong_workspace_results_are_safe() {
+    use soda::files::OpenPreparation;
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("file.txt");
+    fs::write(&path, "text").unwrap();
+    let mut first = Workspace::default();
+    let mut second = Workspace::default();
+    let OpenPreparation::Request(request) = first.prepare_open(&path).unwrap() else {
+        panic!("expected read");
+    };
+    drop(request);
+    let OpenPreparation::Request(request) = first.prepare_open(&path).unwrap() else {
+        panic!("expected read");
+    };
+    let completed = first.service().read_request(request);
+    let OpenPreparation::Request(other) = second.prepare_open(&path).unwrap() else {
+        panic!("expected read");
+    };
+    assert!(matches!(
+        second.finish_open(completed),
+        Err(FileError::StaleCompletion)
+    ));
+    let completed = second.service().read_request(other);
+    second.finish_open(completed).unwrap();
+    first.open(&path).unwrap();
+}
+
+#[test]
+fn save_request_owned_by_worker_keeps_reservation_until_result_is_settled() {
+    use soda::files::FileService;
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("new.txt");
+    let mut workspace = Workspace::default();
+    let id = workspace.new_document(Language::PlainText);
+    let request = workspace.prepare_save(id, Some(&path)).unwrap();
+    let (start, ready) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        ready.recv().unwrap();
+        FileService::default().write(request)
+    });
+    assert!(matches!(workspace.close(id), Err(FileError::Busy)));
+    start.send(()).unwrap();
+    let completed = worker.join().unwrap();
+    assert!(matches!(
+        workspace.prepare_save(id, None),
+        Err(FileError::Busy)
+    ));
+    workspace.finish_save(completed).unwrap();
+    workspace.close(id).unwrap();
+}
+
+#[test]
+fn requests_do_not_start_io_after_their_workspace_is_dropped() {
+    use soda::files::{FileService, OpenPreparation};
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("new.txt");
+    let mut workspace = Workspace::default();
+    let id = workspace.new_document(Language::PlainText);
+    let request = workspace.prepare_save(id, Some(&path)).unwrap();
+    drop(workspace);
+    let completion = FileService::default().write(request);
+    assert!(matches!(
+        completion.result(),
+        Err(FileError::StaleCompletion)
+    ));
+    assert!(!path.exists());
+    let mut workspace = Workspace::default();
+    fs::write(&path, "text").unwrap();
+    let OpenPreparation::Request(request) = workspace.prepare_open(&path).unwrap() else {
+        panic!("expected read");
+    };
+    drop(workspace);
+    let completed = FileService::default().read_request(request);
+    let mut replacement = Workspace::default();
+    assert!(matches!(
+        replacement.finish_open(completed),
+        Err(FileError::StaleCompletion)
+    ));
 }
