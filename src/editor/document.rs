@@ -90,6 +90,9 @@ impl Document {
     pub fn language(&self) -> Language {
         self.language.description()
     }
+    pub fn whitespace(&self) -> crate::language::WhitespacePolicy {
+        self.language.whitespace()
+    }
     pub fn config_generation(&self) -> u64 {
         self.config_generation
     }

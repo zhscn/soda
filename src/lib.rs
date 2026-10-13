@@ -9,3 +9,5 @@ pub mod language;
 pub mod files;
 
 pub mod application;
+
+pub mod tui;
