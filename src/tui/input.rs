@@ -1,313 +1,76 @@
-use crate::editor::{Command, Direction, Motion};
-use crate::interaction::{Input, InputKey, InputMotion, picker::ListMotion};
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+//! Converts terminal events to the frontend-independent input vocabulary.
+use crate::interaction::{Key, KeyStroke, UserInput};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
-pub(super) enum Action {
-    Edit(Command),
-    Open,
-    New,
-    Close,
-    Save { choose_path: bool },
-    Quit,
-    NextView,
-    Search,
-    PickFiles,
-}
-pub(super) fn binding(key: KeyEvent) -> Option<Action> {
-    if key.kind == KeyEventKind::Release {
-        return None;
-    }
-    let control = key.modifiers.contains(KeyModifiers::CONTROL);
-    let shift = key.modifiers.contains(KeyModifiers::SHIFT);
-    if key.modifiers.intersects(
-        KeyModifiers::ALT | KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META,
-    ) {
-        return None;
-    }
-    if control {
-        return match key.code {
-            KeyCode::Char('p') => Some(Action::PickFiles),
-            KeyCode::Char('f') => Some(Action::Search),
-            KeyCode::Char('o') => Some(Action::Open),
-            KeyCode::Char('n') => Some(Action::New),
-            KeyCode::Char('w') => Some(Action::Close),
-            KeyCode::Char('s' | 'S') => Some(Action::Save { choose_path: shift }),
-            KeyCode::Char('q') => Some(Action::Quit),
-            KeyCode::Char('z') => Some(Action::Edit(Command::Undo)),
-            KeyCode::Char('y') => Some(Action::Edit(Command::Redo)),
-            KeyCode::Tab => Some(Action::NextView),
-            KeyCode::Home => Some(Action::Edit(Command::Move {
-                motion: Motion::DocumentStart,
-                extend: shift,
-            })),
-            KeyCode::End => Some(Action::Edit(Command::Move {
-                motion: Motion::DocumentEnd,
-                extend: shift,
-            })),
-            _ => None,
-        };
-    }
-    if key.code == KeyCode::F(3) {
-        return Some(Action::Edit(Command::Find {
-            backward: shift,
-            wrap: true,
-        }));
-    }
-    if key.code == KeyCode::F(6) {
-        return Some(Action::NextView);
-    }
-    if key.code == KeyCode::F(4) {
-        return Some(Action::Save { choose_path: true });
-    }
-    let motion = match key.code {
-        KeyCode::Left => Some(Motion::Backward),
-        KeyCode::Right => Some(Motion::Forward),
-        KeyCode::Up => Some(Motion::Up),
-        KeyCode::Down => Some(Motion::Down),
-        KeyCode::Home => Some(Motion::LineStart),
-        KeyCode::End => Some(Motion::LineEnd),
-        _ => None,
+fn normalize_key(key: KeyEvent) -> KeyStroke {
+    let code = match key.code {
+        KeyCode::Char(ch) => Key::Char(ch),
+        KeyCode::Enter => Key::Enter,
+        KeyCode::Esc => Key::Esc,
+        KeyCode::Backspace => Key::Backspace,
+        KeyCode::Delete => Key::Delete,
+        KeyCode::Tab => Key::Tab,
+        KeyCode::BackTab => Key::BackTab,
+        KeyCode::Left => Key::Left,
+        KeyCode::Right => Key::Right,
+        KeyCode::Up => Key::Up,
+        KeyCode::Down => Key::Down,
+        KeyCode::Home => Key::Home,
+        KeyCode::End => Key::End,
+        KeyCode::PageUp => Key::PageUp,
+        KeyCode::PageDown => Key::PageDown,
+        KeyCode::F(number) => Key::F(number),
+        _ => Key::Unrecognized,
     };
-    if let Some(motion) = motion {
-        return Some(Action::Edit(Command::Move {
-            motion,
-            extend: shift,
-        }));
-    }
-    let command = match key.code {
-        KeyCode::Char(ch) => Command::TypeChar(ch),
-        KeyCode::Enter => Command::Enter,
-        KeyCode::Backspace => Command::Delete {
-            direction: Direction::Backward,
-            smart: true,
-        },
-        KeyCode::Delete => Command::Delete {
-            direction: Direction::Forward,
-            smart: false,
-        },
-        KeyCode::Tab => Command::InsertTab,
-        KeyCode::BackTab => Command::IndentSelection { outdent: true },
-        _ => return None,
-    };
-    Some(Action::Edit(command))
-}
-
-/// Normalize modifiers once for all modal layers. Modified submit/cancel keys
-/// are blocked unless a binding explicitly accepts that combination.
-pub(super) fn modal_key(key: KeyEvent) -> Input {
-    if key.kind == KeyEventKind::Release
-        || key.modifiers.intersects(
+    KeyStroke {
+        code,
+        control: key.modifiers.contains(KeyModifiers::CONTROL),
+        shift: key.modifiers.contains(KeyModifiers::SHIFT),
+        unsupported_modifiers: key.modifiers.intersects(
             KeyModifiers::ALT | KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META,
-        )
-    {
-        return Input::Unrecognized;
+        ),
+        release: key.kind == KeyEventKind::Release,
     }
-    let control = key.modifiers.contains(KeyModifiers::CONTROL);
-    let shift = key.modifiers.contains(KeyModifiers::SHIFT);
-    if key.modifiers.is_empty() {
-        match key.code {
-            KeyCode::Enter => return Input::Confirm,
-            KeyCode::Esc => return Input::Cancel,
-            _ => {}
-        }
-    }
-    if key.code == KeyCode::F(3) && !control {
-        return Input::Navigate { backward: shift };
-    }
-    if control && !shift {
-        let motion = match key.code {
-            KeyCode::Up => Some(ListMotion::First),
-            KeyCode::Down => Some(ListMotion::Last),
-            _ => None,
-        };
-        if let Some(motion) = motion {
-            return Input::Candidate {
-                motion,
-                wrap: false,
-            };
-        }
-    }
-    if !control && !shift {
-        let motion = match key.code {
-            KeyCode::Up => Some(ListMotion::Previous),
-            KeyCode::Down => Some(ListMotion::Next),
-            KeyCode::PageUp => Some(ListMotion::PagePrevious),
-            KeyCode::PageDown => Some(ListMotion::PageNext),
-            _ => None,
-        };
-        if let Some(motion) = motion {
-            return Input::Candidate {
-                motion,
-                wrap: false,
-            };
-        }
-    }
-    let motion = match key.code {
-        KeyCode::Left => Some(if control {
-            InputMotion::WordLeft
-        } else {
-            InputMotion::Left
-        }),
-        KeyCode::Right => Some(if control {
-            InputMotion::WordRight
-        } else {
-            InputMotion::Right
-        }),
-        KeyCode::Home => Some(InputMotion::Start),
-        KeyCode::End => Some(InputMotion::End),
-        _ => None,
-    };
-    if let Some(motion) = motion {
-        return Input::Text(InputKey::Move {
-            motion,
-            extend: shift,
-        });
-    }
-    match key.code {
-        KeyCode::Char('a' | 'A') if control && !shift => Input::Text(InputKey::SelectAll),
-        KeyCode::Char(ch) if !control => Input::Text(InputKey::Char(ch)),
-        KeyCode::Backspace if !shift => Input::Text(InputKey::Delete {
-            backward: true,
-            word: control,
-        }),
-        KeyCode::Delete if !shift => Input::Text(InputKey::Delete {
-            backward: false,
-            word: control,
-        }),
-        _ => Input::Unrecognized,
+}
+
+pub(super) fn normalize(event: Event) -> UserInput {
+    match event {
+        Event::Key(key) => UserInput::Key(normalize_key(key)),
+        Event::Paste(text) => UserInput::Paste(text),
+        _ => UserInput::Unrecognized,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn key(code: KeyCode) -> KeyEvent {
-        KeyEvent::new(code, KeyModifiers::NONE)
+    #[test]
+    fn terminal_keys_preserve_modifiers_release_and_repeat() {
+        let mut key = KeyEvent::new(KeyCode::Left, KeyModifiers::CONTROL | KeyModifiers::SHIFT);
+        let normalized = normalize_key(key);
+        assert_eq!(normalized.code, Key::Left);
+        assert!(normalized.control && normalized.shift);
+        assert!(!normalized.release && !normalized.unsupported_modifiers);
+        key.kind = KeyEventKind::Repeat;
+        assert_eq!(normalize_key(key), normalized);
+        key.kind = KeyEventKind::Release;
+        assert!(normalize_key(key).release);
+        key.modifiers |= KeyModifiers::ALT;
+        assert!(normalize_key(key).unsupported_modifiers);
     }
     #[test]
-    fn bindings_preserve_selection_intent_and_ignore_releases() {
+    fn adapter_preserves_paste_and_does_not_assign_focus_behavior() {
+        let UserInput::Paste(text) = normalize(Event::Paste("中\r\n".into())) else {
+            panic!()
+        };
+        assert_eq!(text, "中\r\n");
         assert!(matches!(
-            binding(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT)),
-            Some(Action::Edit(Command::Move {
-                motion: Motion::Backward,
-                extend: true
-            }))
+            normalize(Event::FocusLost),
+            UserInput::Unrecognized
         ));
-        let mut release = key(KeyCode::Char('a'));
-        release.kind = KeyEventKind::Release;
-        assert!(binding(release).is_none());
-        assert!(binding(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::ALT)).is_none());
-        assert!(matches!(
-            binding(key(KeyCode::Tab)),
-            Some(Action::Edit(Command::InsertTab))
-        ));
-        assert!(matches!(
-            binding(key(KeyCode::F(4))),
-            Some(Action::Save { choose_path: true })
-        ));
-    }
-    #[test]
-    fn modal_submit_cancel_and_navigation_validate_modifiers_and_release() {
-        for code in [KeyCode::Enter, KeyCode::Esc, KeyCode::F(3)] {
-            for modifiers in [
-                KeyModifiers::CONTROL,
-                KeyModifiers::ALT,
-                KeyModifiers::SUPER,
-                KeyModifiers::META,
-                KeyModifiers::HYPER,
-            ] {
-                assert!(matches!(
-                    modal_key(KeyEvent::new(code, modifiers)),
-                    Input::Unrecognized
-                ));
-            }
-            let mut release = key(code);
-            release.kind = KeyEventKind::Release;
-            assert!(matches!(modal_key(release), Input::Unrecognized));
-        }
-        assert!(matches!(modal_key(key(KeyCode::Enter)), Input::Confirm));
-        assert!(matches!(modal_key(key(KeyCode::Esc)), Input::Cancel));
-        assert!(matches!(
-            modal_key(KeyEvent::new(KeyCode::F(3), KeyModifiers::SHIFT)),
-            Input::Navigate { backward: true }
-        ));
-        assert!(matches!(
-            modal_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)),
-            Input::Unrecognized
-        ));
-    }
-    #[test]
-    fn text_shortcuts_normalize_to_widget_operations() {
-        assert!(matches!(
-            modal_key(KeyEvent::new(
-                KeyCode::Left,
-                KeyModifiers::CONTROL | KeyModifiers::SHIFT
-            )),
-            Input::Text(InputKey::Move {
-                motion: InputMotion::WordLeft,
-                extend: true
-            })
-        ));
-        assert!(matches!(
-            modal_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::CONTROL)),
-            Input::Text(InputKey::Delete {
-                backward: true,
-                word: true
-            })
-        ));
-        assert!(matches!(
-            modal_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL)),
-            Input::Text(InputKey::SelectAll)
-        ));
-        assert!(matches!(
-            modal_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT)),
-            Input::Text(InputKey::Char('X'))
-        ));
-        assert!(matches!(
-            modal_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL)),
-            Input::Unrecognized
-        ));
-    }
-    #[test]
-    fn picker_navigation_does_not_steal_text_input_home_end() {
-        assert!(matches!(
-            binding(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL)),
-            Some(Action::PickFiles)
-        ));
-        assert!(matches!(
-            modal_key(key(KeyCode::Down)),
-            Input::Candidate {
-                motion: ListMotion::Next,
-                wrap: false
-            }
-        ));
-        assert!(matches!(
-            modal_key(key(KeyCode::PageUp)),
-            Input::Candidate {
-                motion: ListMotion::PagePrevious,
-                ..
-            }
-        ));
-        assert!(matches!(
-            modal_key(KeyEvent::new(KeyCode::Down, KeyModifiers::CONTROL)),
-            Input::Candidate {
-                motion: ListMotion::Last,
-                ..
-            }
-        ));
-        assert!(matches!(
-            modal_key(key(KeyCode::Home)),
-            Input::Text(InputKey::Move {
-                motion: InputMotion::Start,
-                ..
-            })
-        ));
-        assert!(matches!(
-            modal_key(key(KeyCode::End)),
-            Input::Text(InputKey::Move {
-                motion: InputMotion::End,
-                ..
-            })
-        ));
+        assert_eq!(
+            normalize_key(KeyEvent::new(KeyCode::Null, KeyModifiers::NONE)).code,
+            Key::Unrecognized
+        );
     }
 }

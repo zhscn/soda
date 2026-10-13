@@ -1,5 +1,10 @@
-//! Frontend-independent modal input and feature sessions. Widgets emit intents;
-//! application commands remain the only route to editor mutation.
+//! Frontend-independent input routing, application commands and modal sessions.
+//! Widgets emit intents; application events are the route to editor mutation.
+mod bindings;
+mod commands;
+mod routing;
+pub use commands::Command;
+pub use routing::{Key, KeyStroke, UserInput};
 mod input;
 pub mod picker;
 use picker::{ListMotion, PickerCompletion, PickerEffect, PickerSession};
@@ -7,7 +12,7 @@ mod search;
 use crate::{
     application::{Application, Event, Update},
     core::EditError,
-    editor::{Command, DocumentId},
+    editor::{Command as EditCommand, DocumentId},
 };
 pub use input::{InputKey, InputMotion, InputUpdate, TextInput};
 pub use search::{SearchResults, SearchSession};
@@ -211,11 +216,22 @@ impl Layer {
     }
 }
 
+/// Status-line message changes are explicit so widget updates can preserve the
+/// current message while command invocation clears or replaces it.
+#[derive(Default)]
+pub enum Message {
+    #[default]
+    Keep,
+    Clear,
+    Set(String),
+}
+
 /// Commands are applied after routing ends, so layer removal never occurs during
 /// widget event handling. The host executes events and platform effects.
 #[derive(Default)]
 pub struct Response {
     pub events: Vec<Event>,
+    pub message: Message,
     pub effects: Vec<PickerEffect>,
     pub quit: bool,
     pub redraw: bool,
@@ -286,7 +302,7 @@ impl Layers {
                         if confirm {
                             response.events.push(Event::Edit {
                                 view: session.view(),
-                                command: Command::SetSearchQuery(session.query().clone()),
+                                command: EditCommand::SetSearchQuery(session.query().clone()),
                                 time,
                             });
                         } else {
@@ -324,9 +340,8 @@ impl Layers {
         if session.results().current.is_none() {
             return Ok(Response {
                 events: session.cancel(app, time)?,
-                effects: Vec::new(),
-                quit: false,
                 redraw: true,
+                ..Response::default()
             });
         }
         Ok(Response {
@@ -335,9 +350,8 @@ impl Layers {
                 command,
                 time,
             }],
-            effects: Vec::new(),
-            quit: false,
             redraw: true,
+            ..Response::default()
         })
     }
     /// Hosts must observe every successful application update in order, including

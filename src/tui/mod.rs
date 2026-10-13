@@ -1,17 +1,12 @@
-//! Minimal terminal host. Key bindings and screen layout adapt the application
-//! API; text mutation, history, file identity and sessions stay in lower layers.
+//! Terminal host: normalize platform input, execute ordered events and effects,
+//! and render state. Input routing and command decisions live in interaction.
 mod input;
 mod layout;
-use crate::interaction::picker::{
-    PickerCompletion, PickerEffect, PickerLimits, PickerRunner, PickerSession,
-};
+use crate::interaction::picker::{PickerCompletion, PickerEffect, PickerRunner};
 use crate::{
     application::{Application, Effect, Event, Update},
-    editor::{Command, Language},
-    interaction::{
-        Input, InputResult, Layer as Prompt, Layers, Presentation, Response, SearchSession,
-        TextInput as InputField,
-    },
+    editor::Language,
+    interaction::{InputResult, Layer as Prompt, Layers, Message, Presentation, Response},
 };
 use crossterm::{
     cursor::{Hide, MoveTo, Show},
@@ -20,7 +15,7 @@ use crossterm::{
     style::{Attribute, Print, SetAttribute},
     terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use input::Action;
+
 enum HostEvent {
     Application(Box<Event>),
     Picker(PickerCompletion),
@@ -66,6 +61,7 @@ struct Host {
     picker: PickerRunner,
     message: String,
     epoch: Instant,
+    file_root: PathBuf,
     quit: bool,
     dirty: bool,
 }
@@ -80,6 +76,7 @@ impl Host {
             picker: PickerRunner::new()?,
             message: String::new(),
             epoch: Instant::now(),
+            file_root: std::env::current_dir()?,
             quit: false,
             dirty: true,
         };
@@ -148,6 +145,11 @@ impl Host {
     fn respond(&mut self, response: Result<Response, crate::core::EditError>) {
         match response {
             Ok(response) => {
+                match response.message {
+                    Message::Keep => {}
+                    Message::Clear => self.message.clear(),
+                    Message::Set(message) => self.message = message,
+                }
                 self.dirty |= response.redraw;
                 self.quit |= response.quit;
                 for effect in response.effects {
@@ -155,7 +157,7 @@ impl Host {
                         PickerEffect::Run(task) => {
                             if let Err(error) = self.picker.submit(task) {
                                 let response = self.layers.picker_failed(error.to_string());
-                                self.dirty |= response.redraw;
+                                self.respond(Ok(response));
                             }
                         }
                         PickerEffect::Cancel(id) => self.picker.cancel(id),
@@ -174,114 +176,22 @@ impl Host {
             }
         }
     }
-    fn enter(&mut self, layer: Prompt) {
-        let response = self.layers.enter(layer, &self.app, self.epoch.elapsed());
-        self.respond(response);
+    #[cfg(test)]
+    fn edit(&mut self, command: crate::editor::Command) {
+        self.action(crate::interaction::Command::Edit(command));
     }
-    fn edit(&mut self, command: Command) {
-        if let Some(view) = self.app.active_view() {
-            self.dispatch(Event::Edit {
-                view,
-                command,
-                time: self.epoch.elapsed(),
-            });
-        }
+    #[cfg(test)]
+    fn action(&mut self, command: crate::interaction::Command) {
+        let result = self
+            .layers
+            .execute(command, &self.app, self.epoch.elapsed(), &self.file_root);
+        self.input_result(result);
     }
-    fn action(&mut self, action: Action) {
-        match action {
-            Action::PickFiles => {
-                match std::env::current_dir()
-                    .and_then(|root| PickerSession::new(root, PickerLimits::default()))
-                {
-                    Ok(session) => {
-                        let response =
-                            self.layers
-                                .start_picker(session, &self.app, self.epoch.elapsed());
-                        self.respond(response);
-                    }
-                    Err(error) => {
-                        self.message = error.to_string();
-                        self.dirty = true;
-                    }
-                }
-            }
-            Action::Search => {
-                if let Some(view) = self.app.active_view() {
-                    match SearchSession::new(&self.app, view) {
-                        Ok(session) => {
-                            self.enter(Prompt::Search {
-                                input: InputField::default(),
-                                session,
-                            });
-                        }
-                        Err(error) => self.message = error.to_string(),
-                    }
-                }
-            }
-            Action::Edit(command) => self.edit(command),
-            Action::Open => self.enter(Prompt::Open(InputField::default())),
-            Action::New => self.dispatch(Event::NewDocument(Language::PlainText)),
-            Action::Close => {
-                if let Some(view) = self.app.active_view() {
-                    let document = self.app.view(view).unwrap().document_id;
-                    self.dispatch(Event::CloseDocument {
-                        document,
-                        discard: false,
-                    });
-                }
-            }
-            Action::Save { choose_path } => {
-                if let Some(id) = self.app.active_view() {
-                    let document = self.app.view(id).unwrap().document_id;
-                    let path = self
-                        .app
-                        .workspace()
-                        .editor(document)
-                        .unwrap()
-                        .model()
-                        .document()
-                        .file()
-                        .path();
-                    if choose_path || path.is_none() {
-                        let text = path.map_or_else(String::new, |p| p.display().to_string());
-                        self.enter(Prompt::Save(document, InputField::new(&text)));
-                    } else {
-                        self.dispatch(Event::Save {
-                            document,
-                            target: None,
-                        });
-                    }
-                }
-            }
-            Action::Quit => {
-                if self
-                    .app
-                    .workspace()
-                    .documents()
-                    .any(|id| self.app.workspace().is_saving(id))
-                {
-                    self.message = "Save in progress; quit after it completes".into();
-                } else if self.app.workspace().documents().any(|id| {
-                    self.app
-                        .workspace()
-                        .editor(id)
-                        .unwrap()
-                        .model()
-                        .document()
-                        .is_dirty()
-                }) {
-                    self.enter(Prompt::Quit);
-                } else {
-                    self.quit = true;
-                }
-            }
-            Action::NextView => {
-                let ids: Vec<_> = self.app.views().map(|v| v.id).collect();
-                if let Some(active) = self.app.active_view() {
-                    let index = ids.iter().position(|id| *id == active).unwrap();
-                    self.dispatch(Event::Focus(ids[(index + 1) % ids.len()]));
-                }
-            }
+    fn input_result(&mut self, result: Result<InputResult, crate::core::EditError>) {
+        match result {
+            Ok(InputResult::Handled(response)) => self.respond(Ok(response)),
+            Err(error) => self.respond(Err(error)),
+            Ok(InputResult::Blocked | InputResult::Pass) => {}
         }
     }
     fn input(&mut self, event: TerminalEvent) {
@@ -289,27 +199,13 @@ impl Host {
             self.dirty = true;
             return;
         }
-        let input = match &event {
-            TerminalEvent::Key(key) => input::modal_key(*key),
-            TerminalEvent::Paste(text) => Input::Paste(text.clone()),
-            _ => Input::Unrecognized,
-        };
-        match self.layers.handle(input, &self.app, self.epoch.elapsed()) {
-            Ok(InputResult::Handled(response)) => self.respond(Ok(response)),
-            Ok(InputResult::Blocked) => {}
-            Err(error) => self.respond(Err(error)),
-            Ok(InputResult::Pass) => match event {
-                TerminalEvent::Key(key) => {
-                    if let Some(action) = input::binding(key) {
-                        self.message.clear();
-                        self.dirty = true;
-                        self.action(action);
-                    }
-                }
-                TerminalEvent::Paste(text) => self.edit(Command::InsertText(text)),
-                _ => {}
-            },
-        }
+        let result = self.layers.route_input(
+            input::normalize(event),
+            &self.app,
+            self.epoch.elapsed(),
+            &self.file_root,
+        );
+        self.input_result(result);
     }
     fn draw(&mut self) -> io::Result<()> {
         let (width, height) = terminal::size()?;
@@ -436,6 +332,8 @@ pub fn run(path: Option<PathBuf>) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::editor::Command;
+    use crate::interaction::Command as Action;
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     fn key(code: KeyCode) -> TerminalEvent {
         TerminalEvent::Key(KeyEvent::new(code, KeyModifiers::NONE))
