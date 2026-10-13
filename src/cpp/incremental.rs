@@ -78,9 +78,24 @@ pub(crate) fn reparse(old: &SyntaxTree, source: Arc<str>) -> (SyntaxTree, Analys
     let mut parser = Parser::new(source.clone(), &old.parser_options, tokens);
     let mut reparsed = 0;
     let mut fallback = None;
-    let mut context = Some(old.token_owners[damage.min(old.tokens.len() - 1)]);
-    while let Some(container) = context {
-        context = old.nodes[container].parent;
+    let owner = old.token_owners[damage.min(old.tokens.len() - 1)];
+    let previous = old.tokens[..damage.min(old.tokens.len())]
+        .iter()
+        .rposition(|t| !t.kind.is_trivia())
+        .map(|token| old.token_owners[token]);
+    let mut candidates = Vec::new();
+    // A caret in trailing trivia can belong to the outer block while the edit
+    // still belongs to the preceding case section's logical statement region.
+    for owner in [Some(owner), previous].into_iter().flatten() {
+        let mut context = Some(owner);
+        while let Some(id) = context {
+            candidates.push(id);
+            context = old.nodes[id].parent;
+        }
+    }
+    candidates.sort_unstable_by(|a, b| b.cmp(a));
+    candidates.dedup();
+    for container in candidates {
         if container == 0
             || !super::container::eligible(
                 old,
@@ -198,6 +213,9 @@ mod tests {
     #[test]
     fn incremental_analysis_matches_full_parse_under_repeated_utf8_edits() {
         let samples = [
+            "#if A\nnamespace n { class C { void f() { if (x) { target(); } } }; }\n#else\nvoid g() {}\n#endif\n",
+            "void f() { do {\n#if A\n} while (a);\n#else\nif (x) { target(); }\n} while (b);\n#endif\n}\n",
+            "#if A\nvoid f() { switch (x) { case 1: a(); b(); case 2: c(); } }\n#endif\n",
             "namespace n { class C { public: void f() { if (x) { a(); } else { b(); } for (;;) if (x) c(); d(); } int x; }; }\n",
             "void f() { switch (x) { case 1: a(); case 2: b(); default: c(); } }\n",
             "enum class E { A = 1, B = f(1, 2), C };\nvoid f() {}\n",
@@ -245,6 +263,9 @@ mod tests {
             ..Default::default()
         };
         for source in [
+            "#if A\nvoid f() { switch (x) { case 1: a(); b(); case 2: c(); } }\n#else\nvoid g() {}\n#endif\n",
+            "void f() { do {\n#if A\n} while (a);\n#else\nif (x) { target(); }\n} while (b);\n#endif\n}\n",
+            "namespace n { void f() { target(); }\n",
             "namespace n { class C { public: void f() { if (x) { a(); } else { b(); } next(); } int x; }; }\n",
             "void f() { for (;;) if (x) a(); next(); switch (x) { case 1: a(); case 2: b(); } }\n",
             "enum class E { A = 1, B = f(1, 2), C };\nvoid f() {}\n",
@@ -346,7 +367,7 @@ mod tests {
                 AnalysisFallback::ChangedBoundary,
             ),
             (
-                "#if A\nvoid f() { work(); }\n#endif\n",
+                "void f() {\n#if A\nwork();\n#else\nnext();\n#endif\n}\n",
                 "work()",
                 "other()",
                 AnalysisFallback::PreprocessorContext,
@@ -386,5 +407,94 @@ mod tests {
         assert_eq!(work.strategy, ParseStrategy::Container);
         assert_eq!(work.fallback, None);
         assert!(work.reparsed_tokens < 20);
+    }
+
+    #[test]
+    fn conditional_and_reopened_scopes_keep_closed_islands_locally_repairable() {
+        for source in [
+            "#if A\nvoid f() { target(); }\n#else\nvoid g() {}\n#endif\n",
+            "#ifndef H\n#define H\n#if A\nclass C { void f() { target(); } };\n#endif\n#endif\n",
+            "void f() {\n#if A\nif (a) { target(); }\n#else\nif (b) { other(); }\n#endif\n}\n",
+            "void f() { do {\n#if A\n} while (a);\n#else\nif (x) { target(); }\n} while (b);\n#endif\n}\n",
+            "class C {\n#if A\nvoid f() {}\n};\n#else\nvoid f() { target(); }\n};\n#endif\n",
+            "namespace n { void f() { target(); }\n",
+            "void f() { if (x) { target(); }\n",
+        ] {
+            let (tree, work) = reparse(
+                &parse(source),
+                source.replacen("target()", "changed(1, 2)", 1).into(),
+            );
+            assert_full(&tree);
+            assert_eq!(
+                work.strategy,
+                ParseStrategy::Container,
+                "{source}\n{work:?}"
+            );
+            assert_eq!(work.fallback, None);
+            assert!(work.reparsed_tokens < 30, "{work:?}");
+        }
+    }
+
+    #[test]
+    fn large_case_sections_repair_only_adjacent_items_and_expand_on_new_labels() {
+        let statements = (0..300)
+            .map(|i| format!("  stmt_{i}();\n"))
+            .collect::<String>();
+        let source = format!(
+            "#if A\nvoid f() {{ switch (x) {{\ncase 1:\n{statements}case 2: other();\n}} }}\n#endif\n"
+        );
+        for (needle, replacement) in [
+            ("stmt_150()", "changed(1, 2)"),
+            ("case 2:", "added();\ncase 2:"),
+            ("case 2:", "\ncase 2:"),
+        ] {
+            let (tree, work) = reparse(
+                &parse(&source),
+                source.replacen(needle, replacement, 1).into(),
+            );
+            assert_full(&tree);
+            assert_eq!(work.strategy, ParseStrategy::Container);
+            assert!(work.reparsed_tokens < 40, "{work:?}");
+            assert!(work.reused_nodes > 500, "{work:?}");
+        }
+        let (tree, work) = reparse(
+            &parse(&source),
+            source
+                .replacen("stmt_150();", "stmt_150(); case 3: added();", 1)
+                .into(),
+        );
+        assert_full(&tree);
+        assert_eq!(work.strategy, ParseStrategy::Container);
+        // The new label changes sibling ownership: repair expands to the switch.
+        assert!(work.reparsed_tokens > 500, "{work:?}");
+    }
+
+    #[test]
+    fn directives_and_case_boundary_edits_expand_to_full_preprocessor_analysis() {
+        for (source, needle, replacement) in [
+            (
+                "#if A\nvoid f() { target(); }\n#endif\n",
+                "target();",
+                "\n#if B\ntarget();\n#endif\n",
+            ),
+            (
+                "#if A\nvoid f() { switch(x) { case 1: target(); } }\n#endif\n",
+                "target();",
+                "\n#if B\ntarget();\n#endif\n",
+            ),
+            (
+                "#if A\nvoid f() { target(); }\n#endif\n",
+                "target();",
+                "} target();",
+            ),
+        ] {
+            let (tree, work) = reparse(
+                &parse(source),
+                source.replacen(needle, replacement, 1).into(),
+            );
+            assert_full(&tree);
+            assert_eq!(work.strategy, ParseStrategy::Full, "{work:?}");
+            assert!(work.fallback.is_some());
+        }
     }
 }

@@ -277,3 +277,22 @@ fn explicit_reindent_repairs_macro_bodies_and_closers() {
         Command::Reindent(4),
     );
 }
+
+#[test]
+fn enter_inside_conditional_case_and_reopened_scope_is_atomic() {
+    enter_case(
+        "#if A\nvoid f() {\n  switch (x) {\n  case 1:\n    first();^\n    second();\n  case 2:\n    other();\n  }\n}\n#endif\n",
+        "#if A\nvoid f() {\n  switch (x) {\n  case 1:\n    first();\n    ^\n    second();\n  case 2:\n    other();\n  }\n}\n#endif\n",
+        "",
+    );
+    enter_case(
+        "void f() {\n  do {\n#if A\n  } while (a);\n#else\n    if (x) {\n      target();^\n    }\n  } while (b);\n#endif\n}\n",
+        "void f() {\n  do {\n#if A\n  } while (a);\n#else\n    if (x) {\n      target();\n      ^\n    }\n  } while (b);\n#endif\n}\n",
+        "",
+    );
+    enter_case(
+        "namespace n {\nvoid f() {\n  target();^\n}\n",
+        "namespace n {\nvoid f() {\n  target();\n  ^\n}\n",
+        "",
+    );
+}

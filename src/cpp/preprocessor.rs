@@ -57,20 +57,3 @@ pub(super) fn include_guard(source: &str, tokens: &[Token]) -> bool {
     }
     false
 }
-
-pub(super) fn conditional_depth(source: &str, tokens: &[Token], before: usize) -> Option<usize> {
-    let mut depth = 0usize;
-    for (hash, _) in tokens[..before]
-        .iter()
-        .enumerate()
-        .filter(|(_, t)| t.kind == K::PreprocessorHash && t.preprocessor)
-    {
-        match keyword(source, tokens, hash) {
-            Some("if" | "ifdef" | "ifndef") => depth += 1,
-            Some("endif") => depth = depth.checked_sub(1)?,
-            Some("else" | "elif" | "elifdef" | "elifndef") if depth == 0 => return None,
-            _ => {}
-        }
-    }
-    Some(depth)
-}

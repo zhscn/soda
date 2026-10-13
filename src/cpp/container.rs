@@ -1,4 +1,4 @@
-//! Resume item parsing only at complete, unchanged brace boundaries. Reuse is
+//! Resume item parsing at unchanged brace or case-label boundaries. Reuse is
 //! spliced into the preorder arena; ancestor ranges and sibling IDs are remapped.
 use super::{K, N, Parser, SyntaxTree};
 
@@ -24,6 +24,57 @@ fn path(tree: &SyntaxTree, mut id: usize) -> Vec<usize> {
     path
 }
 
+struct Region {
+    start: usize,
+    boundary: usize,
+    case_section: bool,
+}
+fn region(tree: &SyntaxTree, id: usize) -> Option<Region> {
+    let node = &tree.nodes[id];
+    if id == 0 {
+        return Some(Region {
+            start: 0,
+            boundary: tree.tokens.len() - 1,
+            case_section: false,
+        });
+    }
+    if node.kind == N::CaseSection {
+        let label = tree.nodes.get(*node.children.first()?)?;
+        if label.kind != N::CaseLabel
+            || label.tokens.is_empty()
+            || tree.tokens[label.tokens.end - 1].kind != K::Colon
+        {
+            return None;
+        }
+        let boundary =
+            (node.tokens.end..tree.tokens.len()).find(|&i| !tree.tokens[i].kind.is_trivia())?;
+        return matches!(
+            tree.format_kind(boundary),
+            K::CaseKw | K::DefaultKw | K::RBrace | K::EndOfFile
+        )
+        .then_some(Region {
+            start: label.tokens.end,
+            boundary,
+            case_section: true,
+        });
+    }
+    if matches!(
+        node.kind,
+        N::NamespaceBody | N::ClassBody | N::CompoundStatement
+    ) && !node.reclassified
+        && node.tokens.len() >= 2
+        && tree.tokens[node.tokens.start].kind == K::LBrace
+        && tree.tokens[node.tokens.end - 1].kind == K::RBrace
+    {
+        return Some(Region {
+            start: node.tokens.start + 1,
+            boundary: node.tokens.end - 1,
+            case_section: false,
+        });
+    }
+    None
+}
+
 pub(super) fn eligible(
     old: &SyntaxTree,
     parser: &Parser,
@@ -32,34 +83,19 @@ pub(super) fn eligible(
     suffix: usize,
 ) -> bool {
     let node = &old.nodes[id];
-    if !matches!(
-        node.kind,
-        N::NamespaceBody | N::ClassBody | N::CompoundStatement
-    ) || node.reclassified
-        || node.tokens.len() < 2
-    {
+    let Some(region) = region(old, id) else {
         return false;
-    }
-    let opener = &old.tokens[node.tokens.start];
-    let closer = &old.tokens[node.tokens.end - 1];
-    if opener.kind != K::LBrace
-        || closer.kind != K::RBrace
-        || opener.range.end > prefix
+    };
+    let opener = &old.tokens[region.start - 1];
+    let closer = &old.tokens[region.boundary];
+    if opener.range.end > prefix
         || closer.range.start < old.source.len() - suffix
         || old.nodes[id..subtree_end(old, id)]
             .iter()
             .any(|node| node.incomplete)
-        || path(old, id)
-            .iter()
-            .any(|&id| old.nodes[id].incomplete || old.nodes[id].kind == N::PPReopenedScope)
-        || old.tokens[node.tokens.clone()]
+        || old.tokens[node.tokens.start..region.boundary]
             .iter()
             .any(|t| t.preprocessor)
-        || super::super::preprocessor::conditional_depth(
-            &old.source,
-            &old.tokens,
-            node.tokens.start,
-        ) != Some(0)
     {
         return false;
     }
@@ -72,8 +108,8 @@ pub(super) fn eligible(
         .tree
         .tokens
         .get(index)
-        .is_some_and(|t| t.kind == K::RBrace && t.range.start == new_close)
-        && parser.tree.tokens.get(node.tokens.start) == Some(opener)
+        .is_some_and(|t| t.kind == closer.kind && t.range.start == new_close)
+        && parser.tree.tokens.get(region.start - 1) == Some(opener)
         && !parser.tree.tokens[node.tokens.start..=index]
             .iter()
             .any(|t| t.preprocessor)
@@ -97,6 +133,7 @@ pub(super) fn repair(
     suffix: usize,
 ) -> Result<(usize, usize), RepairFailure> {
     let children = &old.nodes[id].children;
+    let region = region(old, id).expect("repair requires a supported region");
     let ancestors = path(old, id);
     let enum_body = ancestors
         .iter()
@@ -121,7 +158,8 @@ pub(super) fn repair(
         .unwrap_or(0)
         // An else, a following case-body statement, or a class semicolon can
         // attach to the preceding item. Replay that item across the edit edge.
-        .saturating_sub(1);
+        .saturating_sub(1)
+        .max(usize::from(region.case_section));
     let old_end = subtree_end(old, id);
     let prefix_nodes = children.get(keep).copied().unwrap_or(old_end);
     parser.tree.nodes = old.nodes[..prefix_nodes].to_vec();
@@ -129,29 +167,30 @@ pub(super) fn repair(
     parser.tree.nodes[id].children.truncate(keep);
     parser.stack = ancestors;
     parser.enum_body = enum_body;
+    // A closed island cannot consult or change conditional frames: neither its
+    // original nor edited token range contains a directive. Outer branch facts
+    // stay in the reused tree and are never replayed by this parser instance.
     parser.pp.clear();
     parser.phantoms.clear();
     parser.unwind = None;
     parser.pos = if keep > 0 {
         old.nodes[children[keep - 1]].tokens.end
-    } else if id == 0 {
-        0
     } else {
-        old.nodes[id].tokens.start + 1
+        region.start
     };
     let parse_start = parser.pos;
-    let old_close = if id == 0 {
-        old.tokens.len() - 1
-    } else {
-        old.nodes[id].tokens.end - 1
-    };
+    let old_close = region.boundary;
+    let closing_kind = old.format_kind(old_close);
     let close_offset =
         parser.tree.source.len() - (old.source.len() - old.tokens[old_close].range.start);
     let (suffix_index, suffix_node, suffix_token) = loop {
         let kind = parser.kind();
         let position = parser.tree.tokens[parser.pos].range.start;
-        if kind == K::EndOfFile || (id != 0 && kind == K::RBrace) {
-            if position != close_offset || (id != 0 && kind != K::RBrace) {
+        if kind == K::EndOfFile
+            || (id != 0 && kind == K::RBrace)
+            || (region.case_section && matches!(kind, K::CaseKw | K::DefaultKw))
+        {
+            if position != close_offset || kind != closing_kind {
                 return Err(RepairFailure {
                     tokens: parser.pos.saturating_sub(parse_start),
                     reason: super::AnalysisFallback::ChangedBoundary,
@@ -211,6 +250,15 @@ pub(super) fn repair(
             .iter()
             .map(|&child| shifted(child, suffix_node, node_delta)),
     );
+    if region.case_section {
+        // Case sections have no closing token of their own. Their range ends
+        // at the final item, excluding trivia before the next label or closer.
+        let last = *parser.tree.nodes[id]
+            .children
+            .last()
+            .expect("case label is retained");
+        parser.tree.nodes[id].tokens.end = parser.tree.nodes[last].tokens.end;
+    }
     parser.tree.nodes[0].tokens.end = parser.tree.tokens.len();
     parser.tree.index_tokens();
     Ok((reparsed, prefix_nodes + old.nodes.len() - suffix_node))
