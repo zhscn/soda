@@ -249,3 +249,82 @@ fn goto_closes_when_external_focus_changes() {
     editor.event(Event::NewDocument(Language::PlainText));
     assert!(editor.layers.active().is_none());
 }
+
+fn replace_dialog(editor: &mut Editor, query: &str, replacement: &str) {
+    editor.ctrl('r');
+    editor.input(UserInput::Paste(query.into()));
+    editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
+    editor.input(UserInput::Paste(replacement.into()));
+    editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
+}
+#[test]
+fn replace_current_can_choose_match_and_undo_as_one_edit() {
+    let mut editor = Editor::new("foo 中 foo");
+    replace_dialog(&mut editor, "foo", "🦀");
+    assert_eq!(editor.text(), "foo 中 foo");
+    editor.input(UserInput::Key(KeyStroke::plain(Key::F(3))));
+    editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
+    assert_eq!(editor.text(), "foo 中 🦀");
+    assert!(editor.layers.active().is_none());
+    editor.ctrl('z');
+    assert_eq!(editor.text(), "foo 中 foo");
+    assert_eq!(
+        editor.selection(),
+        Selection {
+            anchor: 8,
+            head: 11
+        }
+    );
+}
+#[test]
+fn replace_all_requires_explicit_confirmation_and_supports_deletion() {
+    let mut editor = Editor::new("foo foo foo");
+    replace_dialog(&mut editor, "foo", "");
+    editor.input(UserInput::Key(KeyStroke {
+        control: true,
+        ..KeyStroke::plain(Key::Enter)
+    }));
+    assert_eq!(editor.text(), "  ");
+    editor.ctrl('z');
+    assert_eq!(editor.text(), "foo foo foo");
+}
+#[test]
+fn cancelling_each_replace_phase_restores_origin_without_edits() {
+    for phase in 0..3 {
+        let mut editor = Editor::new("foo foo");
+        editor.select(Selection::caret(4));
+        editor.ctrl('r');
+        editor.input(UserInput::Paste("foo".into()));
+        if phase > 0 {
+            editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
+        }
+        if phase > 1 {
+            editor.input(UserInput::Paste("bar".into()));
+            editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
+        }
+        editor.input(UserInput::Key(KeyStroke::plain(Key::Esc)));
+        assert_eq!(editor.text(), "foo foo");
+        assert_eq!(editor.selection(), Selection::caret(4));
+    }
+}
+#[test]
+fn replacement_dialog_refreshes_match_after_other_view_edits() {
+    let mut editor = Editor::new("foo foo");
+    let target = editor.app.active_view().unwrap();
+    let document = editor.app.view(target).unwrap().document_id;
+    editor.event(Event::AddView(document));
+    let other = editor.app.active_view().unwrap();
+    editor.event(Event::Focus(target));
+    editor.ctrl('r');
+    editor.input(UserInput::Paste("foo".into()));
+    editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
+    editor.event(Event::Edit {
+        view: other,
+        command: Edit::InsertText("prefix".into()),
+        time: Duration::ZERO,
+    });
+    editor.input(UserInput::Paste("bar".into()));
+    editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
+    editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
+    assert_eq!(editor.text(), "prefixbar foo");
+}

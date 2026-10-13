@@ -14,6 +14,7 @@ pub(crate) fn binding(key: KeyStroke) -> Option<Command> {
     if control {
         return match key.code {
             Key::Char('a') if !shift => Some(Command::Edit(EditCommand::SelectAll)),
+            Key::Char('r') if !shift => Some(Command::Replace),
             Key::Char('g') if !shift => Some(Command::Goto),
             Key::Left | Key::Right => Some(Command::Edit(EditCommand::Move {
                 motion: if key.code == Key::Left {
@@ -119,6 +120,9 @@ pub(crate) fn modal_key(key: KeyStroke) -> Input {
             Key::Esc => return Input::Cancel,
             _ => {}
         }
+    }
+    if key.code == Key::Enter && control && !shift {
+        return Input::ReplaceAll;
     }
     if key.code == Key::F(3) && !control {
         return Input::Navigate { backward: shift };
@@ -244,6 +248,9 @@ mod tests {
                 KeyModifiers::META,
                 KeyModifiers::HYPER,
             ] {
+                if code == Key::Enter && modifiers == KeyModifiers::CONTROL {
+                    continue;
+                }
                 assert!(matches!(
                     modal_key(modified(code, modifiers)),
                     Input::Unrecognized
@@ -253,6 +260,10 @@ mod tests {
             release.release = true;
             assert!(matches!(modal_key(release), Input::Unrecognized));
         }
+        assert!(matches!(
+            modal_key(modified(Key::Enter, KeyModifiers::CONTROL)),
+            Input::ReplaceAll
+        ));
         assert!(matches!(modal_key(key(Key::Enter)), Input::Confirm));
         assert!(matches!(modal_key(key(Key::Esc)), Input::Cancel));
         assert!(matches!(

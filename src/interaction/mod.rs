@@ -8,6 +8,8 @@ pub use routing::{Key, KeyStroke, UserInput};
 mod input;
 pub mod picker;
 use picker::{ListMotion, PickerCompletion, PickerEffect, PickerSession};
+mod replace;
+pub use replace::{ReplacePhase, ReplaceSession};
 mod search;
 use crate::{
     application::{Application, Event, Update},
@@ -27,6 +29,7 @@ pub enum Layer {
     Open(TextInput),
     Save(DocumentId, TextInput),
     Quit,
+    Replace(ReplaceSession),
     Picker(PickerSession),
     Search {
         input: TextInput,
@@ -37,6 +40,7 @@ pub enum Input {
     Text(InputKey),
     Paste(String),
     Confirm,
+    ReplaceAll,
     Cancel,
     Navigate { backward: bool },
     Candidate { motion: ListMotion, wrap: bool },
@@ -46,6 +50,7 @@ enum Intent {
     Changed,
     SelectionChanged,
     Confirm,
+    ReplaceAll,
     Cancel,
     Navigate { backward: bool },
     Candidate { motion: ListMotion, wrap: bool },
@@ -139,11 +144,20 @@ impl Layers {
             Input::Candidate { motion, wrap } if matches!(layer, Layer::Picker(_)) => {
                 Route::Handled(Intent::Candidate { motion, wrap })
             }
+            Input::ReplaceAll if matches!(layer, Layer::Replace(session) if session.phase == ReplacePhase::Review) => {
+                Route::Handled(Intent::ReplaceAll)
+            }
             Input::Cancel => Route::Handled(Intent::Cancel),
             Input::Confirm if matches!(layer, Layer::Quit) => Route::Handled(Intent::Cancel),
             Input::Confirm => Route::Handled(Intent::Confirm),
-            Input::Navigate { backward } if matches!(layer, Layer::Search { .. }) => {
+            Input::Navigate { backward }
+                if matches!(layer, Layer::Search { .. })
+                    || matches!(layer, Layer::Replace(session) if session.phase != ReplacePhase::Replacement) =>
+            {
                 Route::Handled(Intent::Navigate { backward })
+            }
+            _ if matches!(layer, Layer::Replace(session) if session.phase == ReplacePhase::Review) => {
+                Route::Blocked
             }
             Input::Text(InputKey::Char('y')) if matches!(layer, Layer::Quit) => {
                 Route::Handled(Intent::Confirm)
@@ -172,6 +186,10 @@ impl Layer {
             | Self::Save(_, input)
             | Self::Search { input, .. }
             | Self::Goto { input, .. } => Some(input),
+            Self::Replace(session) if session.phase != ReplacePhase::Review => {
+                Some(&mut session.input)
+            }
+            Self::Replace(_) => None,
             Self::Picker(session) => Some(session.input_mut()),
             Self::Quit => None,
         }
@@ -217,6 +235,7 @@ impl Layer {
                 };
                 (format!("Files [{status}]: "), session.input())
             }
+            Self::Replace(session) => return session.presentation(),
             Self::Quit => {
                 return Presentation {
                     text: "Unsaved changes: discard and quit? (y/N)".into(),
@@ -289,6 +308,12 @@ impl Layers {
                     ..Response::default()
                 })
             }
+            Intent::Changed if matches!(&self.active, Some(Layer::Replace(session)) if session.phase == ReplacePhase::Replacement) => {
+                Ok(Response {
+                    redraw: true,
+                    ..Response::default()
+                })
+            }
             Intent::Changed => {
                 if let Some(Layer::Goto { error, .. }) = &mut self.active {
                     *error = false;
@@ -298,7 +323,34 @@ impl Layers {
                 Ok(response)
             }
             Intent::Navigate { backward } => self.preview(app, backward, true, time),
-            Intent::Confirm | Intent::Cancel => {
+            Intent::Confirm | Intent::ReplaceAll | Intent::Cancel => {
+                if matches!(intent, Intent::Confirm)
+                    && let Some(Layer::Replace(session)) = &mut self.active
+                {
+                    match session.phase {
+                        ReplacePhase::Query => {
+                            if !session.search.query().is_valid() {
+                                return Ok(Response::default());
+                            }
+                            session.phase = ReplacePhase::Replacement;
+                            session.input = TextInput::default();
+                            return Ok(Response {
+                                redraw: true,
+                                ..Response::default()
+                            });
+                        }
+                        ReplacePhase::Replacement => {
+                            session.replacement = session.input.text().to_owned();
+                            session.phase = ReplacePhase::Review;
+                            return Ok(Response {
+                                redraw: true,
+                                ..Response::default()
+                            });
+                        }
+                        ReplacePhase::Review => {}
+                    }
+                }
+
                 if matches!(intent, Intent::Confirm)
                     && matches!(&self.active, Some(Layer::Picker(session)) if session.selected_path().is_none())
                 {
@@ -319,12 +371,34 @@ impl Layers {
                 let Some(layer) = self.active.take() else {
                     return Ok(Response::default());
                 };
-                let confirm = matches!(intent, Intent::Confirm);
+                let confirm = matches!(intent, Intent::Confirm | Intent::ReplaceAll);
                 let mut response = Response {
                     redraw: true,
                     ..Response::default()
                 };
                 match layer {
+                    Layer::Replace(session) => {
+                        if confirm {
+                            response.events.push(Event::Edit {
+                                view: session.search.view(),
+                                command: EditCommand::SetSearchQuery(
+                                    session.search.query().clone(),
+                                ),
+                                time,
+                            });
+                            response.events.push(Event::Edit {
+                                view: session.search.view(),
+                                command: if matches!(intent, Intent::ReplaceAll) {
+                                    EditCommand::ReplaceAll(session.replacement)
+                                } else {
+                                    EditCommand::ReplaceCurrent(session.replacement)
+                                },
+                                time,
+                            });
+                        } else {
+                            response.events = session.search.cancel(app, time)?;
+                        }
+                    }
                     Layer::Goto { view, input, .. } if confirm => {
                         let (line, column) = parse_location(input.text()).unwrap();
                         if app.view(view).is_some() {
@@ -375,10 +449,19 @@ impl Layers {
         advance: bool,
         time: Duration,
     ) -> Result<Response, EditError> {
-        let Some(Layer::Search { input, session }) = &mut self.active else {
-            return Ok(Response::default());
+        let session = match &mut self.active {
+            Some(Layer::Search { input, session }) => {
+                session.set_query(input.text());
+                session
+            }
+            Some(Layer::Replace(replace)) => {
+                if replace.phase == ReplacePhase::Query {
+                    replace.search.set_query(replace.input.text());
+                }
+                &mut replace.search
+            }
+            _ => return Ok(Response::default()),
         };
-        session.set_query(input.text());
         let command = session.preview(app, backward, advance)?;
         if session.results().current.is_none() {
             return Ok(Response {
@@ -419,8 +502,10 @@ impl Layers {
                 ..Response::default()
             });
         }
-        let Some(Layer::Search { session, .. }) = &mut self.active else {
-            return Ok(Response::default());
+        let session = match &mut self.active {
+            Some(Layer::Search { session, .. }) => session,
+            Some(Layer::Replace(replace)) => &mut replace.search,
+            _ => return Ok(Response::default()),
         };
         if !session.observe(app, update)? {
             self.active = None;

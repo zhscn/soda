@@ -1,7 +1,7 @@
 //! Application command reduction. Commands resolve their targets on the owner
 //! thread and return ordered application events and platform effects.
 use super::{
-    Layer, Layers, Message, Response, SearchSession, TextInput,
+    Layer, Layers, Message, ReplaceSession, Response, SearchSession, TextInput,
     picker::{PickerLimits, PickerSession},
 };
 use crate::{
@@ -25,6 +25,7 @@ pub enum Command {
     Quit,
     NextView,
     Search,
+    Replace,
     PickFiles,
 }
 
@@ -99,6 +100,12 @@ impl Layers {
                 match PickerSession::new(file_root.to_owned(), PickerLimits::default()) {
                     Ok(session) => response = self.start_picker(session, app, time)?,
                     Err(error) => response.message = Message::Set(error.to_string()),
+                }
+            }
+            Command::Replace => {
+                if let Some(view) = app.active_view() {
+                    response =
+                        self.enter(Layer::Replace(ReplaceSession::new(app, view)?), app, time)?;
                 }
             }
             Command::Search => {
