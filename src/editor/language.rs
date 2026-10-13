@@ -116,7 +116,7 @@ mod tests {
                 panic!()
             };
             let work = session.analysis_work().unwrap();
-            assert_eq!(work.strategy, ParseStrategy::Declarations);
+            assert_eq!(work.strategy, ParseStrategy::Container);
             assert!(work.scanned_bytes < 80);
             assert!(work.reparsed_tokens < 50);
         }

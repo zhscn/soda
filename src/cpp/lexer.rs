@@ -419,6 +419,8 @@ impl Iterator for Scanner<'_> {
 pub(super) struct Relexed {
     pub tokens: Vec<Token>,
     pub scanned: Range<usize>,
+    pub unchanged_prefix: usize,
+    pub unchanged_suffix: usize,
 }
 
 /// The common unchanged suffix and equal neutral lexer states establish
@@ -473,6 +475,8 @@ pub(super) fn relex(old: &str, tokens: &[Token], source: &str) -> Relexed {
     Relexed {
         tokens: result,
         scanned: restart..stop,
+        unchanged_prefix: prefix,
+        unchanged_suffix: suffix,
     }
 }
 

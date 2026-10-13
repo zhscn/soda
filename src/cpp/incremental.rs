@@ -1,5 +1,5 @@
-//! Reuse is restricted to token-equivalent analyses and complete declarations
-//! separated by a syntax barrier. Conditional and unfinished contexts fall back.
+//! Reuse is restricted to token-equivalent analyses and complete item containers.
+//! Unsafe conditional or unfinished contexts expand the repair or fall back.
 use super::{K, Parser, SyntaxTree, parse_tokens};
 use crate::cpp::Token;
 use std::sync::Arc;
@@ -9,6 +9,14 @@ pub enum ParseStrategy {
     Full,
     TokenEquivalent,
     Declarations,
+    Container,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AnalysisFallback {
+    PreprocessorContext,
+    IncompleteStructure,
+    ChangedBoundary,
 }
 
 /// Work performed by the latest analysis, excluding source materialization and
@@ -19,6 +27,9 @@ pub struct AnalysisWork {
     pub scanned_bytes: usize,
     pub reparsed_tokens: usize,
     pub reused_nodes: usize,
+    /// Cold full analysis has no fallback; incremental full analysis records why
+    /// a reusable context could not be established.
+    pub fallback: Option<AnalysisFallback>,
 }
 
 pub(crate) fn reparse(old: &SyntaxTree, source: Arc<str>) -> (SyntaxTree, AnalysisWork) {
@@ -54,135 +65,97 @@ pub(crate) fn reparse(old: &SyntaxTree, source: Arc<str>) -> (SyntaxTree, Analys
             scanned_bytes,
             reparsed_tokens: 0,
             reused_nodes: tree.nodes.len(),
+            fallback: None,
         };
         return (tree, work);
     }
-    // Conditional frames and unfinished productions cross declaration boundaries.
-    // Keep the whole parser as the authoritative fallback for those documents.
-    let safe = !old.nodes.iter().any(|n| n.incomplete)
-        && !old.tokens.iter().chain(&tokens).any(|t| t.preprocessor);
-    if safe {
-        let damage = old
+    let damage = old
+        .tokens
+        .iter()
+        .zip(&tokens)
+        .position(|(a, b)| !equivalent(a, b))
+        .unwrap_or(old.tokens.len().min(tokens.len()));
+    let mut parser = Parser::new(source.clone(), &old.parser_options, tokens);
+    let mut reparsed = 0;
+    let mut fallback = None;
+    let mut context = Some(old.token_owners[damage.min(old.tokens.len() - 1)]);
+    while let Some(container) = context {
+        context = old.nodes[container].parent;
+        if container == 0
+            || !super::container::eligible(
+                old,
+                &parser,
+                container,
+                relexed.unchanged_prefix,
+                relexed.unchanged_suffix,
+            )
+        {
+            continue;
+        }
+        match super::container::repair(
+            old,
+            &mut parser,
+            container,
+            damage,
+            relexed.unchanged_suffix,
+        ) {
+            Ok((count, reused)) => {
+                return (
+                    parser.tree,
+                    AnalysisWork {
+                        strategy: ParseStrategy::Container,
+                        scanned_bytes,
+                        reparsed_tokens: reparsed + count,
+                        reused_nodes: reused,
+                        fallback: None,
+                    },
+                );
+            }
+            Err(failure) => {
+                reparsed += failure.tokens;
+                fallback = Some(failure.reason);
+            }
+        }
+    }
+    let safe_root = !old.nodes.iter().any(|n| n.incomplete)
+        && !old
             .tokens
             .iter()
-            .zip(&tokens)
-            .position(|(a, b)| !equivalent(a, b))
-            .unwrap_or(old.tokens.len().min(tokens.len()));
-        let children = &old.nodes[0].children;
-        let barrier = |id: usize| {
-            let node = &old.nodes[id];
-            node.tokens.end > node.tokens.start
-                && matches!(
-                    old.tokens[node.tokens.end - 1].kind,
-                    K::Semicolon | K::RBrace
-                )
-        };
-        let keep = children
-            .iter()
-            .enumerate()
-            .filter(|&(_, &id)| old.nodes[id].tokens.end <= damage && barrier(id))
-            .map(|(i, _)| i + 1)
-            .next_back()
-            .unwrap_or(0);
-        let node_end = children.get(keep).copied().unwrap_or(old.nodes.len());
-        let mut p = Parser::new(source.clone(), &old.parser_options, tokens);
-        p.tree.nodes = old.nodes[..node_end].to_vec();
-        p.tree.nodes.reserve(old.nodes.len() - node_end);
-        p.tree.nodes[0].children.truncate(keep);
-        p.stack.push(0);
-        p.pos = if keep == 0 {
-            0
-        } else {
-            old.nodes[children[keep - 1]].tokens.end
-        };
-        let parse_start = p.pos;
-        let suffix = old
-            .source
-            .bytes()
-            .rev()
-            .zip(source.bytes().rev())
-            .take_while(|(a, b)| a == b)
-            .count();
-        let mut reused_nodes = node_end;
-        loop {
-            if p.kind() == K::EndOfFile {
-                break;
-            }
-            let position = p.tree.tokens[p.pos].range.start;
-            let candidate = if position >= source.len() - suffix {
-                let old_position = old.source.len() - (source.len() - position);
-                let index = children.partition_point(|&id| old.range(id).start < old_position);
-                children
-                    .get(index)
-                    .filter(|&&id| {
-                        index >= keep
-                            && index > 0
-                            && barrier(children[index - 1])
-                            && old.range(id).start == old_position
-                    })
-                    .map(|id| (index, id))
-            } else {
-                None
-            };
-            if let Some((index, &id)) = candidate {
-                let token_shift = p.pos as isize - old.nodes[id].tokens.start as isize;
-                let node_shift = p.tree.nodes.len() as isize - id as isize;
-                for node in &old.nodes[id..] {
-                    let mut node = node.clone();
-                    node.tokens = node.tokens.start.checked_add_signed(token_shift).unwrap()
-                        ..node.tokens.end.checked_add_signed(token_shift).unwrap();
-                    node.parent = node.parent.map(|parent| {
-                        if parent == 0 {
-                            0
-                        } else {
-                            parent.checked_add_signed(node_shift).unwrap()
-                        }
-                    });
-                    for child in &mut node.children {
-                        *child = child.checked_add_signed(node_shift).unwrap();
-                    }
-                    p.tree.nodes.push(node);
-                }
-                p.tree.nodes[0].children.extend(
-                    children[index..]
-                        .iter()
-                        .map(|&child| child.checked_add_signed(node_shift).unwrap()),
+            .chain(&parser.tree.tokens)
+            .any(|t| t.preprocessor);
+    if safe_root {
+        match super::container::repair(old, &mut parser, 0, damage, relexed.unchanged_suffix) {
+            Ok((count, reused)) => {
+                return (
+                    parser.tree,
+                    AnalysisWork {
+                        strategy: ParseStrategy::Declarations,
+                        scanned_bytes,
+                        reparsed_tokens: reparsed + count,
+                        reused_nodes: reused,
+                        fallback: None,
+                    },
                 );
-                reused_nodes += old.nodes.len() - id;
-                break;
             }
-            p.guarded();
+            Err(failure) => {
+                reparsed += failure.tokens;
+                fallback = Some(failure.reason);
+            }
         }
-        let reparsed_tokens = p.pos - parse_start;
-        // A changed declaration may leave the suffix inside an unfinished scope.
-        // Such results are cheap to reject before exposing any partial structure.
-        if !p.tree.nodes.iter().any(|n| n.incomplete) {
-            p.tree.nodes[0].tokens.end = p.tree.tokens.len();
-            p.tree.index_tokens();
-            return (
-                p.tree,
-                AnalysisWork {
-                    strategy: ParseStrategy::Declarations,
-                    scanned_bytes,
-                    reparsed_tokens,
-                    reused_nodes,
-                },
-            );
-        }
-        let tokens = p.tree.tokens;
-        let work = AnalysisWork {
-            strategy: ParseStrategy::Full,
-            scanned_bytes,
-            reparsed_tokens: tokens.len() + reparsed_tokens,
-            reused_nodes: 0,
-        };
-        return (parse_tokens(source, &old.parser_options, tokens), work);
     }
+    let tokens = parser.tree.tokens;
     let work = AnalysisWork {
         strategy: ParseStrategy::Full,
         scanned_bytes,
-        reparsed_tokens: tokens.len(),
+        reparsed_tokens: tokens.len() + reparsed,
         reused_nodes: 0,
+        fallback: Some(fallback.unwrap_or_else(|| {
+            if old.tokens.iter().chain(&tokens).any(|t| t.preprocessor) {
+                AnalysisFallback::PreprocessorContext
+            } else {
+                AnalysisFallback::IncompleteStructure
+            }
+        })),
     };
     (parse_tokens(source, &old.parser_options, tokens), work)
 }
@@ -216,7 +189,7 @@ mod tests {
         assert!(work.scanned_bytes < 60);
         let (changed, work) = reparse(&tree, source.replacen("work(50)", "other(50, 1)", 1).into());
         assert_full(&changed);
-        assert_eq!(work.strategy, ParseStrategy::Declarations);
+        assert_eq!(work.strategy, ParseStrategy::Container);
         assert!(work.reparsed_tokens < 40);
         assert!(work.reused_nodes > 100);
         assert!(work.scanned_bytes < 60);
@@ -225,6 +198,9 @@ mod tests {
     #[test]
     fn incremental_analysis_matches_full_parse_under_repeated_utf8_edits() {
         let samples = [
+            "namespace n { class C { public: void f() { if (x) { a(); } else { b(); } for (;;) if (x) c(); d(); } int x; }; }\n",
+            "void f() { switch (x) { case 1: a(); case 2: b(); default: c(); } }\n",
+            "enum class E { A = 1, B = f(1, 2), C };\nvoid f() {}\n",
             "namespace n {\nvoid f() { work(); }\n}\nvoid g() {}\n",
             "template <class T>\nvoid f(T x) {\n    work(x);\n}\nvoid g() {}\n",
             "#ifdef __cplusplus\nextern \"C\" {\n#endif\nvoid f();\n#ifdef __cplusplus\n}\n#endif\n",
@@ -269,6 +245,10 @@ mod tests {
             ..Default::default()
         };
         for source in [
+            "namespace n { class C { public: void f() { if (x) { a(); } else { b(); } next(); } int x; }; }\n",
+            "void f() { for (;;) if (x) a(); next(); switch (x) { case 1: a(); case 2: b(); } }\n",
+            "enum class E { A = 1, B = f(1, 2), C };\nvoid f() {}\n",
+            "#include <x>\nnamespace n { void f() { work(); } }\n#if A\nvoid g() {}\n#endif\n",
             "int a;\nvoid f() { work(); }\nvoid g() {}\n",
             "auto s = R\"tag(raw\ntext)tag\";\n/* comment\nend */\nvoid f() {}\n",
             "template <typename T>\nclass C { T x; };\nint z;\n",
@@ -302,5 +282,109 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn incremental_repairs_include_the_preceding_item_for_cross_item_attachments() {
+        for (source, needle, insert) in [
+            (
+                "void f() { if (a) work(); next(); }",
+                "next",
+                "else other(); ",
+            ),
+            (
+                "void f() { for (;;) if (a) work(); next(); }",
+                "next",
+                "else other(); ",
+            ),
+            (
+                "void f() { switch (x) { case 1: work(); case 2: next(); } }",
+                "case 2",
+                "other(); ",
+            ),
+            ("class C {}\nint x;", "int x", ";\n"),
+        ] {
+            let mut next = source.to_owned();
+            next.insert_str(source.find(needle).unwrap(), insert);
+            let tree = reparse(&parse(source), next.into()).0;
+            assert_full(&tree);
+        }
+    }
+
+    #[test]
+    fn container_repairs_reuse_siblings_inside_large_namespaces_and_classes() {
+        let functions = (0..500)
+            .map(|i| format!("void f{i}() {{\n    work({i});\n}}\n"))
+            .collect::<String>();
+        for source in [
+            format!("namespace n {{\n{functions}}}\n"),
+            format!("namespace n {{\nclass C {{\npublic:\n{functions}}};\n}}\n"),
+            format!(
+                "#include <x>\n#define OPEN namespace n {{\n#define CLOSE }}\nnamespace n {{\n{functions}}}\n"
+            ),
+        ] {
+            let (tree, work) = reparse(
+                &parse(&source),
+                source.replacen("work(250)", "other(250, 1)", 1).into(),
+            );
+            assert_full(&tree);
+            assert_eq!(work.strategy, ParseStrategy::Container);
+            assert_eq!(work.fallback, None);
+            assert!(work.reparsed_tokens < 30, "{work:?}");
+            assert!(work.scanned_bytes < 60, "{work:?}");
+            assert!(work.reused_nodes > 1000, "{work:?}");
+        }
+    }
+
+    #[test]
+    fn incremental_repairs_report_unsafe_conditional_and_unfinished_contexts() {
+        for (source, needle, replacement, expected) in [
+            (
+                "#include <x>\nvoid f() { work(); }\n",
+                "work();",
+                "} work();",
+                AnalysisFallback::ChangedBoundary,
+            ),
+            (
+                "#if A\nvoid f() { work(); }\n#endif\n",
+                "work()",
+                "other()",
+                AnalysisFallback::PreprocessorContext,
+            ),
+            (
+                "void f() { work();",
+                "work()",
+                "other()",
+                AnalysisFallback::IncompleteStructure,
+            ),
+            (
+                "namespace n { void f() { work(); } }",
+                "work(); }",
+                "work();",
+                AnalysisFallback::IncompleteStructure,
+            ),
+        ] {
+            let (tree, work) = reparse(
+                &parse(source),
+                source.replacen(needle, replacement, 1).into(),
+            );
+            assert_full(&tree);
+            assert_eq!(work.strategy, ParseStrategy::Full);
+            assert_eq!(work.fallback, Some(expected));
+        }
+    }
+
+    #[test]
+    fn unrelated_unfinished_regions_do_not_disable_complete_container_repairs() {
+        let source =
+            "#include <x>\nnamespace n { void f() { work(); } }\nvoid unfinished() { call(\n";
+        let (tree, work) = reparse(
+            &parse(source),
+            source.replacen("work()", "other(1)", 1).into(),
+        );
+        assert_full(&tree);
+        assert_eq!(work.strategy, ParseStrategy::Container);
+        assert_eq!(work.fallback, None);
+        assert!(work.reparsed_tokens < 20);
     }
 }

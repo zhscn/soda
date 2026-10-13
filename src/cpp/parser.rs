@@ -37,10 +37,12 @@ fn parse_tokens(
     p.tree
 }
 
+#[path = "container.rs"]
+mod container;
 #[path = "incremental.rs"]
 mod incremental;
 pub(super) use incremental::reparse;
-pub use incremental::{AnalysisWork, ParseStrategy};
+pub use incremental::{AnalysisFallback, AnalysisWork, ParseStrategy};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DirectiveKind {

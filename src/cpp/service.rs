@@ -59,6 +59,7 @@ impl CppSession {
                         scanned_bytes: snapshot.text().len(),
                         reparsed_tokens: tree.tokens().len(),
                         reused_nodes: 0,
+                        fallback: None,
                     };
                     (tree, work)
                 }
