@@ -177,3 +177,102 @@ impl SearchSession {
         ])
     }
 }
+
+impl SearchSession {
+    pub(super) fn presentation(&self, field: &super::TextInput) -> super::Presentation {
+        super::session::field_presentation(format!("Find [{}]: ", self.results().count), field)
+    }
+    pub(super) fn cancel_response(
+        &self,
+        app: &Application,
+        time: Duration,
+    ) -> Result<super::Response, EditError> {
+        Ok(super::Response {
+            events: if app.view(self.view()).is_some() {
+                self.cancel(app, time)?
+            } else {
+                vec![]
+            },
+            redraw: true,
+            ..super::Response::default()
+        })
+    }
+    pub(super) fn preview_response(
+        &mut self,
+        app: &Application,
+        backward: bool,
+        advance: bool,
+        time: Duration,
+    ) -> Result<super::Response, EditError> {
+        let command = self.preview(app, backward, advance)?;
+        if self.results().current.is_none() {
+            return self.cancel_response(app, time);
+        }
+        Ok(super::Response {
+            events: vec![Event::Edit {
+                view: self.view(),
+                command,
+                time,
+            }],
+            redraw: true,
+            ..super::Response::default()
+        })
+    }
+    pub(super) fn handle(
+        &mut self,
+        field: &mut super::TextInput,
+        input: super::Input,
+        app: &Application,
+        time: Duration,
+    ) -> Result<super::session::Transition, EditError> {
+        use super::{
+            Input, Response,
+            session::{Transition, edit_field},
+        };
+        Ok(match input {
+            Input::Cancel => Transition::finished(self.cancel_response(app, time)?),
+            Input::Confirm => Transition::finished(Response {
+                events: vec![Event::Edit {
+                    view: self.view(),
+                    command: Command::SetSearchQuery(self.query().clone()),
+                    time,
+                }],
+                redraw: true,
+                ..Response::default()
+            }),
+            Input::Navigate { backward } => {
+                Transition::active(self.preview_response(app, backward, true, time)?)
+            }
+            input => match edit_field(field, input) {
+                Some(update) if update.text_changed => {
+                    self.set_query(field.text());
+                    Transition::active(self.preview_response(app, false, false, time)?)
+                }
+                Some(update) if update.selection_changed => Transition::redraw(),
+                _ => Transition::Blocked,
+            },
+        })
+    }
+    pub(super) fn observe_transition(
+        &mut self,
+        app: &Application,
+        update: &Update,
+        time: Duration,
+    ) -> Result<super::session::Transition, EditError> {
+        use super::{Response, session::Transition};
+        if !self.observe(app, update)? {
+            return Ok(Transition::close());
+        }
+        if app.active_view() != Some(self.view()) {
+            return Ok(Transition::finished(self.cancel_response(app, time)?));
+        }
+        if update.edit.as_ref().is_some_and(|edit| {
+            edit.text_changed && edit.document_id == app.view(self.view()).unwrap().document_id
+        }) {
+            return Ok(Transition::active(
+                self.preview_response(app, false, false, time)?,
+            ));
+        }
+        Ok(Transition::active(Response::default()))
+    }
+}

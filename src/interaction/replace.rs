@@ -55,11 +55,80 @@ impl ReplaceSession {
         } else {
             "Replacement: ".to_owned()
         };
-        let selection = self.input.selection().range();
-        Presentation {
-            cursor: Some(label.len() + self.input.cursor()),
-            selection: label.len() + selection.start..label.len() + selection.end,
-            text: format!("{label}{}", self.input.text()),
-        }
+        super::session::field_presentation(label, &self.input)
+    }
+}
+
+impl ReplaceSession {
+    pub(super) fn handle(
+        &mut self,
+        input: super::Input,
+        app: &Application,
+        time: std::time::Duration,
+    ) -> Result<super::session::Transition, EditError> {
+        use super::{
+            Input, Response,
+            session::{Transition, edit_field},
+        };
+        use crate::{application::Event, editor::Command};
+        Ok(match (self.phase, input) {
+            (_, Input::Cancel) => Transition::finished(self.search.cancel_response(app, time)?),
+            (ReplacePhase::Query, Input::Confirm) => {
+                if !self.search.query().is_valid() {
+                    return Ok(Transition::active(Response::default()));
+                }
+                self.phase = ReplacePhase::Replacement;
+                self.input = TextInput::default();
+                Transition::redraw()
+            }
+            (ReplacePhase::Replacement, Input::Confirm) => {
+                self.replacement = self.input.text().to_owned();
+                self.phase = ReplacePhase::Review;
+                Transition::redraw()
+            }
+            (ReplacePhase::Review, input @ (Input::Confirm | Input::ReplaceAll)) => {
+                Transition::finished(Response {
+                    events: vec![
+                        Event::Edit {
+                            view: self.search.view(),
+                            command: Command::SetSearchQuery(self.search.query().clone()),
+                            time,
+                        },
+                        Event::Edit {
+                            view: self.search.view(),
+                            command: if matches!(input, Input::ReplaceAll) {
+                                Command::ReplaceAll(self.replacement.clone())
+                            } else {
+                                Command::ReplaceCurrent(self.replacement.clone())
+                            },
+                            time,
+                        },
+                    ],
+                    redraw: true,
+                    ..Response::default()
+                })
+            }
+            (ReplacePhase::Query | ReplacePhase::Review, Input::Navigate { backward }) => {
+                Transition::active(self.search.preview_response(app, backward, true, time)?)
+            }
+            (ReplacePhase::Query, input) => {
+                self.search.handle(&mut self.input, input, app, time)?
+            }
+            (ReplacePhase::Replacement, input) => match edit_field(&mut self.input, input) {
+                Some(update) if update.text_changed || update.selection_changed => {
+                    Transition::redraw()
+                }
+                _ => Transition::Blocked,
+            },
+            _ => Transition::Blocked,
+        })
+    }
+    pub(super) fn observe(
+        &mut self,
+        app: &Application,
+        update: &crate::application::Update,
+        time: std::time::Duration,
+    ) -> Result<super::session::Transition, EditError> {
+        self.search.observe_transition(app, update, time)
     }
 }

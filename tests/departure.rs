@@ -360,3 +360,33 @@ fn unrelated_failure_cannot_reset_a_waiting_departure() {
     driver.finish_save();
     assert!(driver.app.active_view().is_none());
 }
+
+#[test]
+fn waiting_session_does_not_adopt_a_later_save_for_the_same_document() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut driver = Driver::new();
+    let document = driver.document();
+    driver.command(Command::Close);
+    driver.key(Key::Char('s'));
+    driver.path(&directory.path().join("first.txt"));
+    driver.effects.clear();
+    // This independent save collects the first request's cancellation before
+    // the corresponding terminal result is polled by the interaction layer.
+    driver.event(Event::Save {
+        document,
+        target: Some(directory.path().join("second.txt")),
+    });
+    driver.event(Event::PollFiles);
+    assert!(
+        driver
+            .layers
+            .active()
+            .unwrap()
+            .presentation()
+            .cursor
+            .is_some()
+    );
+    driver.finish_save();
+    assert!(driver.app.workspace().editor(document).is_some());
+    assert!(driver.layers.active().is_some());
+}

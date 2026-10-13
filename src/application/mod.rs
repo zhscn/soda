@@ -1,4 +1,4 @@
-//! Owner-thread application reducer. Hosts execute returned file effects and
+//! Owner-thread application reducer. Runtime executes returned file effects and
 //! feed completions back as events; terminal input and rendering stay outside.
 //!
 //! Each view has a dedicated session and stays bound to one document. The
@@ -9,8 +9,8 @@
 //! completions identify their document independently of focus and retain the exact
 //! saved revision.
 //!
-//! Hosts consume Update after each dispatch, execute effects using a cloned
-//! FileService, and enqueue the resulting completion events on the owner thread.
+//! Runtime consumes Update after each dispatch, executes effects using a cloned
+//! FileService, and reduces completion events on the owner thread.
 //! PollFiles drains request/completion drop notifications. Reading workspace and
 //! view state after an error reveals the current document and reservation state.
 //! Path/configuration preflight and explicit Reload currently run synchronously.

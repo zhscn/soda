@@ -1,8 +1,8 @@
 //! Application command reduction. Commands resolve their targets on the owner
 //! thread and return ordered application events and platform effects.
 use super::{
-    ExitScope, ExitSession, HelpSession, Layer, Layers, Message, ReplaceSession, Response,
-    SearchSession, TextInput,
+    ExitScope, ExitSession, GotoSession, HelpSession, Layer, Layers, Message, ReplaceSession,
+    Response, SearchSession, TextInput,
     picker::{PickerLimits, PickerSession},
 };
 use crate::{
@@ -59,15 +59,7 @@ impl Layers {
             }
             Command::Goto => {
                 if let Some(view) = app.active_view() {
-                    response = self.enter(
-                        Layer::Goto {
-                            view,
-                            input: TextInput::default(),
-                            error: false,
-                        },
-                        app,
-                        time,
-                    )?;
+                    response = self.enter(Layer::Goto(GotoSession::new(view)), app, time)?;
                 }
             }
             Command::Page { backward, extend } => {

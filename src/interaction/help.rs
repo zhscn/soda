@@ -1,5 +1,5 @@
 //! Read-only shortcut help. CLI and interactive help share this text.
-use super::{Input, InputKey, InputMotion, picker::ListMotion};
+use super::{Input, InputKey, InputMotion, picker::ListMotion, session::Transition};
 
 pub const TEXT: &str = "Files
 Ctrl-N New   Ctrl-O Open   Ctrl-P Find file   Ctrl-W Close buffer
@@ -40,12 +40,14 @@ pub struct HelpSession {
     first_line: usize,
     rows: usize,
 }
-pub(super) enum HelpAction {
-    Close,
-    Redraw,
-    Blocked,
-}
 impl HelpSession {
+    pub(super) fn presentation(&self) -> super::Presentation {
+        super::Presentation {
+            text: "Help — arrows / PageUp / PageDown scroll; Esc returns".into(),
+            cursor: None,
+            selection: 0..0,
+        }
+    }
     pub fn first_line(&self) -> usize {
         self.first_line
     }
@@ -58,12 +60,12 @@ impl HelpSession {
             .first_line
             .min(TEXT.lines().count().saturating_sub(rows.max(1)));
     }
-    pub(super) fn handle(&mut self, input: Input) -> HelpAction {
+    pub(super) fn handle(&mut self, input: Input) -> Transition {
         let before = self.first_line;
         let page = self.rows.saturating_sub(1).max(1);
         let last = TEXT.lines().count().saturating_sub(self.rows.max(1));
         let motion = match input {
-            Input::Cancel | Input::Confirm | Input::Help => return HelpAction::Close,
+            Input::Cancel | Input::Confirm | Input::Help => return Transition::close(),
             Input::Candidate { motion, .. } => motion,
             Input::Text(InputKey::Move {
                 motion: InputMotion::Start,
@@ -73,7 +75,7 @@ impl HelpSession {
                 motion: InputMotion::End,
                 ..
             }) => ListMotion::Last,
-            _ => return HelpAction::Blocked,
+            _ => return Transition::Blocked,
         };
         self.first_line = match motion {
             ListMotion::Previous => before.saturating_sub(1),
@@ -84,9 +86,9 @@ impl HelpSession {
             ListMotion::Last => last,
         };
         if self.first_line != before {
-            HelpAction::Redraw
+            Transition::redraw()
         } else {
-            HelpAction::Blocked
+            Transition::Blocked
         }
     }
 }

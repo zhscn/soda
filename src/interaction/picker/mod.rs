@@ -317,3 +317,70 @@ impl Drop for PickerSession {
         self.source.close();
     }
 }
+
+impl PickerSession {
+    pub(super) fn handle(&mut self, input: super::Input) -> super::session::Transition {
+        use super::{
+            Input, Response,
+            session::{Transition, edit_field},
+        };
+        match input {
+            Input::Cancel => Transition::finished(Response {
+                effects: vec![PickerEffect::Cancel(self.id())],
+                redraw: true,
+                ..Response::default()
+            }),
+            Input::Confirm => match self.selected_path() {
+                Some(path) => Transition::finished(Response {
+                    events: vec![crate::application::Event::Open(path.to_owned())],
+                    effects: vec![PickerEffect::Cancel(self.id())],
+                    redraw: true,
+                    ..Response::default()
+                }),
+                None => Transition::active(Response::default()),
+            },
+            Input::Candidate { motion, wrap } => Transition::active(Response {
+                redraw: self.navigate(motion, wrap),
+                ..Response::default()
+            }),
+            input => match edit_field(self.input_mut(), input) {
+                Some(update) if update.text_changed => Transition::active(Response {
+                    effects: self
+                        .query_changed()
+                        .map(PickerEffect::Run)
+                        .into_iter()
+                        .collect(),
+                    redraw: true,
+                    ..Response::default()
+                }),
+                Some(update) if update.selection_changed => Transition::redraw(),
+                _ => Transition::Blocked,
+            },
+        }
+    }
+    pub(super) fn presentation(&self) -> super::Presentation {
+        let status = match self.status() {
+            PickerStatus::Loading => "loading".to_owned(),
+            PickerStatus::Failed(error) => error.clone(),
+            PickerStatus::Ready => {
+                let results = self.results();
+                format!(
+                    "{}/{}{}{}",
+                    results.rows.len(),
+                    results.matched,
+                    if results.truncated {
+                        "; catalog truncated"
+                    } else {
+                        ""
+                    },
+                    if results.warnings.is_empty() {
+                        ""
+                    } else {
+                        "; scan warnings"
+                    }
+                )
+            }
+        };
+        super::session::field_presentation(format!("Files [{status}]: "), self.input())
+    }
+}

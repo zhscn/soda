@@ -1,6 +1,6 @@
 //! Document-bound departure workflows. Save effects are observed to completion
 //! before closing, reloading or quitting; cancellation leaves writes independent.
-use super::{Input, InputKey, Message, Presentation, Response, TextInput};
+use super::{Input, InputKey, Message, Presentation, Response, TextInput, session::Transition};
 use crate::{
     application::{Application, Effect, Event, Update},
     editor::DocumentId,
@@ -28,24 +28,6 @@ pub struct ExitSession {
     discarded: BTreeMap<DocumentId, u64>,
     name: String,
     error: Option<String>,
-}
-pub(super) struct Transition {
-    pub response: Response,
-    pub finished: bool,
-}
-impl Transition {
-    fn active(response: Response) -> Self {
-        Self {
-            response,
-            finished: false,
-        }
-    }
-    fn finished(response: Response) -> Self {
-        Self {
-            response,
-            finished: true,
-        }
-    }
 }
 impl ExitSession {
     pub fn new(app: &Application, scope: ExitScope) -> Option<Self> {
@@ -108,18 +90,18 @@ impl ExitSession {
             selection,
         }
     }
-    pub(super) fn handle(&mut self, input: Input, app: &Application) -> Option<Transition> {
+    pub(super) fn handle(&mut self, input: Input, app: &Application) -> Transition {
         let redraw = || Response {
             redraw: true,
             ..Response::default()
         };
         match input {
-            Input::Cancel => Some(Transition::finished(redraw())),
+            Input::Cancel => Transition::finished(redraw()),
             Input::Confirm if matches!(self.phase, Phase::Question) => {
-                Some(Transition::finished(redraw()))
+                Transition::finished(redraw())
             }
             Input::Text(InputKey::Char('s' | 'S')) if matches!(self.phase, Phase::Question) => {
-                Some(self.save(app, None))
+                self.save(app, None)
             }
             Input::Text(InputKey::Char('d' | 'D' | 'y'))
                 if matches!(self.phase, Phase::Question) =>
@@ -136,19 +118,19 @@ impl ExitSession {
                             .version(),
                     );
                 }
-                Some(self.advance(app, true))
+                self.advance(app, true)
             }
             Input::Text(InputKey::Char(_)) if matches!(self.phase, Phase::Question) => {
-                Some(Transition::finished(redraw()))
+                Transition::finished(redraw())
             }
             Input::Confirm if matches!(self.phase, Phase::Path(_)) => {
                 let Phase::Path(field) = &self.phase else {
                     unreachable!()
                 };
                 if field.text().is_empty() {
-                    return None;
+                    return Transition::Blocked;
                 }
-                Some(self.save(app, Some(PathBuf::from(field.text()))))
+                self.save(app, Some(PathBuf::from(field.text())))
             }
             input if matches!(self.phase, Phase::Path(_)) => {
                 let Phase::Path(field) = &mut self.phase else {
@@ -157,18 +139,18 @@ impl ExitSession {
                 let update = match input {
                     Input::Text(key) => field.key(key),
                     Input::Paste(text) => field.insert(&text),
-                    _ => return None,
+                    _ => return Transition::Blocked,
                 };
                 if update.text_changed {
                     self.error = None;
                 }
                 if update.text_changed || update.selection_changed {
-                    Some(Transition::active(redraw()))
+                    Transition::active(redraw())
                 } else {
-                    None
+                    Transition::Blocked
                 }
             }
-            _ => None,
+            _ => Transition::Blocked,
         }
     }
     fn save(&mut self, app: &Application, target: Option<PathBuf>) -> Transition {
@@ -251,6 +233,7 @@ impl ExitSession {
             for effect in &update.effects {
                 if let Effect::Save(request) = effect
                     && request.document_id() == self.current
+                    && pending.is_none()
                 {
                     *pending = Some(request.id());
                 }

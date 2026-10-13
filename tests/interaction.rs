@@ -466,3 +466,57 @@ fn prompt_navigation_and_filtered_paste_do_not_generate_file_commands() {
     );
     assert!(layers.active().is_none());
 }
+
+#[test]
+fn all_builtin_sessions_share_the_cancel_lifecycle_contract() {
+    use soda::interaction::{
+        ExitScope, ExitSession, GotoSession, HelpSession, ReplaceSession,
+        picker::{PickerLimits, PickerSession},
+    };
+    let (mut app, view) = setup("dirty");
+    let document = app.view(view).unwrap().document_id;
+    let directory = tempfile::tempdir().unwrap();
+    let sessions = vec![
+        Layer::Open(TextInput::default()),
+        Layer::Save(document, TextInput::default()),
+        Layer::Goto(GotoSession::new(view)),
+        Layer::Help(HelpSession::default()),
+        Layer::Exit(ExitSession::new(&app, ExitScope::Close(document)).unwrap()),
+        Layer::Replace(ReplaceSession::new(&app, view).unwrap()),
+        Layer::Picker(
+            PickerSession::new(directory.path().to_owned(), PickerLimits::default()).unwrap(),
+        ),
+        Layer::Search {
+            input: TextInput::default(),
+            session: SearchSession::new(&app, view).unwrap(),
+        },
+    ];
+    for session in sessions {
+        let mut layers = Layers::default();
+        layers.enter(session, &app, Duration::ZERO).unwrap();
+        let InputResult::Handled(response) =
+            layers.handle(Input::Cancel, &app, Duration::ZERO).unwrap()
+        else {
+            panic!("cancel must be consumed")
+        };
+        assert!(layers.active().is_none());
+        assert!(response.redraw);
+        assert!(!response.quit);
+        for event in response.events {
+            let update = app.dispatch(event).unwrap();
+            assert!(update.effects.is_empty());
+            let followup = layers.observe(&app, &update, Duration::ZERO).unwrap();
+            assert!(followup.events.is_empty());
+        }
+        assert_eq!(
+            app.workspace()
+                .editor(document)
+                .unwrap()
+                .model()
+                .document()
+                .snapshot()
+                .text(),
+            "dirty"
+        );
+    }
+}
