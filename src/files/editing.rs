@@ -33,6 +33,14 @@ impl Editing<'_> {
     ) -> Result<EditorUpdate, EditError> {
         self.editor.execute_for(session, command)
     }
+    pub fn execute_at(
+        &mut self,
+        session: SessionId,
+        command: Command,
+        time: std::time::Duration,
+    ) -> Result<EditorUpdate, EditError> {
+        self.editor.execute_at(session, command, time)
+    }
     pub fn add_session(&mut self, selection: Selection) -> Result<SessionId, EditError> {
         self.editor.add_session(selection)
     }

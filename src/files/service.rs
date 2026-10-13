@@ -90,7 +90,7 @@ impl LoadedFile {
 
 /// Synchronous disk operations. Scheduling and completion application belong
 /// to the workspace, so this service never mutates an editor model.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct FileService {
     options: ConfigOptions,
 }

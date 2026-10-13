@@ -84,6 +84,14 @@ impl Workspace {
         workspace.service = service;
         workspace
     }
+    /// Reservation state after the most recent owner-thread event collection.
+    /// Call `poll_file_results` to apply request/completion drop notifications.
+    pub fn is_open_pending(&self, id: OpenId) -> bool {
+        self.open_requests.contains_key(&id)
+    }
+    pub fn is_saving(&self, id: DocumentId) -> bool {
+        self.pending.contains_key(&id)
+    }
     pub fn service(&self) -> &FileService {
         &self.service
     }

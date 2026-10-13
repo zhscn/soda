@@ -150,6 +150,11 @@ pub struct OpenCompletion {
     pub(super) result: Option<Result<LoadedFile, FileError>>,
     pub(super) route: FileRoute,
 }
+impl OpenCompletion {
+    pub fn id(&self) -> OpenId {
+        self.id
+    }
+}
 impl Drop for OpenCompletion {
     fn drop(&mut self) {
         if self.result.is_some() {

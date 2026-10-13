@@ -7,3 +7,5 @@ pub mod editor;
 pub mod language;
 
 pub mod files;
+
+pub mod application;
