@@ -78,7 +78,7 @@ pub enum Event {
     },
     SaveFinished(SaveCompletion),
     Reload {
-        document: DocumentId,
+        view: ViewId,
         discard: bool,
     },
     PollFiles,
@@ -407,8 +407,11 @@ impl Application {
                 let file = self.workspace.finish_save(completion)?;
                 self.accept_file(file, Some(request), &mut update);
             }
-            Event::Reload { document, discard } => {
-                let result = self.workspace.reload(document, discard)?;
+            Event::Reload { view, discard } => {
+                let view = self.views.get(&view).ok_or(Error::UnknownView)?;
+                let result =
+                    self.workspace
+                        .reload_for(view.document_id, view.session_id, discard)?;
                 self.accept_edit(result.edit, &mut update);
                 self.accept_file(result.file, None, &mut update);
             }

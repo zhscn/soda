@@ -145,6 +145,27 @@ impl Workspace {
     /// Explicit disk reload. Local edits require discard=true; history retains
     /// the replaced contents as one undo unit and document identity is stable.
     pub fn reload(&mut self, id: DocumentId, discard: bool) -> Result<ReloadUpdate, FileError> {
+        let session = self
+            .editors
+            .get(&id)
+            .ok_or(FileError::UnknownDocument)?
+            .model()
+            .default_session();
+        self.reload_for(id, session, discard)
+    }
+    /// Reload on behalf of an editing session, which owns the undo selection.
+    pub fn reload_for(
+        &mut self,
+        id: DocumentId,
+        session: crate::editor::SessionId,
+        discard: bool,
+    ) -> Result<ReloadUpdate, FileError> {
+        self.editors
+            .get(&id)
+            .ok_or(FileError::UnknownDocument)?
+            .model()
+            .session(session)
+            .ok_or(crate::core::EditError::UnknownSession)?;
         self.collect_events();
         if self.pending.contains_key(&id) {
             return Err(FileError::Busy);
@@ -180,7 +201,7 @@ impl Workspace {
                 .ok_or(crate::core::EditError::VersionExhausted)?;
         }
         let editor = self.editors.get_mut(&id).unwrap();
-        let mut edit = editor.execute(Command::ReloadText(loaded.text))?;
+        let mut edit = editor.execute_for(session, Command::ReloadText(loaded.text))?;
         let language_changed = editor
             .execute(Command::SetLanguage(language))?
             .language_changed;

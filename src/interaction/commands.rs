@@ -159,7 +159,7 @@ impl Layers {
                             Message::Set("Save in progress; wait before leaving document".into());
                     } else if editor.model().document().is_dirty() {
                         let scope = if reload {
-                            ExitScope::Reload(document)
+                            ExitScope::Reload(view.id)
                         } else {
                             ExitScope::Close(document)
                         };
@@ -171,7 +171,7 @@ impl Layers {
                     } else {
                         response.events.push(if reload {
                             Event::Reload {
-                                document,
+                                view: view.id,
                                 discard: false,
                             }
                         } else {

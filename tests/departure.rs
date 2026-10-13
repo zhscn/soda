@@ -305,3 +305,32 @@ fn dropped_save_request_returns_to_decision_instead_of_closing() {
     assert!(driver.app.workspace().editor(document).is_none());
     assert!(!driver.quit);
 }
+
+#[test]
+fn reload_undo_restores_the_initiating_views_directed_selection() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("file.txt");
+    let mut driver = Driver::new();
+    driver.bind(&path);
+    let document = driver.document();
+    let view = driver.app.active_view().unwrap();
+    let original = soda::core::Selection { anchor: 3, head: 2 };
+    driver.command(Command::Edit(Edit::SetSelection(original)));
+    std::fs::write(path, "XYZ").unwrap();
+    driver.command(Command::Reload);
+    driver.command(Command::Edit(Edit::Undo));
+    assert_eq!(driver.text(document), "local");
+    let session = driver.app.view(view).unwrap().session_id;
+    assert_eq!(
+        driver
+            .app
+            .workspace()
+            .editor(document)
+            .unwrap()
+            .model()
+            .session(session)
+            .unwrap()
+            .selection(),
+        original
+    );
+}

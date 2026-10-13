@@ -10,7 +10,7 @@ use std::{collections::BTreeMap, path::PathBuf};
 #[derive(Clone, Copy, Debug)]
 pub enum ExitScope {
     Close(DocumentId),
-    Reload(DocumentId),
+    Reload(crate::application::ViewId),
     Quit,
 }
 enum Phase {
@@ -50,7 +50,8 @@ impl Transition {
 impl ExitSession {
     pub fn new(app: &Application, scope: ExitScope) -> Option<Self> {
         let current = match scope {
-            ExitScope::Close(document) | ExitScope::Reload(document) => document,
+            ExitScope::Close(document) => document,
+            ExitScope::Reload(view) => app.view(view)?.document_id,
             ExitScope::Quit => app.workspace().documents().find(|id| {
                 app.workspace()
                     .editor(*id)
@@ -211,6 +212,12 @@ impl ExitSession {
         }
     }
     pub(super) fn observe(&mut self, app: &Application, update: &Update) -> Transition {
+        if matches!(self.scope, ExitScope::Reload(view) if app.view(view).is_none()) {
+            return Transition::finished(Response {
+                redraw: true,
+                ..Response::default()
+            });
+        }
         if app.workspace().editor(self.current).is_none() {
             return self.advance(app, false);
         }
@@ -269,9 +276,9 @@ impl ExitSession {
                         .push(Event::CloseDocument { document, discard });
                 }
             }
-            ExitScope::Reload(document) => {
-                if app.workspace().editor(document).is_some() {
-                    response.events.push(Event::Reload { document, discard });
+            ExitScope::Reload(view) => {
+                if app.view(view).is_some() {
+                    response.events.push(Event::Reload { view, discard });
                 }
             }
             ExitScope::Quit => {

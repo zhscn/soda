@@ -67,3 +67,5 @@ cargo test --test files
 ```
 
 保存请求通过 `SaveId` 标识，文件结果携带对应请求身份。未执行请求的取消也输出 `FileError::Cancelled` 终态；宿主消费该结果以结束相关等待会话。重新加载的文件更新没有保存请求身份。
+
+应用重新加载通过发起视图的编辑 Session 执行，撤销恢复该会话的原选区。`Workspace::reload_for` 明确接收会话身份；直接使用工作区的 `reload` 则以默认会话为发起者。

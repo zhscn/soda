@@ -267,7 +267,7 @@ fn dropped_completion_is_applied_by_poll_and_reload_maps_viewports() {
     assert!(!update.files[0].result.as_ref().unwrap().dirty);
     fs::write(path, "z").unwrap();
     app.dispatch(Event::Reload {
-        document: doc,
+        view,
         discard: false,
     })
     .unwrap();
