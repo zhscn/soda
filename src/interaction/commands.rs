@@ -16,6 +16,8 @@ use std::{path::Path, time::Duration};
 pub enum Command {
     Edit(EditCommand),
     Clipboard(ClipboardAction),
+    Goto,
+    Page { backward: bool, extend: bool },
     Open,
     New,
     Close,
@@ -27,6 +29,9 @@ pub enum Command {
 }
 
 impl Layers {
+    pub fn set_page_rows(&mut self, rows: usize) {
+        self.page_rows = rows;
+    }
     /// Invoke a command independently of key bindings. Invocation is blocked
     /// while a modal layer owns focus; confirmation uses that layer's contract.
     pub fn execute(
@@ -45,6 +50,51 @@ impl Layers {
             ..Response::default()
         };
         match command {
+            Command::Goto => {
+                if let Some(view) = app.active_view() {
+                    response = self.enter(
+                        Layer::Goto {
+                            view,
+                            input: TextInput::default(),
+                            error: false,
+                        },
+                        app,
+                        time,
+                    )?;
+                }
+            }
+            Command::Page { backward, extend } => {
+                if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
+                    let count = self.page_rows.saturating_sub(1).max(1);
+                    let snapshot = app
+                        .workspace()
+                        .editor(view.document_id)
+                        .unwrap()
+                        .model()
+                        .document()
+                        .snapshot();
+                    let top = snapshot.line_of(view.viewport.anchor.offset.0).unwrap();
+                    let top = if backward {
+                        top.saturating_sub(count)
+                    } else {
+                        top.saturating_add(count)
+                            .min(snapshot.line_count().saturating_sub(self.page_rows.max(1)))
+                    };
+                    response.events.push(Event::Edit {
+                        view: view.id,
+                        command: EditCommand::Move {
+                            motion: crate::editor::Motion::Lines { backward, count },
+                            extend,
+                        },
+                        time,
+                    });
+                    response.events.push(Event::SetViewport {
+                        view: view.id,
+                        anchor: crate::core::ByteOffset(snapshot.line_start(top).unwrap()),
+                        horizontal_column: view.viewport.horizontal_column,
+                    });
+                }
+            }
             Command::PickFiles => {
                 match PickerSession::new(file_root.to_owned(), PickerLimits::default()) {
                     Ok(session) => response = self.start_picker(session, app, time)?,

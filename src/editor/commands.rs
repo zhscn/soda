@@ -6,6 +6,9 @@ use crate::core::{
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Motion {
+    WordBackward,
+    WordForward,
+    Lines { backward: bool, count: usize },
     Backward,
     Forward,
     Up,
@@ -32,7 +35,7 @@ pub(super) fn move_selection(
     let selection = state.selection();
     let head = selection.head;
     let line = snapshot.line_of(head).unwrap();
-    let vertical = matches!(motion, Motion::Up | Motion::Down);
+    let vertical = matches!(motion, Motion::Up | Motion::Down | Motion::Lines { .. });
     let goal = if vertical {
         Some(match goal {
             Some(goal) => goal,
@@ -55,11 +58,25 @@ pub(super) fn move_selection(
             Motion::Backward | Motion::Forward => {
                 step_grapheme(snapshot, ByteOffset(head), motion == Motion::Forward)?.0
             }
-            Motion::Up | Motion::Down => {
-                let target = if motion == Motion::Up {
-                    line.saturating_sub(1)
+            Motion::WordBackward | Motion::WordForward => {
+                crate::core::word_boundary(
+                    snapshot,
+                    ByteOffset(head),
+                    motion == Motion::WordBackward,
+                )?
+                .0
+            }
+            Motion::Up | Motion::Down | Motion::Lines { .. } => {
+                let (backward, count) = match motion {
+                    Motion::Up => (true, 1),
+                    Motion::Down => (false, 1),
+                    Motion::Lines { backward, count } => (backward, count),
+                    _ => unreachable!(),
+                };
+                let target = if backward {
+                    line.saturating_sub(count)
                 } else {
-                    (line + 1).min(snapshot.line_count() - 1)
+                    line.saturating_add(count).min(snapshot.line_count() - 1)
                 };
                 offset_at_logical_column(
                     snapshot,
@@ -86,6 +103,29 @@ pub(super) fn move_selection(
         },
         goal,
     ))
+}
+pub(super) fn delete_word(
+    state: &EditorState,
+    direction: Direction,
+) -> Result<Transaction, EditError> {
+    let mut range = state.selection().range();
+    if range.is_empty() {
+        let edge = crate::core::word_boundary(
+            state.snapshot(),
+            ByteOffset(range.start),
+            direction == Direction::Backward,
+        )?
+        .0;
+        range = edge.min(range.start)..edge.max(range.start);
+    }
+    let changes = if range.is_empty() {
+        vec![]
+    } else {
+        vec![Change::new(range.clone(), "")]
+    };
+    let mut tx = Transaction::new(state.snapshot().version(), changes);
+    tx.selection = Some(Selection::caret(range.start));
+    Ok(tx)
 }
 fn whitespace(target: usize, language: &LanguageSession) -> String {
     crate::language::materialize(target, 0, target, &language.whitespace())

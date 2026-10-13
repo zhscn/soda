@@ -19,6 +19,11 @@ pub use search::{SearchResults, SearchSession};
 use std::{path::PathBuf, time::Duration};
 
 pub enum Layer {
+    Goto {
+        view: crate::application::ViewId,
+        input: TextInput,
+        error: bool,
+    },
     Open(TextInput),
     Save(DocumentId, TextInput),
     Quit,
@@ -62,6 +67,7 @@ enum Route {
 #[derive(Default)]
 pub struct Layers {
     active: Option<Layer>,
+    page_rows: usize,
 }
 /// A modal layer blocks unrecognized input. Handled input may change only its
 /// selection, so redraw is independent of application commands and queries.
@@ -162,13 +168,25 @@ pub struct Presentation {
 impl Layer {
     fn field_mut(&mut self) -> Option<&mut TextInput> {
         match self {
-            Self::Open(input) | Self::Save(_, input) | Self::Search { input, .. } => Some(input),
+            Self::Open(input)
+            | Self::Save(_, input)
+            | Self::Search { input, .. }
+            | Self::Goto { input, .. } => Some(input),
             Self::Picker(session) => Some(session.input_mut()),
             Self::Quit => None,
         }
     }
     pub fn presentation(&self) -> Presentation {
         let (label, field) = match self {
+            Self::Goto { input, error, .. } => (
+                if *error {
+                    "Go to line[:column] (positive numbers required): "
+                } else {
+                    "Go to line[:column]: "
+                }
+                .to_owned(),
+                input,
+            ),
             Self::Open(field) => ("Open: ".to_owned(), field),
             Self::Save(_, field) => ("Save as: ".to_owned(), field),
             Self::Search { input, session } => {
@@ -272,6 +290,9 @@ impl Layers {
                 })
             }
             Intent::Changed => {
+                if let Some(Layer::Goto { error, .. }) = &mut self.active {
+                    *error = false;
+                }
                 let mut response = self.preview(app, false, false, time)?;
                 response.redraw = true;
                 Ok(response)
@@ -283,6 +304,18 @@ impl Layers {
                 {
                     return Ok(Response::default());
                 }
+                if matches!(intent, Intent::Confirm)
+                    && let Some(Layer::Goto { input, .. }) = &self.active
+                    && parse_location(input.text()).is_none()
+                {
+                    if let Some(Layer::Goto { error, .. }) = &mut self.active {
+                        *error = true;
+                    }
+                    return Ok(Response {
+                        redraw: true,
+                        ..Response::default()
+                    });
+                }
                 let Some(layer) = self.active.take() else {
                     return Ok(Response::default());
                 };
@@ -292,6 +325,16 @@ impl Layers {
                     ..Response::default()
                 };
                 match layer {
+                    Layer::Goto { view, input, .. } if confirm => {
+                        let (line, column) = parse_location(input.text()).unwrap();
+                        if app.view(view).is_some() {
+                            response.events.push(Event::Edit {
+                                view,
+                                command: EditCommand::Goto { line, column },
+                                time,
+                            });
+                        }
+                    }
                     Layer::Picker(session) => {
                         response.effects.push(PickerEffect::Cancel(session.id()));
                         if confirm && let Some(path) = session.selected_path() {
@@ -362,6 +405,11 @@ impl Layers {
         update: &Update,
         time: Duration,
     ) -> Result<Response, EditError> {
+        if let Some(Layer::Goto { view, .. }) = &self.active
+            && (app.view(*view).is_none() || app.active_view() != Some(*view))
+        {
+            return self.close(app, time);
+        }
         if let Some(Layer::Save(document, _)) = &self.active
             && app.workspace().editor(*document).is_none()
         {
@@ -419,4 +467,12 @@ impl Layers {
             _ => false,
         }
     }
+}
+
+fn parse_location(text: &str) -> Option<(usize, usize)> {
+    let (line, column) = text.trim().split_once(':').unwrap_or((text.trim(), "1"));
+    Some((
+        line.parse::<usize>().ok()?.checked_sub(1)?,
+        column.parse::<usize>().ok()?.checked_sub(1)?,
+    ))
 }

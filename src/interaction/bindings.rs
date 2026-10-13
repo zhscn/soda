@@ -13,6 +13,23 @@ pub(crate) fn binding(key: KeyStroke) -> Option<Command> {
     }
     if control {
         return match key.code {
+            Key::Char('a') if !shift => Some(Command::Edit(EditCommand::SelectAll)),
+            Key::Char('g') if !shift => Some(Command::Goto),
+            Key::Left | Key::Right => Some(Command::Edit(EditCommand::Move {
+                motion: if key.code == Key::Left {
+                    Motion::WordBackward
+                } else {
+                    Motion::WordForward
+                },
+                extend: shift,
+            })),
+            Key::Backspace | Key::Delete if !shift => Some(Command::Edit(EditCommand::DeleteWord(
+                if key.code == Key::Backspace {
+                    Direction::Backward
+                } else {
+                    Direction::Forward
+                },
+            ))),
             Key::Char('c') if !shift => Some(Command::Clipboard(ClipboardAction::Copy)),
             Key::Char('x') if !shift => Some(Command::Clipboard(ClipboardAction::Cut)),
             Key::Char('v') if !shift => Some(Command::Clipboard(ClipboardAction::Paste)),
@@ -36,6 +53,12 @@ pub(crate) fn binding(key: KeyStroke) -> Option<Command> {
             })),
             _ => None,
         };
+    }
+    if matches!(key.code, Key::PageUp | Key::PageDown) {
+        return Some(Command::Page {
+            backward: key.code == Key::PageUp,
+            extend: shift,
+        });
     }
     if key.code == Key::F(3) {
         return Some(Command::Edit(EditCommand::Find {

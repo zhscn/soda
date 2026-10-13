@@ -150,3 +150,102 @@ fn copying_separates_typing_history_without_creating_an_undo_entry() {
     editor.ctrl('z');
     assert_eq!(editor.text(), "");
 }
+
+#[test]
+fn word_navigation_and_deletion_cross_crlf_without_splitting_graphemes() {
+    let mut editor = Editor::new("e\u{301} foo\r\n\nbar");
+    editor.input(UserInput::Key(KeyStroke {
+        control: true,
+        ..KeyStroke::plain(Key::Right)
+    }));
+    assert_eq!(editor.selection().head, "e\u{301}".len());
+    editor.input(UserInput::Key(KeyStroke {
+        control: true,
+        shift: true,
+        ..KeyStroke::plain(Key::Right)
+    }));
+    assert_eq!(editor.selection(), Selection { anchor: 3, head: 7 });
+    editor.input(UserInput::Key(KeyStroke {
+        control: true,
+        ..KeyStroke::plain(Key::Delete)
+    }));
+    assert_eq!(editor.text(), "e\u{301}\r\n\nbar");
+    editor.ctrl('z');
+    editor.select(Selection::caret(7));
+    editor.input(UserInput::Key(KeyStroke {
+        control: true,
+        ..KeyStroke::plain(Key::Delete)
+    }));
+    assert_eq!(editor.text(), "e\u{301} foo");
+    editor.ctrl('z');
+    editor.select(Selection::caret(editor.text().len()));
+    editor.input(UserInput::Key(KeyStroke {
+        control: true,
+        ..KeyStroke::plain(Key::Backspace)
+    }));
+    assert_eq!(editor.text(), "e\u{301} foo\r\n\n");
+}
+#[test]
+fn select_all_replacement_restores_directed_selection_on_undo() {
+    let mut editor = Editor::new("中\r\n🦀");
+    editor.ctrl('a');
+    let selected = editor.selection();
+    assert_eq!(
+        selected,
+        Selection {
+            anchor: 0,
+            head: editor.text().len()
+        }
+    );
+    editor.input(UserInput::Paste("replacement".into()));
+    editor.ctrl('z');
+    assert_eq!(editor.text(), "中\r\n🦀");
+    assert_eq!(editor.selection(), selected);
+}
+#[test]
+fn page_navigation_uses_visible_rows_and_preserves_goal_column() {
+    let mut editor = Editor::new("long line\nx\nlong line\nlong line\nlong line\nlong line");
+    editor.select(Selection::caret(7));
+    editor.layers.set_page_rows(3);
+    editor.input(UserInput::Key(KeyStroke::plain(Key::PageDown)));
+    assert_eq!(editor.selection().head, "long line\nx\n".len() + 7);
+    editor.input(UserInput::Key(KeyStroke {
+        shift: true,
+        ..KeyStroke::plain(Key::PageUp)
+    }));
+    assert_eq!(editor.selection().head, 7);
+    assert_ne!(editor.selection().anchor, editor.selection().head);
+    editor.layers.set_page_rows(0);
+    editor.input(UserInput::Key(KeyStroke::plain(Key::PageUp)));
+    assert_eq!(editor.selection().head, 7);
+}
+#[test]
+fn goto_validates_input_clamps_location_and_cancel_keeps_selection() {
+    let mut editor = Editor::new("one\n中e\u{301}x\n");
+    editor.ctrl('g');
+    editor.input(UserInput::Paste("0:1".into()));
+    editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
+    assert!(editor.layers.active().is_some());
+    assert_eq!(editor.selection(), Selection::caret(0));
+    editor.ctrl('a');
+    editor.input(UserInput::Paste("2:4".into()));
+    editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
+    assert!(editor.layers.active().is_none());
+    assert_eq!(editor.selection().head, "one\n中e\u{301}".len());
+    let before = editor.selection();
+    editor.ctrl('g');
+    editor.input(UserInput::Paste("999:999".into()));
+    editor.input(UserInput::Key(KeyStroke::plain(Key::Esc)));
+    assert_eq!(editor.selection(), before);
+    editor.ctrl('g');
+    editor.input(UserInput::Paste("999:999".into()));
+    editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
+    assert_eq!(editor.selection().head, editor.text().len());
+}
+#[test]
+fn goto_closes_when_external_focus_changes() {
+    let mut editor = Editor::new("one");
+    editor.ctrl('g');
+    editor.event(Event::NewDocument(Language::PlainText));
+    assert!(editor.layers.active().is_none());
+}

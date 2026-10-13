@@ -21,6 +21,9 @@ pub enum Command {
     Redo,
     Move { motion: Motion, extend: bool },
     Delete { direction: Direction, smart: bool },
+    DeleteWord(Direction),
+    SelectAll,
+    Goto { line: usize, column: usize },
     InsertTab,
     InsertLiteralTab,
     IndentSelection { outdent: bool },
@@ -152,6 +155,27 @@ impl Editor {
                 }
                 None
             }
+            Command::SelectAll => {
+                self.model.set_selection(
+                    id,
+                    Selection {
+                        anchor: 0,
+                        head: state.snapshot().len_bytes(),
+                    },
+                )?;
+                None
+            }
+            Command::Goto { line, column } => {
+                let line = line.min(state.snapshot().line_count() - 1);
+                let offset = crate::core::offset_at_logical_column(
+                    state.snapshot(),
+                    line,
+                    crate::core::LogicalColumn(column),
+                    self.model.document.language.whitespace().tab_width,
+                )?;
+                self.model.set_selection(id, Selection::caret(offset.0))?;
+                None
+            }
             Command::SetSelection(selection) => {
                 self.model.set_selection(id, selection)?;
                 None
@@ -221,6 +245,10 @@ impl Editor {
                     ),
                     Command::Delete { direction, smart } => (
                         commands::delete(&state, direction, smart, &self.model.document.language)?,
+                        EditOrigin::Delete,
+                    ),
+                    Command::DeleteWord(direction) => (
+                        commands::delete_word(&state, direction)?,
                         EditOrigin::Delete,
                     ),
                     Command::InsertTab => (

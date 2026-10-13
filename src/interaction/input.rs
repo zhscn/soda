@@ -97,21 +97,11 @@ impl TextInput {
     /// Unicode words are movement stops; punctuation and whitespace separate
     /// them.
     fn word_edge(&self, offset: usize, backward: bool) -> usize {
-        if backward {
-            self.text
-                .unicode_word_indices()
-                .map(|(start, _)| start)
-                .take_while(|start| *start < offset)
-                .last()
-                .map_or(0, |start| self.clip_forward(start))
-        } else {
-            self.text
-                .unicode_word_indices()
-                .map(|(start, word)| start + word.len())
-                .find(|end| *end > offset)
-                .map_or(self.text.len(), |end| self.clip_forward(end))
-        }
+        crate::core::word_edge(&self.text, offset, backward)
+            .map(|edge| self.clip_forward(edge))
+            .unwrap_or(if backward { 0 } else { self.text.len() })
     }
+
     pub fn key(&mut self, key: InputKey) -> InputUpdate {
         let before = self.selection;
         match key {

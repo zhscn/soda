@@ -209,6 +209,8 @@ impl Host {
     }
     fn draw(&mut self) -> io::Result<()> {
         let (width, height) = terminal::size()?;
+        self.layers
+            .set_page_rows(usize::from(height.saturating_sub(2)));
         let list_rows = usize::from(height.saturating_sub(2)).min(10);
         self.layers.resize_picker(list_rows);
         let frame = layout::frame(&mut self.app, width, height).map_err(io::Error::other)?;

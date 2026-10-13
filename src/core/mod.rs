@@ -1,3 +1,6 @@
+mod word;
+pub use word::word_boundary;
+pub(crate) use word::word_edge;
 mod coordinate;
 pub use coordinate::{ByteOffset, LogicalColumn, TextPoint};
 mod position;
