@@ -221,6 +221,8 @@ impl Host {
         let (width, height) = terminal::size()?;
         self.layers
             .set_page_rows(usize::from(height.saturating_sub(2)));
+        self.layers
+            .resize_help(usize::from(height.saturating_sub(2)));
         let list_rows = usize::from(height.saturating_sub(2)).min(10);
         self.layers.resize_picker(list_rows);
         let frame = layout::frame(&mut self.app, width, height).map_err(io::Error::other)?;
@@ -251,6 +253,18 @@ impl Host {
                 }
             }
         }
+        if let Some(Prompt::Help(session)) = self.layers.active() {
+            for y in 0..height.saturating_sub(2) {
+                queue!(output, MoveTo(0, y), Clear(ClearType::CurrentLine))?;
+            }
+            for (y, line) in session.lines().enumerate() {
+                queue!(
+                    output,
+                    MoveTo(0, y as u16),
+                    Print(layout::plain(line, 0, usize::from(width)))
+                )?;
+            }
+        }
         queue!(output, SetAttribute(Attribute::Reset))?;
         let mut cursor = frame.cursor;
         if width > 0 && height > 0 {
@@ -265,7 +279,11 @@ impl Host {
             }
             let presentation = self.layers.active().map_or_else(
                 || Presentation {
-                    text: self.message.clone(),
+                    text: if self.message.is_empty() {
+                        crate::interaction::help::HINT.to_owned()
+                    } else {
+                        self.message.clone()
+                    },
                     cursor: None,
                     selection: 0..0,
                 },

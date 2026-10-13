@@ -7,6 +7,8 @@ pub use exit::{ExitScope, ExitSession};
 mod routing;
 pub use commands::Command;
 pub use routing::{Key, KeyStroke, UserInput};
+pub mod help;
+pub use help::HelpSession;
 mod input;
 pub mod picker;
 use picker::{ListMotion, PickerCompletion, PickerEffect, PickerSession};
@@ -31,6 +33,7 @@ pub enum Layer {
     Open(TextInput),
     Save(DocumentId, TextInput),
     Exit(ExitSession),
+    Help(HelpSession),
     Replace(ReplaceSession),
     Picker(PickerSession),
     Search {
@@ -39,6 +42,7 @@ pub enum Layer {
     },
 }
 pub enum Input {
+    Help,
     Text(InputKey),
     Paste(String),
     Confirm,
@@ -140,6 +144,23 @@ impl Layers {
         app: &Application,
         time: Duration,
     ) -> Result<InputResult, EditError> {
+        if let Some(Layer::Help(session)) = &mut self.active {
+            let response = match session.handle(input) {
+                help::HelpAction::Blocked => return Ok(InputResult::Blocked),
+                help::HelpAction::Close => {
+                    self.active = None;
+                    Response {
+                        redraw: true,
+                        ..Response::default()
+                    }
+                }
+                help::HelpAction::Redraw => Response {
+                    redraw: true,
+                    ..Response::default()
+                },
+            };
+            return Ok(InputResult::Handled(response));
+        }
         if let Some(Layer::Exit(session)) = &mut self.active {
             return match session.handle(input, app) {
                 Some(transition) => {
@@ -202,7 +223,7 @@ impl Layer {
             }
             Self::Replace(_) => None,
             Self::Picker(session) => Some(session.input_mut()),
-            Self::Exit(_) => None,
+            Self::Exit(_) | Self::Help(_) => None,
         }
     }
     pub fn presentation(&self) -> Presentation {
@@ -248,6 +269,13 @@ impl Layer {
             }
             Self::Replace(session) => return session.presentation(),
             Self::Exit(session) => return session.presentation(),
+            Self::Help(_) => {
+                return Presentation {
+                    text: "Help — arrows / PageUp / PageDown scroll; Esc returns".into(),
+                    cursor: None,
+                    selection: 0..0,
+                };
+            }
         };
         let selection = field.selection().range();
         Presentation {
@@ -555,6 +583,11 @@ impl Layers {
         Response {
             redraw: session.accept(completion),
             ..Response::default()
+        }
+    }
+    pub fn resize_help(&mut self, rows: usize) {
+        if let Some(Layer::Help(session)) = &mut self.active {
+            session.resize(rows);
         }
     }
     pub fn resize_picker(&mut self, rows: usize) -> bool {

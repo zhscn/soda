@@ -55,6 +55,9 @@ pub(crate) fn binding(key: KeyStroke) -> Option<Command> {
             _ => None,
         };
     }
+    if key.code == Key::F(1) && !shift {
+        return Some(Command::Help);
+    }
     if matches!(key.code, Key::PageUp | Key::PageDown) {
         return Some(Command::Page {
             backward: key.code == Key::PageUp,
@@ -123,6 +126,12 @@ pub(crate) fn modal_key(key: KeyStroke) -> Input {
             Key::Esc => return Input::Cancel,
             _ => {}
         }
+    }
+    if key.code == Key::F(1) && !control && !shift {
+        return Input::Help;
+    }
+    if key.code == Key::F(4) && !control && !shift {
+        return Input::ReplaceAll;
     }
     if key.code == Key::Enter && control && !shift {
         return Input::ReplaceAll;

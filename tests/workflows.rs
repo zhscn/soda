@@ -328,3 +328,47 @@ fn replacement_dialog_refreshes_match_after_other_view_edits() {
     editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
     assert_eq!(editor.text(), "prefixbar foo");
 }
+
+#[test]
+fn help_scrolls_and_returns_without_editing_or_moving_selection() {
+    let mut editor = Editor::new("document");
+    editor.select(Selection::caret(3));
+    editor.input(UserInput::Key(KeyStroke::plain(Key::F(1))));
+    editor.layers.resize_help(3);
+    let Some(soda::interaction::Layer::Help(session)) = editor.layers.active() else {
+        panic!()
+    };
+    assert_eq!(session.first_line(), 0);
+    editor.input(UserInput::Key(KeyStroke::plain(Key::PageDown)));
+    let Some(soda::interaction::Layer::Help(session)) = editor.layers.active() else {
+        panic!()
+    };
+    assert_eq!(session.first_line(), 2);
+    editor.input(UserInput::Key(KeyStroke::plain(Key::End)));
+    editor.layers.resize_help(usize::MAX);
+    let Some(soda::interaction::Layer::Help(session)) = editor.layers.active() else {
+        panic!()
+    };
+    assert_eq!(session.first_line(), 0);
+    editor.input(UserInput::Paste("must not edit".into()));
+    editor.ctrl('x');
+    assert_eq!(editor.text(), "document");
+    assert_eq!(editor.selection(), Selection::caret(3));
+    editor.input(UserInput::Key(KeyStroke::plain(Key::F(1))));
+    assert!(editor.layers.active().is_none());
+    assert_eq!(editor.selection(), Selection::caret(3));
+}
+#[test]
+fn f4_replaces_all_only_in_replacement_review() {
+    let mut editor = Editor::new("foo foo");
+    editor.ctrl('f');
+    editor.input(UserInput::Key(KeyStroke::plain(Key::F(4))));
+    assert!(matches!(
+        editor.layers.active(),
+        Some(soda::interaction::Layer::Search { .. })
+    ));
+    editor.input(UserInput::Key(KeyStroke::plain(Key::Esc)));
+    replace_dialog(&mut editor, "foo", "bar");
+    editor.input(UserInput::Key(KeyStroke::plain(Key::F(4))));
+    assert_eq!(editor.text(), "bar bar");
+}

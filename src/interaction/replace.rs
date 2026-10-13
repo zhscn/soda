@@ -41,7 +41,7 @@ impl ReplaceSession {
         if self.phase == ReplacePhase::Review {
             return Presentation {
                 text: format!(
-                    "Replace {:?} with {:?} [{} matches]: Enter current, Ctrl-Enter all, F3 next, Esc cancel",
+                    "Replace {:?} with {:?} [{} matches]: Enter current, F4 all, F3 next, Esc cancel",
                     self.search.query().text(),
                     self.replacement,
                     self.search.results().count
