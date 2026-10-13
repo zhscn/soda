@@ -14,6 +14,9 @@
 //! PollFiles drains request/completion drop notifications. Reading workspace and
 //! view state after an error reveals the current document and reservation state.
 //! Path/configuration preflight and explicit Reload currently run synchronously.
+mod clipboard;
+pub use clipboard::ClipboardAction;
+
 use crate::{
     core::{Association, ByteOffset, EditError, Selection},
     editor::{Command, DocumentId, DocumentPosition, EditorUpdate, Language, SessionId},
@@ -43,6 +46,11 @@ pub struct Viewport {
 }
 
 pub enum Event {
+    Clipboard {
+        view: ViewId,
+        action: ClipboardAction,
+        time: Duration,
+    },
     NewDocument(Language),
     AddView(DocumentId),
     Focus(ViewId),
@@ -138,6 +146,7 @@ pub struct Application {
     focus_revision: u64,
     open_revision: u64,
     pending_opens: BTreeMap<OpenId, OpenIntent>,
+    clipboard: String,
 }
 impl Application {
     pub fn new(service: FileService) -> Self {
@@ -235,6 +244,22 @@ impl Application {
             result: Ok(file),
         });
     }
+    fn edit(
+        &mut self,
+        view: ViewId,
+        command: Command,
+        time: Duration,
+        update: &mut Update,
+    ) -> Result<(), Error> {
+        let view = self.views.get(&view).ok_or(Error::UnknownView)?;
+        let edit = self
+            .workspace
+            .editor_mut(view.document_id)
+            .unwrap()
+            .execute_at(view.session_id, command, time)?;
+        self.accept_edit(edit, update);
+        Ok(())
+    }
     /// Reduce one event. Effects are returned only after reservations are made.
     /// Closing a view retains its document, including unsaved edits. Closing a
     /// document validates dirty/pending-save constraints before removing views.
@@ -295,13 +320,10 @@ impl Application {
                 command,
                 time,
             } => {
-                let view = self.views.get(&view).ok_or(Error::UnknownView)?;
-                let edit = self
-                    .workspace
-                    .editor_mut(view.document_id)
-                    .unwrap()
-                    .execute_at(view.session_id, command, time)?;
-                self.accept_edit(edit, &mut update);
+                self.edit(view, command, time, &mut update)?;
+            }
+            Event::Clipboard { view, action, time } => {
+                self.clipboard_action(view, action, time, &mut update)?;
             }
             Event::SetViewport {
                 view,

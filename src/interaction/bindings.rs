@@ -1,4 +1,5 @@
 use super::{Command, Input, InputKey, InputMotion, Key, KeyStroke, picker::ListMotion};
+use crate::application::ClipboardAction;
 use crate::editor::{Command as EditCommand, Direction, Motion};
 
 pub(crate) fn binding(key: KeyStroke) -> Option<Command> {
@@ -12,6 +13,9 @@ pub(crate) fn binding(key: KeyStroke) -> Option<Command> {
     }
     if control {
         return match key.code {
+            Key::Char('c') if !shift => Some(Command::Clipboard(ClipboardAction::Copy)),
+            Key::Char('x') if !shift => Some(Command::Clipboard(ClipboardAction::Cut)),
+            Key::Char('v') if !shift => Some(Command::Clipboard(ClipboardAction::Paste)),
             Key::Char('p') => Some(Command::PickFiles),
             Key::Char('f') => Some(Command::Search),
             Key::Char('o') => Some(Command::Open),

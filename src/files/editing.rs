@@ -17,6 +17,9 @@ pub struct Editing<'a> {
     pub(super) editor: &'a mut Editor,
 }
 impl Editing<'_> {
+    pub(crate) fn checkpoint_history(&mut self) {
+        self.editor.checkpoint_history();
+    }
     pub fn model(&self) -> &EditorModel {
         self.editor.model()
     }

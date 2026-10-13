@@ -5,7 +5,7 @@ use super::{
     picker::{PickerLimits, PickerSession},
 };
 use crate::{
-    application::{Application, Event},
+    application::{Application, ClipboardAction, Event},
     core::EditError,
     editor::{Command as EditCommand, Language},
 };
@@ -15,6 +15,7 @@ use std::{path::Path, time::Duration};
 /// Targets are resolved against the current application state at invocation.
 pub enum Command {
     Edit(EditCommand),
+    Clipboard(ClipboardAction),
     Open,
     New,
     Close,
@@ -60,6 +61,13 @@ impl Layers {
                         app,
                         time,
                     )?;
+                }
+            }
+            Command::Clipboard(action) => {
+                if let Some(view) = app.active_view() {
+                    response
+                        .events
+                        .push(Event::Clipboard { view, action, time });
                 }
             }
             Command::Edit(command) => {
