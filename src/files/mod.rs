@@ -12,3 +12,6 @@ pub use request::{
 pub use service::{FileError, FileService, LoadedFile};
 pub use state::FileState;
 pub use workspace::{FileResult, FileUpdate, ReloadUpdate, Workspace};
+
+mod worker;
+pub use worker::{FileCompletion, FileRunner, FileTask, FileTaskKey};

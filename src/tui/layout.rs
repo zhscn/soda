@@ -1,5 +1,5 @@
 use crate::{
-    application::{Application, Event},
+    application::Application,
     core::{ByteOffset, column_width, logical_column_at, step_grapheme},
 };
 use std::num::NonZeroUsize;
@@ -109,17 +109,13 @@ pub(super) fn plain(text: &str, left: usize, width: usize) -> String {
 
 /// Scroll only the active view. Byte anchors remain application-owned and map
 /// through document updates; this frontend resolves them into logical lines.
-pub(super) fn frame(
-    app: &mut Application,
+pub(super) fn follow_caret(
+    app: &Application,
     width: u16,
     height: u16,
-) -> Result<Frame, crate::application::Error> {
+) -> Result<Option<ViewportAdjustment>, crate::application::Error> {
     let Some(id) = app.active_view() else {
-        return Ok(Frame {
-            rows: Vec::new(),
-            cursor: None,
-            status: "Soda — ^N New buffer  ^O Open  ^Q Quit".into(),
-        });
+        return Ok(None);
     };
     let view = app.view(id).unwrap();
     let document = app
@@ -166,18 +162,48 @@ pub(super) fn frame(
         }
     }
     let anchor = ByteOffset(snapshot.line_start(top).unwrap());
-    if anchor != view.viewport.anchor.offset || left != view.viewport.horizontal_column {
-        app.dispatch(Event::SetViewport {
-            view: id,
-            anchor,
-            horizontal_column: left,
-        })?;
-    }
+    Ok(
+        (anchor != view.viewport.anchor.offset || left != view.viewport.horizontal_column)
+            .then_some(ViewportAdjustment {
+                view: id,
+                anchor,
+                horizontal_column: left,
+            }),
+    )
+}
+
+pub(super) struct ViewportAdjustment {
+    pub view: crate::application::ViewId,
+    pub anchor: ByteOffset,
+    pub horizontal_column: usize,
+}
+
+/// Render an immutable application projection. Viewport decisions are applied
+/// by Runtime before this function is called.
+pub(super) fn frame(
+    app: &Application,
+    width: u16,
+    height: u16,
+) -> Result<Frame, crate::application::Error> {
+    let Some(id) = app.active_view() else {
+        return Ok(Frame {
+            rows: vec![],
+            cursor: None,
+            status: "Soda — ^N New buffer  ^O Open  ^Q Quit".into(),
+        });
+    };
     let view = app.view(id).unwrap();
     let editor = app.workspace().editor(view.document_id).unwrap();
     let document = editor.model().document();
     let state = editor.model().session(view.session_id).unwrap().state();
     let snapshot = document.snapshot();
+    let head = state.selection().head;
+    let line = snapshot.line_of(head).unwrap();
+    let tab = document.whitespace().tab_width;
+    let column = logical_column_at(snapshot, ByteOffset(head), tab)?.0;
+    let rows = usize::from(height.saturating_sub(2));
+    let top = snapshot.line_of(view.viewport.anchor.offset.0).unwrap();
+    let left = view.viewport.horizontal_column;
     let mut output = Vec::new();
     for line in top..top.saturating_add(rows).min(snapshot.line_count()) {
         let text = snapshot.line(line).unwrap();
@@ -206,7 +232,13 @@ pub(super) fn frame(
         line + 1,
         column + 1
     );
-    let cursor = if rows > 0 && width > 0 && line >= top && line - top < rows {
+    let cursor = if rows > 0
+        && width > 0
+        && line >= top
+        && line - top < rows
+        && column >= left
+        && column - left < usize::from(width)
+    {
         Some(((column - left) as u16, (line - top) as u16))
     } else {
         None
@@ -252,6 +284,21 @@ pub(super) fn prompt_row(
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn frame(
+        app: &mut Application,
+        width: u16,
+        height: u16,
+    ) -> Result<Frame, crate::application::Error> {
+        if let Some(viewport) = super::follow_caret(app, width, height)? {
+            app.dispatch(Event::SetViewport {
+                view: viewport.view,
+                anchor: viewport.anchor,
+                horizontal_column: viewport.horizontal_column,
+            })?;
+        }
+        super::frame(app, width, height)
+    }
+
     use crate::{
         application::Event,
         core::Selection,
@@ -327,7 +374,7 @@ mod tests {
         let frame = frame(&mut app, 6, 5).unwrap();
         assert_eq!(frame.cursor, Some((5, 0)));
         assert_eq!(app.view(view).unwrap().viewport.horizontal_column, 5);
-        let frame = super::frame(&mut app, 0, 1).unwrap();
+        let frame = super::frame(&app, 0, 1).unwrap();
         assert!(frame.rows.is_empty());
         assert!(frame.cursor.is_none());
     }
@@ -429,5 +476,23 @@ mod tests {
                 .iter()
                 .all(|span| !span.selected)
         );
+    }
+    #[test]
+    fn rendering_is_read_only_even_when_caret_is_outside_viewport() {
+        let mut app = Application::default();
+        app.dispatch(Event::NewDocument(Language::PlainText))
+            .unwrap();
+        let view = app.active_view().unwrap();
+        app.dispatch(Event::Edit {
+            view,
+            command: crate::editor::Command::InsertText("abcdefghijklmnopqrstuvwxyz".into()),
+            time: std::time::Duration::ZERO,
+        })
+        .unwrap();
+        let before = app.view(view).unwrap().viewport;
+        let projected = super::frame(&app, 10, 6).unwrap();
+        assert_eq!(app.view(view).unwrap().viewport, before);
+        assert!(projected.cursor.is_none());
+        assert!(super::follow_caret(&app, 10, 6).unwrap().is_some());
     }
 }

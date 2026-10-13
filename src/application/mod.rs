@@ -22,7 +22,7 @@ use crate::{
     editor::{Command, DocumentId, DocumentPosition, EditorUpdate, Language, SessionId},
     files::{
         FileError, FileResult, FileService, FileUpdate, OpenCompletion, OpenId, OpenPreparation,
-        OpenRequest, SaveCompletion, SaveRequest, Workspace,
+        SaveCompletion, Workspace,
     },
 };
 use std::{collections::BTreeMap, fmt, path::PathBuf, time::Duration};
@@ -83,13 +83,63 @@ pub enum Event {
     },
     PollFiles,
 }
-/// Single-use requests may run on a worker using `FileService`. The application
-/// delegates file payload I/O to the host; path/configuration preflight remains
-/// synchronous. The host chooses its executor and completion queue.
-pub enum Effect {
-    Open(OpenRequest),
-    Save(Box<SaveRequest>),
+/// Identity of an attempted operation, retained when reduction fails.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Operation {
+    Save {
+        document: DocumentId,
+        request: Option<crate::files::SaveId>,
+    },
+    Open {
+        request: Option<OpenId>,
+    },
+    View(ViewId),
+    Document(DocumentId),
+    Other,
 }
+impl From<crate::files::FileTaskKey> for Operation {
+    fn from(key: crate::files::FileTaskKey) -> Self {
+        match key {
+            crate::files::FileTaskKey::Open(request) => Self::Open {
+                request: Some(request),
+            },
+            crate::files::FileTaskKey::Save { document, request } => Self::Save {
+                document,
+                request: Some(request),
+            },
+        }
+    }
+}
+impl Event {
+    pub fn operation(&self) -> Operation {
+        match self {
+            Self::Save { document, .. } => Operation::Save {
+                document: *document,
+                request: None,
+            },
+            Self::SaveFinished(completion) => Operation::Save {
+                document: completion.document_id(),
+                request: Some(completion.id()),
+            },
+            Self::Open(_) => Operation::Open { request: None },
+            Self::OpenFinished(completion) => Operation::Open {
+                request: Some(completion.id()),
+            },
+            Self::CancelOpen(id) => Operation::Open { request: Some(*id) },
+            Self::Edit { view, .. }
+            | Self::Clipboard { view, .. }
+            | Self::SetViewport { view, .. }
+            | Self::Reload { view, .. }
+            | Self::Focus(view)
+            | Self::CloseView(view) => Operation::View(*view),
+            Self::CloseDocument { document, .. } | Self::AddView(document) => {
+                Operation::Document(*document)
+            }
+            _ => Operation::Other,
+        }
+    }
+}
+pub use crate::files::FileTask as Effect;
 #[derive(Default)]
 pub struct Update {
     pub effects: Vec<Effect>,

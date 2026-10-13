@@ -196,6 +196,28 @@ impl ExitSession {
             ..Response::default()
         })
     }
+    pub(super) fn operation_failed(
+        &mut self,
+        operation: crate::application::Operation,
+        error: String,
+    ) -> Response {
+        let Phase::Saving {
+            request: pending, ..
+        } = &self.phase
+        else {
+            return Response::default();
+        };
+        if operation
+            == (crate::application::Operation::Save {
+                document: self.current,
+                request: *pending,
+            })
+        {
+            self.failed(error)
+        } else {
+            Response::default()
+        }
+    }
     /// Save preflight failures do not emit updates. Hosts report the error here.
     pub(super) fn failed(&mut self, error: String) -> Response {
         let target = match &self.phase {

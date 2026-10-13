@@ -79,6 +79,8 @@ enum Route {
 pub struct Layers {
     active: Option<Layer>,
     page_rows: usize,
+    help_rows: usize,
+    picker_rows: usize,
 }
 /// A modal layer blocks unrecognized input. Handled input may change only its
 /// selection, so redraw is independent of application commands and queries.
@@ -104,13 +106,20 @@ impl Layers {
     /// returned effects and events before accepting further input.
     pub fn enter(
         &mut self,
-        layer: Layer,
+        mut layer: Layer,
         app: &Application,
         time: Duration,
     ) -> Result<Response, EditError> {
         let mut response = self.close(app, time)?;
         if let Layer::Picker(session) = &layer {
             response.effects.push(PickerEffect::Run(session.task()));
+        }
+        match &mut layer {
+            Layer::Help(session) => session.resize(self.help_rows),
+            Layer::Picker(session) => {
+                session.resize(self.picker_rows);
+            }
+            _ => {}
         }
         self.active = Some(layer);
         response.redraw = true;
@@ -119,14 +128,17 @@ impl Layers {
     pub fn close(&mut self, app: &Application, time: Duration) -> Result<Response, EditError> {
         self.respond(Intent::Cancel, app, time)
     }
-    pub fn application_failed(&mut self, app: &Application, error: String) -> Response {
+    pub fn application_failed(
+        &mut self,
+        operation: crate::application::Operation,
+        error: String,
+    ) -> Response {
         match &mut self.active {
-            Some(Layer::Exit(session)) if !app.workspace().is_saving(session.document()) => {
-                session.failed(error)
-            }
+            Some(Layer::Exit(session)) => session.operation_failed(operation, error),
             _ => Response::default(),
         }
     }
+
     pub fn picker_failed(&mut self, error: String) -> Response {
         let Some(Layer::Picker(session)) = &mut self.active else {
             return Response::default();
@@ -586,11 +598,13 @@ impl Layers {
         }
     }
     pub fn resize_help(&mut self, rows: usize) {
+        self.help_rows = rows;
         if let Some(Layer::Help(session)) = &mut self.active {
             session.resize(rows);
         }
     }
     pub fn resize_picker(&mut self, rows: usize) -> bool {
+        self.picker_rows = rows;
         match &mut self.active {
             Some(Layer::Picker(session)) => session.resize(rows),
             _ => false,

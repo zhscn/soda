@@ -34,6 +34,7 @@ impl Driver {
             .document_id
     }
     fn event(&mut self, event: Event) {
+        let operation = event.operation();
         match self.app.dispatch(event) {
             Ok(update) => {
                 let response = self
@@ -47,7 +48,7 @@ impl Driver {
                 self.error = error.to_string();
                 let response = self
                     .layers
-                    .application_failed(&self.app, self.error.clone());
+                    .application_failed(operation, self.error.clone());
                 self.respond(response);
             }
         }
@@ -333,4 +334,29 @@ fn reload_undo_restores_the_initiating_views_directed_selection() {
             .selection(),
         original
     );
+}
+
+#[test]
+fn unrelated_failure_cannot_reset_a_waiting_departure() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut driver = Driver::new();
+    driver.command(Command::Close);
+    driver.key(Key::Char('s'));
+    driver.path(&directory.path().join("file.txt"));
+    let response = driver.layers.application_failed(
+        soda::application::Operation::Other,
+        "unrelated failure".into(),
+    );
+    assert!(!response.redraw);
+    assert!(
+        driver
+            .layers
+            .active()
+            .unwrap()
+            .presentation()
+            .text
+            .starts_with("Saving ")
+    );
+    driver.finish_save();
+    assert!(driver.app.active_view().is_none());
 }
