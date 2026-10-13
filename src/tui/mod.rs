@@ -4,19 +4,20 @@ mod input;
 mod layout;
 use crate::{
     application::{Application, Effect, Event, Update},
-    editor::{Command, DocumentId, Language},
+    editor::{Command, Language},
+    interaction::{
+        Input, InputResult, Layer as Prompt, Layers, Presentation, Response, SearchSession,
+        TextInput as InputField,
+    },
 };
 use crossterm::{
     cursor::{Hide, MoveTo, Show},
-    event::{
-        self, DisableBracketedPaste, EnableBracketedPaste, Event as TerminalEvent, KeyCode,
-        KeyEventKind,
-    },
+    event::{self, DisableBracketedPaste, EnableBracketedPaste, Event as TerminalEvent},
     execute, queue,
     style::{Attribute, Print, SetAttribute},
     terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use input::{Action, InputField};
+use input::Action;
 use std::{
     io::{self, IsTerminal, Write},
     path::PathBuf,
@@ -50,16 +51,11 @@ impl Drop for Terminal {
         let _ = terminal::disable_raw_mode();
     }
 }
-enum Prompt {
-    Open(InputField),
-    Save(DocumentId, InputField),
-    Quit,
-}
 struct Host {
     app: Application,
     sender: mpsc::Sender<Event>,
     receiver: mpsc::Receiver<Event>,
-    prompt: Option<Prompt>,
+    layers: Layers,
     message: String,
     epoch: Instant,
     quit: bool,
@@ -72,7 +68,7 @@ impl Host {
             app: Application::default(),
             sender,
             receiver,
-            prompt: None,
+            layers: Layers::default(),
             message: String::new(),
             epoch: Instant::now(),
             quit: false,
@@ -96,6 +92,9 @@ impl Host {
         }
     }
     fn accept(&mut self, update: Update) {
+        let response = self
+            .layers
+            .observe(&self.app, &update, self.epoch.elapsed());
         self.dirty |= update.active_changed
             || !update.changed_views.is_empty()
             || !update.closed_views.is_empty()
@@ -126,6 +125,23 @@ impl Host {
                 let _ = sender.send(event);
             });
         }
+        self.respond(response);
+    }
+    fn respond(&mut self, response: Result<Response, crate::core::EditError>) {
+        match response {
+            Ok(response) => {
+                self.dirty |= response.redraw;
+                self.quit |= response.quit;
+                for event in response.events {
+                    self.dispatch(event);
+                }
+            }
+            Err(error) => {
+                self.layers.active = None;
+                self.message = error.to_string();
+                self.dirty = true;
+            }
+        }
     }
     fn edit(&mut self, command: Command) {
         if let Some(view) = self.app.active_view() {
@@ -138,8 +154,21 @@ impl Host {
     }
     fn action(&mut self, action: Action) {
         match action {
+            Action::Search => {
+                if let Some(view) = self.app.active_view() {
+                    match SearchSession::new(&self.app, view) {
+                        Ok(session) => {
+                            self.layers.active = Some(Prompt::Search {
+                                input: InputField::default(),
+                                session,
+                            })
+                        }
+                        Err(error) => self.message = error.to_string(),
+                    }
+                }
+            }
             Action::Edit(command) => self.edit(command),
-            Action::Open => self.prompt = Some(Prompt::Open(InputField::default())),
+            Action::Open => self.layers.active = Some(Prompt::Open(InputField::default())),
             Action::New => self.dispatch(Event::NewDocument(Language::PlainText)),
             Action::Close => {
                 if let Some(view) = self.app.active_view() {
@@ -164,13 +193,7 @@ impl Host {
                         .path();
                     if choose_path || path.is_none() {
                         let text = path.map_or_else(String::new, |p| p.display().to_string());
-                        self.prompt = Some(Prompt::Save(
-                            document,
-                            InputField {
-                                cursor: text.len(),
-                                text,
-                            },
-                        ));
+                        self.layers.active = Some(Prompt::Save(document, InputField::new(&text)));
                     } else {
                         self.dispatch(Event::Save {
                             document,
@@ -196,7 +219,7 @@ impl Host {
                         .document()
                         .is_dirty()
                 }) {
-                    self.prompt = Some(Prompt::Quit);
+                    self.layers.active = Some(Prompt::Quit);
                 } else {
                     self.quit = true;
                 }
@@ -211,50 +234,30 @@ impl Host {
         }
     }
     fn input(&mut self, event: TerminalEvent) {
-        self.dirty = true;
-        match event {
-            TerminalEvent::Key(key) if key.kind != KeyEventKind::Release => {
-                if self.prompt.is_some() {
-                    if key.code == KeyCode::Esc {
-                        self.prompt = None;
-                        return;
+        if matches!(event, TerminalEvent::Resize(..)) {
+            self.dirty = true;
+            return;
+        }
+        let input = match &event {
+            TerminalEvent::Key(key) => input::modal_key(*key),
+            TerminalEvent::Paste(text) => Input::Paste(text.clone()),
+            _ => Input::Unrecognized,
+        };
+        match self.layers.handle(input, &self.app, self.epoch.elapsed()) {
+            Ok(InputResult::Handled(response)) => self.respond(Ok(response)),
+            Ok(InputResult::Blocked) => {}
+            Err(error) => self.respond(Err(error)),
+            Ok(InputResult::Pass) => match event {
+                TerminalEvent::Key(key) => {
+                    if let Some(action) = input::binding(key) {
+                        self.message.clear();
+                        self.dirty = true;
+                        self.action(action);
                     }
-                    if matches!(self.prompt, Some(Prompt::Quit)) {
-                        if key.code == KeyCode::Char('y') {
-                            self.quit = true;
-                        }
-                        self.prompt = None;
-                        return;
-                    }
-                    if key.code == KeyCode::Enter {
-                        let prompt = self.prompt.take().unwrap();
-                        match prompt {
-                            Prompt::Open(field) if !field.text.is_empty() => {
-                                self.dispatch(Event::Open(PathBuf::from(field.text)))
-                            }
-                            Prompt::Save(document, field) if !field.text.is_empty() => self
-                                .dispatch(Event::Save {
-                                    document,
-                                    target: Some(PathBuf::from(field.text)),
-                                }),
-                            _ => {}
-                        }
-                    } else if let Some(Prompt::Open(field) | Prompt::Save(_, field)) =
-                        &mut self.prompt
-                    {
-                        field.key(key);
-                    }
-                } else if let Some(action) = input::binding(key) {
-                    self.message.clear();
-                    self.action(action);
                 }
-            }
-            TerminalEvent::Paste(text) => match &mut self.prompt {
-                Some(Prompt::Open(field) | Prompt::Save(_, field)) => field.insert(&text),
-                Some(Prompt::Quit) => {}
-                None => self.edit(Command::InsertText(text)),
+                TerminalEvent::Paste(text) => self.edit(Command::InsertText(text)),
+                _ => {}
             },
-            _ => {}
         }
     }
     fn draw(&mut self) -> io::Result<()> {
@@ -269,17 +272,7 @@ impl Host {
         )?;
         for (y, row) in frame.rows.iter().enumerate() {
             queue!(output, MoveTo(0, y as u16))?;
-            for span in row {
-                queue!(
-                    output,
-                    SetAttribute(if span.selected {
-                        Attribute::Reverse
-                    } else {
-                        Attribute::Reset
-                    }),
-                    Print(&span.text)
-                )?;
-            }
+            draw_spans(&mut output, row)?;
         }
         queue!(output, SetAttribute(Attribute::Reset))?;
         let mut cursor = frame.cursor;
@@ -293,28 +286,18 @@ impl Host {
                     SetAttribute(Attribute::Reset)
                 )?;
             }
-            let (footer, prompt_cursor) = match &self.prompt {
-                Some(Prompt::Open(field)) => {
-                    let text = format!("Open: {}", field.text);
-                    let (text, x) =
-                        layout::prompt_cursor(&text, 6 + field.cursor, usize::from(width));
-                    (text, Some(x))
-                }
-                Some(Prompt::Save(_, field)) => {
-                    let text = format!("Save as: {}", field.text);
-                    let (text, x) =
-                        layout::prompt_cursor(&text, 9 + field.cursor, usize::from(width));
-                    (text, Some(x))
-                }
-                Some(Prompt::Quit) => ("Unsaved changes: discard and quit? (y/N)".into(), None),
-                None => (self.message.clone(), None),
-            };
-            queue!(
-                output,
-                MoveTo(0, height - 1),
-                Print(layout::plain(&footer, 0, usize::from(width)))
-            )?;
-            if self.prompt.is_some() {
+            let presentation = self.layers.active.as_ref().map_or_else(
+                || Presentation {
+                    text: self.message.clone(),
+                    cursor: None,
+                    selection: 0..0,
+                },
+                Prompt::presentation,
+            );
+            let (footer, prompt_cursor) = layout::prompt_row(&presentation, usize::from(width));
+            queue!(output, MoveTo(0, height - 1))?;
+            draw_spans(&mut output, &footer)?;
+            if self.layers.active.is_some() {
                 cursor = prompt_cursor.map(|x| (x.min(usize::from(width - 1)) as u16, height - 1));
             }
         }
@@ -323,6 +306,21 @@ impl Host {
         }
         output.flush()
     }
+}
+
+fn draw_spans(output: &mut impl Write, spans: &[layout::Span]) -> io::Result<()> {
+    for span in spans {
+        queue!(
+            output,
+            SetAttribute(if span.selected {
+                Attribute::Reverse
+            } else {
+                Attribute::Reset
+            }),
+            Print(&span.text)
+        )?;
+    }
+    queue!(output, SetAttribute(Attribute::Reset))
 }
 
 /// Start the terminal host. File requests run on workers; completion reduction
@@ -356,7 +354,7 @@ pub fn run(path: Option<PathBuf>) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crossterm::event::{KeyEvent, KeyModifiers};
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     fn key(code: KeyCode) -> TerminalEvent {
         TerminalEvent::Key(KeyEvent::new(code, KeyModifiers::NONE))
     }
@@ -368,11 +366,11 @@ mod tests {
         host.action(Action::Save { choose_path: true });
         host.input(TerminalEvent::Paste("目录/file.txt".into()));
         host.dispatch(Event::NewDocument(Language::PlainText));
-        let Some(Prompt::Save(target, field)) = &host.prompt else {
+        let Some(Prompt::Save(target, field)) = &host.layers.active else {
             panic!()
         };
         assert_eq!(*target, document);
-        assert_eq!(field.text, "目录/file.txt");
+        assert_eq!(field.text(), "目录/file.txt");
         assert!(
             host.app
                 .workspace()
@@ -383,7 +381,7 @@ mod tests {
                 .is_empty()
         );
         host.input(key(KeyCode::Esc));
-        assert!(host.prompt.is_none());
+        assert!(host.layers.active.is_none());
     }
     #[test]
     fn bracketed_paste_is_one_undoable_edit() {
@@ -442,7 +440,7 @@ mod tests {
             .document_id;
         host.dispatch(Event::NewDocument(Language::PlainText));
         host.action(Action::Quit);
-        assert!(matches!(host.prompt, Some(Prompt::Quit)));
+        assert!(matches!(host.layers.active, Some(Prompt::Quit)));
         host.input(key(KeyCode::Esc));
         assert!(!host.quit);
         let update = host
@@ -453,7 +451,7 @@ mod tests {
             })
             .unwrap();
         host.action(Action::Quit);
-        assert!(host.prompt.is_none());
+        assert!(host.layers.active.is_none());
         assert!(!host.quit);
         assert!(host.message.contains("Save in progress"));
         drop(update);
@@ -461,5 +459,108 @@ mod tests {
         host.action(Action::Quit);
         host.input(key(KeyCode::Char('y')));
         assert!(host.quit);
+    }
+    #[test]
+    fn search_input_is_modal_and_cancel_restores_selection() {
+        let mut host = Host::new();
+        host.edit(Command::InsertText("one two one".into()));
+        host.edit(Command::SetSelection(crate::core::Selection::caret(0)));
+        let view = host.app.active_view().unwrap();
+        let state = |host: &Host| {
+            let v = host.app.view(view).unwrap();
+            host.app
+                .workspace()
+                .editor(v.document_id)
+                .unwrap()
+                .model()
+                .session(v.session_id)
+                .unwrap()
+                .selection()
+        };
+        host.input(TerminalEvent::Key(KeyEvent::new(
+            KeyCode::Char('f'),
+            KeyModifiers::CONTROL,
+        )));
+        host.input(TerminalEvent::Paste("one".into()));
+        assert_eq!(state(&host), crate::core::Selection { anchor: 0, head: 3 });
+        host.input(key(KeyCode::F(3)));
+        assert_eq!(
+            state(&host),
+            crate::core::Selection {
+                anchor: 8,
+                head: 11
+            }
+        );
+        host.input(TerminalEvent::Key(KeyEvent::new(
+            KeyCode::Char('z'),
+            KeyModifiers::CONTROL,
+        )));
+        assert_eq!(
+            state(&host),
+            crate::core::Selection {
+                anchor: 8,
+                head: 11
+            }
+        );
+        host.input(key(KeyCode::Esc));
+        assert_eq!(state(&host), crate::core::Selection::caret(0));
+        assert!(host.layers.active.is_none());
+    }
+    #[test]
+    fn search_confirmation_repeats_in_editor_and_paste_replaces_match() {
+        let mut host = Host::new();
+        host.edit(Command::InsertText("one two one".into()));
+        host.edit(Command::SetSelection(crate::core::Selection::caret(0)));
+        host.action(Action::Search);
+        host.input(TerminalEvent::Paste("one".into()));
+        host.input(key(KeyCode::Enter));
+        host.input(key(KeyCode::F(3)));
+        host.input(TerminalEvent::Paste("中".into()));
+        let view = host.app.view(host.app.active_view().unwrap()).unwrap();
+        assert_eq!(
+            host.app
+                .workspace()
+                .editor(view.document_id)
+                .unwrap()
+                .state()
+                .snapshot()
+                .text(),
+            "one two 中"
+        );
+    }
+    #[test]
+    fn prompt_selection_cursor_and_modifier_events_have_distinct_effects() {
+        let mut host = Host::new();
+        host.action(Action::Open);
+        host.input(TerminalEvent::Paste("路径/file".into()));
+        host.dirty = false;
+        host.input(TerminalEvent::Key(KeyEvent::new(
+            KeyCode::Enter,
+            KeyModifiers::CONTROL,
+        )));
+        assert!(host.layers.active.is_some());
+        assert!(!host.dirty);
+        host.input(TerminalEvent::Key(KeyEvent::new(
+            KeyCode::Left,
+            KeyModifiers::SHIFT,
+        )));
+        assert!(host.dirty);
+        let Some(Prompt::Open(field)) = &host.layers.active else {
+            panic!()
+        };
+        assert_eq!(&field.text()[field.selection().range()], "e");
+        host.input(TerminalEvent::Paste("X".into()));
+        let Some(Prompt::Open(field)) = &host.layers.active else {
+            panic!()
+        };
+        assert_eq!(field.text(), "路径/filX");
+        host.dirty = false;
+        let mut release = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE);
+        release.kind = crossterm::event::KeyEventKind::Release;
+        host.input(TerminalEvent::Key(release));
+        assert!(!host.dirty);
+        host.input(key(KeyCode::Esc));
+        assert!(host.layers.active.is_none());
+        assert!(host.dirty);
     }
 }

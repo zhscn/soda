@@ -178,10 +178,35 @@ pub(super) fn frame(
     })
 }
 
-pub(super) fn prompt_cursor(text: &str, cursor: usize, width: usize) -> (String, usize) {
-    let column = column_width(&text[..cursor], 0, NonZeroUsize::new(4).unwrap());
-    let left = column.saturating_sub(width.saturating_sub(1));
-    (plain(text, left, width), column.saturating_sub(left))
+pub(super) fn prompt_row(
+    presentation: &crate::interaction::Presentation,
+    width: usize,
+) -> (Vec<Span>, Option<usize>) {
+    let tab = NonZeroUsize::new(4).unwrap();
+    let cursor = presentation.cursor.map(|offset| {
+        let column = column_width(&presentation.text[..offset], 0, tab);
+        let cluster = presentation.text[offset..]
+            .graphemes(true)
+            .next()
+            .unwrap_or("");
+        let caret_cells = (column_width(cluster, column, tab) - column)
+            .max(1)
+            .min(width);
+        let left = column.saturating_add(caret_cells).saturating_sub(width);
+        (left, column - left)
+    });
+    let left = cursor.map_or(0, |(left, _)| left);
+    (
+        row(
+            &presentation.text,
+            0,
+            presentation.selection.clone(),
+            left,
+            width,
+            tab,
+        ),
+        cursor.map(|(_, column)| column),
+    )
 }
 
 #[cfg(test)]
@@ -303,8 +328,37 @@ mod tests {
     #[test]
     fn prompt_scroll_keeps_caret_visible_without_splitting_unicode() {
         let text = "Save as: 目录/🦀";
-        let (rendered, cursor) = prompt_cursor(text, text.len(), 5);
+        let (rendered, cursor) = prompt_row(
+            &crate::interaction::Presentation {
+                text: text.into(),
+                cursor: Some(text.len()),
+                selection: 0..0,
+            },
+            5,
+        );
+        let rendered = joined(rendered);
         assert!(column_width(&rendered, 0, NonZeroUsize::new(4).unwrap()) <= 5);
-        assert_eq!(cursor, 4);
+        assert_eq!(cursor, Some(4));
+    }
+    #[test]
+    fn prompt_selection_and_wide_caret_survive_horizontal_clipping() {
+        let presentation = crate::interaction::Presentation {
+            text: "Find: a中🦀z".into(),
+            cursor: Some("Find: a中".len()),
+            selection: "Find: a".len().."Find: a中🦀".len(),
+        };
+        let (spans, cursor) = prompt_row(&presentation, 4);
+        assert_eq!(cursor, Some(2));
+        assert_eq!(
+            spans
+                .iter()
+                .filter(|s| s.selected)
+                .map(|s| s.text.as_str())
+                .collect::<String>(),
+            "中🦀"
+        );
+        assert_eq!(joined(spans), "中🦀");
+        let (spans, _) = prompt_row(&presentation, 0);
+        assert!(spans.is_empty());
     }
 }

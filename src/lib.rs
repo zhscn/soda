@@ -11,3 +11,5 @@ pub mod files;
 pub mod application;
 
 pub mod tui;
+
+pub mod interaction;

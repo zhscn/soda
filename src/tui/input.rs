@@ -1,6 +1,6 @@
 use crate::editor::{Command, Direction, Motion};
+use crate::interaction::{Input, InputKey, InputMotion};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use unicode_segmentation::UnicodeSegmentation;
 
 pub(super) enum Action {
     Edit(Command),
@@ -10,6 +10,7 @@ pub(super) enum Action {
     Save { choose_path: bool },
     Quit,
     NextView,
+    Search,
 }
 pub(super) fn binding(key: KeyEvent) -> Option<Action> {
     if key.kind == KeyEventKind::Release {
@@ -17,14 +18,14 @@ pub(super) fn binding(key: KeyEvent) -> Option<Action> {
     }
     let control = key.modifiers.contains(KeyModifiers::CONTROL);
     let shift = key.modifiers.contains(KeyModifiers::SHIFT);
-    if key
-        .modifiers
-        .intersects(KeyModifiers::ALT | KeyModifiers::SUPER)
-    {
+    if key.modifiers.intersects(
+        KeyModifiers::ALT | KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META,
+    ) {
         return None;
     }
     if control {
         return match key.code {
+            KeyCode::Char('f') => Some(Action::Search),
             KeyCode::Char('o') => Some(Action::Open),
             KeyCode::Char('n') => Some(Action::New),
             KeyCode::Char('w') => Some(Action::Close),
@@ -43,6 +44,12 @@ pub(super) fn binding(key: KeyEvent) -> Option<Action> {
             })),
             _ => None,
         };
+    }
+    if key.code == KeyCode::F(3) {
+        return Some(Action::Edit(Command::Find {
+            backward: shift,
+            wrap: true,
+        }));
     }
     if key.code == KeyCode::F(6) {
         return Some(Action::NextView);
@@ -83,62 +90,61 @@ pub(super) fn binding(key: KeyEvent) -> Option<Action> {
     Some(Action::Edit(command))
 }
 
-/// A single-line input buffer with grapheme navigation. It owns input state;
-/// submitting/cancelling and file operations belong to the host.
-#[derive(Default)]
-pub(super) struct InputField {
-    pub text: String,
-    pub cursor: usize,
-}
-impl InputField {
-    pub fn insert(&mut self, text: &str) {
-        let text: String = text.chars().filter(|ch| !ch.is_control()).collect();
-        self.text.insert_str(self.cursor, &text);
-        self.cursor += text.len();
-        // Insertions may merge adjacent graphemes. Keep the caret at a boundary.
-        self.clip_cursor();
+/// Normalize modifiers once for all modal layers. Modified submit/cancel keys
+/// are blocked unless a binding explicitly accepts that combination.
+pub(super) fn modal_key(key: KeyEvent) -> Input {
+    if key.kind == KeyEventKind::Release
+        || key.modifiers.intersects(
+            KeyModifiers::ALT | KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META,
+        )
+    {
+        return Input::Unrecognized;
     }
-    fn clip_cursor(&mut self) {
-        self.cursor = self
-            .text
-            .grapheme_indices(true)
-            .map(|(i, _)| i)
-            .chain(std::iter::once(self.text.len()))
-            .find(|i| *i >= self.cursor)
-            .unwrap();
-    }
-    pub fn key(&mut self, key: KeyEvent) {
-        if key.kind == KeyEventKind::Release
-            || key
-                .modifiers
-                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SUPER)
-        {
-            return;
-        }
-        let previous = self.text[..self.cursor]
-            .grapheme_indices(true)
-            .next_back()
-            .map_or(0, |(i, _)| i);
-        let next = self.text[self.cursor..]
-            .graphemes(true)
-            .next()
-            .map_or(self.cursor, |g| self.cursor + g.len());
+    let control = key.modifiers.contains(KeyModifiers::CONTROL);
+    let shift = key.modifiers.contains(KeyModifiers::SHIFT);
+    if key.modifiers.is_empty() {
         match key.code {
-            KeyCode::Char(ch) => self.insert(&ch.to_string()),
-            KeyCode::Left => self.cursor = previous,
-            KeyCode::Right => self.cursor = next,
-            KeyCode::Home => self.cursor = 0,
-            KeyCode::End => self.cursor = self.text.len(),
-            KeyCode::Backspace => {
-                self.text.replace_range(previous..self.cursor, "");
-                self.cursor = previous;
-            }
-            KeyCode::Delete => {
-                self.text.replace_range(self.cursor..next, "");
-            }
+            KeyCode::Enter => return Input::Confirm,
+            KeyCode::Esc => return Input::Cancel,
             _ => {}
         }
-        self.clip_cursor();
+    }
+    if key.code == KeyCode::F(3) && !control {
+        return Input::Navigate { backward: shift };
+    }
+    let motion = match key.code {
+        KeyCode::Left => Some(if control {
+            InputMotion::WordLeft
+        } else {
+            InputMotion::Left
+        }),
+        KeyCode::Right => Some(if control {
+            InputMotion::WordRight
+        } else {
+            InputMotion::Right
+        }),
+        KeyCode::Home => Some(InputMotion::Start),
+        KeyCode::End => Some(InputMotion::End),
+        _ => None,
+    };
+    if let Some(motion) = motion {
+        return Input::Text(InputKey::Move {
+            motion,
+            extend: shift,
+        });
+    }
+    match key.code {
+        KeyCode::Char('a' | 'A') if control && !shift => Input::Text(InputKey::SelectAll),
+        KeyCode::Char(ch) if !control => Input::Text(InputKey::Char(ch)),
+        KeyCode::Backspace if !shift => Input::Text(InputKey::Delete {
+            backward: true,
+            word: control,
+        }),
+        KeyCode::Delete if !shift => Input::Text(InputKey::Delete {
+            backward: false,
+            word: control,
+        }),
+        _ => Input::Unrecognized,
     }
 }
 
@@ -147,31 +153,6 @@ mod tests {
     use super::*;
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
-    }
-    #[test]
-    fn input_navigates_and_deletes_whole_graphemes() {
-        let mut field = InputField::default();
-        field.insert("中e\u{301}🦀");
-        field.key(key(KeyCode::Left));
-        field.key(key(KeyCode::Backspace));
-        assert_eq!(field.text, "中🦀");
-        assert_eq!(field.cursor, "中".len());
-        field.key(key(KeyCode::Delete));
-        assert_eq!(field.text, "中");
-        field.key(key(KeyCode::Home));
-        field.insert("x\n\x1b\t");
-        assert_eq!(field.text, "x中");
-    }
-    #[test]
-    fn inserted_joiners_do_not_leave_cursor_inside_merged_cluster() {
-        let mut field = InputField {
-            text: "👩👩".into(),
-            cursor: "👩".len(),
-        };
-        field.insert("\u{200d}");
-        assert_eq!(field.cursor, field.text.len());
-        field.key(key(KeyCode::Backspace));
-        assert!(field.text.is_empty());
     }
     #[test]
     fn bindings_preserve_selection_intent_and_ignore_releases() {
@@ -193,6 +174,68 @@ mod tests {
         assert!(matches!(
             binding(key(KeyCode::F(4))),
             Some(Action::Save { choose_path: true })
+        ));
+    }
+    #[test]
+    fn modal_submit_cancel_and_navigation_validate_modifiers_and_release() {
+        for code in [KeyCode::Enter, KeyCode::Esc, KeyCode::F(3)] {
+            for modifiers in [
+                KeyModifiers::CONTROL,
+                KeyModifiers::ALT,
+                KeyModifiers::SUPER,
+                KeyModifiers::META,
+                KeyModifiers::HYPER,
+            ] {
+                assert!(matches!(
+                    modal_key(KeyEvent::new(code, modifiers)),
+                    Input::Unrecognized
+                ));
+            }
+            let mut release = key(code);
+            release.kind = KeyEventKind::Release;
+            assert!(matches!(modal_key(release), Input::Unrecognized));
+        }
+        assert!(matches!(modal_key(key(KeyCode::Enter)), Input::Confirm));
+        assert!(matches!(modal_key(key(KeyCode::Esc)), Input::Cancel));
+        assert!(matches!(
+            modal_key(KeyEvent::new(KeyCode::F(3), KeyModifiers::SHIFT)),
+            Input::Navigate { backward: true }
+        ));
+        assert!(matches!(
+            modal_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT)),
+            Input::Unrecognized
+        ));
+    }
+    #[test]
+    fn text_shortcuts_normalize_to_widget_operations() {
+        assert!(matches!(
+            modal_key(KeyEvent::new(
+                KeyCode::Left,
+                KeyModifiers::CONTROL | KeyModifiers::SHIFT
+            )),
+            Input::Text(InputKey::Move {
+                motion: InputMotion::WordLeft,
+                extend: true
+            })
+        ));
+        assert!(matches!(
+            modal_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::CONTROL)),
+            Input::Text(InputKey::Delete {
+                backward: true,
+                word: true
+            })
+        ));
+        assert!(matches!(
+            modal_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL)),
+            Input::Text(InputKey::SelectAll)
+        ));
+        assert!(matches!(
+            modal_key(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::SHIFT)),
+            Input::Text(InputKey::Char('X'))
+        ));
+        assert!(matches!(
+            modal_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL)),
+            Input::Unrecognized
         ));
     }
 }
