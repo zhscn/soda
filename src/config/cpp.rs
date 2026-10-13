@@ -37,9 +37,11 @@ pub(super) fn to_rules(v: &Map<String, Value>, doc: usize) -> Result<CppRules, C
             "ForContinuationAndIndentation",
             "AlignWithSpaces",
             "Always",
+            "true",
+            "false",
         ],
     )? {
-        "Never" => TabPolicy::Never,
+        "Never" | "false" => TabPolicy::Never,
         "ForIndentation" => TabPolicy::ForIndentation,
         "ForContinuationAndIndentation" => TabPolicy::ForContinuationAndIndentation,
         "AlignWithSpaces" => TabPolicy::AlignWithSpaces,
@@ -156,7 +158,7 @@ pub(super) fn to_rules(v: &Map<String, Value>, doc: usize) -> Result<CppRules, C
         get!("BreakConstructorInitializers"),
         doc,
         "BreakConstructorInitializers",
-        &["BeforeColon", "BeforeComma", "AfterColon"],
+        &["BeforeColon", "BeforeComma", "AfterColon", "AfterComma"],
     )? {
         "BeforeComma" => ConstructorInitializers::AlignWithColon,
         _ => ConstructorInitializers::AlignFirstInitializer,
@@ -165,10 +167,11 @@ pub(super) fn to_rules(v: &Map<String, Value>, doc: usize) -> Result<CppRules, C
         get!("IndentPPDirectives"),
         doc,
         "IndentPPDirectives",
-        &["None", "AfterHash", "BeforeHash"],
+        &["None", "AfterHash", "BeforeHash", "Leave"],
     )? {
         "None" => PPDirectiveIndent::None,
         "AfterHash" => PPDirectiveIndent::AfterHash,
+        "Leave" => PPDirectiveIndent::Leave,
         _ => PPDirectiveIndent::BeforeHash,
     };
     policy.directive.width = width_or_default(get!("PPIndentWidth"), doc, "PPIndentWidth")?
@@ -177,10 +180,10 @@ pub(super) fn to_rules(v: &Map<String, Value>, doc: usize) -> Result<CppRules, C
         get!("IndentExternBlock"),
         doc,
         "IndentExternBlock",
-        &["NoIndent", "Indent", "AfterExternBlock"],
+        &["NoIndent", "Indent", "AfterExternBlock", "true", "false"],
     )? {
-        "NoIndent" => false,
-        "Indent" => true,
+        "NoIndent" | "false" => false,
+        "Indent" | "true" => true,
         _ => match choice(
             get!("BreakBeforeBraces"),
             doc,

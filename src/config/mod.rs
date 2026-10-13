@@ -2,6 +2,7 @@
 mod cpp;
 mod parse;
 mod resolve;
+mod schema;
 mod value;
 
 pub use parse::{

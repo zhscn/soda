@@ -1,0 +1,1195 @@
+{
+  "revision": "8b7a4fb1628138dc89d49b0e4409fd4e1e7f43e5",
+  "sources": [
+    "clang/lib/Format/Format.cpp",
+    "clang/include/clang/Format/Format.h",
+    "clang/lib/Tooling/Inclusions/IncludeStyle.cpp",
+    "clang/include/clang/Tooling/Inclusions/IncludeStyle.h",
+    "clang/include/clang/Basic/TokenKinds.def"
+  ],
+  "options": {
+    "AccessModifierOffset": "int",
+    "AlignAfterOpenBracket": "BracketAlignmentStyle",
+    "AlignArrayOfStructures": "ArrayInitializerAlignmentStyle",
+    "AlignConsecutiveAssignments": "AlignConsecutiveStyle",
+    "AlignConsecutiveBitFields": "AlignConsecutiveStyle",
+    "AlignConsecutiveDeclarations": "AlignConsecutiveStyle",
+    "AlignConsecutiveMacros": "AlignConsecutiveStyle",
+    "AlignConsecutiveShortCaseStatements": "ShortCaseStatementsAlignmentStyle",
+    "AlignConsecutiveTableGenBreakingDAGArgColons": "AlignConsecutiveStyle",
+    "AlignConsecutiveTableGenCondOperatorColons": "AlignConsecutiveStyle",
+    "AlignConsecutiveTableGenDefinitionColons": "AlignConsecutiveStyle",
+    "AlignEscapedNewlines": "EscapedNewlineAlignmentStyle",
+    "AlignEscapedNewlinesLeft": "EscapedNewlineAlignmentStyle",
+    "AlignOperands": "OperandAlignmentStyle",
+    "AlignTrailingComments": "TrailingCommentsAlignmentStyle",
+    "AllowAllArgumentsOnNextLine": "bool",
+    "AllowAllConstructorInitializersOnNextLine": "bool",
+    "AllowAllParametersOfDeclarationOnNextLine": "bool",
+    "AllowBreakBeforeNoexceptSpecifier": "BreakBeforeNoexceptSpecifierStyle",
+    "AllowBreakBeforeQtProperty": "bool",
+    "AllowShortBlocksOnASingleLine": "ShortBlockStyle",
+    "AllowShortCaseExpressionOnASingleLine": "bool",
+    "AllowShortCaseLabelsOnASingleLine": "bool",
+    "AllowShortCompoundRequirementOnASingleLine": "bool",
+    "AllowShortEnumsOnASingleLine": "bool",
+    "AllowShortFunctionsOnASingleLine": "ShortFunctionStyle",
+    "AllowShortIfStatementsOnASingleLine": "ShortIfStyle",
+    "AllowShortLambdasOnASingleLine": "ShortLambdaStyle",
+    "AllowShortLoopsOnASingleLine": "bool",
+    "AllowShortNamespacesOnASingleLine": "bool",
+    "AllowShortRecordOnASingleLine": "ShortRecordStyle",
+    "AlwaysBreakAfterDefinitionReturnType": "DefinitionReturnTypeBreakingStyle",
+    "AlwaysBreakAfterReturnType": "ReturnTypeBreakingStyle",
+    "AlwaysBreakBeforeMultilineStrings": "bool",
+    "AlwaysBreakTemplateDeclarations": "BreakTemplateDeclarationsStyle",
+    "AttributeMacros": "std::vector<std::string>",
+    "BasedOnStyle": "StringRef",
+    "BinPackArguments": "BinPackArgumentsStyle",
+    "BinPackLongBracedList": "bool",
+    "BinPackParameters": "BinPackParametersStyle",
+    "BitFieldColonSpacing": "BitFieldColonSpacingStyle",
+    "BraceWrapping": "BraceWrappingFlags",
+    "BracedInitializerIndentWidth": "int",
+    "BreakAdjacentStringLiterals": "bool",
+    "BreakAfterAttributes": "AttributeBreakingStyle",
+    "BreakAfterJavaFieldAnnotations": "bool",
+    "BreakAfterOpenBracketBracedList": "bool",
+    "BreakAfterOpenBracketFunction": "bool",
+    "BreakAfterOpenBracketIf": "bool",
+    "BreakAfterOpenBracketLoop": "bool",
+    "BreakAfterOpenBracketSwitch": "bool",
+    "BreakAfterReturnType": "ReturnTypeBreakingStyle",
+    "BreakArrays": "bool",
+    "BreakBeforeBinaryOperators": "BinaryOperatorStyle",
+    "BreakBeforeBraces": "BraceBreakingStyle",
+    "BreakBeforeCloseBracketBracedList": "bool",
+    "BreakBeforeCloseBracketFunction": "bool",
+    "BreakBeforeCloseBracketIf": "bool",
+    "BreakBeforeCloseBracketLoop": "bool",
+    "BreakBeforeCloseBracketSwitch": "bool",
+    "BreakBeforeConceptDeclarations": "BreakBeforeConceptDeclarationsStyle",
+    "BreakBeforeInheritanceComma": "bool",
+    "BreakBeforeInlineASMColon": "BreakBeforeInlineASMColonStyle",
+    "BreakBeforeReturnType": "BreakBeforeReturnTypeStyle",
+    "BreakBeforeTemplateCloser": "bool",
+    "BreakBeforeTernaryOperators": "bool",
+    "BreakBinaryOperations": "BreakBinaryOperationsOptions",
+    "BreakConstructorInitializers": "BreakConstructorInitializersStyle",
+    "BreakConstructorInitializersBeforeComma": "bool",
+    "BreakFunctionDeclarationParameters": "bool",
+    "BreakFunctionDefinitionParameters": "bool",
+    "BreakInheritanceList": "BreakInheritanceListStyle",
+    "BreakStringLiterals": "bool",
+    "BreakTemplateDeclarations": "BreakTemplateDeclarationsStyle",
+    "ColumnLimit": "unsigned",
+    "CommentPragmas": "std::string",
+    "CompactNamespaces": "bool",
+    "ConstructorInitializerAllOnOneLineOrOnePerLine": "bool",
+    "ConstructorInitializerIndentWidth": "unsigned",
+    "ContinuationIndentWidth": "unsigned",
+    "Cpp11BracedListStyle": "BracedListStyle",
+    "DeriveLineEnding": "bool",
+    "DerivePointerAlignment": "bool",
+    "DerivePointerBinding": "bool",
+    "DisableFormat": "bool",
+    "EmptyLineAfterAccessModifier": "EmptyLineAfterAccessModifierStyle",
+    "EmptyLineBeforeAccessModifier": "EmptyLineBeforeAccessModifierStyle",
+    "EnumTrailingComma": "EnumTrailingCommaStyle",
+    "ExperimentalAutoDetectBinPacking": "bool",
+    "FixNamespaceComments": "bool",
+    "ForEachMacros": "std::vector<std::string>",
+    "IfMacros": "std::vector<std::string>",
+    "IncludeBlocks": "IncludeBlocksStyle",
+    "IncludeCategories": "std::vector<IncludeCategory>",
+    "IncludeIsMainRegex": "std::string",
+    "IncludeIsMainSourceRegex": "std::string",
+    "IndentAccessModifiers": "IndentAccessModifierStyle",
+    "IndentCaseBlocks": "bool",
+    "IndentCaseLabels": "bool",
+    "IndentExportBlock": "bool",
+    "IndentExternBlock": "IndentExternBlockStyle",
+    "IndentFunctionDeclarationAfterType": "bool",
+    "IndentGotoLabels": "IndentGotoLabelStyle",
+    "IndentPPDirectives": "PPDirectiveIndentStyle",
+    "IndentRequires": "bool",
+    "IndentRequiresClause": "bool",
+    "IndentWidth": "unsigned",
+    "IndentWrappedFunctionNames": "bool",
+    "InsertBraces": "bool",
+    "InsertNewlineAtEOF": "bool",
+    "InsertTrailingCommas": "TrailingCommaStyle",
+    "IntegerLiteralSeparator": "IntegerLiteralSeparatorStyle",
+    "JavaImportGroups": "std::vector<std::string>",
+    "JavaScriptQuotes": "JavaScriptQuoteStyle",
+    "JavaScriptWrapImports": "bool",
+    "KeepEmptyLines": "KeepEmptyLinesStyle",
+    "KeepEmptyLinesAtEOF": "bool",
+    "KeepEmptyLinesAtTheStartOfBlocks": "bool",
+    "KeepFormFeed": "bool",
+    "LambdaBodyIndentation": "LambdaBodyIndentationKind",
+    "Language": "LanguageKind",
+    "LineEnding": "LineEndingStyle",
+    "MacroBlockBegin": "std::string",
+    "MacroBlockEnd": "std::string",
+    "Macros": "std::vector<std::string>",
+    "MacrosSkippedByRemoveParentheses": "std::vector<std::string>",
+    "MainIncludeChar": "MainIncludeCharDiscriminator",
+    "MaxEmptyLinesToKeep": "unsigned",
+    "NamespaceIndentation": "NamespaceIndentationKind",
+    "NamespaceMacros": "std::vector<std::string>",
+    "NumericLiteralCase": "NumericLiteralCaseStyle",
+    "ObjCBinPackProtocolList": "BinPackStyle",
+    "ObjCBlockIndentWidth": "unsigned",
+    "ObjCBreakBeforeNestedBlockParam": "bool",
+    "ObjCPropertyAttributeOrder": "std::vector<std::string>",
+    "ObjCSpaceAfterMethodDeclarationPrefix": "bool",
+    "ObjCSpaceAfterProperty": "bool",
+    "ObjCSpaceBeforeProtocolList": "bool",
+    "OneLineFormatOffRegex": "std::string",
+    "PPIndentWidth": "int",
+    "PackArguments": "PackArgumentsStyle",
+    "PackConstructorInitializers": "PackConstructorInitializersStyle",
+    "PackParameters": "PackParametersStyle",
+    "PenaltyBreakAssignment": "unsigned",
+    "PenaltyBreakBeforeFirstCallParameter": "unsigned",
+    "PenaltyBreakBeforeMemberAccess": "unsigned",
+    "PenaltyBreakComment": "unsigned",
+    "PenaltyBreakFirstLessLess": "unsigned",
+    "PenaltyBreakOpenParenthesis": "unsigned",
+    "PenaltyBreakScopeResolution": "unsigned",
+    "PenaltyBreakString": "unsigned",
+    "PenaltyBreakTemplateDeclaration": "unsigned",
+    "PenaltyExcessCharacter": "unsigned",
+    "PenaltyIndentedWhitespace": "unsigned",
+    "PenaltyReturnTypeOnItsOwnLine": "unsigned",
+    "PointerAlignment": "PointerAlignmentStyle",
+    "PointerBindsToType": "PointerAlignmentStyle",
+    "QualifierAlignment": "QualifierAlignmentStyle",
+    "QualifierOrder": "std::vector<std::string>",
+    "RawStringFormats": "std::vector<RawStringFormat>",
+    "ReferenceAlignment": "ReferenceAlignmentStyle",
+    "ReflowComments": "ReflowCommentsStyle",
+    "RemoveBracesLLVM": "bool",
+    "RemoveEmptyLinesInUnwrappedLines": "bool",
+    "RemoveParentheses": "RemoveParenthesesStyle",
+    "RemoveSemicolon": "bool",
+    "RequiresClausePosition": "RequiresClausePositionStyle",
+    "RequiresExpressionIndentation": "RequiresExpressionIndentationKind",
+    "SeparateDefinitionBlocks": "SeparateDefinitionStyle",
+    "ShortNamespaceLines": "unsigned",
+    "SkipMacroDefinitionBody": "bool",
+    "SortIncludes": "SortIncludesOptions",
+    "SortJavaStaticImport": "SortJavaStaticImportOptions",
+    "SortUsingDeclarations": "SortUsingDeclarationsOptions",
+    "SpaceAfterCStyleCast": "bool",
+    "SpaceAfterControlStatementKeyword": "SpaceBeforeParensStyle",
+    "SpaceAfterLogicalNot": "bool",
+    "SpaceAfterOperatorKeyword": "bool",
+    "SpaceAfterTemplateKeyword": "bool",
+    "SpaceAroundPointerQualifiers": "SpaceAroundPointerQualifiersStyle",
+    "SpaceBeforeAssignmentOperators": "bool",
+    "SpaceBeforeCaseColon": "bool",
+    "SpaceBeforeCpp11BracedList": "bool",
+    "SpaceBeforeCtorInitializerColon": "bool",
+    "SpaceBeforeEnumUnderlyingTypeColon": "bool",
+    "SpaceBeforeInheritanceColon": "bool",
+    "SpaceBeforeJsonColon": "bool",
+    "SpaceBeforeParens": "SpaceBeforeParensStyle",
+    "SpaceBeforeParensOptions": "SpaceBeforeParensCustom",
+    "SpaceBeforeRangeBasedForLoopColon": "bool",
+    "SpaceBeforeSquareBrackets": "bool",
+    "SpaceInEmptyBlock": "bool",
+    "SpaceInEmptyBraces": "SpaceInEmptyBracesStyle",
+    "SpaceInEmptyParentheses": "bool",
+    "SpacesBeforeTrailingComments": "unsigned",
+    "SpacesInAngles": "SpacesInAnglesStyle",
+    "SpacesInBlockComments": "SpacesInBlockCommentsStyle",
+    "SpacesInCStyleCastParentheses": "bool",
+    "SpacesInConditionalStatement": "bool",
+    "SpacesInContainerLiterals": "bool",
+    "SpacesInLineCommentPrefix": "SpacesInLineComment",
+    "SpacesInParens": "SpacesInParensStyle",
+    "SpacesInParensOptions": "SpacesInParensCustom",
+    "SpacesInParentheses": "bool",
+    "SpacesInSquareBrackets": "bool",
+    "Standard": "LanguageStandard",
+    "StatementAttributeLikeMacros": "std::vector<std::string>",
+    "StatementMacros": "std::vector<std::string>",
+    "TabWidth": "unsigned",
+    "TableGenBreakInsideDAGArg": "DAGArgStyle",
+    "TableGenBreakingDAGArgOperators": "std::vector<std::string>",
+    "TemplateNames": "std::vector<std::string>",
+    "TypeNames": "std::vector<std::string>",
+    "TypenameMacros": "std::vector<std::string>",
+    "UseCRLF": "bool",
+    "UseTab": "UseTabStyle",
+    "VariableTemplates": "std::vector<std::string>",
+    "VerilogBreakBetweenInstancePorts": "bool",
+    "WhitespaceSensitiveMacros": "std::vector<std::string>",
+    "WrapNamespaceBodyWithEmptyLines": "WrapNamespaceBodyWithEmptyLinesStyle"
+  },
+  "types": {
+    "AlignConsecutiveStyle": {
+      "kind": "mapping",
+      "fields": {
+        "Enabled": "bool",
+        "AcrossEmptyLines": "bool",
+        "AcrossComments": "bool",
+        "AlignCompound": "bool",
+        "AlignFunctionDeclarations": "bool",
+        "AlignFunctionPointers": "bool",
+        "EnumAssignments": "bool",
+        "PadOperators": "bool"
+      },
+      "values": [
+        "None",
+        "Consecutive",
+        "AcrossEmptyLines",
+        "AcrossComments",
+        "AcrossEmptyLinesAndComments",
+        "true",
+        "false"
+      ]
+    },
+    "ArrayInitializerAlignmentStyle": {
+      "kind": "enum",
+      "values": [
+        "None",
+        "Left",
+        "Right"
+      ]
+    },
+    "AttributeBreakingStyle": {
+      "kind": "enum",
+      "values": [
+        "Always",
+        "Leave",
+        "LeaveAll",
+        "Never"
+      ]
+    },
+    "BinPackArgumentsStyle": {
+      "kind": "enum",
+      "values": [
+        "BinPack",
+        "OnePerLine",
+        "UseBreakAfter",
+        "true",
+        "false"
+      ]
+    },
+    "BinPackParametersStyle": {
+      "kind": "enum",
+      "values": [
+        "BinPack",
+        "OnePerLine",
+        "AlwaysOnePerLine",
+        "UseBreakAfter",
+        "true",
+        "false"
+      ]
+    },
+    "BinPackStyle": {
+      "kind": "enum",
+      "values": [
+        "Auto",
+        "Always",
+        "Never"
+      ]
+    },
+    "BinaryOperationBreakRule": {
+      "kind": "mapping",
+      "fields": {
+        "Operators": "std::vector<tok::TokenKind>",
+        "Style": "BreakBinaryOperationsStyle",
+        "MinChainLength": "unsigned"
+      },
+      "values": []
+    },
+    "BinaryOperatorStyle": {
+      "kind": "enum",
+      "values": [
+        "All",
+        "true",
+        "None",
+        "false",
+        "NonAssignment"
+      ]
+    },
+    "BitFieldColonSpacingStyle": {
+      "kind": "enum",
+      "values": [
+        "Both",
+        "None",
+        "Before",
+        "After"
+      ]
+    },
+    "BraceBreakingStyle": {
+      "kind": "enum",
+      "values": [
+        "Attach",
+        "Linux",
+        "Mozilla",
+        "Stroustrup",
+        "Allman",
+        "Whitesmiths",
+        "GNU",
+        "WebKit",
+        "Custom"
+      ]
+    },
+    "BraceWrappingAfterControlStatementStyle": {
+      "kind": "enum",
+      "values": [
+        "Never",
+        "MultiLine",
+        "Always",
+        "false",
+        "true"
+      ]
+    },
+    "BraceWrappingFlags": {
+      "kind": "mapping",
+      "fields": {
+        "AfterCaseLabel": "bool",
+        "AfterClass": "bool",
+        "AfterControlStatement": "BraceWrappingAfterControlStatementStyle",
+        "AfterEnum": "bool",
+        "AfterExportBlock": "bool",
+        "AfterExternBlock": "bool",
+        "AfterFunction": "bool",
+        "AfterNamespace": "bool",
+        "AfterObjCDeclaration": "bool",
+        "AfterRequiresExpression": "bool",
+        "AfterStruct": "bool",
+        "AfterUnion": "bool",
+        "BeforeCatch": "bool",
+        "BeforeElse": "bool",
+        "BeforeLambdaBody": "bool",
+        "BeforeWhile": "bool",
+        "IndentBraces": "bool",
+        "SplitEmptyFunction": "bool",
+        "SplitEmptyRecord": "bool",
+        "SplitEmptyNamespace": "bool"
+      },
+      "values": []
+    },
+    "BracedListStyle": {
+      "kind": "enum",
+      "values": [
+        "Block",
+        "FunctionCall",
+        "AlignFirstComment",
+        "false",
+        "true"
+      ]
+    },
+    "BracketAlignmentStyle": {
+      "kind": "enum",
+      "values": [
+        "Align",
+        "DontAlign",
+        "true",
+        "false",
+        "AlwaysBreak",
+        "BlockIndent"
+      ]
+    },
+    "BreakBeforeConceptDeclarationsStyle": {
+      "kind": "enum",
+      "values": [
+        "Never",
+        "Allowed",
+        "Always",
+        "true",
+        "false"
+      ]
+    },
+    "BreakBeforeInlineASMColonStyle": {
+      "kind": "enum",
+      "values": [
+        "Never",
+        "OnlyMultiline",
+        "Always"
+      ]
+    },
+    "BreakBeforeNoexceptSpecifierStyle": {
+      "kind": "enum",
+      "values": [
+        "Never",
+        "OnlyWithParen",
+        "Always"
+      ]
+    },
+    "BreakBeforeReturnTypeStyle": {
+      "kind": "enum",
+      "values": [
+        "None",
+        "All",
+        "TopLevel",
+        "AllDefinitions",
+        "TopLevelDefinitions"
+      ]
+    },
+    "BreakBinaryOperationsOptions": {
+      "kind": "mapping",
+      "fields": {
+        "Default": "BreakBinaryOperationsStyle",
+        "PerOperator": "std::vector<BinaryOperationBreakRule>"
+      },
+      "values": [
+        "Never",
+        "OnePerLine",
+        "RespectPrecedence"
+      ]
+    },
+    "BreakBinaryOperationsStyle": {
+      "kind": "enum",
+      "values": [
+        "Never",
+        "OnePerLine",
+        "RespectPrecedence"
+      ]
+    },
+    "BreakConstructorInitializersStyle": {
+      "kind": "enum",
+      "values": [
+        "BeforeColon",
+        "BeforeComma",
+        "AfterColon",
+        "AfterComma"
+      ]
+    },
+    "BreakInheritanceListStyle": {
+      "kind": "enum",
+      "values": [
+        "BeforeColon",
+        "BeforeComma",
+        "AfterColon",
+        "AfterComma"
+      ]
+    },
+    "BreakTemplateDeclarationsStyle": {
+      "kind": "enum",
+      "values": [
+        "Leave",
+        "No",
+        "MultiLine",
+        "Yes",
+        "false",
+        "true"
+      ]
+    },
+    "DAGArgStyle": {
+      "kind": "enum",
+      "values": [
+        "DontBreak",
+        "BreakElements",
+        "BreakAll"
+      ]
+    },
+    "DefinitionReturnTypeBreakingStyle": {
+      "kind": "enum",
+      "values": [
+        "None",
+        "All",
+        "TopLevel",
+        "false",
+        "true"
+      ]
+    },
+    "EmptyLineAfterAccessModifierStyle": {
+      "kind": "enum",
+      "values": [
+        "Never",
+        "Leave",
+        "Always"
+      ]
+    },
+    "EmptyLineBeforeAccessModifierStyle": {
+      "kind": "enum",
+      "values": [
+        "Never",
+        "Leave",
+        "LogicalBlock",
+        "Always"
+      ]
+    },
+    "EnumTrailingCommaStyle": {
+      "kind": "enum",
+      "values": [
+        "Leave",
+        "Insert",
+        "Remove"
+      ]
+    },
+    "EscapedNewlineAlignmentStyle": {
+      "kind": "enum",
+      "values": [
+        "DontAlign",
+        "Left",
+        "LeftWithLastLine",
+        "Right",
+        "true",
+        "false"
+      ]
+    },
+    "IncludeBlocksStyle": {
+      "kind": "enum",
+      "values": [
+        "Preserve",
+        "Merge",
+        "Regroup"
+      ]
+    },
+    "IncludeCategory": {
+      "kind": "mapping",
+      "fields": {
+        "Regex": "std::string",
+        "Priority": "int",
+        "SortPriority": "int",
+        "CaseSensitive": "bool"
+      },
+      "values": []
+    },
+    "IndentAccessModifierStyle": {
+      "kind": "enum",
+      "values": [
+        "Never",
+        "Always",
+        "AfterFirstAccessModifier",
+        "false",
+        "true"
+      ]
+    },
+    "IndentExternBlockStyle": {
+      "kind": "enum",
+      "values": [
+        "AfterExternBlock",
+        "Indent",
+        "NoIndent",
+        "true",
+        "false"
+      ]
+    },
+    "IndentGotoLabelStyle": {
+      "kind": "enum",
+      "values": [
+        "NoIndent",
+        "OuterIndent",
+        "InnerIndent",
+        "HalfIndent",
+        "false",
+        "true"
+      ]
+    },
+    "IntegerLiteralSeparatorStyle": {
+      "kind": "mapping",
+      "fields": {
+        "Binary": "int8_t",
+        "BinaryMinDigitsInsert": "int8_t",
+        "BinaryMaxDigitsRemove": "int8_t",
+        "Decimal": "int8_t",
+        "DecimalMinDigitsInsert": "int8_t",
+        "DecimalMaxDigitsRemove": "int8_t",
+        "Hex": "int8_t",
+        "HexMinDigitsInsert": "int8_t",
+        "HexMaxDigitsRemove": "int8_t",
+        "BinaryMinDigits": "int8_t",
+        "DecimalMinDigits": "int8_t",
+        "HexMinDigits": "int8_t"
+      },
+      "values": []
+    },
+    "JavaScriptQuoteStyle": {
+      "kind": "enum",
+      "values": [
+        "Leave",
+        "Single",
+        "Double"
+      ]
+    },
+    "KeepEmptyLinesStyle": {
+      "kind": "mapping",
+      "fields": {
+        "AtEndOfBlock": "bool",
+        "AtEndOfFile": "bool",
+        "AtStartOfBlock": "bool",
+        "AtStartOfFile": "bool"
+      },
+      "values": []
+    },
+    "LambdaBodyIndentationKind": {
+      "kind": "enum",
+      "values": [
+        "Signature",
+        "OuterScope"
+      ]
+    },
+    "LanguageKind": {
+      "kind": "enum",
+      "values": [
+        "C",
+        "Cpp",
+        "Java",
+        "JavaScript",
+        "ObjC",
+        "Proto",
+        "TableGen",
+        "TextProto",
+        "CSharp",
+        "Json",
+        "Verilog"
+      ]
+    },
+    "LanguageStandard": {
+      "kind": "enum",
+      "values": [
+        "c++03",
+        "C++03",
+        "Cpp03",
+        "c++11",
+        "C++11",
+        "c++14",
+        "c++17",
+        "c++20",
+        "c++23",
+        "c++26",
+        "Latest",
+        "Cpp11",
+        "Auto"
+      ]
+    },
+    "LineEndingStyle": {
+      "kind": "enum",
+      "values": [
+        "LF",
+        "CRLF",
+        "DeriveLF",
+        "DeriveCRLF"
+      ]
+    },
+    "MainIncludeCharDiscriminator": {
+      "kind": "enum",
+      "values": [
+        "Quote",
+        "AngleBracket",
+        "Any"
+      ]
+    },
+    "NamespaceIndentationKind": {
+      "kind": "enum",
+      "values": [
+        "None",
+        "Inner",
+        "All"
+      ]
+    },
+    "NumericLiteralCaseStyle": {
+      "kind": "mapping",
+      "fields": {
+        "ExponentLetter": "NumericLiteralComponentStyle",
+        "HexDigit": "NumericLiteralComponentStyle",
+        "Prefix": "NumericLiteralComponentStyle",
+        "Suffix": "NumericLiteralComponentStyle"
+      },
+      "values": []
+    },
+    "NumericLiteralComponentStyle": {
+      "kind": "enum",
+      "values": [
+        "Leave",
+        "Upper",
+        "Lower"
+      ]
+    },
+    "OperandAlignmentStyle": {
+      "kind": "enum",
+      "values": [
+        "DontAlign",
+        "Align",
+        "AlignAfterOperator",
+        "true",
+        "false"
+      ]
+    },
+    "PPDirectiveIndentStyle": {
+      "kind": "enum",
+      "values": [
+        "None",
+        "AfterHash",
+        "BeforeHash",
+        "Leave"
+      ]
+    },
+    "PackArgumentsStyle": {
+      "kind": "mapping",
+      "fields": {
+        "BinPack": "BinPackArgumentsStyle",
+        "BreakAfter": "unsigned"
+      },
+      "values": []
+    },
+    "PackConstructorInitializersStyle": {
+      "kind": "enum",
+      "values": [
+        "Never",
+        "BinPack",
+        "CurrentLine",
+        "NextLine",
+        "NextLineOnly"
+      ]
+    },
+    "PackParametersStyle": {
+      "kind": "mapping",
+      "fields": {
+        "BinPack": "BinPackParametersStyle",
+        "BreakAfter": "unsigned"
+      },
+      "values": []
+    },
+    "PointerAlignmentStyle": {
+      "kind": "enum",
+      "values": [
+        "Middle",
+        "Left",
+        "Right",
+        "true",
+        "false"
+      ]
+    },
+    "QualifierAlignmentStyle": {
+      "kind": "enum",
+      "values": [
+        "Leave",
+        "Left",
+        "Right",
+        "Custom"
+      ]
+    },
+    "RawStringFormat": {
+      "kind": "mapping",
+      "fields": {
+        "Language": "LanguageKind",
+        "Delimiters": "std::vector<std::string>",
+        "EnclosingFunctions": "std::vector<std::string>",
+        "CanonicalDelimiter": "std::string",
+        "BasedOnStyle": "std::string"
+      },
+      "values": []
+    },
+    "ReferenceAlignmentStyle": {
+      "kind": "enum",
+      "values": [
+        "Pointer",
+        "Middle",
+        "Left",
+        "Right"
+      ]
+    },
+    "ReflowCommentsStyle": {
+      "kind": "enum",
+      "values": [
+        "Never",
+        "IndentOnly",
+        "Always",
+        "false",
+        "true"
+      ]
+    },
+    "RemoveParenthesesStyle": {
+      "kind": "enum",
+      "values": [
+        "Leave",
+        "MultipleParentheses",
+        "ReturnStatement"
+      ]
+    },
+    "RequiresClausePositionStyle": {
+      "kind": "enum",
+      "values": [
+        "OwnLine",
+        "OwnLineWithBrace",
+        "WithPreceding",
+        "WithFollowing",
+        "SingleLine"
+      ]
+    },
+    "RequiresExpressionIndentationKind": {
+      "kind": "enum",
+      "values": [
+        "Keyword",
+        "OuterScope"
+      ]
+    },
+    "ReturnTypeBreakingStyle": {
+      "kind": "enum",
+      "values": [
+        "None",
+        "Automatic",
+        "ExceptShortType",
+        "All",
+        "TopLevel",
+        "TopLevelDefinitions",
+        "AllDefinitions"
+      ]
+    },
+    "SeparateDefinitionStyle": {
+      "kind": "enum",
+      "values": [
+        "Leave",
+        "Always",
+        "Never"
+      ]
+    },
+    "ShortBlockStyle": {
+      "kind": "enum",
+      "values": [
+        "Never",
+        "false",
+        "Always",
+        "true",
+        "Empty"
+      ]
+    },
+    "ShortCaseStatementsAlignmentStyle": {
+      "kind": "mapping",
+      "fields": {
+        "Enabled": "bool",
+        "AcrossEmptyLines": "bool",
+        "AcrossComments": "bool",
+        "AlignCaseArrows": "bool",
+        "AlignCaseColons": "bool"
+      },
+      "values": []
+    },
+    "ShortFunctionStyle": {
+      "kind": "mapping",
+      "fields": {
+        "Empty": "bool",
+        "Inline": "bool",
+        "Other": "bool"
+      },
+      "values": [
+        "None",
+        "Empty",
+        "Inline",
+        "InlineOnly",
+        "All",
+        "true",
+        "false"
+      ]
+    },
+    "ShortIfStyle": {
+      "kind": "enum",
+      "values": [
+        "Never",
+        "WithoutElse",
+        "OnlyFirstIf",
+        "AllIfsAndElse",
+        "Always",
+        "false",
+        "true"
+      ]
+    },
+    "ShortLambdaStyle": {
+      "kind": "enum",
+      "values": [
+        "None",
+        "false",
+        "Empty",
+        "Inline",
+        "All",
+        "true"
+      ]
+    },
+    "ShortRecordStyle": {
+      "kind": "enum",
+      "values": [
+        "Never",
+        "EmptyAndAttached",
+        "Empty",
+        "Always"
+      ]
+    },
+    "SortIncludesOptions": {
+      "kind": "mapping",
+      "fields": {
+        "Enabled": "bool",
+        "IgnoreCase": "bool",
+        "IgnoreExtension": "bool",
+        "Natural": "bool",
+        "FilesBeforeFolders": "bool"
+      },
+      "values": [
+        "Never",
+        "CaseInsensitive",
+        "CaseSensitive",
+        "Natural",
+        "false",
+        "true"
+      ]
+    },
+    "SortJavaStaticImportOptions": {
+      "kind": "enum",
+      "values": [
+        "Before",
+        "After"
+      ]
+    },
+    "SortUsingDeclarationsOptions": {
+      "kind": "enum",
+      "values": [
+        "Never",
+        "Lexicographic",
+        "LexicographicNumeric",
+        "false",
+        "true"
+      ]
+    },
+    "SpaceAroundPointerQualifiersStyle": {
+      "kind": "enum",
+      "values": [
+        "Default",
+        "Before",
+        "After",
+        "Both"
+      ]
+    },
+    "SpaceBeforeParensCustom": {
+      "kind": "mapping",
+      "fields": {
+        "AfterControlStatements": "bool",
+        "AfterForeachMacros": "bool",
+        "AfterFunctionDefinitionName": "bool",
+        "AfterFunctionDeclarationName": "bool",
+        "AfterIfMacros": "bool",
+        "AfterNot": "bool",
+        "AfterOverloadedOperator": "bool",
+        "AfterPlacementOperator": "bool",
+        "AfterRequiresInClause": "bool",
+        "AfterRequiresInExpression": "bool",
+        "BeforeNonEmptyParentheses": "bool"
+      },
+      "values": []
+    },
+    "SpaceBeforeParensStyle": {
+      "kind": "enum",
+      "values": [
+        "Never",
+        "ControlStatements",
+        "ControlStatementsExceptControlMacros",
+        "NonEmptyParentheses",
+        "Always",
+        "Custom",
+        "false",
+        "true",
+        "ControlStatementsExceptForEachMacros"
+      ]
+    },
+    "SpaceInEmptyBracesStyle": {
+      "kind": "enum",
+      "values": [
+        "Always",
+        "Block",
+        "Never"
+      ]
+    },
+    "SpacesInAnglesStyle": {
+      "kind": "enum",
+      "values": [
+        "Never",
+        "Always",
+        "Leave",
+        "false",
+        "true"
+      ]
+    },
+    "SpacesInBlockCommentsStyle": {
+      "kind": "enum",
+      "values": [
+        "Never",
+        "Always",
+        "Leave"
+      ]
+    },
+    "SpacesInLineComment": {
+      "kind": "mapping",
+      "fields": {
+        "Minimum": "unsigned",
+        "Maximum": "int"
+      },
+      "values": []
+    },
+    "SpacesInParensCustom": {
+      "kind": "mapping",
+      "fields": {
+        "ExceptDoubleParentheses": "bool",
+        "InCStyleCasts": "bool",
+        "InConditionalStatements": "bool",
+        "InEmptyParentheses": "bool",
+        "Other": "bool"
+      },
+      "values": []
+    },
+    "SpacesInParensStyle": {
+      "kind": "enum",
+      "values": [
+        "Never",
+        "Custom"
+      ]
+    },
+    "StringRef": {
+      "kind": "string"
+    },
+    "TrailingCommaStyle": {
+      "kind": "enum",
+      "values": [
+        "None",
+        "Wrapped"
+      ]
+    },
+    "TrailingCommentsAlignmentKinds": {
+      "kind": "enum",
+      "values": [
+        "Leave",
+        "Always",
+        "Never"
+      ]
+    },
+    "TrailingCommentsAlignmentStyle": {
+      "kind": "mapping",
+      "fields": {
+        "AlignPPAndNotPP": "bool",
+        "Kind": "TrailingCommentsAlignmentKinds",
+        "OverEmptyLines": "unsigned"
+      },
+      "values": [
+        "Leave",
+        "Always",
+        "Never",
+        "true",
+        "false"
+      ]
+    },
+    "UseTabStyle": {
+      "kind": "enum",
+      "values": [
+        "Never",
+        "false",
+        "Always",
+        "true",
+        "ForIndentation",
+        "ForContinuationAndIndentation",
+        "AlignWithSpaces"
+      ]
+    },
+    "WrapNamespaceBodyWithEmptyLinesStyle": {
+      "kind": "enum",
+      "values": [
+        "Never",
+        "Always",
+        "Leave"
+      ]
+    },
+    "bool": {
+      "kind": "boolean"
+    },
+    "int": {
+      "kind": "integer"
+    },
+    "int8_t": {
+      "kind": "integer"
+    },
+    "std::string": {
+      "kind": "string"
+    },
+    "std::vector<BinaryOperationBreakRule>": {
+      "kind": "sequence",
+      "item": "BinaryOperationBreakRule"
+    },
+    "std::vector<IncludeCategory>": {
+      "kind": "sequence",
+      "item": "IncludeCategory"
+    },
+    "std::vector<RawStringFormat>": {
+      "kind": "sequence",
+      "item": "RawStringFormat"
+    },
+    "std::vector<std::string>": {
+      "kind": "sequence",
+      "item": "std::string"
+    },
+    "std::vector<tok::TokenKind>": {
+      "kind": "sequence",
+      "item": "tok::TokenKind"
+    },
+    "tok::TokenKind": {
+      "kind": "enum",
+      "values": [
+        "[",
+        "]",
+        "(",
+        ")",
+        "{",
+        "}",
+        ".",
+        "...",
+        "&",
+        "&&",
+        "&=",
+        "*",
+        "*=",
+        "+",
+        "++",
+        "+=",
+        "-",
+        "->",
+        "--",
+        "-=",
+        "~",
+        "!",
+        "!=",
+        "/",
+        "/=",
+        "%",
+        "%=",
+        "<",
+        "<<",
+        "<=",
+        "<<=",
+        "<=>",
+        ">",
+        ">>",
+        ">=",
+        ">>=",
+        "^",
+        "^^",
+        "^=",
+        "|",
+        "||",
+        "|=",
+        "?",
+        ":",
+        ";",
+        "=",
+        "==",
+        ",",
+        "#",
+        "##",
+        "#@",
+        ".*",
+        "->*",
+        "::",
+        "@",
+        "<<<",
+        ">>>"
+      ]
+    },
+    "unsigned": {
+      "kind": "unsigned"
+    }
+  }
+}

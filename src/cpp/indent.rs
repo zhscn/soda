@@ -28,6 +28,7 @@ pub enum IndentRole {
     BraceInit,
     StatementContinuation,
     PreprocessorDirective,
+    OpeningToken,
     ClosingToken,
     PreservedRawString,
     PreservedBlockComment,
@@ -251,6 +252,21 @@ impl Computer<'_> {
             let token = &self.tree.tokens[i];
             let id = self.tree.token_owner(i);
             match self.tree.format_kind(i) {
+                K::LBrace
+                    if matches!(
+                        self.tree.nodes[id].kind,
+                        N::CompoundStatement | N::NamespaceBody | N::ClassBody
+                    ) =>
+                {
+                    let anchor = self.origin(id);
+                    if self.line_of(anchor) < self.line {
+                        return self.fixed(
+                            IndentRole::OpeningToken,
+                            self.indent(self.line_of(anchor)),
+                            Some(anchor),
+                        );
+                    }
+                }
                 K::RBrace | K::RParen | K::RBracket
                     if matches!(
                         self.tree.nodes[id].kind,
@@ -270,26 +286,44 @@ impl Computer<'_> {
                     );
                 }
                 K::PreprocessorHash => {
-                    let depth = self.pp_column();
-                    let mut decision = self.fixed(
-                        IndentRole::PreprocessorDirective,
+                    if self.style.directive.layout == PPDirectiveIndent::Leave {
+                        let mut decision = self.fixed(
+                            IndentRole::PreprocessorDirective,
+                            self.indent(self.line),
+                            None,
+                        );
+                        decision.preserve = true;
+                        decision.whitespace =
+                            leading(&self.snapshot.line(self.line).unwrap()).into();
+                        return decision;
+                    }
+                    let level = self.pp_level();
+                    let depth = level * self.style.directive.width;
+                    let structural = level * self.style.whitespace.indent_width;
+                    let mut decision =
                         if self.style.directive.layout == PPDirectiveIndent::BeforeHash {
-                            depth
+                            self.decision(
+                                IndentRole::PreprocessorDirective,
+                                structural,
+                                depth,
+                                depth,
+                                None,
+                            )
                         } else {
-                            0
-                        },
-                        None,
-                    );
+                            self.fixed(IndentRole::PreprocessorDirective, 0, None)
+                        };
                     {
                         let start = token.range.end;
                         let len = leading(&self.snapshot.text()[start..]).len();
-                        let spaces = " ".repeat(
-                            if self.style.directive.layout == PPDirectiveIndent::AfterHash {
-                                depth
-                            } else {
-                                0
-                            },
-                        );
+                        // LLVM gives indentation after # a zero-based tab origin.
+                        let target = if self.style.directive.layout == PPDirectiveIndent::AfterHash
+                        {
+                            depth
+                        } else {
+                            0
+                        };
+                        let spaces =
+                            materialize(structural, target, target, &self.style.whitespace);
                         if self.snapshot.text()[start..start + len] != spaces {
                             decision.directive_spacing =
                                 Some(Change::new(start..start + len, spaces));
@@ -686,7 +720,7 @@ impl Computer<'_> {
         }
         true
     }
-    fn pp_column(&self) -> usize {
+    fn pp_level(&self) -> usize {
         if self.style.directive.layout == PPDirectiveIndent::None {
             return 0;
         }
@@ -715,7 +749,7 @@ impl Computer<'_> {
                 _ => level,
             };
             if self.line_of(token.range.start) == self.line {
-                return own.saturating_sub(usize::from(guard)) * self.style.directive.width;
+                return own.saturating_sub(usize::from(guard));
             }
         }
         0

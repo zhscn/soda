@@ -1,6 +1,6 @@
 use super::{
     cpp::to_rules,
-    value::{boolean, choice, integer, string},
+    value::{boolean, choice, string},
 };
 use crate::cpp::CppRules;
 use serde_json::{Map, Value};
@@ -120,43 +120,20 @@ fn merge(base: &mut Map<String, Value>, patch: &Map<String, Value>) {
     }
 }
 
-fn validate_shape(
-    key: &str,
-    value: &Value,
-    expected: &Value,
-    doc: usize,
-) -> Result<(), ConfigError> {
-    if let Value::Object(schema) = expected {
-        if let Value::Object(fields) = value {
-            for (name, value) in fields {
-                let path = format!("{key}.{name}");
-                let expected = schema
-                    .get(name)
-                    .ok_or_else(|| ConfigError::key(doc, &path, "unknown nested option"))?;
-                validate_shape(&path, value, expected, doc)?;
-            }
-        } else if !((key.starts_with("AlignConsecutive")
-            || matches!(key, "AlignTrailingComments" | "SortIncludes"))
-            && (value.is_string() || value.is_boolean()))
-        {
-            return Err(ConfigError::key(doc, key, "expected a mapping"));
-        }
-    } else if expected.is_array() && !value.is_array() {
-        return Err(ConfigError::key(doc, key, "expected a sequence"));
-    } else if expected.is_number() && integer(value, doc, key).is_err() {
-        return Err(ConfigError::key(doc, key, "expected an integer"));
-    } else if (expected.is_boolean() || expected.is_string())
-        && !(value.is_string() || value.is_boolean())
-    {
-        return Err(ConfigError::key(doc, key, "expected a scalar"));
-    }
-    Ok(())
-}
-const UNSUPPORTED: [&str; 4] = [
+const UNSUPPORTED: &[&str] = &[
     "IndentCaseBlocks",
     "IndentGotoLabels",
     "IndentRequiresClause",
     "LambdaBodyIndentation",
+    "IndentExportBlock",
+    "RequiresExpressionIndentation",
+    "StatementAttributeLikeMacros",
+    "TypenameMacros",
+    "TypeNames",
+    "TemplateNames",
+    "VariableTemplates",
+    "Macros",
+    "SkipMacroDefinitionBody",
 ];
 
 fn record_explicit(
@@ -181,7 +158,7 @@ fn refresh_diagnostics(config: &mut ClangConfig) {
         !UNSUPPORTED.contains(&diagnostic.option.as_str())
             && !matches!(
                 diagnostic.option.as_str(),
-                "AlignOperands" | "BraceWrapping"
+                "AlignOperands" | "BraceWrapping" | "Cpp11BracedListStyle"
             )
     });
     let source = |key: &str| {
@@ -191,7 +168,7 @@ fn refresh_diagnostics(config: &mut ClangConfig) {
             .copied()
             .unwrap_or(config.preset_document)
     };
-    for key in UNSUPPORTED {
+    for &key in UNSUPPORTED {
         if config.explicit_options.contains_key(key)
             || config.values.get(key) != presets()["llvm"].get(key)
         {
@@ -208,11 +185,27 @@ fn refresh_diagnostics(config: &mut ClangConfig) {
             message: "AlignAfterOperator currently uses Align continuation rules".into(),
         });
     }
+    if matches!(
+        config
+            .values
+            .get("Cpp11BracedListStyle")
+            .and_then(Value::as_str),
+        Some("AlignFirstComment" | "true")
+    ) && (config.explicit_options.contains_key("Cpp11BracedListStyle")
+        || config.values.get("Cpp11BracedListStyle")
+            != presets()["llvm"].get("Cpp11BracedListStyle"))
+    {
+        config.diagnostics.push(ConfigDiagnostic {
+            document: source("Cpp11BracedListStyle"),
+            option: "Cpp11BracedListStyle".into(),
+            message: "AlignFirstComment currently uses FunctionCall continuation rules; first-comment alignment is not implemented".into(),
+        });
+    }
     let brace_style = config
         .values
         .get("BreakBeforeBraces")
         .and_then(Value::as_str);
-    let extra_indent = brace_style == Some("GNU")
+    let extra_indent = matches!(brace_style, Some("GNU" | "Whitesmiths"))
         || (brace_style == Some("Custom")
             && boolean(
                 &config.values["BraceWrapping"]["IndentBraces"],
@@ -265,17 +258,8 @@ fn patch(
     }
     let mut values = doc.clone();
     values.remove("BasedOnStyle");
-    if let Some(v) = values.get("BreakConstructorInitializersBeforeComma")
-        && !values.contains_key("BreakConstructorInitializers")
-        && boolean(v, index, "BreakConstructorInitializersBeforeComma")?
-    {
-        values.insert(
-            "BreakConstructorInitializers".into(),
-            Value::String("BeforeComma".into()),
-        );
-    }
-    for key in doc.keys() {
-        if !include_str!("keys.txt").lines().any(|known| known == key) {
+    for (key, value) in &mut values {
+        if !super::schema::known(key) {
             if unknown == UnknownOptions::Error {
                 return Err(ConfigError::key(index, key, "unknown clang-format option"));
             }
@@ -284,10 +268,37 @@ fn patch(
                 option: key.clone(),
                 message: "unknown clang-format option; retained but not applied".into(),
             });
+        } else {
+            super::schema::validate(key, value, index)?;
         }
-        if let Some(expected) = presets()["llvm"].get(key) {
-            validate_shape(key, &doc[key], expected, index)?;
+    }
+    // These legacy names affect interactive indentation and share the modern
+    // option's meaning. Explicit modern values take precedence, as in LLVM.
+    for (old, new) in [
+        (
+            "IndentFunctionDeclarationAfterType",
+            "IndentWrappedFunctionNames",
+        ),
+        ("IndentRequires", "IndentRequiresClause"),
+    ] {
+        if !values.contains_key(new)
+            && let Some(value) = values.get(old).cloned()
+        {
+            values.insert(new.into(), value);
         }
+    }
+    if let Some(value) = values.get("BreakConstructorInitializersBeforeComma")
+        && boolean(value, index, "BreakConstructorInitializersBeforeComma")?
+        && values
+            .get("BreakConstructorInitializers")
+            .or_else(|| base.values.get("BreakConstructorInitializers"))
+            .and_then(Value::as_str)
+            == Some("BeforeColon")
+    {
+        values.insert(
+            "BreakConstructorInitializers".into(),
+            Value::String("BeforeComma".into()),
+        );
     }
     merge(&mut base.values, &values);
     base.rules = to_rules(&base.values, index)?;

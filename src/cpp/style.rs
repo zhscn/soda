@@ -9,6 +9,7 @@ pub enum NamespaceIndentation {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PPDirectiveIndent {
     None,
+    Leave,
     AfterHash,
     BeforeHash,
 }

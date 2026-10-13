@@ -41,7 +41,7 @@ impl CppSession {
         self.work
     }
     pub fn triggers(&self, ch: char) -> bool {
-        self.rules.enabled() && matches!(ch, ':' | '}' | '#')
+        self.rules.enabled() && matches!(ch, ':' | '{' | '}' | '#' | 'e' | 'f')
     }
     fn matches(&self, snapshot: &Snapshot) -> bool {
         self.analysis.as_ref().is_some_and(|tree| {
@@ -130,10 +130,42 @@ impl CppSession {
         if snapshot.line_of(request.position) != Some(request.line) {
             return Err(EditError::InvalidRange);
         }
+        // PP branch keywords end in e/f. Filter ordinary typing before parsing;
+        // finishing endif/else/elif changes the current directive's own level.
+        let pp_word = matches!(request.trigger, IndentTrigger::Typed('e' | 'f'));
+        if pp_word {
+            let prefix = snapshot.byte_slice(start..request.position).unwrap();
+            if prefix.bytes().find(|b| !matches!(b, b' ' | b'\t')) != Some(b'#') {
+                return Ok(IndentAdvice::Unavailable);
+            }
+        } else if let IndentTrigger::Typed(ch) = request.trigger
+            && ch != ':'
+            && !snapshot
+                .byte_slice(start..request.position)
+                .unwrap()
+                .bytes()
+                .all(|b| matches!(b, b' ' | b'\t'))
+        {
+            return Ok(IndentAdvice::Unavailable);
+        }
         let tree = self.analyze(snapshot);
-        if let IndentTrigger::Typed(ch) = request.trigger {
+        if pp_word {
+            if !tree.tokens().iter().any(|token| {
+                let word = &tree.source()[token.range.clone()];
+                token.preprocessor
+                    && token.range.contains(&request.position)
+                    && word
+                        .bytes()
+                        .next()
+                        .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+                    && word.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+            }) {
+                return Ok(IndentAdvice::Unavailable);
+            }
+        } else if let IndentTrigger::Typed(ch) = request.trigger {
             let expected = match ch {
                 ':' => K::Colon,
+                '{' => K::LBrace,
                 '}' => K::RBrace,
                 '#' => K::PreprocessorHash,
                 _ => return Ok(IndentAdvice::Unavailable),
@@ -142,17 +174,14 @@ impl CppSession {
                 .tokens()
                 .iter()
                 .any(|token| token.range.start == request.position && token.kind == expected)
-                || (ch != ':'
-                    && !snapshot
-                        .byte_slice(start..request.position)
-                        .unwrap()
-                        .bytes()
-                        .all(|b| matches!(b, b' ' | b'\t')))
             {
                 return Ok(IndentAdvice::Unavailable);
             }
         }
         let decision = compute_indent(snapshot, &tree, request.line, &self.rules)?;
+        if pp_word && decision.role != IndentRole::PreprocessorDirective {
+            return Ok(IndentAdvice::Unavailable);
+        }
         if decision.preserve {
             let newline = match decision.role {
                 IndentRole::PreservedBlockComment | IndentRole::PreservedMacro => {
@@ -166,6 +195,10 @@ impl CppSession {
                 _ => NewlineIndent::Verbatim,
             };
             return Ok(IndentAdvice::Preserve { newline });
+        }
+        if request.trigger == IndentTrigger::Typed('{') && decision.role != IndentRole::OpeningToken
+        {
+            return Ok(IndentAdvice::Unavailable);
         }
         if request.trigger == IndentTrigger::Typed(':')
             && !matches!(

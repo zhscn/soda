@@ -51,31 +51,35 @@ Rust 内置模块通过 `CppStyle::compile` 生成同一策略表示，返回 `R
 | 选项 | 交互缩进中的含义 |
 | --- | --- |
 | `IndentWidth`、`ContinuationIndentWidth`、`TabWidth` | 独立的结构宽度、续行宽度和 tab stop |
-| `UseTab` | Never、ForIndentation、ForContinuationAndIndentation、AlignWithSpaces、Always 分别处理 |
+| `UseTab` | 五种策略分别处理；兼容 false=Never、true=Always |
 | `NamespaceIndentation` | None、Inner、All |
 | `AccessModifierOffset` | 保存相对普通成员的偏移，具体列在查询时计算 |
 | `IndentAccessModifiers` | 兼容 bool，以及 Never、Always、AfterFirstAccessModifier |
 | `IndentCaseLabels` | case/default 相对 switch 的缩进 |
-| `IndentWrappedFunctionNames` | 换行后的函数声明名称缩进 |
+| `IndentWrappedFunctionNames` | 换行后的函数声明名称缩进；兼容旧字段 IndentFunctionDeclarationAfterType |
 | `AlignAfterOpenBracket` | 兼容 bool 和旧版枚举，控制用户已经选定换行位置的参数对齐 |
 | `AlignOperands`、`BreakBeforeTernaryOperators` | 操作数和三元表达式续行 |
 | `Cpp11BracedListStyle`、`BracedInitializerIndentWidth` | 区分块式与函数参数式初始化列表及独立宽度 |
-| `ConstructorInitializerIndentWidth`、`BreakConstructorInitializers` | 初始化列表独立宽度、首项与逗号对齐 |
-| `IndentPPDirectives`、`PPIndentWidth` | BeforeHash 的前导空白和 AfterHash 的关键字间距，包含 include guard 处理 |
-| `IndentExternBlock` | 与有效 BraceWrapping.AfterExternBlock 组合决定 extern body 缩进 |
+| `ConstructorInitializerIndentWidth`、`BreakConstructorInitializers` | 初始化列表独立宽度、首项与逗号对齐，接受 AfterComma；旧 BeforeComma 开关按 LLVM 的有效布局转换 |
+| `IndentPPDirectives`、`PPIndentWidth` | BeforeHash 调整前导空白；AfterHash 按 UseTab 在 # 后生成缩进；ForIndentation 的 Tab 范围仍由层级乘 IndentWidth 决定，PPIndentWidth 决定目标列；Leave 保留两侧空白；包含 include guard 处理 |
+| `IndentExternBlock` | 与有效 BraceWrapping.AfterExternBlock 组合决定 extern body 缩进，兼容 true=Indent、false=NoIndent |
 | `DisableFormat` | 保留既有缩进；Enter 沿用已有行首空白 |
 | `ForEachMacros`、`IfMacros`、`NamespaceMacros` | 识别循环、条件和 namespace 结构 |
 | `StatementMacros`、`AttributeMacros` | 区分独立宏语句和声明修饰宏 |
 | `WhitespaceSensitiveMacros` | 保留宏内部已有缩进 |
 | `MacroBlockBegin`、`MacroBlockEnd` | 将匹配的宏标识符作为块开闭边界，支持带参数调用 |
 
-LLVM 当前映射里的旧字段拼写保留在已知选项表中。未知顶层选项默认报错，调用者可以选择警告并保留。核心缩进字段校验类型与枚举；宽度限制在 0 到 4096，TabWidth 必须大于零。嵌套配置检查形状和已知子字段。
+选项名、类型、枚举和嵌套字段由独立的 `schema.json` 校验，来源是 LLVM 的 YAML mapping/enum traits，不依赖预设是否输出某个字段。序列元素也按声明类型校验。带 enumInput 的 mapping 同时接受其指定的枚举写法，如 `AllowShortFunctionsOnASingleLine: Empty`、`BreakBinaryOperations: Never`。未知顶层选项默认报错，调用者可以选择警告并保留；未知嵌套字段返回带完整字段路径的错误。
+
+布尔字段接受 LLVM 的 true/false、yes/no、on/off、y/n 写法及大小写变体。带引号的整数支持 LLVM 的进制前缀。核心缩进宽度限制在 0 到 4096，TabWidth 必须大于零。BracedInitializerIndentWidth 和 PPIndentWidth 的任意负值按 LLVM 规则选择默认宽度。所有顶层选项的类型及应用范围见[选项对照表](clang-format-options.csv)。表中的 interactive 表示接入策略，具体语法场景仍由语言服务支持；retained 表示保存配置，未执行该 formatter 行为。
 
 ## 已解析选项与实现范围
 
-完整选项树保留列宽、排序、换行及其他排版配置，缩进器只使用与当前交互能力相关的字段。配置层没有实现完整 formatter 的语义校验与跨字段约束。
+完整选项树保留列宽、排序、换行及其他排版配置，缩进器只使用与当前交互能力相关的字段。配置层不执行完整 formatter 的跨字段约束和全部旧字段归一化。标量和 mapping 的合法兼容形式保留在选项树中；与即时缩进相关的旧字段在策略编译前转换。
 
-显式配置 `IndentCaseBlocks`、`IndentGotoLabels`、`IndentRequiresClause`、`LambdaBodyIndentation`，或预设对这些选项采用不同于 LLVM 基线的值时，会返回尚未参与交互缩进的诊断。`AlignOperands: AlignAfterOperator` 编译为独立的 AfterOperator 策略值，目前执行时采用 Align 的续行规则，并返回诊断。GNU 或自定义额外 brace indentation 同样需要后续语言规则实现。
+显式配置 `IndentCaseBlocks`、`IndentGotoLabels`、`IndentRequiresClause`、`LambdaBodyIndentation`，或预设对这些选项采用不同于 LLVM 基线的值时，会返回尚未参与交互缩进的诊断。`AlignOperands: AlignAfterOperator` 编译为独立的 AfterOperator 策略值，目前执行时采用 Align 的续行规则，并返回诊断。GNU、Whitesmiths 或自定义额外 brace indentation 同样返回能力诊断。显式选择 AlignFirstComment（包括旧 true 写法）时，会说明当前采用 FunctionCall 续行规则，尚未实现首注释锚点的区别。
+
+导出块、requires expression、StatementAttributeLikeMacros、TypenameMacros、TypeNames、TemplateNames、VariableTemplates、Macros 和 SkipMacroDefinitionBody 尚未接入语法或缩进策略。显式设置或偏离 LLVM 基线时返回能力诊断；旧 IndentRequires 先转换成 IndentRequiresClause，再参与诊断。枚举写法能通过配置校验不表示相应语法行为已经实现。
 
 宏块正则采用 Rust `regex` 的语法，对完整标识符执行搜索；需要精确匹配时使用 `^`、`$`。配置加载和 `CppStyle::compile` 校验表达式。常用的分组、分支和字符类可直接使用，LLVM 正则的其他扩展语法不保证兼容。
 
@@ -88,3 +92,13 @@ LLVM 当前映射里的旧字段拼写保留在已知选项表中。未知顶层
 运行 `cargo test --test config` 检查 YAML、预设、覆盖、目录继承、语言选择、错误和配置到编辑操作的链路。如果安装了 `clang-format-23`，预设测试还会与其 `--dump-config` 结果对照。
 
 配置语义参考 [LLVM 配置文档](https://clang.llvm.org/docs/ClangFormatStyleOptions.html) 及 `~/project/llvm-project/clang/lib/Format/Format.cpp` 的 YAML mapping、`parseConfiguration`、`getStyle` 和预设定义。空白策略参考同仓库的 `WhitespaceManager.cpp`，即时续行参考 `ContinuationIndenter.cpp`。
+
+## 更新校验表与参考用例
+
+运行 `python3 scripts/generate_clang_format_schema.py ~/project/llvm-project` 更新类型表、枚举输入用例和选项应用对照表。生成器解析 Format.cpp/Format.h 和 IncludeStyle.cpp/IncludeStyle.h 的声明，以及 TokenKinds.def 的 token 拼写；未识别的类型中止生成。生成结果记录 LLVM revision。升级时仍需阅读条件兼容转换及选项使用点，分别检查 `config/cpp.rs` 的策略映射和语言求解器行为。
+
+运行 `python3 scripts/generate_clang_format_indent_cases.py clang-format-23` 捕获参考布局。测试固定参考实现已经选定的布局，只扰动并恢复非空行的前导空白，不改变换行位置。编辑中的空行保留供下一次输入使用的缩进，不套用完整 formatter 的空行清理规则。独占一行的结构左括号以所属声明或控制语句的行首为基准，输入 `{` 时的前导空白调整与字符插入合并为一个撤销单元；额外括号缩进策略受上述能力诊断限制。
+
+`cargo test --test clang_format_options --test config` 验证枚举兼容、可选字段和序列类型、策略映射以及编辑结果。类型定义取自本地 LLVM 的记录 revision，布局用例及预设记录其 clang-format 可执行文件版本；二者可能处于不同版本，新增取值需以对应来源分别核对。
+
+完成预处理分支关键字 endif、else、elif 等时，语言服务重新求解当前指令的层级，使输入 # 时的临时缩进随关键字收敛。普通文本先按行首过滤，字符串和注释中的字符不参与这个触发路径。调整与最后一个字符的插入属于同一事务。
