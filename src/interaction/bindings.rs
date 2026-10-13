@@ -67,6 +67,9 @@ pub(crate) fn binding(key: KeyStroke) -> Option<Command> {
             wrap: true,
         }));
     }
+    if key.code == Key::F(5) {
+        return Some(Command::Reload);
+    }
     if key.code == Key::F(6) {
         return Some(Command::NextView);
     }

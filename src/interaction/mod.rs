@@ -2,6 +2,8 @@
 //! Widgets emit intents; application events are the route to editor mutation.
 mod bindings;
 mod commands;
+mod exit;
+pub use exit::{ExitScope, ExitSession};
 mod routing;
 pub use commands::Command;
 pub use routing::{Key, KeyStroke, UserInput};
@@ -28,7 +30,7 @@ pub enum Layer {
     },
     Open(TextInput),
     Save(DocumentId, TextInput),
-    Quit,
+    Exit(ExitSession),
     Replace(ReplaceSession),
     Picker(PickerSession),
     Search {
@@ -113,6 +115,14 @@ impl Layers {
     pub fn close(&mut self, app: &Application, time: Duration) -> Result<Response, EditError> {
         self.respond(Intent::Cancel, app, time)
     }
+    pub fn application_failed(&mut self, app: &Application, error: String) -> Response {
+        match &mut self.active {
+            Some(Layer::Exit(session)) if !app.workspace().is_saving(session.document()) => {
+                session.failed(error)
+            }
+            _ => Response::default(),
+        }
+    }
     pub fn picker_failed(&mut self, error: String) -> Response {
         let Some(Layer::Picker(session)) = &mut self.active else {
             return Response::default();
@@ -130,6 +140,17 @@ impl Layers {
         app: &Application,
         time: Duration,
     ) -> Result<InputResult, EditError> {
+        if let Some(Layer::Exit(session)) = &mut self.active {
+            return match session.handle(input, app) {
+                Some(transition) => {
+                    if transition.finished {
+                        self.active = None;
+                    }
+                    Ok(InputResult::Handled(transition.response))
+                }
+                None => Ok(InputResult::Blocked),
+            };
+        }
         match self.route(input) {
             Route::Pass => Ok(InputResult::Pass),
             Route::Blocked => Ok(InputResult::Blocked),
@@ -148,7 +169,6 @@ impl Layers {
                 Route::Handled(Intent::ReplaceAll)
             }
             Input::Cancel => Route::Handled(Intent::Cancel),
-            Input::Confirm if matches!(layer, Layer::Quit) => Route::Handled(Intent::Cancel),
             Input::Confirm => Route::Handled(Intent::Confirm),
             Input::Navigate { backward }
                 if matches!(layer, Layer::Search { .. })
@@ -159,17 +179,8 @@ impl Layers {
             _ if matches!(layer, Layer::Replace(session) if session.phase == ReplacePhase::Review) => {
                 Route::Blocked
             }
-            Input::Text(InputKey::Char('y')) if matches!(layer, Layer::Quit) => {
-                Route::Handled(Intent::Confirm)
-            }
-            Input::Text(InputKey::Char(_)) if matches!(layer, Layer::Quit) => {
-                Route::Handled(Intent::Cancel)
-            }
-            Input::Text(_) if matches!(layer, Layer::Quit) => Route::Blocked,
             Input::Text(key) => route_update(layer.field_mut().unwrap().key(key)),
-            Input::Paste(text) if !matches!(layer, Layer::Quit) => {
-                route_update(layer.field_mut().unwrap().insert(&text))
-            }
+            Input::Paste(text) => route_update(layer.field_mut().unwrap().insert(&text)),
             _ => Route::Blocked,
         }
     }
@@ -191,7 +202,7 @@ impl Layer {
             }
             Self::Replace(_) => None,
             Self::Picker(session) => Some(session.input_mut()),
-            Self::Quit => None,
+            Self::Exit(_) => None,
         }
     }
     pub fn presentation(&self) -> Presentation {
@@ -236,13 +247,7 @@ impl Layer {
                 (format!("Files [{status}]: "), session.input())
             }
             Self::Replace(session) => return session.presentation(),
-            Self::Quit => {
-                return Presentation {
-                    text: "Unsaved changes: discard and quit? (y/N)".into(),
-                    cursor: None,
-                    selection: 0..0,
-                };
-            }
+            Self::Exit(session) => return session.presentation(),
         };
         let selection = field.selection().range();
         Presentation {
@@ -435,7 +440,6 @@ impl Layers {
                             target: Some(PathBuf::from(field.text())),
                         })
                     }
-                    Layer::Quit if confirm => response.quit = true,
                     _ => {}
                 }
                 Ok(response)
@@ -488,6 +492,13 @@ impl Layers {
         update: &Update,
         time: Duration,
     ) -> Result<Response, EditError> {
+        if let Some(Layer::Exit(session)) = &mut self.active {
+            let transition = session.observe(app, update);
+            if transition.finished {
+                self.active = None;
+            }
+            return Ok(transition.response);
+        }
         if let Some(Layer::Goto { view, .. }) = &self.active
             && (app.view(*view).is_none() || app.active_view() != Some(*view))
         {

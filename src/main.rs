@@ -10,7 +10,7 @@ fn main() -> ExitCode {
         }
         [arg] if arg == "--help" || arg == "-h" => {
             println!(
-                "Usage: soda [FILE]\n\nCtrl-N New  Ctrl-O Open  Ctrl-P Find file  Ctrl-W Close buffer\nCtrl-S Save  Ctrl-Shift-S / F4 Save as\nCtrl-Q Quit  Ctrl-Z Undo  Ctrl-Y Redo  Ctrl-Tab / F6 Next buffer\nCtrl-A Select all  Ctrl-G Go to line[:column]\nCtrl + arrows / Backspace / Delete: word operations; PageUp/PageDown: page\nCtrl-C Copy  Ctrl-X Cut  Ctrl-V Paste (internal clipboard)\nCtrl-F Search  Ctrl-R Replace  F3 / Shift-F3 Next / previous match\nShift + arrows selects text; bracketed paste inserts one edit."
+                "Usage: soda [FILE]\n\nCtrl-N New  Ctrl-O Open  Ctrl-P Find file  Ctrl-W Close buffer\nCtrl-S Save  Ctrl-Shift-S / F4 Save as  F5 Reload\nCtrl-Q Quit  Ctrl-Z Undo  Ctrl-Y Redo  Ctrl-Tab / F6 Next buffer\nCtrl-A Select all  Ctrl-G Go to line[:column]\nCtrl + arrows / Backspace / Delete: word operations; PageUp/PageDown: page\nCtrl-C Copy  Ctrl-X Cut  Ctrl-V Paste (internal clipboard)\nCtrl-F Search  Ctrl-R Replace  F3 / Shift-F3 Next / previous match\nShift + arrows selects text; bracketed paste inserts one edit."
             );
             return ExitCode::SUCCESS;
         }

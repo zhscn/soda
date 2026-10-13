@@ -1,7 +1,8 @@
 //! Application command reduction. Commands resolve their targets on the owner
 //! thread and return ordered application events and platform effects.
 use super::{
-    Layer, Layers, Message, ReplaceSession, Response, SearchSession, TextInput,
+    ExitScope, ExitSession, Layer, Layers, Message, ReplaceSession, Response, SearchSession,
+    TextInput,
     picker::{PickerLimits, PickerSession},
 };
 use crate::{
@@ -21,6 +22,7 @@ pub enum Command {
     Open,
     New,
     Close,
+    Reload,
     Save { choose_path: bool },
     Quit,
     NextView,
@@ -140,12 +142,41 @@ impl Layers {
             Command::New => response
                 .events
                 .push(Event::NewDocument(Language::PlainText)),
-            Command::Close => {
+            Command::Close | Command::Reload => {
                 if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
-                    response.events.push(Event::CloseDocument {
-                        document: view.document_id,
-                        discard: false,
-                    });
+                    let document = view.document_id;
+                    let editor = app.workspace().editor(document).unwrap();
+                    let reload = matches!(command, Command::Reload);
+                    if reload && editor.model().document().file().path().is_none() {
+                        response.message =
+                            Message::Set("Untitled document has no file to reload".into());
+                    } else if app.workspace().is_saving(document) {
+                        response.message =
+                            Message::Set("Save in progress; wait before leaving document".into());
+                    } else if editor.model().document().is_dirty() {
+                        let scope = if reload {
+                            ExitScope::Reload(document)
+                        } else {
+                            ExitScope::Close(document)
+                        };
+                        response = self.enter(
+                            Layer::Exit(ExitSession::new(app, scope).unwrap()),
+                            app,
+                            time,
+                        )?;
+                    } else {
+                        response.events.push(if reload {
+                            Event::Reload {
+                                document,
+                                discard: false,
+                            }
+                        } else {
+                            Event::CloseDocument {
+                                document,
+                                discard: false,
+                            }
+                        });
+                    }
                 }
             }
             Command::Save { choose_path } => {
@@ -187,7 +218,11 @@ impl Layers {
                         .document()
                         .is_dirty()
                 }) {
-                    response = self.enter(Layer::Quit, app, time)?;
+                    response = self.enter(
+                        Layer::Exit(ExitSession::new(app, ExitScope::Quit).unwrap()),
+                        app,
+                        time,
+                    )?;
                 } else {
                     response.quit = true;
                 }

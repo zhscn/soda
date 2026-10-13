@@ -93,6 +93,10 @@ impl Host {
                     }
                     other => other.to_string(),
                 };
+                let response = self
+                    .layers
+                    .application_failed(&self.app, self.message.clone());
+                self.respond(Ok(response));
                 self.dirty = true;
             }
         }
@@ -115,10 +119,16 @@ impl Host {
             || !update.closed_views.is_empty()
             || !update.files.is_empty()
             || !update.effects.is_empty();
+        let reloaded = update
+            .edit
+            .as_ref()
+            .and_then(|edit| edit.document.as_ref())
+            .is_some_and(|document| document.origin == crate::editor::EditOrigin::Reload);
         for result in update.files {
             self.message = match result.result {
                 Ok(file) => format!(
-                    "Saved {}{}",
+                    "{} {}{}",
+                    if reloaded { "Reloaded" } else { "Saved" },
                     file.path.display(),
                     if file.dirty {
                         " (newer edits remain)"
@@ -396,7 +406,7 @@ mod tests {
         );
     }
     #[test]
-    fn close_rejects_dirty_buffer_and_last_clean_buffer_can_close() {
+    fn close_prompts_for_dirty_buffer_and_last_clean_buffer_can_close() {
         let mut host = Host::new().unwrap();
         host.action(Action::Close);
         assert!(host.app.active_view().is_none());
@@ -405,7 +415,8 @@ mod tests {
         host.edit(Command::InsertText("unsaved".into()));
         host.action(Action::Close);
         assert_eq!(host.app.active_view(), Some(view));
-        assert!(host.message.contains("save before closing"));
+        assert!(matches!(host.layers.active(), Some(Prompt::Exit(_))));
+        host.input(key(KeyCode::Esc));
         host.edit(Command::Undo);
         host.action(Action::Close);
         assert!(host.app.active_view().is_none());
@@ -422,7 +433,7 @@ mod tests {
             .document_id;
         host.dispatch(Event::NewDocument(Language::PlainText));
         host.action(Action::Quit);
-        assert!(matches!(host.layers.active(), Some(Prompt::Quit)));
+        assert!(matches!(host.layers.active(), Some(Prompt::Exit(_))));
         host.input(key(KeyCode::Esc));
         assert!(!host.quit);
         let update = host

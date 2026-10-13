@@ -236,7 +236,7 @@ fn closed_view_drops_session_and_focus_change_restores_original_view() {
 
 #[test]
 fn modal_routing_blocks_unknown_input_and_requires_explicit_discard() {
-    let app = Application::default();
+    let (app, _) = setup("dirty");
     let mut layers = Layers::default();
     assert!(matches!(
         layers
@@ -260,7 +260,16 @@ fn modal_routing_blocks_unknown_input_and_requires_explicit_discard() {
         panic!()
     };
     assert!(response.redraw);
-    layers.enter(Layer::Quit, &app, Duration::ZERO).unwrap();
+    layers
+        .enter(
+            Layer::Exit(
+                soda::interaction::ExitSession::new(&app, soda::interaction::ExitScope::Quit)
+                    .unwrap(),
+            ),
+            &app,
+            Duration::ZERO,
+        )
+        .unwrap();
     let InputResult::Handled(response) =
         layers.handle(Input::Confirm, &app, Duration::ZERO).unwrap()
     else {
@@ -268,7 +277,16 @@ fn modal_routing_blocks_unknown_input_and_requires_explicit_discard() {
     };
     assert!(!response.quit);
     assert!(layers.active().is_none());
-    layers.enter(Layer::Quit, &app, Duration::ZERO).unwrap();
+    layers
+        .enter(
+            Layer::Exit(
+                soda::interaction::ExitSession::new(&app, soda::interaction::ExitScope::Quit)
+                    .unwrap(),
+            ),
+            &app,
+            Duration::ZERO,
+        )
+        .unwrap();
     assert!(matches!(
         layers
             .handle(Input::Paste("y".into()), &app, Duration::ZERO)
