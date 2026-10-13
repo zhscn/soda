@@ -27,7 +27,10 @@ impl<'a> InputEdit<'a> {
     fn finish(self, corrections: Vec<Change>) -> Result<Transaction, EditError> {
         if corrections.is_empty() {
             let mut tx = Transaction::new(self.base.snapshot().version(), vec![self.input]);
-            tx.selection = Some(self.speculative.selection());
+            tx.selection = Some(caret_at(
+                self.speculative.snapshot(),
+                self.speculative.selection().head,
+            )?);
             return Ok(tx);
         }
         let corrections =
@@ -42,7 +45,8 @@ impl<'a> InputEdit<'a> {
             &corrections.changes,
         );
         let mut tx = Transaction::new(self.base.snapshot().version(), changes);
-        tx.selection = Some(Selection::caret(caret));
+        let (output, _) = self.base.apply(tx.clone())?;
+        tx.selection = Some(caret_at(output.snapshot(), caret)?);
         Ok(tx)
     }
 }
@@ -247,17 +251,33 @@ pub(super) fn prepare_reindent(
     )?;
     Ok(Transaction::new(state.snapshot().version(), changes))
 }
-pub(super) fn prepare_insert(state: &EditorState, text: String) -> Transaction {
+pub(super) fn caret_at(snapshot: &Snapshot, position: usize) -> Result<Selection, EditError> {
+    Ok(Selection::caret(
+        crate::core::clip_grapheme_offset(
+            snapshot,
+            crate::core::ByteOffset(position),
+            Association::After,
+        )?
+        .0,
+    ))
+}
+
+pub(super) fn normalize_caret(
+    state: &EditorState,
+    mut tx: Transaction,
+) -> Result<Transaction, EditError> {
+    let (output, _) = state.apply(tx.clone())?;
+    tx.selection = Some(caret_at(output.snapshot(), output.selection().head)?);
+    Ok(tx)
+}
+
+pub(super) fn prepare_insert(state: &EditorState, text: String) -> Result<Transaction, EditError> {
     let range = state.selection().range();
+    if range.is_empty() && text.is_empty() {
+        return Ok(Transaction::new(state.snapshot().version(), vec![]));
+    }
     let caret = range.start + text.len();
-    let changes = if range.is_empty() && text.is_empty() {
-        vec![]
-    } else {
-        vec![Change::new(range, text)]
-    };
-    let mut tx = Transaction::new(state.snapshot().version(), changes);
-    tx.selection = Some(Selection::caret(caret));
-    tx
+    InputEdit::new(state, Change::new(range, text), caret)?.finish(vec![])
 }
 
 /// Stateless transaction planning for callers that manage their own state.

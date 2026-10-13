@@ -392,3 +392,33 @@ fn tab_and_backtab_indent_selected_lines_without_replacing_text() {
     assert_eq!(editor.text(), "a\r\nb\r\nc");
     assert_eq!(editor.selection(), original);
 }
+
+#[test]
+fn document_input_and_deletion_keep_carets_outside_merged_graphemes() {
+    for paste in [false, true] {
+        let mut editor = Editor::new("👩👩");
+        editor.select(Selection::caret(4));
+        editor.command(Command::Edit(if paste {
+            Edit::InsertText("\u{200d}".into())
+        } else {
+            Edit::TypeChar('\u{200d}')
+        }));
+        assert_eq!(editor.selection(), Selection::caret(11));
+        editor.ctrl('z');
+        assert_eq!(editor.selection(), Selection::caret(4));
+    }
+    let mut editor = Editor::new("🇨x🇳");
+    editor.select(Selection { anchor: 4, head: 5 });
+    editor.command(Command::Edit(Edit::Delete {
+        direction: soda::editor::Direction::Backward,
+        smart: false,
+    }));
+    assert_eq!(editor.text(), "🇨🇳");
+    assert_eq!(editor.selection(), Selection::caret(8));
+    let mut editor = Editor::new("e\u{301} foo");
+    editor.select(Selection::caret(1));
+    editor.command(Command::Edit(Edit::DeleteWord(
+        soda::editor::Direction::Backward,
+    )));
+    assert_eq!(editor.text(), " foo");
+}

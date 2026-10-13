@@ -116,7 +116,18 @@ pub(super) fn delete_word(
             direction == Direction::Backward,
         )?
         .0;
-        range = edge.min(range.start)..edge.max(range.start);
+        range = crate::core::clip_grapheme_offset(
+            state.snapshot(),
+            ByteOffset(edge.min(range.start)),
+            crate::core::Association::Before,
+        )?
+        .0
+            ..crate::core::clip_grapheme_offset(
+                state.snapshot(),
+                ByteOffset(edge.max(range.start)),
+                crate::core::Association::After,
+            )?
+            .0;
     }
     let changes = if range.is_empty() {
         vec![]
@@ -125,7 +136,7 @@ pub(super) fn delete_word(
     };
     let mut tx = Transaction::new(state.snapshot().version(), changes);
     tx.selection = Some(Selection::caret(range.start));
-    Ok(tx)
+    super::operations::normalize_caret(state, tx)
 }
 fn whitespace(target: usize, language: &LanguageSession) -> String {
     crate::language::materialize(target, 0, target, &language.whitespace())
@@ -181,18 +192,18 @@ pub(super) fn delete(
         },
     );
     tx.selection = Some(Selection::caret(range.start));
-    Ok(tx)
+    super::operations::normalize_caret(state, tx)
 }
 pub(super) fn insert_tab(
     state: &EditorState,
     literal: bool,
     language: &LanguageSession,
-) -> Transaction {
+) -> Result<Transaction, EditError> {
     if literal {
         return super::operations::prepare_insert(state, "\t".into());
     }
     if !state.selection().range().is_empty() {
-        return indent_selection(state, false, language);
+        return Ok(indent_selection(state, false, language));
     }
     let settings = language.whitespace();
     let position = state.selection().range().start;

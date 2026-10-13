@@ -221,7 +221,7 @@ impl Editor {
                 let mut prepared_language = None;
                 let (mut tx, origin) = match command {
                     Command::InsertText(text) => {
-                        (operations::prepare_insert(&state, text), EditOrigin::Paste)
+                        (operations::prepare_insert(&state, text)?, EditOrigin::Paste)
                     }
                     Command::TypeChar(ch) => {
                         let mut language = self.model.document.language.clone();
@@ -252,11 +252,11 @@ impl Editor {
                         EditOrigin::Delete,
                     ),
                     Command::InsertTab => (
-                        commands::insert_tab(&state, false, &self.model.document.language),
+                        commands::insert_tab(&state, false, &self.model.document.language)?,
                         EditOrigin::Indent,
                     ),
                     Command::InsertLiteralTab => (
-                        commands::insert_tab(&state, true, &self.model.document.language),
+                        commands::insert_tab(&state, true, &self.model.document.language)?,
                         EditOrigin::Input,
                     ),
                     Command::IndentSelection { outdent } => (
@@ -280,7 +280,7 @@ impl Editor {
                                 });
                         (
                             if matches {
-                                operations::prepare_insert(&state, text)
+                                operations::prepare_insert(&state, text)?
                             } else {
                                 Transaction::new(state.snapshot().version(), vec![])
                             },
