@@ -7,7 +7,7 @@ pub(crate) mod state;
 mod workspace;
 
 pub use request::{
-    OpenCompletion, OpenId, OpenPreparation, OpenRequest, SaveCompletion, SaveRequest,
+    OpenCompletion, OpenId, OpenPreparation, OpenRequest, SaveCompletion, SaveId, SaveRequest,
 };
 pub use service::{FileError, FileService, LoadedFile};
 pub use state::FileState;

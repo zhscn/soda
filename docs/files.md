@@ -65,3 +65,5 @@
 ```sh
 cargo test --test files
 ```
+
+保存请求通过 `SaveId` 标识，文件结果携带对应请求身份。未执行请求的取消也输出 `FileError::Cancelled` 终态；宿主消费该结果以结束相关等待会话。重新加载的文件更新没有保存请求身份。

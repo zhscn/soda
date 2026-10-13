@@ -237,9 +237,15 @@ impl Application {
         self.changed_document(edit.document_id, update);
         update.edit = Some(edit);
     }
-    fn accept_file(&self, file: FileUpdate, update: &mut Update) {
+    fn accept_file(
+        &self,
+        file: FileUpdate,
+        request: Option<crate::files::SaveId>,
+        update: &mut Update,
+    ) {
         self.changed_document(file.document_id, update);
         update.files.push(FileResult {
+            request,
             document_id: file.document_id,
             result: Ok(file),
         });
@@ -397,13 +403,14 @@ impl Application {
                 self.changed_document(document, &mut update);
             }
             Event::SaveFinished(completion) => {
+                let request = completion.id();
                 let file = self.workspace.finish_save(completion)?;
-                self.accept_file(file, &mut update);
+                self.accept_file(file, Some(request), &mut update);
             }
             Event::Reload { document, discard } => {
                 let result = self.workspace.reload(document, discard)?;
                 self.accept_edit(result.edit, &mut update);
-                self.accept_file(result.file, &mut update);
+                self.accept_file(result.file, None, &mut update);
             }
             Event::PollFiles => {
                 update.files = self.workspace.poll_file_results();

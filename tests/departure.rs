@@ -294,14 +294,14 @@ fn dropped_save_request_returns_to_decision_instead_of_closing() {
     driver.effects.clear();
     driver.event(Event::PollFiles);
     assert!(driver.app.workspace().editor(document).is_some());
+    let presentation = driver.layers.active().unwrap().presentation();
     assert!(
-        driver
-            .layers
-            .active()
-            .unwrap()
-            .presentation()
-            .text
-            .contains("cancel")
+        presentation.cursor.is_some(),
+        "cancelled save must return to the path prompt"
     );
+    assert!(!presentation.text.starts_with("Saving "));
+    driver.key(Key::Enter);
+    driver.finish_save();
+    assert!(driver.app.workspace().editor(document).is_none());
     assert!(!driver.quit);
 }

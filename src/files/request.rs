@@ -9,6 +9,9 @@ use std::{
     },
 };
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SaveId(pub(crate) u64);
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct OpenId(u64);
 impl OpenId {
@@ -78,6 +81,9 @@ pub struct SaveRequest {
     pub(super) started: bool,
 }
 impl SaveRequest {
+    pub fn id(&self) -> SaveId {
+        SaveId(self.plan.as_ref().unwrap().token)
+    }
     pub fn document_id(&self) -> DocumentId {
         self.plan.as_ref().unwrap().document_id
     }
@@ -109,6 +115,12 @@ pub struct SaveCompletion {
     pub(super) route: FileRoute,
 }
 impl SaveCompletion {
+    pub fn id(&self) -> SaveId {
+        SaveId(self.payload.as_ref().unwrap().plan.token)
+    }
+    pub fn document_id(&self) -> DocumentId {
+        self.payload.as_ref().unwrap().plan.document_id
+    }
     pub fn result(&self) -> Result<(), &FileError> {
         self.payload.as_ref().unwrap().result.as_ref().map(|_| ())
     }

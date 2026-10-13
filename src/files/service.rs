@@ -25,6 +25,7 @@ pub enum FileError {
     StaleCompletion,
     UnsavedChanges,
     Interrupted,
+    Cancelled,
     Edit(crate::core::EditError),
 }
 impl fmt::Display for FileError {

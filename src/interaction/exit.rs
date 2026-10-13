@@ -18,7 +18,7 @@ enum Phase {
     Path(TextInput),
     Saving {
         target: Option<PathBuf>,
-        revision: Option<u64>,
+        request: Option<crate::files::SaveId>,
     },
 }
 pub struct ExitSession {
@@ -183,7 +183,7 @@ impl ExitSession {
         }
         self.phase = Phase::Saving {
             target: target.clone(),
-            revision: None,
+            request: None,
         };
         self.error = None;
         Transition::active(Response {
@@ -215,20 +215,24 @@ impl ExitSession {
             return self.advance(app, false);
         }
         self.name = document_name(app, self.current);
-        if let Phase::Saving { revision, .. } = &mut self.phase {
+        if let Phase::Saving {
+            request: pending, ..
+        } = &mut self.phase
+        {
             for effect in &update.effects {
                 if let Effect::Save(request) = effect
                     && request.document_id() == self.current
                 {
-                    *revision = Some(request.revision());
+                    *pending = Some(request.id());
                 }
             }
             for file in &update.files {
-                if file.document_id != self.current {
+                if file.document_id != self.current || file.request != *pending || pending.is_none()
+                {
                     continue;
                 }
                 match &file.result {
-                    Ok(file) if Some(file.saved_revision) == *revision => {
+                    Ok(_) => {
                         if app
                             .workspace()
                             .editor(self.current)
@@ -247,7 +251,6 @@ impl ExitSession {
                         return self.advance(app, false);
                     }
                     Err(error) => return Transition::active(self.failed(error.to_string())),
-                    _ => {}
                 }
             }
         }

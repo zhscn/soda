@@ -28,6 +28,7 @@ pub struct FileUpdate {
 }
 #[derive(Debug)]
 pub struct FileResult {
+    pub request: Option<super::SaveId>,
     pub document_id: DocumentId,
     pub result: Result<FileUpdate, FileError>,
 }
@@ -458,11 +459,18 @@ impl Workspace {
                         .is_some_and(|pending| pending.token == token)
                     {
                         self.pending.remove(&document_id);
+                        results.push(FileResult {
+                            document_id,
+                            request: Some(super::SaveId(token)),
+                            result: Err(FileError::Cancelled),
+                        });
                     }
                 }
                 FileEvent::FinishSave(payload) => {
                     let document_id = payload.plan.document_id;
+                    let request = Some(super::SaveId(payload.plan.token));
                     results.push(FileResult {
+                        request,
                         document_id,
                         result: self.apply_save(*payload),
                     });
@@ -477,7 +485,9 @@ impl Workspace {
                         Err(error) => Err(error),
                     };
                     let document_id = plan.document_id;
+                    let request = Some(super::SaveId(plan.token));
                     results.push(FileResult {
+                        request,
                         document_id,
                         result: self.apply_save(SavePayload {
                             plan: *plan,
