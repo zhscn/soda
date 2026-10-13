@@ -191,6 +191,9 @@ pub(super) fn insert_tab(
     if literal {
         return super::operations::prepare_insert(state, "\t".into());
     }
+    if !state.selection().range().is_empty() {
+        return indent_selection(state, false, language);
+    }
     let settings = language.whitespace();
     let position = state.selection().range().start;
     let line = state.snapshot().line_of(position).unwrap();

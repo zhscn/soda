@@ -52,7 +52,7 @@ Application 拥有一个跨文档共享的内部剪贴板；系统剪贴板和�
 
 ## 导航与选择
 
-文档中的 `Ctrl-Left/Right` 按 Unicode 单词移动，`Ctrl-Backspace/Delete` 删除到前后词边界；已有选区时先删除选区。单词边界与输入组件采用相同规则，标点和空白是分隔符，跨行操作保留 grapheme 边界。查询逐行读取 rope，不生成全文字符串。`Ctrl-A` 全选。
+文档中的 `Ctrl-Left/Right` 按 Unicode 单词移动，`Ctrl-Backspace/Delete` 删除到前后词边界；已有选区时先删除选区。单词边界与输入组件采用相同规则，标点和空白是分隔符，跨行操作保留 grapheme 边界。查询逐行读取 rope，不生成全文字符串。`Ctrl-A` 全选。选区存在时 Tab 缩进所选行，Shift-Tab 反缩进，选区与事务一起映射；选区终点恰好位于下一行开头时不包含该行。没有选区时 Tab 按文档的 tab/space 策略插入缩进。
 
 `PageUp/PageDown` 移动一个视口减一行，保留目标逻辑列并同时移动视口；Shift 扩展选区。前端通过 `set_page_rows` 提供编辑区可见行数；零或一行视口仍至少移动一行。core 只理解指定行数的垂直移动。
 

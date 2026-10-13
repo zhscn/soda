@@ -16,7 +16,7 @@ Ctrl-Left / Right move by word; Ctrl-Backspace / Delete delete word
 Ctrl-Home / End move to document start / end
 PageUp / PageDown move by page; Shift extends selection
 Ctrl-G Go to line[:column] (one-based logical columns)
-Tab indent / insert indentation   Shift-Tab Outdent
+Tab Indent selected lines / insert indentation   Shift-Tab Outdent
 
 Search and replacement
 Ctrl-F Search   F3 / Shift-F3 Next / previous match

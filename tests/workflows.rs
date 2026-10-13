@@ -372,3 +372,23 @@ fn f4_replaces_all_only_in_replacement_review() {
     editor.input(UserInput::Key(KeyStroke::plain(Key::F(4))));
     assert_eq!(editor.text(), "bar bar");
 }
+
+#[test]
+fn tab_and_backtab_indent_selected_lines_without_replacing_text() {
+    let mut editor = Editor::new("a\r\nb\r\nc");
+    let original = Selection { anchor: 6, head: 0 };
+    editor.select(original);
+    editor.input(UserInput::Key(KeyStroke::plain(Key::Tab)));
+    assert_eq!(editor.text(), "    a\r\n    b\r\nc");
+    assert!(editor.selection().anchor > editor.selection().head);
+    editor.input(UserInput::Key(KeyStroke {
+        shift: true,
+        ..KeyStroke::plain(Key::BackTab)
+    }));
+    assert_eq!(editor.text(), "a\r\nb\r\nc");
+    editor.ctrl('z');
+    assert_eq!(editor.text(), "    a\r\n    b\r\nc");
+    editor.ctrl('z');
+    assert_eq!(editor.text(), "a\r\nb\r\nc");
+    assert_eq!(editor.selection(), original);
+}
