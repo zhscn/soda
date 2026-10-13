@@ -1,5 +1,5 @@
 use crate::editor::{Command, Direction, Motion};
-use crate::interaction::{Input, InputKey, InputMotion};
+use crate::interaction::{Input, InputKey, InputMotion, picker::ListMotion};
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 pub(super) enum Action {
@@ -11,6 +11,7 @@ pub(super) enum Action {
     Quit,
     NextView,
     Search,
+    PickFiles,
 }
 pub(super) fn binding(key: KeyEvent) -> Option<Action> {
     if key.kind == KeyEventKind::Release {
@@ -25,6 +26,7 @@ pub(super) fn binding(key: KeyEvent) -> Option<Action> {
     }
     if control {
         return match key.code {
+            KeyCode::Char('p') => Some(Action::PickFiles),
             KeyCode::Char('f') => Some(Action::Search),
             KeyCode::Char('o') => Some(Action::Open),
             KeyCode::Char('n') => Some(Action::New),
@@ -111,6 +113,34 @@ pub(super) fn modal_key(key: KeyEvent) -> Input {
     }
     if key.code == KeyCode::F(3) && !control {
         return Input::Navigate { backward: shift };
+    }
+    if control && !shift {
+        let motion = match key.code {
+            KeyCode::Up => Some(ListMotion::First),
+            KeyCode::Down => Some(ListMotion::Last),
+            _ => None,
+        };
+        if let Some(motion) = motion {
+            return Input::Candidate {
+                motion,
+                wrap: false,
+            };
+        }
+    }
+    if !control && !shift {
+        let motion = match key.code {
+            KeyCode::Up => Some(ListMotion::Previous),
+            KeyCode::Down => Some(ListMotion::Next),
+            KeyCode::PageUp => Some(ListMotion::PagePrevious),
+            KeyCode::PageDown => Some(ListMotion::PageNext),
+            _ => None,
+        };
+        if let Some(motion) = motion {
+            return Input::Candidate {
+                motion,
+                wrap: false,
+            };
+        }
     }
     let motion = match key.code {
         KeyCode::Left => Some(if control {
@@ -236,6 +266,48 @@ mod tests {
         assert!(matches!(
             modal_key(KeyEvent::new(KeyCode::Char('z'), KeyModifiers::CONTROL)),
             Input::Unrecognized
+        ));
+    }
+    #[test]
+    fn picker_navigation_does_not_steal_text_input_home_end() {
+        assert!(matches!(
+            binding(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL)),
+            Some(Action::PickFiles)
+        ));
+        assert!(matches!(
+            modal_key(key(KeyCode::Down)),
+            Input::Candidate {
+                motion: ListMotion::Next,
+                wrap: false
+            }
+        ));
+        assert!(matches!(
+            modal_key(key(KeyCode::PageUp)),
+            Input::Candidate {
+                motion: ListMotion::PagePrevious,
+                ..
+            }
+        ));
+        assert!(matches!(
+            modal_key(KeyEvent::new(KeyCode::Down, KeyModifiers::CONTROL)),
+            Input::Candidate {
+                motion: ListMotion::Last,
+                ..
+            }
+        ));
+        assert!(matches!(
+            modal_key(key(KeyCode::Home)),
+            Input::Text(InputKey::Move {
+                motion: InputMotion::Start,
+                ..
+            })
+        ));
+        assert!(matches!(
+            modal_key(key(KeyCode::End)),
+            Input::Text(InputKey::Move {
+                motion: InputMotion::End,
+                ..
+            })
         ));
     }
 }

@@ -2,6 +2,9 @@
 //! API; text mutation, history, file identity and sessions stay in lower layers.
 mod input;
 mod layout;
+use crate::interaction::picker::{
+    PickerCompletion, PickerEffect, PickerLimits, PickerRunner, PickerSession,
+};
 use crate::{
     application::{Application, Effect, Event, Update},
     editor::{Command, Language},
@@ -18,6 +21,10 @@ use crossterm::{
     terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use input::Action;
+enum HostEvent {
+    Application(Box<Event>),
+    Picker(PickerCompletion),
+}
 use std::{
     io::{self, IsTerminal, Write},
     path::PathBuf,
@@ -56,26 +63,28 @@ struct Host {
     sender: mpsc::Sender<Event>,
     receiver: mpsc::Receiver<Event>,
     layers: Layers,
+    picker: PickerRunner,
     message: String,
     epoch: Instant,
     quit: bool,
     dirty: bool,
 }
 impl Host {
-    fn new() -> Self {
+    fn new() -> io::Result<Self> {
         let (sender, receiver) = mpsc::channel();
         let mut host = Self {
             app: Application::default(),
             sender,
             receiver,
             layers: Layers::default(),
+            picker: PickerRunner::new()?,
             message: String::new(),
             epoch: Instant::now(),
             quit: false,
             dirty: true,
         };
         host.dispatch(Event::NewDocument(Language::PlainText));
-        host
+        Ok(host)
     }
     fn dispatch(&mut self, event: Event) {
         match self.app.dispatch(event) {
@@ -88,6 +97,15 @@ impl Host {
                     other => other.to_string(),
                 };
                 self.dirty = true;
+            }
+        }
+    }
+    fn completion(&mut self, event: HostEvent) {
+        match event {
+            HostEvent::Application(event) => self.dispatch(*event),
+            HostEvent::Picker(completion) => {
+                let response = self.layers.picker_finished(completion);
+                self.respond(Ok(response));
             }
         }
     }
@@ -132,16 +150,33 @@ impl Host {
             Ok(response) => {
                 self.dirty |= response.redraw;
                 self.quit |= response.quit;
+                for effect in response.effects {
+                    match effect {
+                        PickerEffect::Run(task) => {
+                            if let Err(error) = self.picker.submit(task) {
+                                let response = self.layers.picker_failed(error.to_string());
+                                self.dirty |= response.redraw;
+                            }
+                        }
+                        PickerEffect::Cancel(id) => self.picker.cancel(id),
+                    }
+                }
                 for event in response.events {
                     self.dispatch(event);
                 }
             }
             Err(error) => {
-                self.layers.active = None;
+                if let Ok(response) = self.layers.close(&self.app, self.epoch.elapsed()) {
+                    self.respond(Ok(response));
+                }
                 self.message = error.to_string();
                 self.dirty = true;
             }
         }
+    }
+    fn enter(&mut self, layer: Prompt) {
+        let response = self.layers.enter(layer, &self.app, self.epoch.elapsed());
+        self.respond(response);
     }
     fn edit(&mut self, command: Command) {
         if let Some(view) = self.app.active_view() {
@@ -154,21 +189,37 @@ impl Host {
     }
     fn action(&mut self, action: Action) {
         match action {
+            Action::PickFiles => {
+                match std::env::current_dir()
+                    .and_then(|root| PickerSession::new(root, PickerLimits::default()))
+                {
+                    Ok(session) => {
+                        let response =
+                            self.layers
+                                .start_picker(session, &self.app, self.epoch.elapsed());
+                        self.respond(response);
+                    }
+                    Err(error) => {
+                        self.message = error.to_string();
+                        self.dirty = true;
+                    }
+                }
+            }
             Action::Search => {
                 if let Some(view) = self.app.active_view() {
                     match SearchSession::new(&self.app, view) {
                         Ok(session) => {
-                            self.layers.active = Some(Prompt::Search {
+                            self.enter(Prompt::Search {
                                 input: InputField::default(),
                                 session,
-                            })
+                            });
                         }
                         Err(error) => self.message = error.to_string(),
                     }
                 }
             }
             Action::Edit(command) => self.edit(command),
-            Action::Open => self.layers.active = Some(Prompt::Open(InputField::default())),
+            Action::Open => self.enter(Prompt::Open(InputField::default())),
             Action::New => self.dispatch(Event::NewDocument(Language::PlainText)),
             Action::Close => {
                 if let Some(view) = self.app.active_view() {
@@ -193,7 +244,7 @@ impl Host {
                         .path();
                     if choose_path || path.is_none() {
                         let text = path.map_or_else(String::new, |p| p.display().to_string());
-                        self.layers.active = Some(Prompt::Save(document, InputField::new(&text)));
+                        self.enter(Prompt::Save(document, InputField::new(&text)));
                     } else {
                         self.dispatch(Event::Save {
                             document,
@@ -219,7 +270,7 @@ impl Host {
                         .document()
                         .is_dirty()
                 }) {
-                    self.layers.active = Some(Prompt::Quit);
+                    self.enter(Prompt::Quit);
                 } else {
                     self.quit = true;
                 }
@@ -262,6 +313,8 @@ impl Host {
     }
     fn draw(&mut self) -> io::Result<()> {
         let (width, height) = terminal::size()?;
+        let list_rows = usize::from(height.saturating_sub(2)).min(10);
+        self.layers.resize_picker(list_rows);
         let frame = layout::frame(&mut self.app, width, height).map_err(io::Error::other)?;
         let mut output = io::stdout().lock();
         queue!(
@@ -273,6 +326,22 @@ impl Host {
         for (y, row) in frame.rows.iter().enumerate() {
             queue!(output, MoveTo(0, y as u16))?;
             draw_spans(&mut output, row)?;
+        }
+        if let Some(Prompt::Picker(session)) = self.layers.active() {
+            let start = usize::from(height.saturating_sub(2)) - list_rows;
+            let rows = &session.results().rows;
+            for offset in 0..list_rows {
+                queue!(
+                    output,
+                    MoveTo(0, (start + offset) as u16),
+                    Clear(ClearType::CurrentLine)
+                )?;
+                if let Some(row) = rows.get(session.list().first_visible() + offset) {
+                    let spans =
+                        layout::candidate_row(row, session.list().selected(), usize::from(width));
+                    draw_spans(&mut output, &spans)?;
+                }
+            }
         }
         queue!(output, SetAttribute(Attribute::Reset))?;
         let mut cursor = frame.cursor;
@@ -286,7 +355,7 @@ impl Host {
                     SetAttribute(Attribute::Reset)
                 )?;
             }
-            let presentation = self.layers.active.as_ref().map_or_else(
+            let presentation = self.layers.active().map_or_else(
                 || Presentation {
                     text: self.message.clone(),
                     cursor: None,
@@ -297,7 +366,7 @@ impl Host {
             let (footer, prompt_cursor) = layout::prompt_row(&presentation, usize::from(width));
             queue!(output, MoveTo(0, height - 1))?;
             draw_spans(&mut output, &footer)?;
-            if self.layers.active.is_some() {
+            if self.layers.active().is_some() {
                 cursor = prompt_cursor.map(|x| (x.min(usize::from(width - 1)) as u16, height - 1));
             }
         }
@@ -310,15 +379,14 @@ impl Host {
 
 fn draw_spans(output: &mut impl Write, spans: &[layout::Span]) -> io::Result<()> {
     for span in spans {
-        queue!(
-            output,
-            SetAttribute(if span.selected {
-                Attribute::Reverse
-            } else {
-                Attribute::Reset
-            }),
-            Print(&span.text)
-        )?;
+        queue!(output, SetAttribute(Attribute::Reset))?;
+        if span.selected {
+            queue!(output, SetAttribute(Attribute::Reverse))?;
+        }
+        if span.matched {
+            queue!(output, SetAttribute(Attribute::Underlined))?;
+        }
+        queue!(output, Print(&span.text))?;
     }
     queue!(output, SetAttribute(Attribute::Reset))
 }
@@ -331,13 +399,27 @@ pub fn run(path: Option<PathBuf>) -> io::Result<()> {
         return Err(io::Error::other("interactive editing requires a terminal"));
     }
     let _terminal = Terminal::enter()?;
-    let mut host = Host::new();
+    let mut host = Host::new()?;
     if let Some(path) = path {
         host.dispatch(Event::Open(path));
     }
     while !host.quit {
-        while let Ok(event) = host.receiver.try_recv() {
-            host.dispatch(event);
+        for _ in 0..8 {
+            let Ok(event) = host.receiver.try_recv() else {
+                break;
+            };
+            host.completion(HostEvent::Application(Box::new(event)));
+        }
+        for _ in 0..8 {
+            match host.picker.poll() {
+                Ok(Some(completion)) => host.completion(HostEvent::Picker(completion)),
+                Ok(None) => break,
+                Err(error) => {
+                    let response = host.layers.picker_failed(error.to_string());
+                    host.respond(Ok(response));
+                    break;
+                }
+            }
         }
         host.dispatch(Event::PollFiles);
         if host.dirty {
@@ -360,13 +442,13 @@ mod tests {
     }
     #[test]
     fn path_prompt_owns_input_and_stays_bound_to_original_document() {
-        let mut host = Host::new();
+        let mut host = Host::new().unwrap();
         let first = host.app.active_view().unwrap();
         let document = host.app.view(first).unwrap().document_id;
         host.action(Action::Save { choose_path: true });
         host.input(TerminalEvent::Paste("目录/file.txt".into()));
         host.dispatch(Event::NewDocument(Language::PlainText));
-        let Some(Prompt::Save(target, field)) = &host.layers.active else {
+        let Some(Prompt::Save(target, field)) = host.layers.active() else {
             panic!()
         };
         assert_eq!(*target, document);
@@ -381,11 +463,11 @@ mod tests {
                 .is_empty()
         );
         host.input(key(KeyCode::Esc));
-        assert!(host.layers.active.is_none());
+        assert!(host.layers.active().is_none());
     }
     #[test]
     fn bracketed_paste_is_one_undoable_edit() {
-        let mut host = Host::new();
+        let mut host = Host::new().unwrap();
         host.input(TerminalEvent::Paste("a\r\n中🦀".into()));
         let document = host
             .app
@@ -415,7 +497,7 @@ mod tests {
     }
     #[test]
     fn close_rejects_dirty_buffer_and_last_clean_buffer_can_close() {
-        let mut host = Host::new();
+        let mut host = Host::new().unwrap();
         host.action(Action::Close);
         assert!(host.app.active_view().is_none());
         host.action(Action::New);
@@ -431,7 +513,7 @@ mod tests {
     #[test]
     fn quit_checks_hidden_documents_and_waits_for_pending_saves() {
         let directory = tempfile::tempdir().unwrap();
-        let mut host = Host::new();
+        let mut host = Host::new().unwrap();
         host.edit(Command::InsertText("dirty".into()));
         let document = host
             .app
@@ -440,7 +522,7 @@ mod tests {
             .document_id;
         host.dispatch(Event::NewDocument(Language::PlainText));
         host.action(Action::Quit);
-        assert!(matches!(host.layers.active, Some(Prompt::Quit)));
+        assert!(matches!(host.layers.active(), Some(Prompt::Quit)));
         host.input(key(KeyCode::Esc));
         assert!(!host.quit);
         let update = host
@@ -451,7 +533,7 @@ mod tests {
             })
             .unwrap();
         host.action(Action::Quit);
-        assert!(host.layers.active.is_none());
+        assert!(host.layers.active().is_none());
         assert!(!host.quit);
         assert!(host.message.contains("Save in progress"));
         drop(update);
@@ -462,7 +544,7 @@ mod tests {
     }
     #[test]
     fn search_input_is_modal_and_cancel_restores_selection() {
-        let mut host = Host::new();
+        let mut host = Host::new().unwrap();
         host.edit(Command::InsertText("one two one".into()));
         host.edit(Command::SetSelection(crate::core::Selection::caret(0)));
         let view = host.app.active_view().unwrap();
@@ -504,11 +586,11 @@ mod tests {
         );
         host.input(key(KeyCode::Esc));
         assert_eq!(state(&host), crate::core::Selection::caret(0));
-        assert!(host.layers.active.is_none());
+        assert!(host.layers.active().is_none());
     }
     #[test]
     fn search_confirmation_repeats_in_editor_and_paste_replaces_match() {
-        let mut host = Host::new();
+        let mut host = Host::new().unwrap();
         host.edit(Command::InsertText("one two one".into()));
         host.edit(Command::SetSelection(crate::core::Selection::caret(0)));
         host.action(Action::Search);
@@ -530,7 +612,7 @@ mod tests {
     }
     #[test]
     fn prompt_selection_cursor_and_modifier_events_have_distinct_effects() {
-        let mut host = Host::new();
+        let mut host = Host::new().unwrap();
         host.action(Action::Open);
         host.input(TerminalEvent::Paste("路径/file".into()));
         host.dirty = false;
@@ -538,19 +620,19 @@ mod tests {
             KeyCode::Enter,
             KeyModifiers::CONTROL,
         )));
-        assert!(host.layers.active.is_some());
+        assert!(host.layers.active().is_some());
         assert!(!host.dirty);
         host.input(TerminalEvent::Key(KeyEvent::new(
             KeyCode::Left,
             KeyModifiers::SHIFT,
         )));
         assert!(host.dirty);
-        let Some(Prompt::Open(field)) = &host.layers.active else {
+        let Some(Prompt::Open(field)) = host.layers.active() else {
             panic!()
         };
         assert_eq!(&field.text()[field.selection().range()], "e");
         host.input(TerminalEvent::Paste("X".into()));
-        let Some(Prompt::Open(field)) = &host.layers.active else {
+        let Some(Prompt::Open(field)) = host.layers.active() else {
             panic!()
         };
         assert_eq!(field.text(), "路径/filX");
@@ -560,7 +642,7 @@ mod tests {
         host.input(TerminalEvent::Key(release));
         assert!(!host.dirty);
         host.input(key(KeyCode::Esc));
-        assert!(host.layers.active.is_none());
+        assert!(host.layers.active().is_none());
         assert!(host.dirty);
     }
 }

@@ -9,6 +9,7 @@ use unicode_segmentation::UnicodeSegmentation;
 pub(super) struct Span {
     pub text: String,
     pub selected: bool,
+    pub matched: bool,
 }
 pub(super) struct Frame {
     pub rows: Vec<Vec<Span>>,
@@ -22,6 +23,17 @@ pub(super) fn row(
     text: &str,
     byte_start: usize,
     selection: std::ops::Range<usize>,
+    left: usize,
+    width: usize,
+    tab: NonZeroUsize,
+) -> Vec<Span> {
+    styled_row(text, byte_start, selection, &[], left, width, tab)
+}
+fn styled_row(
+    text: &str,
+    byte_start: usize,
+    selection: std::ops::Range<usize>,
+    matches: &[std::ops::Range<usize>],
     left: usize,
     width: usize,
     tab: NonZeroUsize,
@@ -47,18 +59,46 @@ pub(super) fn row(
             let selected = !selection.is_empty()
                 && byte_start + offset < selection.end
                 && byte_start + offset + cluster.len() > selection.start;
-            if let Some(last) = spans.last_mut().filter(|last| last.selected == selected) {
+            let matched = matches
+                .iter()
+                .any(|range| offset < range.end && offset + cluster.len() > range.start);
+            if let Some(last) = spans
+                .last_mut()
+                .filter(|last| last.selected == selected && last.matched == matched)
+            {
                 last.text.push_str(&rendered);
             } else {
                 spans.push(Span {
                     text: rendered,
                     selected,
+                    matched,
                 });
             }
         }
         column = end;
     }
     spans
+}
+pub(super) fn candidate_row<T>(
+    row: &crate::interaction::picker::MatchedCandidate<T>,
+    selected: Option<crate::interaction::picker::CandidateKey>,
+    width: usize,
+) -> Vec<Span> {
+    let text = &row.candidate.label;
+    let selection = if selected == Some(row.candidate.key) {
+        0..text.len()
+    } else {
+        0..0
+    };
+    styled_row(
+        text,
+        0,
+        selection,
+        &row.highlights,
+        0,
+        width,
+        NonZeroUsize::new(4).unwrap(),
+    )
 }
 pub(super) fn plain(text: &str, left: usize, width: usize) -> String {
     row(text, 0, 0..0, left, width, NonZeroUsize::new(4).unwrap())
@@ -360,5 +400,34 @@ mod tests {
         assert_eq!(joined(spans), "中🦀");
         let (spans, _) = prompt_row(&presentation, 0);
         assert!(spans.is_empty());
+    }
+    #[test]
+    fn picker_highlights_and_selection_clip_at_grapheme_boundaries() {
+        use crate::interaction::picker::{Candidate, CandidateKey, MatchedCandidate};
+        let row = MatchedCandidate {
+            candidate: std::sync::Arc::new(Candidate {
+                key: CandidateKey(1),
+                label: "a中e\u{301}🦀".into(),
+                payload: (),
+            }),
+            score: 1,
+            highlights: vec![1..4, 4..7],
+        };
+        let spans = candidate_row(&row, Some(CandidateKey(1)), 4);
+        assert!(spans.iter().all(|span| span.selected));
+        assert_eq!(
+            spans
+                .iter()
+                .filter(|span| span.matched)
+                .map(|span| span.text.as_str())
+                .collect::<String>(),
+            "中e\u{301}"
+        );
+        assert_eq!(joined(spans), "a中e\u{301}");
+        assert!(
+            candidate_row(&row, None, 4)
+                .iter()
+                .all(|span| !span.selected)
+        );
     }
 }

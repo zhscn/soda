@@ -420,3 +420,61 @@ fn explicit_event_times_replay_identically() {
     assert_eq!(replay(), ("abc".into(), Selection::caret(3)));
     assert_eq!(replay(), replay());
 }
+
+#[test]
+fn latest_open_intent_wins_in_both_completion_orders() {
+    for newest_first in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.txt");
+        let b = dir.path().join("b.txt");
+        fs::write(&a, "a").unwrap();
+        fs::write(&b, "b").unwrap();
+        let mut app = Application::default();
+        let (initial, _) = new(&mut app);
+        let first = open(&mut app, a);
+        let second = open(&mut app, b.clone());
+        let first = app.workspace().service().read_request(first);
+        let second = app.workspace().service().read_request(second);
+        if newest_first {
+            app.dispatch(Event::OpenFinished(second)).unwrap();
+            app.dispatch(Event::OpenFinished(first)).unwrap();
+        } else {
+            app.dispatch(Event::OpenFinished(first)).unwrap();
+            assert_eq!(app.active_view(), Some(initial));
+            app.dispatch(Event::OpenFinished(second)).unwrap();
+        }
+        let active = app.view(app.active_view().unwrap()).unwrap();
+        assert_eq!(
+            app.workspace()
+                .editor(active.document_id)
+                .unwrap()
+                .model()
+                .document()
+                .file()
+                .path(),
+            Some(b.as_path())
+        );
+        assert_eq!(app.views().count(), 3);
+    }
+}
+
+#[test]
+fn cancelling_or_failing_latest_open_does_not_reactivate_older_intent() {
+    for cancel in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.txt");
+        fs::write(&a, "a").unwrap();
+        let mut app = Application::default();
+        let (initial, _) = new(&mut app);
+        let first = open(&mut app, a);
+        let second = open(&mut app, dir.path().join("missing.txt"));
+        if cancel {
+            app.dispatch(Event::CancelOpen(second.id())).unwrap();
+        }
+        let completion = app.workspace().service().read_request(second);
+        assert!(app.dispatch(Event::OpenFinished(completion)).is_err());
+        let completion = app.workspace().service().read_request(first);
+        app.dispatch(Event::OpenFinished(completion)).unwrap();
+        assert_eq!(app.active_view(), Some(initial));
+    }
+}

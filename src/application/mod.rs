@@ -4,9 +4,10 @@
 //! Each view has a dedicated session and stays bound to one document. The
 //! document's default session remains an internal fallback. Closing all views
 //! leaves the document available for a later AddView; CloseDocument is explicit.
-//! An open completion activates its new view only if focus has not changed since
-//! the request. Cancelled reads cannot create views. Save completions identify
-//! their document independently of focus and retain the exact saved revision.
+//! Only the latest accepted open request may activate a view, and only if focus
+//! has not changed since that request. Cancelled reads cannot create views. Save
+//! completions identify their document independently of focus and retain the exact
+//! saved revision.
 //!
 //! Hosts consume Update after each dispatch, execute effects using a cloned
 //! FileService, and enqueue the resulting completion events on the owner thread.
@@ -123,6 +124,11 @@ impl std::error::Error for Error {
     }
 }
 
+#[derive(Clone, Copy)]
+struct OpenIntent {
+    focus_revision: u64,
+    open_revision: u64,
+}
 #[derive(Default)]
 pub struct Application {
     workspace: Workspace,
@@ -130,7 +136,8 @@ pub struct Application {
     active: Option<ViewId>,
     next_view: u64,
     focus_revision: u64,
-    pending_opens: BTreeMap<OpenId, u64>,
+    open_revision: u64,
+    pending_opens: BTreeMap<OpenId, OpenIntent>,
 }
 impl Application {
     pub fn new(service: FileService) -> Self {
@@ -314,23 +321,37 @@ impl Application {
                 };
                 update.changed_views.push(view);
             }
-            Event::Open(path) => match self.workspace.prepare_open(&path)? {
-                OpenPreparation::Existing(document) => {
-                    let view = match self.views.values().find(|v| v.document_id == document) {
-                        Some(view) => view.id,
-                        None => {
-                            let id = self.add_view(document)?;
-                            update.changed_views.push(id);
-                            id
-                        }
-                    };
-                    self.focus(Some(view));
+            Event::Open(path) => {
+                let next = self
+                    .open_revision
+                    .checked_add(1)
+                    .ok_or(EditError::VersionExhausted)?;
+                let preparation = self.workspace.prepare_open(&path)?;
+                self.open_revision = next;
+                match preparation {
+                    OpenPreparation::Existing(document) => {
+                        let view = match self.views.values().find(|v| v.document_id == document) {
+                            Some(view) => view.id,
+                            None => {
+                                let id = self.add_view(document)?;
+                                update.changed_views.push(id);
+                                id
+                            }
+                        };
+                        self.focus(Some(view));
+                    }
+                    OpenPreparation::Request(request) => {
+                        self.pending_opens.insert(
+                            request.id(),
+                            OpenIntent {
+                                focus_revision: self.focus_revision,
+                                open_revision: self.open_revision,
+                            },
+                        );
+                        update.effects.push(Effect::Open(request));
+                    }
                 }
-                OpenPreparation::Request(request) => {
-                    self.pending_opens.insert(request.id(), self.focus_revision);
-                    update.effects.push(Effect::Open(request));
-                }
-            },
+            }
             Event::CancelOpen(id) => {
                 self.workspace.cancel_open(id)?;
                 self.pending_opens.remove(&id);
@@ -340,7 +361,10 @@ impl Application {
                 let document = self.workspace.finish_open(completion)?;
                 let view = self.add_view(document)?;
                 update.changed_views.push(view);
-                if revision == Some(self.focus_revision) {
+                if revision.is_some_and(|intent| {
+                    intent.focus_revision == self.focus_revision
+                        && intent.open_revision == self.open_revision
+                }) {
                     self.focus(Some(view));
                 }
             }

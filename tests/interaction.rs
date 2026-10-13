@@ -36,11 +36,19 @@ fn setup(text: &str) -> (Application, ViewId) {
     (app, view)
 }
 fn search(app: &Application, view: ViewId) -> Layers {
-    Layers {
-        active: Some(Layer::Search {
-            input: TextInput::default(),
-            session: SearchSession::new(app, view).unwrap(),
-        }),
+    {
+        let mut layers = Layers::default();
+        layers
+            .enter(
+                Layer::Search {
+                    input: TextInput::default(),
+                    session: SearchSession::new(app, view).unwrap(),
+                },
+                app,
+                Duration::ZERO,
+            )
+            .unwrap();
+        layers
     }
 }
 fn input(layers: &mut Layers, app: &mut Application, event: Input) {
@@ -60,7 +68,7 @@ fn preview_wrap_confirm_and_repeat_preserve_document_history() {
     let mut layers = search(&app, view);
     input(&mut layers, &mut app, Input::Paste("中".into()));
     assert_eq!(selection(&app, view), Selection { anchor: 0, head: 3 });
-    let Some(Layer::Search { session, .. }) = &layers.active else {
+    let Some(Layer::Search { session, .. }) = layers.active() else {
         panic!()
     };
     assert_eq!(session.results().count, 2);
@@ -75,7 +83,7 @@ fn preview_wrap_confirm_and_repeat_preserve_document_history() {
     input(&mut layers, &mut app, Input::Navigate { backward: false });
     assert_eq!(selection(&app, view), Selection { anchor: 0, head: 3 });
     input(&mut layers, &mut app, Input::Confirm);
-    assert!(layers.active.is_none());
+    assert!(layers.active().is_none());
     edit(
         &mut app,
         view,
@@ -191,7 +199,7 @@ fn empty_or_missing_query_restores_origin_and_viewport() {
         );
     }
     assert_eq!(selection(&app, view), Selection::caret(0));
-    let Some(Layer::Search { session, .. }) = &layers.active else {
+    let Some(Layer::Search { session, .. }) = layers.active() else {
         panic!()
     };
     assert_eq!(session.results().count, 0);
@@ -210,7 +218,7 @@ fn closed_view_drops_session_and_focus_change_restores_original_view() {
     for event in response.events {
         app.dispatch(event).unwrap();
     }
-    assert!(layers.active.is_none());
+    assert!(layers.active().is_none());
     assert_eq!(app.active_view(), active);
     assert_eq!(selection(&app, view), Selection::caret(0));
     app.dispatch(Event::Focus(view)).unwrap();
@@ -223,7 +231,7 @@ fn closed_view_drops_session_and_focus_change_restores_original_view() {
             .events
             .is_empty()
     );
-    assert!(layers.active.is_none());
+    assert!(layers.active().is_none());
 }
 
 #[test]
@@ -236,7 +244,9 @@ fn modal_routing_blocks_unknown_input_and_requires_explicit_discard() {
             .unwrap(),
         InputResult::Pass
     ));
-    layers.active = Some(Layer::Open(TextInput::default()));
+    layers
+        .enter(Layer::Open(TextInput::default()), &app, Duration::ZERO)
+        .unwrap();
     assert!(matches!(
         layers
             .handle(Input::Unrecognized, &app, Duration::ZERO)
@@ -250,15 +260,15 @@ fn modal_routing_blocks_unknown_input_and_requires_explicit_discard() {
         panic!()
     };
     assert!(response.redraw);
-    layers.active = Some(Layer::Quit);
+    layers.enter(Layer::Quit, &app, Duration::ZERO).unwrap();
     let InputResult::Handled(response) =
         layers.handle(Input::Confirm, &app, Duration::ZERO).unwrap()
     else {
         panic!()
     };
     assert!(!response.quit);
-    assert!(layers.active.is_none());
-    layers.active = Some(Layer::Quit);
+    assert!(layers.active().is_none());
+    layers.enter(Layer::Quit, &app, Duration::ZERO).unwrap();
     assert!(matches!(
         layers
             .handle(Input::Paste("y".into()), &app, Duration::ZERO)
@@ -356,7 +366,7 @@ fn selection_only_input_repaints_without_restarting_preview() {
     // Replace a query with an equal-length query; length alone cannot identify changes.
     input(&mut layers, &mut app, Input::Text(InputKey::SelectAll));
     input(&mut layers, &mut app, Input::Paste("bar".into()));
-    let Some(Layer::Search { session, .. }) = &layers.active else {
+    let Some(Layer::Search { session, .. }) = layers.active() else {
         panic!()
     };
     assert_eq!(session.query().text(), "bar");
@@ -368,8 +378,16 @@ fn selection_only_input_repaints_without_restarting_preview() {
 fn save_prompt_closes_when_target_document_closes() {
     let (mut app, view) = setup("a");
     let document = app.view(view).unwrap().document_id;
-    let mut layers = Layers {
-        active: Some(Layer::Save(document, TextInput::new("file.txt"))),
+    let mut layers = {
+        let mut layers = Layers::default();
+        layers
+            .enter(
+                Layer::Save(document, TextInput::new("file.txt")),
+                &app,
+                Duration::ZERO,
+            )
+            .unwrap();
+        layers
     };
     let update = app
         .dispatch(Event::CloseDocument {
@@ -380,7 +398,7 @@ fn save_prompt_closes_when_target_document_closes() {
     let response = layers.observe(&app, &update, Duration::ZERO).unwrap();
     assert!(response.redraw);
     assert!(response.events.is_empty());
-    assert!(layers.active.is_none());
+    assert!(layers.active().is_none());
     assert!(matches!(
         layers.handle(Input::Confirm, &app, Duration::ZERO).unwrap(),
         InputResult::Pass
@@ -390,8 +408,16 @@ fn save_prompt_closes_when_target_document_closes() {
 #[test]
 fn prompt_navigation_and_filtered_paste_do_not_generate_file_commands() {
     let app = Application::default();
-    let mut layers = Layers {
-        active: Some(Layer::Open(TextInput::new("路径/a.cpp"))),
+    let mut layers = {
+        let mut layers = Layers::default();
+        layers
+            .enter(
+                Layer::Open(TextInput::new("路径/a.cpp")),
+                &app,
+                Duration::ZERO,
+            )
+            .unwrap();
+        layers
     };
     let InputResult::Handled(response) = layers
         .handle(Input::Text(InputKey::SelectAll), &app, Duration::ZERO)
@@ -407,7 +433,7 @@ fn prompt_navigation_and_filtered_paste_do_not_generate_file_commands() {
             .unwrap(),
         InputResult::Blocked
     ));
-    let Some(Layer::Open(field)) = &layers.active else {
+    let Some(Layer::Open(field)) = layers.active() else {
         panic!()
     };
     assert_eq!(field.text(), "路径/a.cpp");
@@ -420,5 +446,5 @@ fn prompt_navigation_and_filtered_paste_do_not_generate_file_commands() {
     assert!(
         matches!(response.events.as_slice(), [Event::Open(path)] if path == std::path::Path::new("路径/a.cpp"))
     );
-    assert!(layers.active.is_none());
+    assert!(layers.active().is_none());
 }

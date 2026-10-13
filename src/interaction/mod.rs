@@ -1,6 +1,8 @@
 //! Frontend-independent modal input and feature sessions. Widgets emit intents;
 //! application commands remain the only route to editor mutation.
 mod input;
+pub mod picker;
+use picker::{ListMotion, PickerCompletion, PickerEffect, PickerSession};
 mod search;
 use crate::{
     application::{Application, Event, Update},
@@ -15,6 +17,7 @@ pub enum Layer {
     Open(TextInput),
     Save(DocumentId, TextInput),
     Quit,
+    Picker(PickerSession),
     Search {
         input: TextInput,
         session: SearchSession,
@@ -26,6 +29,7 @@ pub enum Input {
     Confirm,
     Cancel,
     Navigate { backward: bool },
+    Candidate { motion: ListMotion, wrap: bool },
     Unrecognized,
 }
 enum Intent {
@@ -34,6 +38,7 @@ enum Intent {
     Confirm,
     Cancel,
     Navigate { backward: bool },
+    Candidate { motion: ListMotion, wrap: bool },
 }
 /// An unrecognized event is blocked by a modal layer rather than reaching the
 /// editing surface. Pass is reserved for input with no active layer.
@@ -42,9 +47,16 @@ enum Route {
     Blocked,
     Handled(Intent),
 }
+/// Owns modal transitions and cancellation. Read state through `active()` and
+/// execute the responses returned by `enter`, `handle` and `close`.
+///
+/// ```compile_fail
+/// let mut layers = soda::interaction::Layers::default();
+/// layers.active = None;
+/// ```
 #[derive(Default)]
 pub struct Layers {
-    pub active: Option<Layer>,
+    active: Option<Layer>,
 }
 /// A modal layer blocks unrecognized input. Handled input may change only its
 /// selection, so redraw is independent of application commands and queries.
@@ -63,6 +75,38 @@ fn route_update(update: InputUpdate) -> Route {
     }
 }
 impl Layers {
+    pub fn active(&self) -> Option<&Layer> {
+        self.active.as_ref()
+    }
+    /// Replace a modal layer through its cancellation contract. Hosts execute
+    /// returned effects and events before accepting further input.
+    pub fn enter(
+        &mut self,
+        layer: Layer,
+        app: &Application,
+        time: Duration,
+    ) -> Result<Response, EditError> {
+        let mut response = self.close(app, time)?;
+        if let Layer::Picker(session) = &layer {
+            response.effects.push(PickerEffect::Run(session.task()));
+        }
+        self.active = Some(layer);
+        response.redraw = true;
+        Ok(response)
+    }
+    pub fn close(&mut self, app: &Application, time: Duration) -> Result<Response, EditError> {
+        self.respond(Intent::Cancel, app, time)
+    }
+    pub fn picker_failed(&mut self, error: String) -> Response {
+        let Some(Layer::Picker(session)) = &mut self.active else {
+            return Response::default();
+        };
+        session.fail(error);
+        Response {
+            redraw: true,
+            ..Response::default()
+        }
+    }
     /// Route and reduce in one call; intents cannot outlive their owning layer.
     pub fn handle(
         &mut self,
@@ -81,6 +125,9 @@ impl Layers {
             return Route::Pass;
         };
         match event {
+            Input::Candidate { motion, wrap } if matches!(layer, Layer::Picker(_)) => {
+                Route::Handled(Intent::Candidate { motion, wrap })
+            }
             Input::Cancel => Route::Handled(Intent::Cancel),
             Input::Confirm if matches!(layer, Layer::Quit) => Route::Handled(Intent::Cancel),
             Input::Confirm => Route::Handled(Intent::Confirm),
@@ -111,6 +158,7 @@ impl Layer {
     fn field_mut(&mut self) -> Option<&mut TextInput> {
         match self {
             Self::Open(input) | Self::Save(_, input) | Self::Search { input, .. } => Some(input),
+            Self::Picker(session) => Some(session.input_mut()),
             Self::Quit => None,
         }
     }
@@ -120,6 +168,31 @@ impl Layer {
             Self::Save(_, field) => ("Save as: ".to_owned(), field),
             Self::Search { input, session } => {
                 (format!("Find [{}]: ", session.results().count), input)
+            }
+            Self::Picker(session) => {
+                let status = match session.status() {
+                    picker::PickerStatus::Loading => "loading".to_owned(),
+                    picker::PickerStatus::Failed(error) => error.clone(),
+                    picker::PickerStatus::Ready => {
+                        let results = session.results();
+                        format!(
+                            "{}/{}{}{}",
+                            results.rows.len(),
+                            results.matched,
+                            if results.truncated {
+                                "; catalog truncated"
+                            } else {
+                                ""
+                            },
+                            if results.warnings.is_empty() {
+                                ""
+                            } else {
+                                "; scan warnings"
+                            }
+                        )
+                    }
+                };
+                (format!("Files [{status}]: "), session.input())
             }
             Self::Quit => {
                 return Presentation {
@@ -143,6 +216,7 @@ impl Layer {
 #[derive(Default)]
 pub struct Response {
     pub events: Vec<Event>,
+    pub effects: Vec<PickerEffect>,
     pub quit: bool,
     pub redraw: bool,
 }
@@ -158,6 +232,29 @@ impl Layers {
                 redraw: true,
                 ..Response::default()
             }),
+            Intent::Changed if matches!(self.active, Some(Layer::Picker(_))) => {
+                let Some(Layer::Picker(session)) = &mut self.active else {
+                    unreachable!()
+                };
+                Ok(Response {
+                    effects: session
+                        .query_changed()
+                        .map(PickerEffect::Run)
+                        .into_iter()
+                        .collect(),
+                    redraw: true,
+                    ..Response::default()
+                })
+            }
+            Intent::Candidate { motion, wrap } => {
+                let Some(Layer::Picker(session)) = &mut self.active else {
+                    return Ok(Response::default());
+                };
+                Ok(Response {
+                    redraw: session.navigate(motion, wrap),
+                    ..Response::default()
+                })
+            }
             Intent::Changed => {
                 let mut response = self.preview(app, false, false, time)?;
                 response.redraw = true;
@@ -165,6 +262,11 @@ impl Layers {
             }
             Intent::Navigate { backward } => self.preview(app, backward, true, time),
             Intent::Confirm | Intent::Cancel => {
+                if matches!(intent, Intent::Confirm)
+                    && matches!(&self.active, Some(Layer::Picker(session)) if session.selected_path().is_none())
+                {
+                    return Ok(Response::default());
+                }
                 let Some(layer) = self.active.take() else {
                     return Ok(Response::default());
                 };
@@ -174,6 +276,12 @@ impl Layers {
                     ..Response::default()
                 };
                 match layer {
+                    Layer::Picker(session) => {
+                        response.effects.push(PickerEffect::Cancel(session.id()));
+                        if confirm && let Some(path) = session.selected_path() {
+                            response.events.push(Event::Open(path.to_owned()));
+                        }
+                    }
                     Layer::Search { session, .. } => {
                         if confirm {
                             response.events.push(Event::Edit {
@@ -216,6 +324,7 @@ impl Layers {
         if session.results().current.is_none() {
             return Ok(Response {
                 events: session.cancel(app, time)?,
+                effects: Vec::new(),
                 quit: false,
                 redraw: true,
             });
@@ -226,6 +335,7 @@ impl Layers {
                 command,
                 time,
             }],
+            effects: Vec::new(),
             quit: false,
             redraw: true,
         })
@@ -266,5 +376,33 @@ impl Layers {
             return self.preview(app, false, false, time);
         }
         Ok(Response::default())
+    }
+}
+
+impl Layers {
+    /// End the preceding modal session before installing a new picker.
+    pub fn start_picker(
+        &mut self,
+        session: PickerSession,
+        app: &Application,
+        time: Duration,
+    ) -> Result<Response, EditError> {
+        self.enter(Layer::Picker(session), app, time)
+    }
+
+    pub fn picker_finished(&mut self, completion: PickerCompletion) -> Response {
+        let Some(Layer::Picker(session)) = &mut self.active else {
+            return Response::default();
+        };
+        Response {
+            redraw: session.accept(completion),
+            ..Response::default()
+        }
+    }
+    pub fn resize_picker(&mut self, rows: usize) -> bool {
+        match &mut self.active {
+            Some(Layer::Picker(session)) => session.resize(rows),
+            _ => false,
+        }
     }
 }
