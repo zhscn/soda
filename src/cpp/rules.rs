@@ -10,6 +10,8 @@ pub struct ParserOptions {
     pub namespace_macros: Vec<String>,
     pub attribute_macros: Vec<String>,
     pub whitespace_sensitive_macros: Vec<String>,
+    pub macro_block_begin: String,
+    pub macro_block_end: String,
 }
 
 pub use crate::language::WhitespacePolicy;

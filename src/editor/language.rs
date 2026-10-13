@@ -52,11 +52,6 @@ impl LanguageSession {
             (_, language) => *self = Self::new(language),
         }
     }
-    pub fn invalidate(&mut self) {
-        if let Session::Cpp(session) = &mut self.inner {
-            session.invalidate();
-        }
-    }
     pub fn whitespace(&self) -> crate::language::WhitespacePolicy {
         match &self.inner {
             Session::Cpp(session) => session.rules().whitespace().clone(),
@@ -92,5 +87,46 @@ impl LanguageSession {
             Session::PlainText => Ok(IndentAdvice::Unavailable),
             Session::Cpp(session) => session.indent(snapshot, request),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        core::Selection,
+        cpp::ParseStrategy,
+        editor::{Command, Editor},
+    };
+
+    #[test]
+    fn successful_input_retains_speculative_analysis_for_subsequent_edits() {
+        let text = (0..100)
+            .map(|i| format!("void f{i}() {{\n    work({i});\n}}\n"))
+            .collect::<String>();
+        let mut editor = Editor::new(text.clone(), CppRules::default());
+        editor.indentation(0).unwrap();
+        let caret = text.find("work(50);").unwrap() + "work(50);".len();
+        editor
+            .execute(Command::SetSelection(Selection::caret(caret)))
+            .unwrap();
+        for _ in 0..2 {
+            editor.execute(Command::Enter).unwrap();
+            let Session::Cpp(session) = &editor.model().document.language.inner else {
+                panic!()
+            };
+            let work = session.analysis_work().unwrap();
+            assert_eq!(work.strategy, ParseStrategy::Declarations);
+            assert!(work.scanned_bytes < 80);
+            assert!(work.reparsed_tokens < 50);
+        }
+        editor.execute(Command::Undo).unwrap();
+        editor.indentation(0).unwrap();
+        let Session::Cpp(session) = &editor.model().document.language.inner else {
+            panic!()
+        };
+        let work = session.analysis_work().unwrap();
+        assert!(work.scanned_bytes < 80);
+        assert!(work.reparsed_tokens < 50);
     }
 }

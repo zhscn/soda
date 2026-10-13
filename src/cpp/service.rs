@@ -14,12 +14,14 @@ use std::sync::Arc;
 pub struct CppSession {
     rules: Arc<CppRules>,
     analysis: Option<Arc<SyntaxTree>>,
+    work: Option<super::AnalysisWork>,
 }
 impl CppSession {
     pub fn new(rules: Arc<CppRules>) -> Self {
         Self {
             rules,
             analysis: None,
+            work: None,
         }
     }
     pub fn rules(&self) -> &Arc<CppRules> {
@@ -33,6 +35,10 @@ impl CppSession {
     }
     pub fn invalidate(&mut self) {
         self.analysis = None;
+        self.work = None;
+    }
+    pub fn analysis_work(&self) -> Option<super::AnalysisWork> {
+        self.work
     }
     pub fn triggers(&self, ch: char) -> bool {
         self.rules.enabled() && matches!(ch, ':' | '}' | '#')
@@ -44,10 +50,21 @@ impl CppSession {
     }
     fn analyze(&mut self, snapshot: &Snapshot) -> Arc<SyntaxTree> {
         if !self.matches(snapshot) {
-            self.analysis = Some(Arc::new(parse_snapshot_with_options(
-                snapshot,
-                self.rules.parser_options(),
-            )));
+            let (tree, work) = match &self.analysis {
+                Some(previous) => super::parser::reparse(previous, snapshot.shared_text()),
+                None => {
+                    let tree = parse_snapshot_with_options(snapshot, self.rules.parser_options());
+                    let work = super::AnalysisWork {
+                        strategy: super::ParseStrategy::Full,
+                        scanned_bytes: snapshot.text().len(),
+                        reparsed_tokens: tree.tokens().len(),
+                        reused_nodes: 0,
+                    };
+                    (tree, work)
+                }
+            };
+            self.analysis = Some(Arc::new(tree));
+            self.work = Some(work);
         }
         self.analysis.as_ref().unwrap().clone()
     }
@@ -59,11 +76,7 @@ impl CppSession {
         if !snapshot.is_char_boundary(position) {
             return Err(EditError::InvalidRange);
         }
-        let known = self
-            .analysis
-            .as_ref()
-            .filter(|_| self.matches(snapshot))
-            .cloned();
+        let known = self.analysis.is_some().then(|| self.analyze(snapshot));
         let scanned;
         let tokens = match &known {
             Some(tree) => tree.tokens(),

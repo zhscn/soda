@@ -255,5 +255,15 @@ pub(super) fn to_rules(v: &Map<String, Value>, doc: usize) -> Result<CppRules, C
             list.dedup();
         }
     }
+    for (key, pattern) in [
+        ("MacroBlockBegin", &mut policy.parser.macro_block_begin),
+        ("MacroBlockEnd", &mut policy.parser.macro_block_end),
+    ] {
+        *pattern = string(v.get(key).expect("complete preset base"), doc, key)?.into();
+        if !pattern.is_empty() {
+            regex::Regex::new(pattern)
+                .map_err(|error| ConfigError::key(doc, key, error.to_string()))?;
+        }
+    }
     Ok(policy)
 }

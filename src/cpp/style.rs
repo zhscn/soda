@@ -116,6 +116,17 @@ pub(crate) fn validate_offset(offset: isize) -> Result<(), &'static str> {
 }
 impl CppStyle {
     pub(super) fn validate(&self) -> Result<(), StyleError> {
+        for (field, pattern) in [
+            ("macro_block_begin", &self.parser.macro_block_begin),
+            ("macro_block_end", &self.parser.macro_block_end),
+        ] {
+            if !pattern.is_empty() {
+                regex::Regex::new(pattern).map_err(|_| StyleError {
+                    field,
+                    message: "invalid block macro regular expression",
+                })?;
+            }
+        }
         for (field, width) in [
             ("indent_width", Some(self.indent_width)),
             ("continuation_indent", Some(self.continuation_indent)),

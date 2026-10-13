@@ -250,7 +250,7 @@ impl Computer<'_> {
         if let Some(i) = first {
             let token = &self.tree.tokens[i];
             let id = self.tree.token_owner(i);
-            match token.kind {
+            match self.tree.format_kind(i) {
                 K::RBrace | K::RParen | K::RBracket
                     if matches!(
                         self.tree.nodes[id].kind,
@@ -690,41 +690,18 @@ impl Computer<'_> {
         if self.style.directive.layout == PPDirectiveIndent::None {
             return 0;
         }
-        let dirs: Vec<_> = self
+        let guard = super::preprocessor::include_guard(self.snapshot.text(), &self.tree.tokens);
+        let mut level = 0usize;
+        for (hash, token) in self
             .tree
             .tokens
             .iter()
             .enumerate()
-            .filter(|(_, t)| t.kind == K::PreprocessorHash)
-            .map(|(i, t)| {
-                let words: Vec<_> = self.tree.tokens[i + 1..]
-                    .iter()
-                    .take_while(|t| t.preprocessor)
-                    .filter(|t| !t.kind.is_trivia())
-                    .map(|t| &self.snapshot.text()[t.range.clone()])
-                    .collect();
-                (self.line_of(t.range.start), words)
-            })
-            .collect();
-        let last_code_line = self
-            .tree
-            .tokens
-            .iter()
-            .rev()
-            .find(|t| !t.kind.is_trivia() && t.kind != K::EndOfFile)
-            .map(|t| self.line_of(t.range.start));
-        let guard = dirs.len() >= 3
-            && last_code_line.is_some_and(|line| line <= dirs.last().unwrap().0)
-            && dirs[0].1.first() == Some(&"ifndef")
-            && dirs[1].1.first() == Some(&"define")
-            && dirs[0].1.get(1).is_some()
-            && dirs[0].1.get(1) == dirs[1].1.get(1)
-            && dirs
-                .last()
-                .is_some_and(|(_, w)| w.first() == Some(&"endif"));
-        let mut level = 0usize;
-        for (line, words) in dirs {
-            let own = match words.first().copied().unwrap_or("") {
+            .filter(|(_, t)| t.kind == K::PreprocessorHash && t.preprocessor)
+        {
+            let word = super::preprocessor::keyword(self.snapshot.text(), &self.tree.tokens, hash)
+                .unwrap_or("");
+            let own = match word {
                 "if" | "ifdef" | "ifndef" => {
                     let own = level;
                     level += 1;
@@ -737,7 +714,7 @@ impl Computer<'_> {
                 }
                 _ => level,
             };
-            if line == self.line {
+            if self.line_of(token.range.start) == self.line {
                 return own.saturating_sub(usize::from(guard)) * self.style.directive.width;
             }
         }

@@ -152,13 +152,11 @@ fn validate_shape(
     }
     Ok(())
 }
-const UNSUPPORTED: [&str; 6] = [
+const UNSUPPORTED: [&str; 4] = [
     "IndentCaseBlocks",
     "IndentGotoLabels",
     "IndentRequiresClause",
     "LambdaBodyIndentation",
-    "MacroBlockBegin",
-    "MacroBlockEnd",
 ];
 
 fn record_explicit(

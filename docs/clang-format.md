@@ -67,6 +67,7 @@ Rust 内置模块通过 `CppStyle::compile` 生成同一策略表示，返回 `R
 | `ForEachMacros`、`IfMacros`、`NamespaceMacros` | 识别循环、条件和 namespace 结构 |
 | `StatementMacros`、`AttributeMacros` | 区分独立宏语句和声明修饰宏 |
 | `WhitespaceSensitiveMacros` | 保留宏内部已有缩进 |
+| `MacroBlockBegin`、`MacroBlockEnd` | 将匹配的宏标识符作为块开闭边界，支持带参数调用 |
 
 LLVM 当前映射里的旧字段拼写保留在已知选项表中。未知顶层选项默认报错，调用者可以选择警告并保留。核心缩进字段校验类型与枚举；宽度限制在 0 到 4096，TabWidth 必须大于零。嵌套配置检查形状和已知子字段。
 
@@ -74,7 +75,9 @@ LLVM 当前映射里的旧字段拼写保留在已知选项表中。未知顶层
 
 完整选项树保留列宽、排序、换行及其他排版配置，缩进器只使用与当前交互能力相关的字段。配置层没有实现完整 formatter 的语义校验与跨字段约束。
 
-显式配置 `IndentCaseBlocks`、`IndentGotoLabels`、`IndentRequiresClause`、`LambdaBodyIndentation`、`MacroBlockBegin` 和 `MacroBlockEnd`，或预设对这些选项采用不同于 LLVM 基线的值时，会返回尚未参与交互缩进的诊断。`AlignOperands: AlignAfterOperator` 编译为独立的 AfterOperator 策略值，目前执行时采用 Align 的续行规则，并返回诊断。GNU 或自定义额外 brace indentation 同样需要后续语言规则实现。
+显式配置 `IndentCaseBlocks`、`IndentGotoLabels`、`IndentRequiresClause`、`LambdaBodyIndentation`，或预设对这些选项采用不同于 LLVM 基线的值时，会返回尚未参与交互缩进的诊断。`AlignOperands: AlignAfterOperator` 编译为独立的 AfterOperator 策略值，目前执行时采用 Align 的续行规则，并返回诊断。GNU 或自定义额外 brace indentation 同样需要后续语言规则实现。
+
+宏块正则采用 Rust `regex` 的语法，对完整标识符执行搜索；需要精确匹配时使用 `^`、`$`。配置加载和 `CppStyle::compile` 校验表达式。常用的分组、分支和字符类可直接使用，LLVM 正则的其他扩展语法不保证兼容。
 
 能力诊断根据最终有效配置重新生成，覆盖语言分段、目录继承和预设选择。覆盖为受支持的策略后，先前的能力诊断消失。诊断保留有效选项的 YAML 文档编号，预设自带的诊断使用编号 0。
 

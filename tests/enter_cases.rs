@@ -8,6 +8,11 @@ use soda::{
 fn enter_regression_corpus() {
     let cases: &[(&str, &str, &str)] = &[
         (
+            "unclosed macro invocation does not swallow a following namespace",
+            "#define DECLARE(x) x\n\nDECLARE(\nnamespace foo {^\nint x;\n}\n",
+            "#define DECLARE(x) x\n\nDECLARE(\nnamespace foo {\n^\nint x;\n}\n",
+        ),
+        (
             "namespace body is not indented by default",
             "namespace foo {^\nint x;\n}\n",
             "namespace foo {\n^\nint x;\n}\n",

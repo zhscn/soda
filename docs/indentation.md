@@ -30,6 +30,10 @@ CC Mode 的参考价值在于上下文覆盖、配置行为和编辑轨迹。语
 
 空白行或两个 token 之间的插入位置可能没有所属语法节点。查询必须同时考虑前缀、后缀和未闭合结构，不能简单将“最近节点的缩进”作为答案。例如，在 `call(first,|second)` 中按 Enter，后缀仍属于参数列表；在 `class A { public:|` 后换行，需要查询成员插入位置。
 
+预处理指令按逻辑行解析，反斜杠续行仍属于同一指令。指令体中的不完整括号不会吞并下一条指令或普通代码。条件分支允许在不同分支中打开或关闭代码块，也支持由两段 `#ifdef __cplusplus` 包围开闭括号的 `extern "C"`；这些都是格式结构，分析器不求值条件表达式。
+
+宏块分类保留原始 token 和源码范围。`MacroBlockBegin/End` 配置提供一般块边界；当前文件中可直接识别的对象式 `#define` 则保留更具体的结构：`namespace name {`、`extern "C" {`、`extern "C++" {`、`{` 和 `}`。定义按出现顺序生效，重定义及 `#undef` 更新分类。条件分支结束时只保留各分支一致的分类；没有 else 的条件还要与进入条件前的分类一致。文件级 `#ifndef NAME`、`#define NAME`、末尾 `#endif` 形式的 include guard 按透明包装处理。宏别名、参数替换、递归展开和其他复杂替换体需要显式配置，分类器不执行通用宏展开。
+
 ## 3 查询契约
 
 以下是语义模型，具体 Rust 类型可以在实现时收敛：
@@ -103,12 +107,24 @@ raw string 内的 Enter 插入用户请求的换行，后缀保持原字节；�
 
 ## 6 缓存与验证
 
-分析缓存依赖文档版本和语法配置；宏分类变化会使结构分析失效，缩进宽度变化可以复用结构。缩进结果还依赖有效策略、实际布局及列度量，不能仅按节点编号缓存。完整分析与增量分析通过同一查询边界提供服务，增量结果与完整基线做差分验证。
+分析只有在源码内容和语法配置匹配时才可用于查询。文档可以保留上一份分析作为增量计算的基线；宏分类配置变化会清除它，缩进宽度变化可以复用结构。输入协调器隔离试算分析，并在事务成功提交后保留它；失败输入不替换文档分析。撤销、重做和重新加载也通过同一内容匹配规则重新分析。缩进结果还依赖有效策略、实际布局及列度量，不能仅按节点编号缓存。
+
+增量词法扫描从修改前的独立换行 token 后重新开始，在未改变的后缀中遇到对应换行 token 后收敛。字符串、块注释和反斜杠续行内部不作为恢复点；未闭合 token 可以使扫描延伸到文件末尾。词法 token 和语法有意义的拼写保持一致时复用节点结构，否则尝试从完整顶层声明后的分号或闭括号边界重解析，在可靠的旧声明边界复用后缀节点。前后片段的节点和 token 索引重新映射，索引不跨分析保持稳定。
+
+需要重新解析结构时，含预处理指令或旧结构未完成的文档执行完整结构解析；局部结果出现未完成结构时也回退。大型 namespace、class 或函数仍以所在顶层声明为重解析单位。clang-format 的 `TokenAnalyzer::process` 每次扫描并解析格式结构，再由 affected-range 机制筛选行；范围格式化不等于跨编辑的局部重解析。
+
+当前实现仍有完整源码物化、前后缀比较、token/节点数组复制及归属索引重建的线性成本，因此局部扫描和解析不构成端到端次线性性能保证。`CppSession::analysis_work` 报告实际扫描字节、重解析 token 和复用节点数，便于区分优化路径。差分测试比较完整与增量分析的 token、节点、宏分类、归属索引及逐行缩进建议，运行 `cargo test incremental --lib` 验证。
 
 契约测试通过输入轨迹断言文本字节、caret、修改范围和一次撤销。重点覆盖选区替换、行中换行、空白新行、未闭合结构、现有后缀、配置切换、保护与预算降级。混排矩阵包含非整除宽度、空格后接 tab、负偏移和结构/续行/对齐边界。内部树形变化不应要求这些测试改变预期。
 
+`tests/clang_format_editor.rs` 将 LLVM `FormatTest.cpp` 中与行首缩进有关的例子改成实际 editor 命令测试。每个例子记录上游测试名、配置覆盖和带 caret 标记的预期文本；文件头记录上游版本。预期值来自上游排版例子，允许缩短标识符和省略无关语句，但必须保留影响缩进的上下文。用例不在运行时调用 clang-format，也不从当前求解器生成预期值。
+
+Enter 路径删除标记所在行前的换行和前导空白，再通过 `Command::Enter` 恢复它们；Reindent 路径将该行前导空白替换为混合空白，再通过 `Command::Reindent` 修复。两条路径均检查完整文本字节、caret、撤销恢复和重做，并分别运行 LF 与 CRLF。输入保留文件末尾换行，使 Enter 可以识别文件的换行风格。运行 `cargo test --test clang_format_editor` 验证这组用例。
+
+这些用例验证用户已经选择换行位置时的缩进行为。新增上游例子时，应显式选择目标边界，并记录所需配置；自动折行、整段重排和行尾空白对齐不能直接作为即时缩进的预期。受保护文本、未完成输入及输入标点触发调整继续由 editor 与 Enter 的专项测试覆盖。
+
 ## 7 设计参考
 
-- LLVM：`~/project/llvm-project`。`clang/lib/Format/UnwrappedLineParser.cpp`、`TokenAnnotator.cpp` 和 `ContinuationIndenter.cpp` 提供分析职责及续行计算参考，`WhitespaceManager.cpp` 提供空白生成参考。
+- LLVM：`~/project/llvm-project`。`clang/lib/Format/UnwrappedLineParser.cpp`、`TokenAnnotator.cpp` 和 `ContinuationIndenter.cpp` 提供分析职责及续行计算参考，`WhitespaceManager.cpp` 提供空白生成参考；`TokenAnalyzer.cpp`、`AffectedRangeManager.cpp` 和 `FormatTokenLexer.cpp` 提供解析入口、范围筛选及宏块分类参考。
 - IntelliJ Community：`~/project/intellij-community`。`platform/code-style-api/src/com/intellij/formatting/{Block,ChildAttributes,Indent}.java` 提供插入位置、完整性及缩进抽象；`platform/code-style-api/src/com/intellij/psi/codeStyle/lineIndent/LineIndentProvider.java` 提供即时查询与保留语义；`platform/code-style-impl/src/com/intellij/formatting/IndentInfo.java` 提供缩进/对齐空白分离。这些是公开平台及语言实现的参考，CLion 的 C++ 行为另以编辑用例验证。
 - Emacs C++ 配置：`~/.emacs.d/lisp/init-cc.el`。用于核对配置行为、tab/space 混排和上下文用例。

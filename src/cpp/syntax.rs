@@ -52,7 +52,7 @@ impl NodeKind {
     }
 }
 use NodeKind as N;
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Node {
     pub kind: N,
     pub tokens: Range<usize>,
@@ -71,6 +71,7 @@ pub struct SyntaxTree {
     pub(crate) tokens: Vec<Token>,
     pub(crate) nodes: Vec<Node>,
     pub(super) token_owners: Vec<usize>,
+    pub(super) macro_blocks: Vec<Option<super::macros::BlockMacro>>,
 }
 impl SyntaxTree {
     pub fn parser_options(&self) -> &ParserOptions {
@@ -142,6 +143,9 @@ impl SyntaxTree {
     }
 
     pub(crate) fn format_kind(&self, token: usize) -> K {
+        if let Some(block) = self.macro_blocks[token] {
+            return block.kind();
+        }
         let node = &self.nodes[self.token_owner(token)];
         if token == node.tokens.start {
             match node.kind {

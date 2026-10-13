@@ -129,7 +129,6 @@ impl Document {
             mapping,
         };
         self.snapshot = next.snapshot().clone();
-        self.language.invalidate();
         Ok(Commit {
             update,
             restore_selection: (owner, next.selection()),
@@ -160,7 +159,6 @@ impl Document {
         };
         self.snapshot = next.snapshot().clone();
         self.history.break_group();
-        self.language.invalidate();
         Ok(Some(Commit {
             update,
             restore_selection,

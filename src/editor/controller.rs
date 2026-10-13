@@ -194,25 +194,23 @@ impl Editor {
                 None
             }
             command => {
+                let mut prepared_language = None;
                 let (mut tx, origin) = match command {
                     Command::InsertText(text) => {
                         (operations::prepare_insert(&state, text), EditOrigin::Paste)
                     }
-                    Command::TypeChar(ch) => (
-                        operations::prepare_char(
-                            &state,
-                            ch,
-                            &mut self.model.document.language.clone(),
-                        )?,
-                        EditOrigin::Input,
-                    ),
-                    Command::Enter => (
-                        operations::prepare_enter(
-                            &state,
-                            &mut self.model.document.language.clone(),
-                        )?,
-                        EditOrigin::Input,
-                    ),
+                    Command::TypeChar(ch) => {
+                        let mut language = self.model.document.language.clone();
+                        let tx = operations::prepare_char(&state, ch, &mut language)?;
+                        prepared_language = Some(language);
+                        (tx, EditOrigin::Input)
+                    }
+                    Command::Enter => {
+                        let mut language = self.model.document.language.clone();
+                        let tx = operations::prepare_enter(&state, &mut language)?;
+                        prepared_language = Some(language);
+                        (tx, EditOrigin::Input)
+                    }
                     Command::Reindent(line) => (
                         operations::prepare_reindent(
                             &state,
@@ -326,7 +324,11 @@ impl Editor {
                     self.model.set_selection(id, next.selection())?;
                     None
                 } else {
-                    Some(self.model.document.commit(id, &state, tx, origin)?)
+                    let commit = self.model.document.commit(id, &state, tx, origin)?;
+                    if let Some(language) = prepared_language {
+                        self.model.document.language = language;
+                    }
+                    Some(commit)
                 }
             }
         };

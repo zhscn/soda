@@ -130,13 +130,51 @@ pub struct Token {
 /// Lossless lexer: every input byte belongs to exactly one token. Unterminated
 /// literals and comments retain their original ranges for editing protection.
 pub fn lex(source: &str) -> Vec<Token> {
-    use TokenKind::*;
-    let b = source.as_bytes();
-    let mut tokens = Vec::new();
-    let mut p = 0;
-    let mut line_start = true;
-    let mut pp = false;
-    while p < b.len() {
+    Scanner::new(source, 0).collect()
+}
+
+/// Scanning can resume immediately after a standalone newline token: strings,
+/// comments and escaped newlines cannot contain such a checkpoint.
+struct Scanner<'a> {
+    source: &'a str,
+    position: usize,
+    line_start: bool,
+    preprocessor: bool,
+    finished: bool,
+}
+impl<'a> Scanner<'a> {
+    fn new(source: &'a str, position: usize) -> Self {
+        Self {
+            source,
+            position,
+            line_start: true,
+            preprocessor: false,
+            finished: false,
+        }
+    }
+}
+impl Iterator for Scanner<'_> {
+    type Item = Token;
+    fn next(&mut self) -> Option<Token> {
+        use TokenKind::*;
+        if self.finished {
+            return None;
+        }
+        let source = self.source;
+        let b = source.as_bytes();
+        let mut p = self.position;
+        if p == b.len() {
+            self.finished = true;
+            return Some(Token {
+                kind: EndOfFile,
+                range: p..p,
+                preprocessor: false,
+                unterminated: false,
+                escaped_newline: false,
+            });
+        }
+        let mut line_start = self.line_start;
+        let mut pp = self.preprocessor;
         let start = p;
         let mut unterminated = false;
         let mut escaped = false;
@@ -358,29 +396,86 @@ pub fn lex(source: &str) -> Vec<Token> {
         if kind == PreprocessorHash && line_start {
             pp = true;
         }
-        tokens.push(Token {
+        let token = Token {
             kind,
             range: start..p,
             preprocessor: pp,
             unterminated,
             escaped_newline: escaped,
-        });
+        };
         if kind == Newline {
             pp = false;
             line_start = true;
         } else if !kind.is_trivia() {
             line_start = false;
         }
+        self.position = p;
+        self.line_start = line_start;
+        self.preprocessor = pp;
+        Some(token)
     }
-    tokens.push(Token {
-        kind: EndOfFile,
-        range: p..p,
-        preprocessor: false,
-        unterminated: false,
-        escaped_newline: false,
-    });
-    tokens
 }
+
+pub(super) struct Relexed {
+    pub tokens: Vec<Token>,
+    pub scanned: Range<usize>,
+}
+
+/// The common unchanged suffix and equal neutral lexer states establish
+/// convergence. No checkpoint inside a multiline token or line splice is used.
+pub(super) fn relex(old: &str, tokens: &[Token], source: &str) -> Relexed {
+    let prefix = old
+        .bytes()
+        .zip(source.bytes())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let suffix = old.as_bytes()[prefix..]
+        .iter()
+        .rev()
+        .zip(source.as_bytes()[prefix..].iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let keep = tokens
+        .iter()
+        .rposition(|t| t.kind == TokenKind::Newline && t.range.end < prefix)
+        .map_or(0, |i| i + 1);
+    let restart = if keep == 0 {
+        0
+    } else {
+        tokens[keep - 1].range.end
+    };
+    let mut result = Vec::with_capacity(tokens.len());
+    result.extend_from_slice(&tokens[..keep]);
+    let mut stop = source.len();
+    for token in Scanner::new(source, restart) {
+        let converged =
+            token.kind == TokenKind::Newline && token.range.end >= source.len() - suffix;
+        let end = token.range.end;
+        result.push(token);
+        if converged {
+            let old_end = old.len() - (source.len() - end);
+            let index = tokens.partition_point(|t| t.range.end <= old_end);
+            if index > 0
+                && tokens[index - 1].kind == TokenKind::Newline
+                && tokens[index - 1].range.end == old_end
+            {
+                for token in &tokens[index..] {
+                    let mut token = token.clone();
+                    token.range = (source.len() - (old.len() - token.range.start))
+                        ..(source.len() - (old.len() - token.range.end));
+                    result.push(token);
+                }
+                stop = end;
+                break;
+            }
+        }
+    }
+    Relexed {
+        tokens: result,
+        scanned: restart..stop,
+    }
+}
+
 fn ident_start(b: u8) -> bool {
     b.is_ascii_alphabetic() || b == b'_' || b >= 0x80
 }

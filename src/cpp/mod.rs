@@ -2,7 +2,9 @@ mod expression;
 mod indent;
 mod indent_rules;
 mod lexer;
+mod macros;
 mod parser;
+mod preprocessor;
 mod rules;
 mod service;
 mod style;
@@ -11,6 +13,7 @@ mod syntax;
 pub use crate::{core::column_width, language::materialize};
 pub use indent::{IndentDecision, IndentRole, compute_indent};
 pub use lexer::{Token, TokenKind, lex};
+pub use parser::{AnalysisWork, ParseStrategy};
 pub use parser::{parse, parse_snapshot, parse_snapshot_with_options, parse_with_options};
 pub use service::CppSession;
 pub use style::{

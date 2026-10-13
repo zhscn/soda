@@ -20,7 +20,15 @@ pub fn parse_snapshot_with_options(snapshot: &Snapshot, options: &ParserOptions)
     parse_shared(snapshot.shared_text(), options)
 }
 fn parse_shared(source: Arc<str>, options: &ParserOptions) -> SyntaxTree {
-    let mut p = Parser::new(source, options);
+    let tokens = lex(&source);
+    parse_tokens(source, options, tokens)
+}
+fn parse_tokens(
+    source: Arc<str>,
+    options: &ParserOptions,
+    tokens: Vec<super::Token>,
+) -> SyntaxTree {
+    let mut p = Parser::new(source, options, tokens);
     p.open(N::TranslationUnit);
     p.tree.nodes[0].tokens.start = 0;
     p.items(false);
@@ -28,6 +36,12 @@ fn parse_shared(source: Arc<str>, options: &ParserOptions) -> SyntaxTree {
     p.tree.index_tokens();
     p.tree
 }
+
+#[path = "incremental.rs"]
+mod incremental;
+pub(super) use incremental::reparse;
+pub use incremental::{AnalysisWork, ParseStrategy};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum DirectiveKind {
     Other,
@@ -68,14 +82,16 @@ struct Parser {
     unwind: Option<usize>,
 }
 impl Parser {
-    fn new(source: Arc<str>, options: &ParserOptions) -> Self {
+    fn new(source: Arc<str>, options: &ParserOptions, tokens: Vec<super::Token>) -> Self {
+        let macro_blocks = super::macros::classify(&source, &tokens, options);
         Self {
             tree: SyntaxTree {
-                tokens: lex(&source),
+                tokens,
                 parser_options: options.clone(),
                 source,
                 nodes: vec![],
                 token_owners: vec![],
+                macro_blocks,
             },
             pos: 0,
             stack: vec![],
@@ -93,7 +109,8 @@ impl Parser {
     }
     fn kind(&mut self) -> K {
         self.skip();
-        self.tree.tokens[self.pos].kind
+        self.tree.macro_blocks[self.pos]
+            .map_or(self.tree.tokens[self.pos].kind, |block| block.kind())
     }
     fn at(&mut self, k: K) -> bool {
         self.kind() == k
@@ -109,6 +126,9 @@ impl Parser {
     }
     fn open(&mut self, kind: N) -> usize {
         self.skip();
+        self.open_at_cursor(kind)
+    }
+    fn open_at_cursor(&mut self, kind: N) -> usize {
         let id = self.tree.nodes.len();
         let parent = self.stack.last().copied();
         self.tree.nodes.push(Node {
@@ -146,7 +166,11 @@ impl Parser {
         self.tree.nodes[id].incomplete = true;
     }
     fn missing(&mut self, expected: K) {
-        let id = self.open(N::MissingToken);
+        self.skip();
+        self.missing_at_cursor(expected);
+    }
+    fn missing_at_cursor(&mut self, expected: K) {
+        let id = self.open_at_cursor(N::MissingToken);
         self.tree.nodes[id].expected = Some(expected);
         self.incomplete(id);
         self.close(id);
@@ -200,6 +224,12 @@ impl Parser {
     }
     fn item(&mut self) {
         let kind = self.kind();
+        if let Some(block) = self.tree.macro_blocks[self.pos]
+            && block != super::macros::BlockMacro::Close
+        {
+            self.macro_body(block);
+            return;
+        }
         if kind == K::Identifier {
             let name = self.text(self.pos);
             let control = if self
@@ -307,7 +337,10 @@ impl Parser {
     }
     fn directive(&mut self) {
         let id = self.open(N::PreprocessorDirective);
-        while self.pos + 1 < self.tree.tokens.len() && self.tree.tokens[self.pos].preprocessor {
+        while self.pos + 1 < self.tree.tokens.len()
+            && self.tree.tokens[self.pos].preprocessor
+            && self.tree.tokens[self.pos].kind != K::Newline
+        {
             let k = self.tree.tokens[self.pos].kind;
             if matches!(k, K::LParen | K::LBracket | K::LBrace) {
                 self.pp_group(k);
@@ -321,7 +354,10 @@ impl Parser {
         let (n, closer) = Self::delimiter(k);
         let id = self.open(n);
         self.pos += 1;
-        while self.pos + 1 < self.tree.tokens.len() && self.tree.tokens[self.pos].preprocessor {
+        while self.pos + 1 < self.tree.tokens.len()
+            && self.tree.tokens[self.pos].preprocessor
+            && self.tree.tokens[self.pos].kind != K::Newline
+        {
             let k = self.tree.tokens[self.pos].kind;
             if k == closer {
                 self.pos += 1;
@@ -334,14 +370,11 @@ impl Parser {
                 self.pos += 1;
             }
         }
-        self.missing(closer);
+        self.missing_at_cursor(closer);
         self.close(id);
     }
     fn pp_category(&self, hash: usize) -> DirectiveKind {
-        let i = (hash + 1..self.tree.tokens.len())
-            .take_while(|&i| self.tree.tokens[i].preprocessor)
-            .find(|&i| !self.tree.tokens[i].kind.is_trivia());
-        match i.map(|i| self.text(i)) {
+        match super::preprocessor::keyword(&self.tree.source, &self.tree.tokens, hash) {
             Some("if" | "ifdef" | "ifndef") => DirectiveKind::ConditionalStart,
             Some("else" | "elif" | "elifdef" | "elifndef") => DirectiveKind::ConditionalBranch,
             Some("endif") => DirectiveKind::ConditionalEnd,
@@ -450,6 +483,32 @@ impl Parser {
         self.expect(K::RBrace);
         self.close(id);
     }
+    fn macro_body(&mut self, block: super::macros::BlockMacro) {
+        use super::macros::BlockMacro;
+        let declaration = matches!(block, BlockMacro::Namespace | BlockMacro::Extern).then(|| {
+            let id = self.open(N::NamespaceDecl);
+            self.tree.nodes[id].extern_linkage = block == BlockMacro::Extern;
+            id
+        });
+        let id = self.open(if declaration.is_some() {
+            N::NamespaceBody
+        } else {
+            N::CompoundStatement
+        });
+        self.advance();
+        if self.at(K::LParen) && !self.line_start() {
+            self.group(K::LParen);
+        }
+        self.items(false);
+        self.expect(K::RBrace);
+        if self.at(K::LParen) && !self.line_start() {
+            self.group(K::LParen);
+        }
+        self.close(id);
+        if let Some(id) = declaration {
+            self.close(id);
+        }
+    }
     fn namespace_macro(&mut self) {
         let id = self.open(N::NamespaceDecl);
         self.advance();
@@ -468,8 +527,13 @@ impl Parser {
     fn namespace(&mut self) {
         let id = self.open(N::NamespaceDecl);
         self.advance();
-        while matches!(self.kind(), K::Identifier | K::ColonColon) {
-            self.advance();
+        loop {
+            match self.kind() {
+                K::Identifier | K::ColonColon => self.advance(),
+                K::LBracket => self.group(K::LBracket),
+                K::LParen => self.group(K::LParen),
+                _ => break,
+            }
         }
         if self.at(K::Equals) {
             while !matches!(self.kind(), K::EndOfFile | K::Semicolon | K::RBrace)
@@ -957,7 +1021,7 @@ mod tests {
             ("#elif X", DirectiveKind::ConditionalBranch),
             ("#endif", DirectiveKind::ConditionalEnd),
         ] {
-            let parser = Parser::new(source.into(), &ParserOptions::default());
+            let parser = Parser::new(source.into(), &ParserOptions::default(), lex(source));
             assert_eq!(parser.pp_category(0), expected, "{source}");
         }
     }
