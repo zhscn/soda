@@ -35,6 +35,7 @@ pub(crate) fn binding(key: KeyStroke) -> Option<Command> {
             Key::Char('x') if !shift => Some(Command::Clipboard(ClipboardAction::Cut)),
             Key::Char('v') if !shift => Some(Command::Clipboard(ClipboardAction::Paste)),
             Key::Char('p') => Some(Command::PickFiles),
+            Key::Char('b') if !shift => Some(Command::SwitchBuffer),
             Key::Char('f') => Some(Command::Search),
             Key::Char('o') => Some(Command::Open),
             Key::Char('n') => Some(Command::New),

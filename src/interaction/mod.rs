@@ -1,6 +1,8 @@
 //! Frontend-independent routing and built-in sessions. Layers own lifecycle;
 //! feature reducers return transitions and Runtime executes their responses.
 mod bindings;
+mod buffer;
+pub use buffer::BufferSession;
 mod commands;
 pub use commands::Command;
 mod exit;
@@ -203,6 +205,10 @@ impl Layers {
         self.picker_rows = rows;
         match &mut self.active {
             Some(Layer::Picker(session)) => session.resize(rows),
+            Some(Layer::Buffer(session)) => {
+                session.resize(rows);
+                true
+            }
             Some(Layer::Open(field) | Layer::Save(_, field)) => {
                 field.resize(rows);
                 true

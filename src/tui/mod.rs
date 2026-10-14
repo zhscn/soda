@@ -92,6 +92,16 @@ fn draw(runtime: &Runtime, width: u16, height: u16) -> io::Result<()> {
             list_rows,
         )?;
     }
+    if let Some(Prompt::Buffer(session)) = runtime.layer() {
+        draw_candidates(
+            &mut output,
+            session.rows(),
+            session.list(),
+            width,
+            height,
+            list_rows,
+        )?;
+    }
     let path = match runtime.layer() {
         Some(Prompt::Open(field) | Prompt::Save(_, field)) => Some(field),
         Some(Prompt::Exit(session)) => session.path_input(),

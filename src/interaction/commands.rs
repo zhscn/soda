@@ -1,8 +1,8 @@
 //! Application command reduction. Commands resolve their targets on the owner
 //! thread and return ordered application events and platform effects.
 use super::{
-    ExitScope, ExitSession, GotoSession, HelpSession, Layer, Layers, Message, ReplaceSession,
-    Response, SearchSession, TextInput,
+    BufferSession, ExitScope, ExitSession, GotoSession, HelpSession, Layer, Layers, Message,
+    ReplaceSession, Response, SearchSession, TextInput,
     path::PathInput,
     picker::{PickerLimits, PickerSession},
 };
@@ -31,6 +31,7 @@ pub enum Command {
     Search,
     Replace,
     PickFiles,
+    SwitchBuffer,
 }
 
 impl Layers {
@@ -94,6 +95,9 @@ impl Layers {
                         horizontal_column: view.viewport.horizontal_column,
                     });
                 }
+            }
+            Command::SwitchBuffer => {
+                response = self.enter(Layer::Buffer(BufferSession::new(app)), app, time)?;
             }
             Command::PickFiles => {
                 match PickerSession::new(file_root.to_owned(), PickerLimits::default()) {

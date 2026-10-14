@@ -1,8 +1,8 @@
 //! Static dispatch for built-in sessions. Feature reducers own interaction
 //! behavior; the layer manager owns installation, removal and geometry.
 use super::{
-    ExitSession, GotoSession, HelpSession, Input, Presentation, ReplaceSession, Response,
-    SearchSession, TextInput,
+    BufferSession, ExitSession, GotoSession, HelpSession, Input, Presentation, ReplaceSession,
+    Response, SearchSession, TextInput,
     path::PathInput,
     picker::PickerSession,
     prompt::{self, PathTarget},
@@ -17,6 +17,7 @@ use std::time::Duration;
 
 pub enum Layer {
     Goto(GotoSession),
+    Buffer(BufferSession),
     Open(PathInput),
     Save(DocumentId, PathInput),
     Exit(ExitSession),
@@ -37,6 +38,7 @@ impl Layer {
     ) -> Result<Transition, EditError> {
         Ok(match self {
             Self::Goto(session) => session.handle(input, app, time),
+            Self::Buffer(session) => session.handle(input, app),
             Self::Open(field) => prompt::path_input(PathTarget::Open, field, input),
             Self::Save(document, field) => {
                 prompt::path_input(PathTarget::Save(*document), field, input)
@@ -59,6 +61,7 @@ impl Layer {
     ) -> Result<Transition, EditError> {
         Ok(match self {
             Self::Goto(session) => session.observe(app),
+            Self::Buffer(session) => session.observe(app),
             Self::Open(_) => prompt::path_observe(PathTarget::Open, app),
             Self::Save(document, _) => prompt::path_observe(PathTarget::Save(*document), app),
             Self::Exit(session) => session.observe(app, update),
@@ -70,6 +73,7 @@ impl Layer {
     pub(super) fn resize(&mut self, help_rows: usize, picker_rows: usize) {
         match self {
             Self::Help(session) => session.resize(help_rows),
+            Self::Buffer(session) => session.resize(picker_rows),
             Self::Picker(session) => {
                 session.resize(picker_rows);
             }
@@ -81,6 +85,7 @@ impl Layer {
     pub fn presentation(&self) -> Presentation {
         match self {
             Self::Goto(session) => session.presentation(),
+            Self::Buffer(session) => session.presentation(),
             Self::Open(field) => prompt::path_presentation(PathTarget::Open, field),
             Self::Save(document, field) => {
                 prompt::path_presentation(PathTarget::Save(*document), field)
