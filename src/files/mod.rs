@@ -1,5 +1,6 @@
 //! File I/O and immutable requests, independent of command execution.
 mod editing;
+pub mod paths;
 pub(crate) mod request;
 mod service;
 pub use editing::Editing;

@@ -3,6 +3,7 @@
 use super::{
     ExitSession, GotoSession, HelpSession, Input, Presentation, ReplaceSession, Response,
     SearchSession, TextInput,
+    path::PathInput,
     picker::PickerSession,
     prompt::{self, PathTarget},
     session::Transition,
@@ -16,8 +17,8 @@ use std::time::Duration;
 
 pub enum Layer {
     Goto(GotoSession),
-    Open(TextInput),
-    Save(DocumentId, TextInput),
+    Open(PathInput),
+    Save(DocumentId, PathInput),
     Exit(ExitSession),
     Help(HelpSession),
     Replace(ReplaceSession),
@@ -72,6 +73,8 @@ impl Layer {
             Self::Picker(session) => {
                 session.resize(picker_rows);
             }
+            Self::Open(field) | Self::Save(_, field) => field.resize(picker_rows),
+            Self::Exit(session) => session.resize(picker_rows),
             _ => {}
         }
     }

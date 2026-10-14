@@ -169,7 +169,7 @@ fn save_prompt_keeps_its_target_after_external_focus_change() {
     ));
     assert_eq!(response.events.len(), 1);
     assert!(
-        matches!(&response.events[0], Event::Save { document, target: Some(path) } if *document == first && path == Path::new("target.txt"))
+        matches!(&response.events[0], Event::Save { document, target: Some(path) } if *document == first && path == Path::new("/target.txt"))
     );
     assert!(layers.active().is_none());
 }

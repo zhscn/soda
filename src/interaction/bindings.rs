@@ -127,6 +127,11 @@ pub(crate) fn modal_key(key: KeyStroke) -> Input {
             _ => {}
         }
     }
+    if !control && matches!(key.code, Key::Tab | Key::BackTab) {
+        return Input::Complete {
+            backward: shift || key.code == Key::BackTab,
+        };
+    }
     if key.code == Key::F(1) && !control && !shift {
         return Input::Help;
     }

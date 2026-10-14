@@ -3,7 +3,7 @@
 use crate::{
     application::{Application, Event, Operation, Update, ViewId},
     core::{ByteOffset, EditError},
-    files::{FileCompletion, FileRunner},
+    files::{FileCompletion, FileRunner, paths::PathRunner},
     interaction::{
         Command, InputResult, Layer, Layers, Message, Response, UserInput,
         picker::{PickerEffect, PickerRunner},
@@ -19,6 +19,7 @@ pub struct Runtime {
     // Workers drop before the application so in-progress file writes can finish.
     files: FileRunner,
     picker: PickerRunner,
+    paths: PathRunner,
     app: Application,
     layers: Layers,
     file_root: PathBuf,
@@ -41,6 +42,7 @@ impl Runtime {
         Ok(Self {
             files: FileRunner::new()?,
             picker: PickerRunner::new()?,
+            paths: PathRunner::new()?,
             app,
             layers: Layers::default(),
             file_root,
@@ -207,6 +209,9 @@ impl Runtime {
             Message::Set(message) => self.message = message,
         }
         self.dirty |= response.redraw;
+        for request in response.path_requests {
+            self.paths.submit(request);
+        }
         for effect in response.effects {
             match effect {
                 PickerEffect::Run(task) => {
@@ -272,6 +277,13 @@ impl Runtime {
                     break;
                 }
             }
+        }
+        for _ in 0..8 {
+            let Some(completion) = self.paths.poll() else {
+                break;
+            };
+            let response = self.layers.path_finished(completion);
+            self.respond(response, self.epoch.elapsed());
         }
         self.dispatch(Event::PollFiles);
     }

@@ -3,6 +3,7 @@
 use super::{
     ExitScope, ExitSession, GotoSession, HelpSession, Layer, Layers, Message, ReplaceSession,
     Response, SearchSession, TextInput,
+    path::PathInput,
     picker::{PickerLimits, PickerSession},
 };
 use crate::{
@@ -134,7 +135,13 @@ impl Layers {
                     });
                 }
             }
-            Command::Open => response = self.enter(Layer::Open(TextInput::default()), app, time)?,
+            Command::Open => {
+                response = self.enter(
+                    Layer::Open(PathInput::new(file_root.to_owned(), "")),
+                    app,
+                    time,
+                )?
+            }
             Command::New => response
                 .events
                 .push(Event::NewDocument(Language::PlainText)),
@@ -156,7 +163,10 @@ impl Layers {
                             ExitScope::Close(document)
                         };
                         response = self.enter(
-                            Layer::Exit(ExitSession::new(app, scope).unwrap()),
+                            Layer::Exit(
+                                ExitSession::new_with_root(app, scope, file_root.to_owned())
+                                    .unwrap(),
+                            ),
                             app,
                             time,
                         )?;
@@ -188,8 +198,11 @@ impl Layers {
                         .path();
                     if choose_path || path.is_none() {
                         let text = path.map_or_else(String::new, |p| p.display().to_string());
-                        response =
-                            self.enter(Layer::Save(document, TextInput::new(&text)), app, time)?;
+                        response = self.enter(
+                            Layer::Save(document, PathInput::new(file_root.to_owned(), &text)),
+                            app,
+                            time,
+                        )?;
                     } else {
                         response.events.push(Event::Save {
                             document,
@@ -215,7 +228,10 @@ impl Layers {
                         .is_dirty()
                 }) {
                     response = self.enter(
-                        Layer::Exit(ExitSession::new(app, ExitScope::Quit).unwrap()),
+                        Layer::Exit(
+                            ExitSession::new_with_root(app, ExitScope::Quit, file_root.to_owned())
+                                .unwrap(),
+                        ),
                         app,
                         time,
                     )?;

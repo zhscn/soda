@@ -13,6 +13,7 @@ mod layer;
 pub use layer::Layer;
 pub mod picker;
 use picker::{ListMotion, PickerCompletion, PickerEffect, PickerSession};
+pub mod path;
 mod prompt;
 pub use prompt::GotoSession;
 mod replace;
@@ -35,6 +36,7 @@ pub enum Input {
     Paste(String),
     Confirm,
     ReplaceAll,
+    Complete { backward: bool },
     Cancel,
     Navigate { backward: bool },
     Candidate { motion: ListMotion, wrap: bool },
@@ -64,6 +66,7 @@ pub struct Response {
     pub events: Vec<Event>,
     pub message: Message,
     pub effects: Vec<PickerEffect>,
+    pub path_requests: Vec<path::PathRequest>,
     pub quit: bool,
     pub redraw: bool,
 }
@@ -179,6 +182,17 @@ impl Layers {
             _ => Response::default(),
         }
     }
+    pub fn path_finished(&mut self, completion: path::PathCompletion) -> Response {
+        let accepted = match &mut self.active {
+            Some(Layer::Open(field) | Layer::Save(_, field)) => field.accept(completion),
+            Some(Layer::Exit(session)) => session.path_finished(completion),
+            _ => false,
+        };
+        Response {
+            redraw: accepted,
+            ..Response::default()
+        }
+    }
     pub fn resize_help(&mut self, rows: usize) {
         self.help_rows = rows;
         if let Some(layer) = &mut self.active {
@@ -189,6 +203,14 @@ impl Layers {
         self.picker_rows = rows;
         match &mut self.active {
             Some(Layer::Picker(session)) => session.resize(rows),
+            Some(Layer::Open(field) | Layer::Save(_, field)) => {
+                field.resize(rows);
+                true
+            }
+            Some(Layer::Exit(session)) => {
+                session.resize(rows);
+                true
+            }
             _ => false,
         }
     }

@@ -8,21 +8,20 @@ use crate::{
     application::{Application, Event, ViewId},
     editor::{Command, DocumentId},
 };
-use std::{path::PathBuf, time::Duration};
+use std::time::Duration;
 #[derive(Clone, Copy)]
 pub(super) enum PathTarget {
     Open,
     Save(DocumentId),
 }
-pub(super) fn path_presentation(target: PathTarget, field: &TextInput) -> Presentation {
-    field_presentation(
-        match target {
-            PathTarget::Open => "Open: ",
-            PathTarget::Save(_) => "Save as: ",
-        }
-        .into(),
-        field,
-    )
+pub(super) fn path_presentation(
+    target: PathTarget,
+    field: &super::path::PathInput,
+) -> Presentation {
+    field.presentation(match target {
+        PathTarget::Open => "Open",
+        PathTarget::Save(_) => "Save as",
+    })
 }
 pub(super) fn path_observe(target: PathTarget, app: &Application) -> Transition {
     match target {
@@ -32,30 +31,26 @@ pub(super) fn path_observe(target: PathTarget, app: &Application) -> Transition 
         _ => Transition::active(Response::default()),
     }
 }
-pub(super) fn path_input(target: PathTarget, field: &mut TextInput, input: Input) -> Transition {
-    match input {
-        Input::Cancel => Transition::close(),
-        Input::Confirm => {
-            let mut response = Response {
-                redraw: true,
-                ..Response::default()
-            };
-            if !field.text().is_empty() {
-                let path = PathBuf::from(field.text());
-                response.events.push(match target {
-                    PathTarget::Open => Event::Open(path),
-                    PathTarget::Save(document) => Event::Save {
-                        document,
-                        target: Some(path),
-                    },
-                });
-            }
-            Transition::finished(response)
-        }
-        input => match edit_field(field, input) {
-            Some(update) if update.text_changed || update.selection_changed => Transition::redraw(),
-            _ => Transition::Blocked,
-        },
+pub(super) fn path_input(
+    target: PathTarget,
+    field: &mut super::path::PathInput,
+    input: Input,
+) -> Transition {
+    match field.handle(input) {
+        super::path::PathAction::Active(response) => Transition::active(response),
+        super::path::PathAction::Blocked => Transition::Blocked,
+        super::path::PathAction::Cancel => Transition::close(),
+        super::path::PathAction::Submit(path) => Transition::finished(Response {
+            events: vec![match target {
+                PathTarget::Open => Event::Open(path),
+                PathTarget::Save(document) => Event::Save {
+                    document,
+                    target: Some(path),
+                },
+            }],
+            redraw: true,
+            ..Response::default()
+        }),
     }
 }
 pub struct GotoSession {

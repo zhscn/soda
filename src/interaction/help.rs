@@ -6,6 +6,8 @@ Ctrl-N New   Ctrl-O Open   Ctrl-P Find file   Ctrl-W Close buffer
 Ctrl-S Save   Ctrl-Shift-S / F4 Save as   F5 Reload
 Ctrl-Q Quit   Ctrl-Tab / F6 Next buffer
 Unsaved changes: s save, d discard, c / Esc / Enter cancel
+Path prompts: Tab lists / fills; arrows select; Enter uses input
+Trailing / browses directory; Esc hides candidates, then cancels
 
 Editing
 Ctrl-C Copy   Ctrl-X Cut   Ctrl-V Paste (internal clipboard)

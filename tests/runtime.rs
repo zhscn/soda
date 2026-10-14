@@ -95,3 +95,89 @@ fn headless_runtime_replaces_and_cancels_search_without_frontend_dependencies() 
     runtime.input(UserInput::Key(KeyStroke::plain(Key::Esc)));
     assert!(runtime.layer().is_none());
 }
+
+#[test]
+fn path_completion_opens_existing_files_and_saves_new_names() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::create_dir(directory.path().join("src")).unwrap();
+    let path = directory.path().join("src/main.cpp");
+    std::fs::write(&path, "int main() {}\n").unwrap();
+    let mut runtime = Runtime::new(directory.path().to_owned()).unwrap();
+    runtime.start(None);
+    runtime.command(Command::Open);
+    runtime.input(UserInput::Paste("sr".into()));
+    runtime.input(UserInput::Key(KeyStroke::plain(Key::Tab)));
+    wait(
+        &mut runtime,
+        |r| matches!(r.layer(), Some(Layer::Open(f)) if !f.rows().is_empty()),
+    );
+    runtime.input(UserInput::Key(KeyStroke::plain(Key::Tab)));
+    wait(
+        &mut runtime,
+        |r| matches!(r.layer(), Some(Layer::Open(f)) if f.rows().iter().any(|row| row.candidate.label == "main.cpp")),
+    );
+    // Parent is first; selecting the file does not modify the input until Tab.
+    runtime.input(UserInput::Key(KeyStroke::plain(Key::Down)));
+    runtime.input(UserInput::Key(KeyStroke::plain(Key::Tab)));
+    assert!(matches!(runtime.layer(), Some(Layer::Open(f)) if f.text() == path.to_str().unwrap()));
+    runtime.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
+    wait(&mut runtime, |r| {
+        r.app().views().any(|v| {
+            r.app()
+                .workspace()
+                .editor(v.document_id)
+                .unwrap()
+                .model()
+                .document()
+                .file()
+                .path()
+                == Some(path.as_path())
+        })
+    });
+    runtime.command(Command::Save { choose_path: true });
+    let target = directory.path().join("new.cpp");
+    runtime.input(UserInput::Key(KeyStroke {
+        control: true,
+        ..KeyStroke::plain(Key::Char('a'))
+    }));
+    runtime.input(UserInput::Paste(target.to_str().unwrap().into()));
+    runtime.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
+    wait(&mut runtime, |_| target.exists());
+    assert_eq!(std::fs::read_to_string(target).unwrap(), "int main() {}\n");
+}
+
+#[test]
+fn departure_path_completion_can_be_cancelled_and_reused_before_saving() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::create_dir(directory.path().join("dest")).unwrap();
+    let mut runtime = Runtime::new(directory.path().to_owned()).unwrap();
+    runtime.start(None);
+    runtime.input(UserInput::Paste("content".into()));
+    runtime.command(Command::Close);
+    runtime.input(UserInput::Key(KeyStroke::plain(Key::Char('s'))));
+    runtime.input(UserInput::Paste("de".into()));
+    runtime.input(UserInput::Key(KeyStroke::plain(Key::Tab)));
+    wait(
+        &mut runtime,
+        |r| matches!(r.layer(), Some(Layer::Exit(s)) if s.path_input().is_some_and(|f| !f.rows().is_empty())),
+    );
+    runtime.input(UserInput::Key(KeyStroke::plain(Key::Esc)));
+    assert!(
+        matches!(runtime.layer(), Some(Layer::Exit(s)) if s.path_input().is_some_and(|f| !f.visible() && f.text() == "de"))
+    );
+    runtime.input(UserInput::Key(KeyStroke::plain(Key::Tab)));
+    wait(
+        &mut runtime,
+        |r| matches!(r.layer(), Some(Layer::Exit(s)) if s.path_input().is_some_and(|f| !f.rows().is_empty())),
+    );
+    runtime.input(UserInput::Key(KeyStroke::plain(Key::Tab)));
+    runtime.input(UserInput::Paste("new.txt".into()));
+    runtime.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
+    wait(&mut runtime, |r| {
+        r.layer().is_none() && r.app().views().next().is_none()
+    });
+    assert_eq!(
+        std::fs::read_to_string(directory.path().join("dest/new.txt")).unwrap(),
+        "content"
+    );
+}

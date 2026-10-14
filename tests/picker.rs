@@ -678,7 +678,10 @@ fn managed_close_and_replacement_emit_cancellation_and_invalidate_tasks() {
     let (mut layers, task) = setup(root.path(), &app);
     let response = layers
         .enter(
-            Layer::Open(soda::interaction::TextInput::default()),
+            Layer::Open(soda::interaction::path::PathInput::new(
+                std::env::current_dir().unwrap(),
+                "",
+            )),
             &app,
             Duration::ZERO,
         )

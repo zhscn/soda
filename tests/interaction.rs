@@ -245,7 +245,14 @@ fn modal_routing_blocks_unknown_input_and_requires_explicit_discard() {
         InputResult::Pass
     ));
     layers
-        .enter(Layer::Open(TextInput::default()), &app, Duration::ZERO)
+        .enter(
+            Layer::Open(soda::interaction::path::PathInput::new(
+                std::env::current_dir().unwrap(),
+                "",
+            )),
+            &app,
+            Duration::ZERO,
+        )
         .unwrap();
     assert!(matches!(
         layers
@@ -400,7 +407,13 @@ fn save_prompt_closes_when_target_document_closes() {
         let mut layers = Layers::default();
         layers
             .enter(
-                Layer::Save(document, TextInput::new("file.txt")),
+                Layer::Save(
+                    document,
+                    soda::interaction::path::PathInput::new(
+                        std::env::current_dir().unwrap(),
+                        "file.txt",
+                    ),
+                ),
                 &app,
                 Duration::ZERO,
             )
@@ -430,7 +443,10 @@ fn prompt_navigation_and_filtered_paste_do_not_generate_file_commands() {
         let mut layers = Layers::default();
         layers
             .enter(
-                Layer::Open(TextInput::new("路径/a.cpp")),
+                Layer::Open(soda::interaction::path::PathInput::new(
+                    std::env::current_dir().unwrap(),
+                    "路径/a.cpp",
+                )),
                 &app,
                 Duration::ZERO,
             )
@@ -462,7 +478,7 @@ fn prompt_navigation_and_filtered_paste_do_not_generate_file_commands() {
     };
     assert!(response.redraw);
     assert!(
-        matches!(response.events.as_slice(), [Event::Open(path)] if path == std::path::Path::new("路径/a.cpp"))
+        matches!(response.events.as_slice(), [Event::Open(path)] if path == &std::env::current_dir().unwrap().join("路径/a.cpp"))
     );
     assert!(layers.active().is_none());
 }
@@ -477,8 +493,14 @@ fn all_builtin_sessions_share_the_cancel_lifecycle_contract() {
     let document = app.view(view).unwrap().document_id;
     let directory = tempfile::tempdir().unwrap();
     let sessions = vec![
-        Layer::Open(TextInput::default()),
-        Layer::Save(document, TextInput::default()),
+        Layer::Open(soda::interaction::path::PathInput::new(
+            std::env::current_dir().unwrap(),
+            "",
+        )),
+        Layer::Save(
+            document,
+            soda::interaction::path::PathInput::new(std::env::current_dir().unwrap(), ""),
+        ),
         Layer::Goto(GotoSession::new(view)),
         Layer::Help(HelpSession::default()),
         Layer::Exit(ExitSession::new(&app, ExitScope::Close(document)).unwrap()),

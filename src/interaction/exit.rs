@@ -1,6 +1,10 @@
 //! Document-bound departure workflows. Save effects are observed to completion
 //! before closing, reloading or quitting; cancellation leaves writes independent.
-use super::{Input, InputKey, Message, Presentation, Response, TextInput, session::Transition};
+use super::{
+    Input, InputKey, Message, Presentation, Response,
+    path::{PathAction, PathCompletion, PathInput},
+    session::Transition,
+};
 use crate::{
     application::{Application, Effect, Event, Update},
     editor::DocumentId,
@@ -15,13 +19,15 @@ pub enum ExitScope {
 }
 enum Phase {
     Question,
-    Path(TextInput),
+    Path(PathInput),
     Saving {
         target: Option<PathBuf>,
         request: Option<crate::files::SaveId>,
     },
 }
 pub struct ExitSession {
+    root: PathBuf,
+    page_rows: usize,
     scope: ExitScope,
     current: DocumentId,
     phase: Phase,
@@ -31,6 +37,13 @@ pub struct ExitSession {
 }
 impl ExitSession {
     pub fn new(app: &Application, scope: ExitScope) -> Option<Self> {
+        Self::new_with_root(app, scope, std::env::current_dir().ok()?)
+    }
+    pub(super) fn new_with_root(
+        app: &Application,
+        scope: ExitScope,
+        root: PathBuf,
+    ) -> Option<Self> {
         let current = match scope {
             ExitScope::Close(document) => document,
             ExitScope::Reload(view) => app.view(view)?.document_id,
@@ -45,6 +58,8 @@ impl ExitSession {
         };
         app.workspace().editor(current)?;
         Some(Self {
+            root,
+            page_rows: 0,
             scope,
             current,
             phase: Phase::Question,
@@ -75,13 +90,8 @@ impl ExitSession {
             ),
             Phase::Saving { .. } => (format!("Saving {name}; Esc cancels departure"), None, 0..0),
             Phase::Path(input) => {
-                let label = format!("Save as{error}: ");
-                let selected = input.selection().range();
-                (
-                    format!("{label}{}", input.text()),
-                    Some(label.len() + input.cursor()),
-                    label.len() + selected.start..label.len() + selected.end,
-                )
+                let p = input.presentation(&format!("Save as{error}"));
+                (p.text, p.cursor, p.selection)
             }
         };
         Presentation {
@@ -96,7 +106,9 @@ impl ExitSession {
             ..Response::default()
         };
         match input {
-            Input::Cancel => Transition::finished(redraw()),
+            Input::Cancel if !matches!(self.phase, Phase::Path(_)) => {
+                Transition::finished(redraw())
+            }
             Input::Confirm if matches!(self.phase, Phase::Question) => {
                 Transition::finished(redraw())
             }
@@ -123,34 +135,39 @@ impl ExitSession {
             Input::Text(InputKey::Char(_)) if matches!(self.phase, Phase::Question) => {
                 Transition::finished(redraw())
             }
-            Input::Confirm if matches!(self.phase, Phase::Path(_)) => {
-                let Phase::Path(field) = &self.phase else {
-                    unreachable!()
-                };
-                if field.text().is_empty() {
-                    return Transition::Blocked;
-                }
-                self.save(app, Some(PathBuf::from(field.text())))
-            }
             input if matches!(self.phase, Phase::Path(_)) => {
                 let Phase::Path(field) = &mut self.phase else {
                     unreachable!()
                 };
-                let update = match input {
-                    Input::Text(key) => field.key(key),
-                    Input::Paste(text) => field.insert(&text),
-                    _ => return Transition::Blocked,
-                };
-                if update.text_changed {
-                    self.error = None;
-                }
-                if update.text_changed || update.selection_changed {
-                    Transition::active(redraw())
-                } else {
-                    Transition::Blocked
+                match field.handle(input) {
+                    PathAction::Active(response) => {
+                        self.error = None;
+                        Transition::active(response)
+                    }
+                    PathAction::Submit(path) => self.save(app, Some(path)),
+                    PathAction::Cancel => Transition::close(),
+                    PathAction::Blocked => Transition::Blocked,
                 }
             }
             _ => Transition::Blocked,
+        }
+    }
+    pub fn path_input(&self) -> Option<&PathInput> {
+        match &self.phase {
+            Phase::Path(field) => Some(field),
+            _ => None,
+        }
+    }
+    pub(super) fn path_finished(&mut self, completion: PathCompletion) -> bool {
+        match &mut self.phase {
+            Phase::Path(field) => field.accept(completion),
+            _ => false,
+        }
+    }
+    pub(super) fn resize(&mut self, rows: usize) {
+        self.page_rows = rows;
+        if let Phase::Path(field) = &mut self.phase {
+            field.resize(rows);
         }
     }
     fn save(&mut self, app: &Application, target: Option<PathBuf>) -> Transition {
@@ -158,7 +175,8 @@ impl ExitSession {
             return self.advance(app, false);
         };
         if target.is_none() && editor.model().document().file().path().is_none() {
-            self.phase = Phase::Path(TextInput::default());
+            self.phase = Phase::Path(PathInput::new(self.root.clone(), ""));
+            self.resize(self.page_rows);
             return Transition::active(Response {
                 redraw: true,
                 ..Response::default()
@@ -207,8 +225,9 @@ impl ExitSession {
             _ => return Response::default(),
         };
         self.phase = target.map_or(Phase::Question, |path| {
-            Phase::Path(TextInput::new(&path.to_string_lossy()))
+            Phase::Path(PathInput::new(self.root.clone(), &path.to_string_lossy()))
         });
+        self.resize(self.page_rows);
         self.error = Some(error);
         Response {
             redraw: true,

@@ -44,6 +44,30 @@ impl Drop for Terminal {
         let _ = terminal::disable_raw_mode();
     }
 }
+fn draw_candidates<T>(
+    output: &mut impl Write,
+    rows: &[crate::interaction::picker::MatchedCandidate<T>],
+    list: &crate::interaction::picker::CandidateListState,
+    width: u16,
+    height: u16,
+    count: usize,
+) -> io::Result<()> {
+    let start = usize::from(height.saturating_sub(2)) - count;
+    for offset in 0..count {
+        queue!(
+            output,
+            MoveTo(0, (start + offset) as u16),
+            Clear(ClearType::CurrentLine)
+        )?;
+        if let Some(row) = rows.get(list.first_visible() + offset) {
+            draw_spans(
+                output,
+                &layout::candidate_row(row, list.selected(), usize::from(width)),
+            )?;
+        }
+    }
+    Ok(())
+}
 fn draw(runtime: &Runtime, width: u16, height: u16) -> io::Result<()> {
     let list_rows = usize::from(height.saturating_sub(2)).min(10);
     let frame = layout::frame(runtime.app(), width, height).map_err(io::Error::other)?;
@@ -59,20 +83,29 @@ fn draw(runtime: &Runtime, width: u16, height: u16) -> io::Result<()> {
         draw_spans(&mut output, row)?;
     }
     if let Some(Prompt::Picker(session)) = runtime.layer() {
-        let start = usize::from(height.saturating_sub(2)) - list_rows;
-        let rows = &session.results().rows;
-        for offset in 0..list_rows {
-            queue!(
-                output,
-                MoveTo(0, (start + offset) as u16),
-                Clear(ClearType::CurrentLine)
-            )?;
-            if let Some(row) = rows.get(session.list().first_visible() + offset) {
-                let spans =
-                    layout::candidate_row(row, session.list().selected(), usize::from(width));
-                draw_spans(&mut output, &spans)?;
-            }
-        }
+        draw_candidates(
+            &mut output,
+            &session.results().rows,
+            session.list(),
+            width,
+            height,
+            list_rows,
+        )?;
+    }
+    let path = match runtime.layer() {
+        Some(Prompt::Open(field) | Prompt::Save(_, field)) => Some(field),
+        Some(Prompt::Exit(session)) => session.path_input(),
+        _ => None,
+    };
+    if let Some(field) = path.filter(|field| field.visible()) {
+        draw_candidates(
+            &mut output,
+            field.rows(),
+            field.list(),
+            width,
+            height,
+            list_rows,
+        )?;
     }
     if let Some(Prompt::Help(session)) = runtime.layer() {
         for y in 0..height.saturating_sub(2) {
