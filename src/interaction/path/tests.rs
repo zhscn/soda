@@ -64,11 +64,12 @@ fn editing_and_cancel_invalidate_old_results_and_cancel_has_two_visible_steps() 
     let old = request(&mut f);
     f.handle(Input::Text(InputKey::Char('b')));
     assert!(old.cancelled.load(Ordering::Relaxed));
-    assert!(!f.visible());
+    assert!(f.visible());
     assert!(!f.accept(PathCompletion {
         cancelled: old.cancelled,
         result: Ok(vec![])
     }));
+    f.handle(Input::Cancel);
     let live = request(&mut f);
     assert!(matches!(f.handle(Input::Cancel), PathAction::Active(_)));
     assert!(!f.visible());
@@ -166,4 +167,35 @@ fn results_from_another_session_and_duplicate_results_are_rejected() {
         result: Ok(vec![])
     }));
     assert_eq!(second.rows().len(), 1);
+}
+
+#[test]
+fn expanded_completion_refreshes_after_typing_and_deletion() {
+    let mut f = field("s");
+    let r = request(&mut f);
+    complete(&mut f, r, &[("src", true), ("stuff", true)]);
+    let PathAction::Active(mut response) = f.handle(Input::Text(InputKey::Char('r'))) else {
+        panic!()
+    };
+    assert!(f.visible());
+    assert!(f.rows().is_empty());
+    let r = response.path_requests.pop().unwrap();
+    assert_eq!(r.prefix, "sr");
+    complete(&mut f, r, &[("src", true)]);
+    let PathAction::Active(mut response) = f.handle(Input::Text(InputKey::Delete {
+        backward: true,
+        word: false,
+    })) else {
+        panic!()
+    };
+    let r = response.path_requests.pop().unwrap();
+    assert_eq!(r.prefix, "s");
+    complete(&mut f, r, &[("src", true), ("stuff", true)]);
+    assert_eq!(f.rows().len(), 2);
+    f.handle(Input::Cancel);
+    let PathAction::Active(response) = f.handle(Input::Text(InputKey::Char('r'))) else {
+        panic!()
+    };
+    assert!(!f.visible());
+    assert!(response.path_requests.is_empty());
 }

@@ -233,6 +233,13 @@ impl PathInput {
             },
             input => match super::session::edit_field(&mut self.field, input) {
                 Some(update) if update.text_changed || update.selection_changed => {
+                    if self.visible
+                        && update.text_changed
+                        && self.field.cursor() == self.field.text().len()
+                        && self.field.selection().range().is_empty()
+                    {
+                        return PathAction::Active(self.request());
+                    }
                     self.invalidate();
                     self.error = None;
                     PathAction::Active(Response {
