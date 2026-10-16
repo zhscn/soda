@@ -12,6 +12,7 @@ pub enum ClipboardAction {
     Copy,
     Cut,
     Paste,
+    Kill { backward: bool, word: bool },
 }
 
 impl Application {
@@ -45,19 +46,35 @@ impl Application {
             }
             return Ok(());
         }
-        let range = if selection.range().is_empty() {
+        let range = if !selection.range().is_empty() {
+            selection.range()
+        } else if let ClipboardAction::Kill { backward, word } = action {
+            let head = selection.head;
+            let line = snapshot.line_of(head).unwrap();
+            let other = if word {
+                crate::core::word_boundary(snapshot, crate::core::ByteOffset(head), backward)?.0
+            } else if backward {
+                snapshot.line_start(line).unwrap()
+            } else {
+                let end = snapshot.line_content_range(line).unwrap().end;
+                if end == head {
+                    snapshot.line_range(line).unwrap().end
+                } else {
+                    end
+                }
+            };
+            head.min(other)..head.max(other)
+        } else {
             snapshot
                 .line_range(snapshot.line_of(selection.head).unwrap())
                 .unwrap()
-        } else {
-            selection.range()
         };
         if range.is_empty() {
             return Ok(());
         }
         let document = state.document_id;
         let text = snapshot.byte_slice(range.clone()).unwrap().to_string();
-        if matches!(action, ClipboardAction::Cut) {
+        if matches!(action, ClipboardAction::Cut | ClipboardAction::Kill { .. }) {
             let mut tx = Transaction::new(snapshot.version(), vec![Change::new(range.clone(), "")]);
             tx.selection = Some(Selection::caret(range.start));
             self.edit(view, Command::Apply(tx), time, update)?;

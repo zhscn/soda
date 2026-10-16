@@ -16,6 +16,8 @@ pub enum InputKey {
     Move { motion: InputMotion, extend: bool },
     Delete { backward: bool, word: bool },
     SelectAll,
+    Kill(InputMotion),
+    Yank,
 }
 /// Text changes require a new query; selection changes require only a repaint.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -29,12 +31,14 @@ pub struct InputUpdate {
 pub struct TextInput {
     text: String,
     selection: Selection,
+    killed: String,
 }
 impl Default for TextInput {
     fn default() -> Self {
         Self {
             text: String::new(),
             selection: Selection::caret(0),
+            killed: String::new(),
         }
     }
 }
@@ -105,6 +109,28 @@ impl TextInput {
     pub fn key(&mut self, key: InputKey) -> InputUpdate {
         let before = self.selection;
         match key {
+            InputKey::Yank => return self.insert(&self.killed.clone()),
+            InputKey::Kill(motion) => {
+                let range = self.selection.range();
+                let range = if range.is_empty() {
+                    let cursor = self.cursor();
+                    let other = match motion {
+                        InputMotion::Start => 0,
+                        InputMotion::End => self.text.len(),
+                        InputMotion::WordLeft => self.word_edge(cursor, true),
+                        InputMotion::WordRight => self.word_edge(cursor, false),
+                        InputMotion::Left => self.previous(cursor),
+                        InputMotion::Right => self.next(cursor),
+                    };
+                    cursor.min(other)..cursor.max(other)
+                } else {
+                    range
+                };
+                if !range.is_empty() {
+                    self.killed = self.text[range.clone()].to_owned();
+                }
+                return self.replace(range, "");
+            }
             InputKey::Char(ch) => return self.insert(&ch.to_string()),
             InputKey::SelectAll => {
                 self.selection = Selection {

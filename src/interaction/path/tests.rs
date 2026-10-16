@@ -199,3 +199,14 @@ fn expanded_completion_refreshes_after_typing_and_deletion() {
     assert!(!f.visible());
     assert!(response.path_requests.is_empty());
 }
+
+#[test]
+fn filling_a_candidate_preserves_the_fields_killed_text() {
+    let mut f = field("saved");
+    f.handle(Input::Text(InputKey::Kill(InputMotion::Start)));
+    let r = request(&mut f);
+    complete(&mut f, r, &[("file", false)]);
+    f.handle(Input::Complete { backward: false });
+    f.handle(Input::Text(InputKey::Yank));
+    assert_eq!(f.text(), "/project/filesaved");
+}

@@ -189,7 +189,7 @@ pub(super) fn frame(
         return Ok(Frame {
             rows: vec![],
             cursor: None,
-            status: "Soda — ^N New buffer  ^O Open  ^Q Quit".into(),
+            status: "Soda — C-x n New  C-x C-f Open  C-x C-c Quit".into(),
         });
     };
     let view = app.view(id).unwrap();
@@ -221,7 +221,7 @@ pub(super) fn frame(
         .path()
         .map_or_else(|| "[untitled]".into(), |p| p.display().to_string());
     let status = format!(
-        "{}{}{}  {}:{}  ^O Open  ^S Save  ^Q Quit",
+        "{}{}{}  {}:{}  C-x C-f Open  C-x C-s Save",
         path,
         if document.is_dirty() { " *" } else { "" },
         if app.workspace().is_saving(view.document_id) {

@@ -192,7 +192,8 @@ impl PathInput {
                         ..Response::default()
                     });
                 };
-                self.field = TextInput::new(&text);
+                self.field.key(super::InputKey::SelectAll);
+                self.field.insert(&text);
                 self.invalidate();
                 if directory {
                     PathAction::Active(self.request())

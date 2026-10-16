@@ -8,7 +8,9 @@ use crate::{
 };
 use crossterm::{
     cursor::{Hide, MoveTo, Show},
-    event::{self, DisableBracketedPaste, EnableBracketedPaste},
+    event::{
+        self, DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange,
+    },
     execute, queue,
     style::{Attribute, Print, SetAttribute},
     terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
@@ -27,6 +29,7 @@ impl Terminal {
             io::stdout(),
             EnterAlternateScreen,
             EnableBracketedPaste,
+            EnableFocusChange,
             Hide
         )?;
         Ok(guard)
@@ -38,6 +41,7 @@ impl Drop for Terminal {
             io::stdout(),
             SetAttribute(Attribute::Reset),
             DisableBracketedPaste,
+            DisableFocusChange,
             Show,
             LeaveAlternateScreen
         );
@@ -137,14 +141,18 @@ fn draw(runtime: &Runtime, width: u16, height: u16) -> io::Result<()> {
                 output,
                 MoveTo(0, height - 2),
                 SetAttribute(Attribute::Reverse),
-                Print(layout::plain(&frame.status, 0, usize::from(width))),
+                Print(layout::plain(
+                    &format!("[{:?}] {}", runtime.edit_mode(), frame.status),
+                    0,
+                    usize::from(width)
+                )),
                 SetAttribute(Attribute::Reset)
             )?;
         }
         let presentation = runtime.layer().map_or_else(
             || Presentation {
                 text: if runtime.message().is_empty() {
-                    crate::interaction::help::HINT.to_owned()
+                    runtime.input_hint()
                 } else {
                     runtime.message().to_owned()
                 },

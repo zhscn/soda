@@ -25,10 +25,11 @@ fn normalize_key(key: KeyEvent) -> KeyStroke {
     KeyStroke {
         code,
         control: key.modifiers.contains(KeyModifiers::CONTROL),
+        alt: key.modifiers.contains(KeyModifiers::ALT),
         shift: key.modifiers.contains(KeyModifiers::SHIFT),
-        unsupported_modifiers: key.modifiers.intersects(
-            KeyModifiers::ALT | KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META,
-        ),
+        unsupported_modifiers: key
+            .modifiers
+            .intersects(KeyModifiers::SUPER | KeyModifiers::HYPER | KeyModifiers::META),
         release: key.kind == KeyEventKind::Release,
     }
 }
@@ -36,6 +37,7 @@ fn normalize_key(key: KeyEvent) -> KeyStroke {
 pub(super) fn normalize(event: Event) -> UserInput {
     match event {
         Event::Key(key) => UserInput::Key(normalize_key(key)),
+        Event::FocusLost => UserInput::FocusLost,
         Event::Paste(text) => UserInput::Paste(text),
         _ => UserInput::Unrecognized,
     }
@@ -56,6 +58,8 @@ mod tests {
         key.kind = KeyEventKind::Release;
         assert!(normalize_key(key).release);
         key.modifiers |= KeyModifiers::ALT;
+        assert!(normalize_key(key).alt);
+        key.modifiers |= KeyModifiers::SUPER;
         assert!(normalize_key(key).unsupported_modifiers);
     }
     #[test]
@@ -64,10 +68,7 @@ mod tests {
             panic!()
         };
         assert_eq!(text, "中\r\n");
-        assert!(matches!(
-            normalize(Event::FocusLost),
-            UserInput::Unrecognized
-        ));
+        assert!(matches!(normalize(Event::FocusLost), UserInput::FocusLost));
         assert_eq!(
             normalize_key(KeyEvent::new(KeyCode::Null, KeyModifiers::NONE)).code,
             Key::Unrecognized

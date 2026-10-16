@@ -31,6 +31,17 @@ fn route(layers: &mut Layers, app: &Application, input: UserInput) -> InputResul
         .route_input(input, app, Duration::ZERO, Path::new("/"))
         .unwrap()
 }
+fn sequence(layers: &mut Layers, app: &Application, last: char, control: bool) -> InputResult {
+    handled(route(layers, app, ctrl('x')));
+    route(
+        layers,
+        app,
+        UserInput::Key(KeyStroke {
+            control,
+            ..KeyStroke::plain(Key::Char(last))
+        }),
+    )
+}
 fn apply(app: &mut Application, layers: &mut Layers, response: Response) {
     assert!(response.effects.is_empty());
     for event in response.events {
@@ -74,7 +85,7 @@ fn direct_commands_and_keyboard_input_share_edit_and_history() {
         apply(&mut direct, &mut direct_layers, direct_response);
     }
     assert_eq!(text(&keyed), text(&direct));
-    let response = handled(route(&mut keyed_layers, &keyed, ctrl('z')));
+    let response = handled(route(&mut keyed_layers, &keyed, ctrl('_')));
     apply(&mut keyed, &mut keyed_layers, response);
     let response = handled(
         direct_layers
@@ -93,7 +104,7 @@ fn direct_commands_and_keyboard_input_share_edit_and_history() {
 #[test]
 fn modal_focus_blocks_both_keyboard_and_direct_application_commands() {
     let (app, mut layers) = setup();
-    handled(route(&mut layers, &app, ctrl('o')));
+    handled(sequence(&mut layers, &app, 'f', true));
     assert!(matches!(
         route(&mut layers, &app, ctrl('n')),
         InputResult::Blocked
@@ -118,7 +129,7 @@ fn modal_focus_blocks_both_keyboard_and_direct_application_commands() {
 #[test]
 fn modal_confirm_and_cancel_are_consumed_once() {
     let (mut app, mut layers) = setup();
-    handled(route(&mut layers, &app, ctrl('o')));
+    handled(sequence(&mut layers, &app, 'f', true));
     // An empty path closes the prompt but must not insert a newline.
     let response = handled(route(
         &mut layers,
@@ -129,7 +140,7 @@ fn modal_confirm_and_cancel_are_consumed_once() {
     apply(&mut app, &mut layers, response);
     assert!(layers.active().is_none());
     assert!(text(&app).is_empty());
-    handled(route(&mut layers, &app, ctrl('o')));
+    handled(sequence(&mut layers, &app, 'f', true));
     let response = handled(route(
         &mut layers,
         &app,
@@ -143,7 +154,7 @@ fn modal_confirm_and_cancel_are_consumed_once() {
             &app,
             UserInput::Key(KeyStroke::plain(Key::Esc))
         ),
-        InputResult::Pass
+        InputResult::Handled(_)
     ));
 }
 
@@ -151,7 +162,7 @@ fn modal_confirm_and_cancel_are_consumed_once() {
 fn save_prompt_keeps_its_target_after_external_focus_change() {
     let (mut app, mut layers) = setup();
     let first = app.view(app.active_view().unwrap()).unwrap().document_id;
-    handled(route(&mut layers, &app, ctrl('s')));
+    handled(sequence(&mut layers, &app, 's', true));
     let update = app
         .dispatch(Event::NewDocument(Language::PlainText))
         .unwrap();
@@ -226,7 +237,7 @@ fn releases_and_unsupported_modifiers_never_edit_or_submit() {
     let (app, mut layers) = setup();
     for modal in [false, true] {
         if modal {
-            handled(route(&mut layers, &app, ctrl('o')));
+            handled(sequence(&mut layers, &app, 'f', true));
         }
         for key in [
             KeyStroke {
@@ -265,7 +276,7 @@ fn commands_with_no_active_view_are_safe_and_new_document_recovers() {
         assert!(response.events.is_empty());
         assert!(layers.active().is_none());
     }
-    let response = handled(route(&mut layers, &app, ctrl('n')));
+    let response = handled(sequence(&mut layers, &app, 'n', false));
     assert!(matches!(
         response.events.as_slice(),
         [Event::NewDocument(Language::PlainText)]
@@ -284,7 +295,7 @@ fn document_paste_preserves_status_and_is_one_undoable_command() {
     assert_eq!(response.events.len(), 1);
     apply(&mut app, &mut layers, response);
     assert_eq!(text(&app), "中\r\n🦀");
-    let response = handled(route(&mut layers, &app, ctrl('z')));
+    let response = handled(route(&mut layers, &app, ctrl('_')));
     assert!(matches!(response.message, Message::Clear));
     apply(&mut app, &mut layers, response);
     assert!(text(&app).is_empty());

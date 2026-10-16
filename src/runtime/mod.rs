@@ -64,6 +64,12 @@ impl Runtime {
     pub fn layer(&self) -> Option<&Layer> {
         self.layers.active()
     }
+    pub fn edit_mode(&self) -> crate::interaction::EditMode {
+        self.layers.edit_mode()
+    }
+    pub fn input_hint(&self) -> String {
+        self.layers.input_hint()
+    }
     pub fn message(&self) -> &str {
         &self.message
     }

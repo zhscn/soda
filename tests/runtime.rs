@@ -137,7 +137,7 @@ fn path_completion_opens_existing_files_and_saves_new_names() {
     runtime.command(Command::Save { choose_path: true });
     let target = directory.path().join("new.cpp");
     runtime.input(UserInput::Key(KeyStroke {
-        control: true,
+        alt: true,
         ..KeyStroke::plain(Key::Char('a'))
     }));
     runtime.input(UserInput::Paste(target.to_str().unwrap().into()));

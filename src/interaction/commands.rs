@@ -15,8 +15,12 @@ use std::{path::Path, time::Duration};
 
 /// Commands shared by keyboard bindings and other invocation surfaces.
 /// Targets are resolved against the current application state at invocation.
+#[derive(Clone, Debug)]
 pub enum Command {
     Edit(EditCommand),
+    SetMode(super::EditMode),
+    Append,
+    Change,
     Clipboard(ClipboardAction),
     Goto,
     Page { backward: bool, extend: bool },
@@ -50,12 +54,64 @@ impl Layers {
         if self.active().is_some() {
             return Ok(super::InputResult::Blocked);
         }
+        self.sequence.clear();
         let mut response = Response {
             redraw: true,
             message: Message::Clear,
             ..Response::default()
         };
         match command {
+            Command::SetMode(mode) => {
+                self.mode = mode;
+                if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
+                    let selection = app
+                        .workspace()
+                        .editor(view.document_id)
+                        .unwrap()
+                        .model()
+                        .session(view.session_id)
+                        .unwrap()
+                        .selection();
+                    response.events.push(Event::Edit {
+                        view: view.id,
+                        command: EditCommand::SetSelection(selection),
+                        time,
+                    });
+                }
+            }
+            Command::Append | Command::Change => {
+                self.mode = super::EditMode::Insert;
+                if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
+                    let selection = app
+                        .workspace()
+                        .editor(view.document_id)
+                        .unwrap()
+                        .model()
+                        .session(view.session_id)
+                        .unwrap()
+                        .selection();
+                    if matches!(command, Command::Append) {
+                        response.events.push(Event::Edit {
+                            view: view.id,
+                            command: EditCommand::Move {
+                                motion: crate::editor::Motion::Forward,
+                                extend: false,
+                            },
+                            time,
+                        });
+                    } else if !selection.range().is_empty() {
+                        response.events.push(Event::Edit {
+                            view: view.id,
+                            command: EditCommand::Delete {
+                                direction: crate::editor::Direction::Forward,
+                                smart: false,
+                            },
+                            time,
+                        });
+                    }
+                }
+            }
+
             Command::Help => {
                 response = self.enter(Layer::Help(HelpSession::default()), app, time)?
             }

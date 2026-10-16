@@ -1,4 +1,5 @@
-//! Frontend-independent routing and built-in sessions. Layers own lifecycle;
+//! Frontend-independent routing and built-in sessions. Layers own editing mode,
+//! literal key sequences and session lifecycle;
 //! feature reducers return transitions and Runtime executes their responses.
 mod bindings;
 mod buffer;
@@ -24,7 +25,15 @@ mod routing;
 pub use routing::{Key, KeyStroke, UserInput};
 mod search;
 pub use search::{SearchResults, SearchSession};
+mod sequence;
 mod session;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum EditMode {
+    #[default]
+    Insert,
+    Normal,
+}
 use crate::{
     application::{Application, Event, Operation, Update},
     core::EditError,
@@ -72,7 +81,7 @@ pub struct Response {
     pub quit: bool,
     pub redraw: bool,
 }
-/// Owns one modal layer. Read-only access keeps lifecycle transitions inside
+/// Owns editing input state and one modal layer. Read-only access keeps transitions inside
 /// this manager; callers must execute responses and observe resulting updates.
 ///
 /// ```compile_fail
@@ -82,11 +91,23 @@ pub struct Response {
 #[derive(Default)]
 pub struct Layers {
     active: Option<Layer>,
+    mode: EditMode,
+    sequence: sequence::Sequence,
     page_rows: usize,
     help_rows: usize,
     picker_rows: usize,
 }
 impl Layers {
+    pub fn edit_mode(&self) -> EditMode {
+        self.mode
+    }
+    pub fn input_hint(&self) -> String {
+        if self.sequence.active() {
+            self.sequence.hint()
+        } else {
+            format!("{:?}  {}", self.mode, help::HINT)
+        }
+    }
     pub fn active(&self) -> Option<&Layer> {
         self.active.as_ref()
     }
@@ -96,6 +117,7 @@ impl Layers {
         app: &Application,
         time: Duration,
     ) -> Result<Response, EditError> {
+        self.sequence.clear();
         let mut response = self.close(app, time)?;
         if let Layer::Picker(session) = &layer {
             response.effects.push(PickerEffect::Run(session.task()));
@@ -106,6 +128,7 @@ impl Layers {
         Ok(response)
     }
     pub fn close(&mut self, app: &Application, time: Duration) -> Result<Response, EditError> {
+        self.sequence.clear();
         let Some(mut layer) = self.active.take() else {
             return Ok(Response::default());
         };
@@ -145,6 +168,9 @@ impl Layers {
         update: &Update,
         time: Duration,
     ) -> Result<Response, EditError> {
+        if update.active_changed {
+            self.sequence.clear();
+        }
         let Some(layer) = &mut self.active else {
             return Ok(Response::default());
         };

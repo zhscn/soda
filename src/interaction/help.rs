@@ -2,40 +2,61 @@
 use super::{Input, InputKey, InputMotion, picker::ListMotion, session::Transition};
 
 pub const TEXT: &str = "Files
-Ctrl-N New   Ctrl-O Open   Ctrl-P Find file   Ctrl-W Close buffer
-Ctrl-S Save   Ctrl-Shift-S / F4 Save as   F5 Reload
-Ctrl-Q Quit   Ctrl-B Switch buffer   Ctrl-Tab / F6 Next buffer
+C-x C-f Open   C-x C-s Save   C-x C-w / F4 Save as
+C-x n New   C-x k Close buffer   C-x C-c Quit
+C-x b Switch buffer   C-x p f Find project file
+C-x r / F5 Reload   Ctrl-Tab / F6 Next view
 Unsaved changes: s save, d discard, c / Esc / Enter cancel
 Path prompts: Tab lists / fills; arrows select; Enter uses input
 Trailing / browses directory; Esc hides candidates, then cancels
 
-Editing
-Ctrl-C Copy   Ctrl-X Cut   Ctrl-V Paste (internal clipboard)
-Copy / cut selection, or current line when no text is selected
-Ctrl-A Select all   Ctrl-Z Undo   Ctrl-Y Redo
-Arrows move; Shift extends selection; Home / End move within line
-Ctrl-Left / Right move by word; Ctrl-Backspace / Delete delete word
-Ctrl-Home / End move to document start / end
-PageUp / PageDown move by page; Shift extends selection
-Ctrl-G Go to line[:column] (one-based logical columns)
+Readline editing (C = Ctrl, M = Alt)
+C-b / C-f Back / forward   C-a / C-e Line start / end
+M-b / M-f Word back / forward   C-p / C-n Previous / next line
+C-h / Backspace Delete backward   C-d / Delete Delete forward
+C-k Kill to line end (at end, kill newline)   C-u Kill to line start
+C-w / M-Backspace Kill word backward   M-d Kill word forward
+C-y Yank   M-w Copy selection / current line (document)
+C-_ / C-/ Undo   M-_ Redo (document)
+M-a Select all   C-x h Select document
+Arrows / Home / End move; Shift extends selection
+C-Left / Right Move by word   C-Home / End Document start / end
+C-v / M-v / PageDown / PageUp Move by page
+C-x g Go to line[:column]
 Tab Indent selected lines / insert indentation   Shift-Tab Outdent
 
+Normal layer
+Esc enters Normal; i enters Insert; a moves forward and enters Insert
+h j k l Move; b / w Move by word; uppercase extends selection
+0 / $ Line start / end   d Delete   s Change selection and enter Insert
+y Copy   r Cut   p Yank   u Undo   / Open file
+SPC f Project files   SPC b Buffers   SPC s Save   SPC q Quit
+C-s searches in either mode; prompts always accept text
+
 Search and replacement
-Ctrl-F Search   F3 / Shift-F3 Next / previous match
-Ctrl-R Replace: query, replacement, then explicit confirmation
+C-s Search   M-% Replace
+Search prompt: C-s / C-r Next / previous match
+F3 / Shift-F3 Next / previous match
 Review: Enter replaces current, F4 / Ctrl-Enter replaces all
-Esc cancels search or replacement and restores the original position
+Esc / C-g cancel search or replacement and restore the original position
 
 Prompts and file picker
-Ctrl-A Select input   Ctrl-Left / Right Move by word
-Up / Down Select candidate   PageUp / PageDown Move candidate page
-Enter Confirm   Esc Cancel
+Readline character / word / line editing; M-a selects input
+Each field keeps its last killed text for C-y
+Up / Down or C-p / C-n Select candidate
+PageUp / PageDown Move candidate page
+Enter Confirm   Esc / C-g Cancel
+
+Key sequences
+C-x sequences work in Insert and Normal; SPC sequences work in Normal
+C-g / Esc cancel a prefix; undefined sequences are consumed
+Prefixes wait until completed or cancelled
 
 Help
 F1 Open / close help   Arrows / PageUp / PageDown Scroll
 Home / End First / last page   Enter / Esc Return to editor";
 
-pub const HINT: &str = "F1 Help  Ctrl-O Open  Ctrl-P Files  Ctrl-S Save  Ctrl-Q Quit";
+pub const HINT: &str = "F1 Help  C-x C-f Open  C-x b Buffers  C-x C-s Save  C-x C-c Quit";
 
 #[derive(Default)]
 pub struct HelpSession {

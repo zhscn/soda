@@ -150,7 +150,7 @@ fn search_input_is_modal_and_cancel_restores_selection() {
             .selection()
     };
     host.input(TerminalEvent::Key(key_with(
-        KeyCode::Char('f'),
+        KeyCode::Char('s'),
         KeyModifiers::CONTROL,
     )));
     host.input(TerminalEvent::Paste("one".into()));
@@ -164,7 +164,7 @@ fn search_input_is_modal_and_cancel_restores_selection() {
         }
     );
     host.input(TerminalEvent::Key(key_with(
-        KeyCode::Char('z'),
+        KeyCode::Char('_'),
         KeyModifiers::CONTROL,
     )));
     assert_eq!(

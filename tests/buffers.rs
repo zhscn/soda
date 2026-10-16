@@ -25,8 +25,9 @@ fn switch_reuses_a_view_without_preview_and_cancel_leaves_focus() {
     assert_eq!(r.app().active_view(), Some(second));
     r.input(UserInput::Key(KeyStroke {
         control: true,
-        ..KeyStroke::plain(Key::Char('b'))
+        ..KeyStroke::plain(Key::Char('x'))
     }));
+    key(&mut r, Key::Char('b'));
     key(&mut r, Key::Enter);
     assert_eq!(r.app().active_view(), Some(first));
     assert_eq!(r.app().views().count(), 2);
@@ -69,7 +70,7 @@ fn filtering_no_matches_and_external_document_changes_are_safe() {
     key(&mut r, Key::Enter);
     assert!(r.layer().is_some());
     r.input(UserInput::Key(KeyStroke {
-        control: true,
+        alt: true,
         ..KeyStroke::plain(Key::Char('a'))
     }));
     r.input(UserInput::Paste("UNTITLED".into()));
