@@ -113,6 +113,7 @@ pub(super) fn follow_caret(
     app: &Application,
     width: u16,
     height: u16,
+    caret: Option<usize>,
 ) -> Result<Option<ViewportAdjustment>, crate::application::Error> {
     let Some(id) = app.active_view() else {
         return Ok(None);
@@ -134,7 +135,7 @@ pub(super) fn follow_caret(
         .state();
     let snapshot = document.snapshot();
     let tab = document.whitespace().tab_width;
-    let head = state.selection().head;
+    let head = caret.unwrap_or(state.selection().head);
     let line = snapshot.line_of(head).unwrap();
     let column = logical_column_at(snapshot, ByteOffset(head), tab)?.0;
     let rows = usize::from(height.saturating_sub(2));
@@ -184,12 +185,13 @@ pub(super) fn frame(
     app: &Application,
     width: u16,
     height: u16,
+    caret: Option<usize>,
 ) -> Result<Frame, crate::application::Error> {
     let Some(id) = app.active_view() else {
         return Ok(Frame {
             rows: vec![],
             cursor: None,
-            status: "Soda — C-x n New  C-x C-f Open  C-x C-c Quit".into(),
+            status: "Soda — :enew New  :open Open  :q Quit".into(),
         });
     };
     let view = app.view(id).unwrap();
@@ -197,7 +199,7 @@ pub(super) fn frame(
     let document = editor.model().document();
     let state = editor.model().session(view.session_id).unwrap().state();
     let snapshot = document.snapshot();
-    let head = state.selection().head;
+    let head = caret.unwrap_or(state.selection().head);
     let line = snapshot.line_of(head).unwrap();
     let tab = document.whitespace().tab_width;
     let column = logical_column_at(snapshot, ByteOffset(head), tab)?.0;
@@ -221,7 +223,7 @@ pub(super) fn frame(
         .path()
         .map_or_else(|| "[untitled]".into(), |p| p.display().to_string());
     let status = format!(
-        "{}{}{}  {}:{}  C-x C-f Open  C-x C-s Save",
+        "{}{}{}  {}:{}  :open Open  :w Save  :q Quit",
         path,
         if document.is_dirty() { " *" } else { "" },
         if app.workspace().is_saving(view.document_id) {
@@ -289,14 +291,14 @@ mod tests {
         width: u16,
         height: u16,
     ) -> Result<Frame, crate::application::Error> {
-        if let Some(viewport) = super::follow_caret(app, width, height)? {
+        if let Some(viewport) = super::follow_caret(app, width, height, None)? {
             app.dispatch(Event::SetViewport {
                 view: viewport.view,
                 anchor: viewport.anchor,
                 horizontal_column: viewport.horizontal_column,
             })?;
         }
-        super::frame(app, width, height)
+        super::frame(app, width, height, None)
     }
 
     use crate::{
@@ -374,7 +376,7 @@ mod tests {
         let frame = frame(&mut app, 6, 5).unwrap();
         assert_eq!(frame.cursor, Some((5, 0)));
         assert_eq!(app.view(view).unwrap().viewport.horizontal_column, 5);
-        let frame = super::frame(&app, 0, 1).unwrap();
+        let frame = super::frame(&app, 0, 1, None).unwrap();
         assert!(frame.rows.is_empty());
         assert!(frame.cursor.is_none());
     }
@@ -490,9 +492,9 @@ mod tests {
         })
         .unwrap();
         let before = app.view(view).unwrap().viewport;
-        let projected = super::frame(&app, 10, 6).unwrap();
+        let projected = super::frame(&app, 10, 6, None).unwrap();
         assert_eq!(app.view(view).unwrap().viewport, before);
         assert!(projected.cursor.is_none());
-        assert!(super::follow_caret(&app, 10, 6).unwrap().is_some());
+        assert!(super::follow_caret(&app, 10, 6, None).unwrap().is_some());
     }
 }

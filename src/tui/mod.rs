@@ -7,7 +7,7 @@ use crate::{
     runtime::Runtime,
 };
 use crossterm::{
-    cursor::{Hide, MoveTo, Show},
+    cursor::{Hide, MoveTo, SetCursorStyle, Show},
     event::{
         self, DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange,
     },
@@ -43,6 +43,7 @@ impl Drop for Terminal {
             DisableBracketedPaste,
             DisableFocusChange,
             Show,
+            SetCursorStyle::DefaultUserShape,
             LeaveAlternateScreen
         );
         let _ = terminal::disable_raw_mode();
@@ -74,11 +75,17 @@ fn draw_candidates<T>(
 }
 fn draw(runtime: &Runtime, width: u16, height: u16) -> io::Result<()> {
     let list_rows = usize::from(height.saturating_sub(2)).min(10);
-    let frame = layout::frame(runtime.app(), width, height).map_err(io::Error::other)?;
+    let frame = layout::frame(runtime.app(), width, height, runtime.editor_caret())
+        .map_err(io::Error::other)?;
     let mut output = io::stdout().lock();
     queue!(
         output,
         Hide,
+        if runtime.edit_mode() == crate::interaction::EditMode::Insert {
+            SetCursorStyle::SteadyBar
+        } else {
+            SetCursorStyle::SteadyBlock
+        },
         SetAttribute(Attribute::Reset),
         Clear(ClearType::All)
     )?;
@@ -206,7 +213,8 @@ pub fn run(path: Option<PathBuf>) -> io::Result<()> {
         }
         if runtime.take_redraw() {
             if let Some(viewport) =
-                layout::follow_caret(runtime.app(), width, height).map_err(io::Error::other)?
+                layout::follow_caret(runtime.app(), width, height, runtime.editor_caret())
+                    .map_err(io::Error::other)?
             {
                 runtime.update_viewport(viewport.view, viewport.anchor, viewport.horizontal_column);
             }

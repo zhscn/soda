@@ -18,6 +18,8 @@ pub enum Command {
     Apply(Transaction),
     SetLanguage(Language),
     Undo,
+    BeginUndoGroup(Selection),
+    EndUndoGroup(Selection),
     Redo,
     Move { motion: Motion, extend: bool },
     Delete { direction: Direction, smart: bool },
@@ -72,7 +74,7 @@ impl Editor {
     }
     pub(crate) fn checkpoint_history(&mut self) {
         self.model.document.break_group();
-        self.input_history.isolate();
+        self.input_history.end();
     }
     pub(crate) fn bind_file(&mut self, file: crate::files::FileState) {
         self.model.document.file = file;
@@ -117,6 +119,7 @@ impl Editor {
         command: Command,
         time: Duration,
     ) -> Result<EditorUpdate, EditError> {
+        let mut history = self.input_history.clone();
         let event = match &command {
             Command::TypeChar(ch) if !matches!(ch, '\n' | '\r') => Some(UserEvent::Input),
             Command::Delete {
@@ -129,7 +132,22 @@ impl Editor {
             } => Some(UserEvent::DeleteForward),
             _ => None,
         };
-        let preserves_explicit_group = matches!(&command, Command::Apply(_));
+        history.owner_changed(id);
+        if matches!(
+            &command,
+            Command::SetSelection(_)
+                | Command::Move { .. }
+                | Command::Undo
+                | Command::Redo
+                | Command::EndUndoGroup(_)
+                | Command::SetLanguage(_)
+                | Command::ReloadText(_)
+        ) {
+            history.end();
+        }
+        let preserves_explicit_group = matches!(&command, Command::Apply(_))
+            || history.compound(id).is_some()
+            || matches!(&command, Command::BeginUndoGroup(_));
         let mut used_group = None;
         let state = self
             .model
@@ -144,6 +162,18 @@ impl Editor {
             .collect();
         let mut language_changed = false;
         let commit = match command {
+            Command::BeginUndoGroup(selection) => {
+                EditorState::from_snapshot(self.model.document.snapshot().clone(), selection)?;
+                history.begin(id, selection)?;
+                self.model.document.break_group();
+                None
+            }
+            Command::EndUndoGroup(selection) => {
+                EditorState::from_snapshot(self.model.document.snapshot().clone(), selection)?;
+                self.model.document.finish_group(id, selection);
+                self.model.set_selection(id, selection)?;
+                None
+            }
             Command::Undo => self.model.document.restore(id, false)?,
             Command::Redo => self.model.document.restore(id, true)?,
             Command::SetLanguage(language) => {
@@ -338,9 +368,14 @@ impl Editor {
                     _ => unreachable!(),
                 };
                 if !tx.changes.is_empty()
+                    && let Some(group) = history.compound(id)
+                {
+                    tx.history_group = Some(group);
+                    tx.user_event = None;
+                } else if !tx.changes.is_empty()
                     && let Some(event) = event
                 {
-                    let group = self.input_history.plan(id, event, time, &state)?;
+                    let group = history.plan(id, event, time, &state)?;
                     tx.history_group = Some(group);
                     tx.user_event = Some(event);
                     used_group = Some(group);
@@ -349,7 +384,11 @@ impl Editor {
                     // Validation is shared with text transactions, but a selection
                     // update does not publish a new document revision or history.
                     let (next, _) = state.apply(tx)?;
-                    self.model.set_selection(id, next.selection())?;
+                    if history.compound(id).is_some() {
+                        self.model.set_selection_in_group(id, next.selection())?;
+                    } else {
+                        self.model.set_selection(id, next.selection())?;
+                    }
                     None
                 } else {
                     let commit = self.model.document.commit(id, &state, tx, origin)?;
@@ -361,10 +400,13 @@ impl Editor {
             }
         };
         if let Some(commit) = &commit {
+            if let Some(before) = history.take_start(id) {
+                self.model.document.set_group_start(id, before);
+            }
             self.model.install(commit);
         }
         if let (Some(event), Some(group)) = (event, used_group) {
-            self.input_history.record(
+            history.record(
                 id,
                 event,
                 time,
@@ -372,7 +414,7 @@ impl Editor {
                 group,
             );
         } else {
-            self.input_history.isolate();
+            history.isolate();
             if !preserves_explicit_group {
                 self.model.document.break_group();
             }
@@ -390,6 +432,7 @@ impl Editor {
             .collect();
         let selection_changed = sessions.iter().any(|update| update.session_id == id);
         let document = commit.map(|commit| commit.update);
+        self.input_history = history;
         Ok(EditorUpdate {
             document_id: self.model.document.id(),
             session_id: id,

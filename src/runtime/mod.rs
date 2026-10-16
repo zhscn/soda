@@ -64,6 +64,48 @@ impl Runtime {
     pub fn layer(&self) -> Option<&Layer> {
         self.layers.active()
     }
+    pub fn bind(
+        &mut self,
+        mode: crate::interaction::EditMode,
+        keys: &[crate::interaction::KeyStroke],
+        command: Command,
+    ) -> Result<(), crate::interaction::BindingError> {
+        self.layers.bind(mode, keys, command)?;
+        self.dirty = true;
+        Ok(())
+    }
+    pub fn unbind_input(
+        &mut self,
+        key: crate::interaction::KeyStroke,
+    ) -> Result<(), crate::interaction::BindingError> {
+        self.layers.unbind_input(key)
+    }
+    pub fn bind_input(
+        &mut self,
+        key: crate::interaction::KeyStroke,
+        input: crate::interaction::Input,
+    ) -> Result<(), crate::interaction::BindingError> {
+        self.layers.bind_input(key, input)
+    }
+    pub fn unbind(
+        &mut self,
+        mode: crate::interaction::EditMode,
+        keys: &[crate::interaction::KeyStroke],
+    ) -> Result<(), crate::interaction::BindingError> {
+        self.layers.unbind(mode, keys)?;
+        self.dirty = true;
+        Ok(())
+    }
+    pub fn register_command(
+        &mut self,
+        name: impl Into<String>,
+        handler: fn(&Application) -> Result<Command, EditError>,
+    ) {
+        self.layers.register_command(name, handler);
+    }
+    pub fn editor_caret(&self) -> Option<usize> {
+        self.layers.editor_caret()
+    }
     pub fn edit_mode(&self) -> crate::interaction::EditMode {
         self.layers.edit_mode()
     }
@@ -232,6 +274,23 @@ impl Runtime {
         for event in response.events {
             if !self.reduce(event, time) {
                 return false;
+            }
+        }
+        for command in response.commands {
+            match self
+                .layers
+                .execute(command, &self.app, time, &self.file_root)
+            {
+                Ok(InputResult::Handled(response)) => {
+                    if !self.respond(response, time) {
+                        return false;
+                    }
+                }
+                Ok(_) => return false,
+                Err(error) => {
+                    self.interaction_failed(error, time);
+                    return false;
+                }
             }
         }
         self.quit |= response.quit;

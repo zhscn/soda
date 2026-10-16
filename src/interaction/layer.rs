@@ -17,6 +17,7 @@ use std::time::Duration;
 
 pub enum Layer {
     Goto(GotoSession),
+    Ex(super::ExSession),
     Buffer(BufferSession),
     Open(PathInput),
     Save(DocumentId, PathInput),
@@ -38,6 +39,7 @@ impl Layer {
     ) -> Result<Transition, EditError> {
         Ok(match self {
             Self::Goto(session) => session.handle(input, app, time),
+            Self::Ex(session) => session.handle(input),
             Self::Buffer(session) => session.handle(input, app),
             Self::Open(field) => prompt::path_input(PathTarget::Open, field, input),
             Self::Save(document, field) => {
@@ -85,6 +87,7 @@ impl Layer {
     pub fn presentation(&self) -> Presentation {
         match self {
             Self::Goto(session) => session.presentation(),
+            Self::Ex(session) => session.presentation(),
             Self::Buffer(session) => session.presentation(),
             Self::Open(field) => prompt::path_presentation(PathTarget::Open, field),
             Self::Save(document, field) => {

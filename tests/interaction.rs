@@ -37,7 +37,7 @@ fn setup(text: &str) -> (Application, ViewId) {
 }
 fn search(app: &Application, view: ViewId) -> Layers {
     {
-        let mut layers = Layers::default();
+        let mut layers = insert_layers();
         layers
             .enter(
                 Layer::Search {
@@ -237,7 +237,7 @@ fn closed_view_drops_session_and_focus_change_restores_original_view() {
 #[test]
 fn modal_routing_blocks_unknown_input_and_requires_explicit_discard() {
     let (app, _) = setup("dirty");
-    let mut layers = Layers::default();
+    let mut layers = insert_layers();
     assert!(matches!(
         layers
             .handle(Input::Unrecognized, &app, Duration::ZERO)
@@ -404,7 +404,7 @@ fn save_prompt_closes_when_target_document_closes() {
     let (mut app, view) = setup("a");
     let document = app.view(view).unwrap().document_id;
     let mut layers = {
-        let mut layers = Layers::default();
+        let mut layers = insert_layers();
         layers
             .enter(
                 Layer::Save(
@@ -440,7 +440,7 @@ fn save_prompt_closes_when_target_document_closes() {
 fn prompt_navigation_and_filtered_paste_do_not_generate_file_commands() {
     let app = Application::default();
     let mut layers = {
-        let mut layers = Layers::default();
+        let mut layers = insert_layers();
         layers
             .enter(
                 Layer::Open(soda::interaction::path::PathInput::new(
@@ -514,7 +514,7 @@ fn all_builtin_sessions_share_the_cancel_lifecycle_contract() {
         },
     ];
     for session in sessions {
-        let mut layers = Layers::default();
+        let mut layers = insert_layers();
         layers.enter(session, &app, Duration::ZERO).unwrap();
         let InputResult::Handled(response) =
             layers.handle(Input::Cancel, &app, Duration::ZERO).unwrap()
@@ -541,4 +541,17 @@ fn all_builtin_sessions_share_the_cancel_lifecycle_contract() {
             "dirty"
         );
     }
+}
+
+fn insert_layers() -> Layers {
+    let mut layers = Layers::default();
+    layers
+        .execute(
+            soda::interaction::Command::SetMode(soda::interaction::EditMode::Insert),
+            &Application::default(),
+            Duration::ZERO,
+            std::path::Path::new("/"),
+        )
+        .unwrap();
+    layers
 }

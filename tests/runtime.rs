@@ -23,6 +23,7 @@ fn headless_runtime_opens_edits_saves_and_observes_completion() {
     std::fs::write(&path, "old").unwrap();
     let mut runtime = Runtime::new(directory.path().to_owned()).unwrap();
     runtime.start(Some(path.clone()));
+    runtime.command(Command::SetMode(soda::interaction::EditMode::Insert));
     wait(&mut runtime, |runtime| {
         runtime.app().views().any(|view| {
             runtime
@@ -65,6 +66,7 @@ fn headless_runtime_opens_edits_saves_and_observes_completion() {
 fn headless_runtime_replaces_and_cancels_search_without_frontend_dependencies() {
     let mut runtime = Runtime::new(PathBuf::from("/")).unwrap();
     runtime.dispatch(Event::NewDocument(Language::PlainText));
+    runtime.command(Command::SetMode(soda::interaction::EditMode::Insert));
     runtime.input(UserInput::Paste("foo foo".into()));
     runtime.command(Command::Replace);
     runtime.input(UserInput::Paste("foo".into()));
@@ -104,6 +106,9 @@ fn path_completion_opens_existing_files_and_saves_new_names() {
     std::fs::write(&path, "int main() {}\n").unwrap();
     let mut runtime = Runtime::new(directory.path().to_owned()).unwrap();
     runtime.start(None);
+    runtime.command(soda::interaction::Command::SetMode(
+        soda::interaction::EditMode::Insert,
+    ));
     runtime.command(Command::Open);
     runtime.input(UserInput::Paste("sr".into()));
     runtime.input(UserInput::Key(KeyStroke::plain(Key::Tab)));
@@ -137,8 +142,8 @@ fn path_completion_opens_existing_files_and_saves_new_names() {
     runtime.command(Command::Save { choose_path: true });
     let target = directory.path().join("new.cpp");
     runtime.input(UserInput::Key(KeyStroke {
-        alt: true,
-        ..KeyStroke::plain(Key::Char('a'))
+        control: true,
+        ..KeyStroke::plain(Key::Char('u'))
     }));
     runtime.input(UserInput::Paste(target.to_str().unwrap().into()));
     runtime.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
@@ -152,6 +157,9 @@ fn departure_path_completion_can_be_cancelled_and_reused_before_saving() {
     std::fs::create_dir(directory.path().join("dest")).unwrap();
     let mut runtime = Runtime::new(directory.path().to_owned()).unwrap();
     runtime.start(None);
+    runtime.command(soda::interaction::Command::SetMode(
+        soda::interaction::EditMode::Insert,
+    ));
     runtime.input(UserInput::Paste("content".into()));
     runtime.command(Command::Close);
     runtime.input(UserInput::Key(KeyStroke::plain(Key::Char('s'))));

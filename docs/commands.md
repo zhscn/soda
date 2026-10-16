@@ -30,6 +30,8 @@ core 的 History 保存、组合和恢复修改。editor 的 InputHistory 只负
 
 `execute_at` 接收显式事件时间，用于确定性测试或宿主事件重放。普通 execute 使用控制器的单调时间。失败命令不更新分组策略。显式 Apply 使用调用方的 history_group，自动输入事件与显式组具有不同的历史键。
 
+显式 BeginUndoGroup/EndUndoGroup 可将一个交互操作中的连续修改合并。开始与结束分别携带用于 undo 和 redo 的选区，分组归属单个编辑会话。选择移动、保存和其他会话操作建立边界；失败事务不消耗分组状态。它与按输入时间自动组合的规则共享同一份文档历史。
+
 ## 搜索与替换
 
 SearchQuery 提供区分大小写的字面查询。SearchCursor 使用 memchr 匹配，逐 chunk 读取 rope，保留跨 chunk 的查询尾部，不请求全文字符串。cursor 返回非重叠的 UTF-8 字节范围，空查询没有匹配。

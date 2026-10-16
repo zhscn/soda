@@ -19,8 +19,12 @@ use std::{path::Path, time::Duration};
 pub enum Command {
     Edit(EditCommand),
     SetMode(super::EditMode),
-    Append,
-    Change,
+    Vim(super::vim::VimCommand),
+    Ex,
+    Named(String),
+    OpenPath(std::path::PathBuf),
+    SavePath(std::path::PathBuf),
+    WriteQuit,
     Clipboard(ClipboardAction),
     Goto,
     Page { backward: bool, extend: bool },
@@ -55,13 +59,30 @@ impl Layers {
             return Ok(super::InputResult::Blocked);
         }
         self.sequence.clear();
+        self.vim.clear();
         let mut response = Response {
             redraw: true,
             message: Message::Clear,
             ..Response::default()
         };
+        let opening_path = matches!(command, Command::OpenPath(_));
         match command {
             Command::SetMode(mode) => {
+                if matches!(mode, super::EditMode::Visual | super::EditMode::VisualLine) {
+                    if self.mode == mode {
+                        return Ok(super::InputResult::Handled(response));
+                    }
+                    return self.execute(
+                        Command::Vim(super::vim::VimCommand::Visual {
+                            linewise: mode == super::EditMode::VisualLine,
+                        }),
+                        app,
+                        time,
+                        file_root,
+                    );
+                }
+                let caret = self.vim.caret();
+                self.vim.reset();
                 self.mode = mode;
                 if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
                     let selection = app
@@ -74,44 +95,78 @@ impl Layers {
                         .selection();
                     response.events.push(Event::Edit {
                         view: view.id,
-                        command: EditCommand::SetSelection(selection),
+                        command: EditCommand::SetSelection(
+                            caret.map_or(selection, crate::core::Selection::caret),
+                        ),
                         time,
                     });
                 }
             }
-            Command::Append | Command::Change => {
-                self.mode = super::EditMode::Insert;
-                if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
-                    let selection = app
-                        .workspace()
-                        .editor(view.document_id)
-                        .unwrap()
-                        .model()
-                        .session(view.session_id)
-                        .unwrap()
-                        .selection();
-                    if matches!(command, Command::Append) {
-                        response.events.push(Event::Edit {
-                            view: view.id,
-                            command: EditCommand::Move {
-                                motion: crate::editor::Motion::Forward,
-                                extend: false,
-                            },
-                            time,
-                        });
-                    } else if !selection.range().is_empty() {
-                        response.events.push(Event::Edit {
-                            view: view.id,
-                            command: EditCommand::Delete {
-                                direction: crate::editor::Direction::Forward,
-                                smart: false,
-                            },
-                            time,
-                        });
-                    }
+            Command::Vim(super::vim::VimCommand::Search { backward }) => {
+                if let Some(view) = app.active_view() {
+                    let mut session = SearchSession::new(app, view)?;
+                    session.set_direction(backward, self.vim.last_search.clone());
+                    response = self.enter(
+                        Layer::Search {
+                            input: TextInput::default(),
+                            session,
+                        },
+                        app,
+                        time,
+                    )?;
                 }
             }
-
+            Command::Vim(command) => response = self.vim_execute(command, app, time),
+            Command::Ex => {
+                response = self.enter(Layer::Ex(super::ExSession::default()), app, time)?
+            }
+            Command::Named(name) => {
+                if let Some(handler) = self.handlers.get(&name) {
+                    let command = handler(app)?;
+                    if matches!(command, Command::Named(_)) {
+                        response.message = Message::Set(
+                            "Named commands cannot recursively dispatch named commands".into(),
+                        );
+                    } else {
+                        return self.execute(command, app, time, file_root);
+                    }
+                } else {
+                    response.message = Message::Set(format!("Unknown command: {name}"));
+                }
+            }
+            Command::OpenPath(path) | Command::SavePath(path) => {
+                let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+                match super::path::resolve_path(file_root, home.as_deref(), &path) {
+                    Ok(path) => {
+                        if opening_path {
+                            response.events.push(Event::Open(path));
+                        } else if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
+                            response.events.push(Event::Save {
+                                document: view.document_id,
+                                target: Some(path),
+                            });
+                        }
+                    }
+                    Err(error) => response.message = Message::Set(error),
+                }
+            }
+            Command::WriteQuit => {
+                if let Some(session) = ExitSession::write_quit(app, file_root.to_owned()) {
+                    response = self.enter(Layer::Exit(session), app, time)?;
+                    if let Some(Layer::Exit(session)) = &mut self.active
+                        && let super::session::Transition::Active(next) =
+                            session.handle(super::Input::Text(super::InputKey::Char('s')), app)
+                    {
+                        let mut next = next;
+                        let mut events = response.events;
+                        events.append(&mut next.events);
+                        next.events = events;
+                        response = next;
+                    }
+                } else {
+                    return self.execute(Command::Quit, app, time, file_root);
+                }
+            }
             Command::Help => {
                 response = self.enter(Layer::Help(HelpSession::default()), app, time)?
             }

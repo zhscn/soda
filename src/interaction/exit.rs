@@ -68,6 +68,22 @@ impl ExitSession {
             error: None,
         })
     }
+    pub(super) fn write_quit(app: &Application, root: PathBuf) -> Option<Self> {
+        let current = app.view(app.active_view()?)?.document_id;
+        if !app
+            .workspace()
+            .editor(current)?
+            .model()
+            .document()
+            .is_dirty()
+        {
+            return None;
+        }
+        let mut session = Self::new_with_root(app, ExitScope::Quit, root)?;
+        session.current = current;
+        session.name = document_name(app, current);
+        Some(session)
+    }
     pub fn document(&self) -> DocumentId {
         self.current
     }

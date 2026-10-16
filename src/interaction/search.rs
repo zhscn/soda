@@ -13,6 +13,9 @@ pub struct SearchSession {
     head: DocumentPosition,
     viewport: Viewport,
     query: SearchQuery,
+    backward: bool,
+    vim: bool,
+    fallback: Option<SearchQuery>,
     results: SearchResults,
 }
 #[derive(Default)]
@@ -22,6 +25,14 @@ pub struct SearchResults {
     pub current: Option<Range<usize>>,
 }
 impl SearchSession {
+    pub(super) fn set_direction(&mut self, backward: bool, fallback: Option<SearchQuery>) {
+        self.fallback = fallback;
+        self.backward = backward;
+        self.vim = true;
+    }
+    pub(super) fn vim_direction(&self) -> Option<bool> {
+        self.vim.then_some(self.backward)
+    }
     pub fn view(&self) -> ViewId {
         self.view
     }
@@ -63,6 +74,9 @@ impl SearchSession {
             head: document.position(ByteOffset(selection.head), head_association)?,
             viewport: view_state.viewport,
             query: SearchQuery::new(""),
+            backward: false,
+            vim: false,
+            fallback: None,
             results: SearchResults::default(),
         })
     }
@@ -105,7 +119,7 @@ impl SearchSession {
             self.results
                 .current
                 .as_ref()
-                .map(|r| if backward { r.start } else { r.end })
+                .map(|r| if backward || self.vim { r.start } else { r.end })
                 .unwrap_or(origin)
         } else {
             origin
@@ -120,10 +134,20 @@ impl SearchSession {
                 first = Some(range.clone());
             }
             if backward {
-                if range.end <= boundary {
+                if if self.vim {
+                    range.start < boundary
+                } else {
+                    range.end <= boundary
+                } {
                     chosen = Some(range.clone());
                 }
-            } else if chosen.is_none() && range.start >= boundary {
+            } else if chosen.is_none()
+                && if self.vim {
+                    range.start > boundary
+                } else {
+                    range.start >= boundary
+                }
+            {
                 chosen = Some(range.clone());
             }
             last = Some(range);
@@ -180,7 +204,16 @@ impl SearchSession {
 
 impl SearchSession {
     pub(super) fn presentation(&self, field: &super::TextInput) -> super::Presentation {
-        super::session::field_presentation(format!("Find [{}]: ", self.results().count), field)
+        let label = if self.vim {
+            if self.backward {
+                "?".into()
+            } else {
+                "/".into()
+            }
+        } else {
+            format!("Find [{}]: ", self.results().count)
+        };
+        super::session::field_presentation(label, field)
     }
     pub(super) fn cancel_response(
         &self,
@@ -231,6 +264,24 @@ impl SearchSession {
         };
         Ok(match input {
             Input::Cancel => Transition::finished(self.cancel_response(app, time)?),
+            Input::Confirm if self.vim && field.text().is_empty() => {
+                if let Some(query) = self.fallback.clone() {
+                    self.set_query(query.text());
+                    let mut response = self.preview_response(app, self.backward, false, time)?;
+                    response.events.push(Event::Edit {
+                        view: self.view(),
+                        command: Command::SetSearchQuery(query),
+                        time,
+                    });
+                    Transition::finished(response)
+                } else {
+                    Transition::finished(Response {
+                        message: super::Message::Set("No previous search".into()),
+                        redraw: true,
+                        ..Response::default()
+                    })
+                }
+            }
             Input::Confirm => Transition::finished(Response {
                 events: vec![Event::Edit {
                     view: self.view(),
@@ -246,7 +297,7 @@ impl SearchSession {
             input => match edit_field(field, input) {
                 Some(update) if update.text_changed => {
                     self.set_query(field.text());
-                    Transition::active(self.preview_response(app, false, false, time)?)
+                    Transition::active(self.preview_response(app, self.backward, false, time)?)
                 }
                 Some(update) if update.selection_changed => Transition::redraw(),
                 _ => Transition::Blocked,
@@ -269,9 +320,12 @@ impl SearchSession {
         if update.edit.as_ref().is_some_and(|edit| {
             edit.text_changed && edit.document_id == app.view(self.view()).unwrap().document_id
         }) {
-            return Ok(Transition::active(
-                self.preview_response(app, false, false, time)?,
-            ));
+            return Ok(Transition::active(self.preview_response(
+                app,
+                self.backward,
+                false,
+                time,
+            )?));
         }
         Ok(Transition::active(Response::default()))
     }

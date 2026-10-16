@@ -113,13 +113,22 @@ impl EditorModel {
         id: SessionId,
         selection: Selection,
     ) -> Result<(), EditError> {
-        let state = EditorState::from_snapshot(self.document.snapshot().clone(), selection)?;
-        self.sessions
-            .get_mut(&id)
-            .ok_or(EditError::UnknownSession)?
-            .state = state;
-        self.sessions.get_mut(&id).unwrap().goal_column = None;
+        self.set_selection_in_group(id, selection)?;
         self.document.break_group();
+        Ok(())
+    }
+    pub(super) fn set_selection_in_group(
+        &mut self,
+        id: SessionId,
+        selection: Selection,
+    ) -> Result<(), EditError> {
+        let state = EditorState::from_snapshot(self.document.snapshot().clone(), selection)?;
+        let session = self
+            .sessions
+            .get_mut(&id)
+            .ok_or(EditError::UnknownSession)?;
+        session.state = state;
+        session.goal_column = None;
         Ok(())
     }
     pub(super) fn install(&mut self, commit: &Commit) {

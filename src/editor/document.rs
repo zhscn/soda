@@ -109,6 +109,12 @@ impl Document {
         self.history.break_group();
         Ok(true)
     }
+    pub(super) fn set_group_start(&mut self, owner: SessionId, before: Selection) {
+        self.history.set_group_start(owner, before);
+    }
+    pub(super) fn finish_group(&mut self, owner: SessionId, after: Selection) {
+        self.history.finish_group(owner, after);
+    }
     pub(super) fn break_group(&mut self) {
         self.history.break_group();
     }

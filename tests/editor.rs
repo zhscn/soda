@@ -307,3 +307,30 @@ fn grouped_random_utf8_edits_restore_every_checkpoint() {
         assert_eq!(editor.state().snapshot().text(), expected);
     }
 }
+
+#[test]
+fn explicit_edit_groups_preserve_original_and_final_carets_across_failed_edits() {
+    let mut editor = soda::editor::Editor::new("", soda::editor::Language::PlainText);
+    editor
+        .execute(Command::BeginUndoGroup(Selection::caret(0)))
+        .unwrap();
+    editor.execute(Command::TypeChar('a')).unwrap();
+    assert!(
+        editor
+            .execute(Command::Apply(soda::core::Transaction::new(
+                editor.state().snapshot().version(),
+                vec![soda::core::Change::new(9..10, "x")]
+            )))
+            .is_err()
+    );
+    editor.execute(Command::TypeChar('b')).unwrap();
+    editor
+        .execute(Command::EndUndoGroup(Selection::caret(1)))
+        .unwrap();
+    editor.execute(Command::Undo).unwrap();
+    assert_eq!(editor.state().snapshot().text(), "");
+    assert_eq!(editor.state().selection(), Selection::caret(0));
+    editor.execute(Command::Redo).unwrap();
+    assert_eq!(editor.state().snapshot().text(), "ab");
+    assert_eq!(editor.state().selection(), Selection::caret(1));
+}

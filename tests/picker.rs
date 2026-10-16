@@ -45,7 +45,7 @@ fn packet(
     }
 }
 fn setup(root: &Path, app: &Application) -> (Layers, PickerTask) {
-    let mut layers = Layers::default();
+    let mut layers = insert_layers();
     let response = layers
         .start_picker(
             PickerSession::new(root.into(), PickerLimits::default()).unwrap(),
@@ -494,7 +494,7 @@ fn replacing_search_with_picker_restores_search_origin() {
     })
     .unwrap();
     let mut layers = {
-        let mut layers = Layers::default();
+        let mut layers = insert_layers();
         layers
             .enter(
                 Layer::Search {
@@ -709,4 +709,17 @@ fn task_failure_invalidates_catalog_identity_and_stale_snapshots() {
     assert!(session.selected_path().is_none());
     assert_ne!(session.key().source, task.key().source);
     assert!(!session.accept(packet(&task, 2, vec![row(1, "b", "/b")])));
+}
+
+fn insert_layers() -> Layers {
+    let mut layers = Layers::default();
+    layers
+        .execute(
+            soda::interaction::Command::SetMode(soda::interaction::EditMode::Insert),
+            &Application::default(),
+            Duration::ZERO,
+            std::path::Path::new("/"),
+        )
+        .unwrap();
+    layers
 }

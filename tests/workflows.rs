@@ -13,7 +13,7 @@ impl Editor {
     fn new(text: &str) -> Self {
         let mut editor = Self {
             app: Application::default(),
-            layers: Layers::default(),
+            layers: insert_layers(),
         };
         editor.event(Event::NewDocument(Language::PlainText));
         editor.command(Command::Edit(Edit::InsertText(text.into())));
@@ -45,18 +45,6 @@ impl Editor {
             .route_input(input, &self.app, Duration::ZERO, Path::new("/"))
             .unwrap();
         self.apply(result);
-    }
-    fn alt(&mut self, ch: char) {
-        self.input(UserInput::Key(KeyStroke {
-            alt: true,
-            ..KeyStroke::plain(Key::Char(ch))
-        }));
-    }
-    fn ctrl(&mut self, ch: char) {
-        self.input(UserInput::Key(KeyStroke {
-            control: true,
-            ..KeyStroke::plain(Key::Char(ch))
-        }));
     }
     fn apply(&mut self, result: InputResult) {
         if let InputResult::Handled(response) = result {
@@ -97,18 +85,20 @@ fn copy_cut_paste_cross_documents_preserve_unicode_and_undo_selection() {
     let mut editor = Editor::new("a中🦀z");
     let selection = Selection { anchor: 8, head: 1 };
     editor.select(selection);
-    editor.alt('w');
+    editor.command(Command::Clipboard(soda::application::ClipboardAction::Copy));
     assert_eq!(editor.app.clipboard(), "中🦀");
     assert_eq!(editor.selection(), selection);
     editor.command(Command::Clipboard(soda::application::ClipboardAction::Cut));
     assert_eq!(editor.text(), "az");
-    editor.ctrl('_');
+    editor.command(Command::Edit(Edit::Undo));
     assert_eq!(editor.text(), "a中🦀z");
     assert_eq!(editor.selection(), selection);
     editor.command(Command::New);
-    editor.ctrl('y');
+    editor.command(Command::Clipboard(
+        soda::application::ClipboardAction::Paste,
+    ));
     assert_eq!(editor.text(), "中🦀");
-    editor.ctrl('_');
+    editor.command(Command::Edit(Edit::Undo));
     assert!(editor.text().is_empty());
     assert_eq!(editor.app.clipboard(), "中🦀");
 }
@@ -120,27 +110,33 @@ fn whole_line_cut_preserves_crlf_and_empty_last_line_keeps_clipboard() {
     assert_eq!(editor.text(), "二\n");
     assert_eq!(editor.app.clipboard(), "one\r\n");
     editor.select(Selection::caret(editor.text().len()));
-    editor.alt('w');
+    editor.command(Command::Clipboard(soda::application::ClipboardAction::Copy));
     assert_eq!(editor.app.clipboard(), "one\r\n");
-    editor.ctrl('y');
+    editor.command(Command::Clipboard(
+        soda::application::ClipboardAction::Paste,
+    ));
     assert_eq!(editor.text(), "二\none\r\n");
 }
 #[test]
 fn internal_paste_replaces_selection_and_modal_shortcuts_are_blocked() {
     let mut editor = Editor::new("first second");
     editor.select(Selection { anchor: 0, head: 5 });
-    editor.alt('w');
+    editor.command(Command::Clipboard(soda::application::ClipboardAction::Copy));
     editor.select(Selection {
         anchor: 6,
         head: 12,
     });
-    editor.ctrl('y');
+    editor.command(Command::Clipboard(
+        soda::application::ClipboardAction::Paste,
+    ));
     assert_eq!(editor.text(), "first first");
-    editor.ctrl('_');
+    editor.command(Command::Edit(Edit::Undo));
     assert_eq!(editor.text(), "first second");
     editor.command(Command::Open);
     editor.command(Command::Clipboard(soda::application::ClipboardAction::Cut));
-    editor.ctrl('y');
+    editor.command(Command::Clipboard(
+        soda::application::ClipboardAction::Paste,
+    ));
     assert_eq!(editor.text(), "first second");
     assert_eq!(editor.app.clipboard(), "first");
 }
@@ -149,11 +145,11 @@ fn internal_paste_replaces_selection_and_modal_shortcuts_are_blocked() {
 fn copying_separates_typing_history_without_creating_an_undo_entry() {
     let mut editor = Editor::new("");
     editor.command(Command::Edit(Edit::TypeChar('a')));
-    editor.alt('w');
+    editor.command(Command::Clipboard(soda::application::ClipboardAction::Copy));
     editor.command(Command::Edit(Edit::TypeChar('b')));
-    editor.ctrl('_');
+    editor.command(Command::Edit(Edit::Undo));
     assert_eq!(editor.text(), "a");
-    editor.ctrl('_');
+    editor.command(Command::Edit(Edit::Undo));
     assert_eq!(editor.text(), "");
 }
 
@@ -176,14 +172,14 @@ fn word_navigation_and_deletion_cross_crlf_without_splitting_graphemes() {
         ..KeyStroke::plain(Key::Delete)
     }));
     assert_eq!(editor.text(), "e\u{301}\r\n\nbar");
-    editor.ctrl('_');
+    editor.command(Command::Edit(Edit::Undo));
     editor.select(Selection::caret(7));
     editor.input(UserInput::Key(KeyStroke {
         control: true,
         ..KeyStroke::plain(Key::Delete)
     }));
     assert_eq!(editor.text(), "e\u{301} foo");
-    editor.ctrl('_');
+    editor.command(Command::Edit(Edit::Undo));
     editor.select(Selection::caret(editor.text().len()));
     editor.input(UserInput::Key(KeyStroke {
         control: true,
@@ -194,7 +190,7 @@ fn word_navigation_and_deletion_cross_crlf_without_splitting_graphemes() {
 #[test]
 fn select_all_replacement_restores_directed_selection_on_undo() {
     let mut editor = Editor::new("中\r\n🦀");
-    editor.alt('a');
+    editor.command(Command::Edit(Edit::SelectAll));
     let selected = editor.selection();
     assert_eq!(
         selected,
@@ -204,7 +200,7 @@ fn select_all_replacement_restores_directed_selection_on_undo() {
         }
     );
     editor.input(UserInput::Paste("replacement".into()));
-    editor.ctrl('_');
+    editor.command(Command::Edit(Edit::Undo));
     assert_eq!(editor.text(), "中\r\n🦀");
     assert_eq!(editor.selection(), selected);
 }
@@ -213,16 +209,22 @@ fn page_navigation_uses_visible_rows_and_preserves_goal_column() {
     let mut editor = Editor::new("long line\nx\nlong line\nlong line\nlong line\nlong line");
     editor.select(Selection::caret(7));
     editor.layers.set_page_rows(3);
-    editor.input(UserInput::Key(KeyStroke::plain(Key::PageDown)));
+    editor.command(Command::Page {
+        backward: false,
+        extend: false,
+    });
     assert_eq!(editor.selection().head, "long line\nx\n".len() + 7);
-    editor.input(UserInput::Key(KeyStroke {
-        shift: true,
-        ..KeyStroke::plain(Key::PageUp)
-    }));
+    editor.command(Command::Page {
+        backward: true,
+        extend: true,
+    });
     assert_eq!(editor.selection().head, 7);
     assert_ne!(editor.selection().anchor, editor.selection().head);
     editor.layers.set_page_rows(0);
-    editor.input(UserInput::Key(KeyStroke::plain(Key::PageUp)));
+    editor.command(Command::Page {
+        backward: true,
+        extend: false,
+    });
     assert_eq!(editor.selection().head, 7);
 }
 #[test]
@@ -233,7 +235,10 @@ fn goto_validates_input_clamps_location_and_cancel_keeps_selection() {
     editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
     assert!(editor.layers.active().is_some());
     assert_eq!(editor.selection(), Selection::caret(0));
-    editor.alt('a');
+    editor.input(UserInput::Key(KeyStroke {
+        control: true,
+        ..KeyStroke::plain(Key::Char('u'))
+    }));
     editor.input(UserInput::Paste("2:4".into()));
     editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
     assert!(editor.layers.active().is_none());
@@ -257,7 +262,7 @@ fn goto_closes_when_external_focus_changes() {
 }
 
 fn replace_dialog(editor: &mut Editor, query: &str, replacement: &str) {
-    editor.alt('%');
+    editor.command(Command::Replace);
     editor.input(UserInput::Paste(query.into()));
     editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
     editor.input(UserInput::Paste(replacement.into()));
@@ -272,7 +277,7 @@ fn replace_current_can_choose_match_and_undo_as_one_edit() {
     editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
     assert_eq!(editor.text(), "foo 中 🦀");
     assert!(editor.layers.active().is_none());
-    editor.ctrl('_');
+    editor.command(Command::Edit(Edit::Undo));
     assert_eq!(editor.text(), "foo 中 foo");
     assert_eq!(
         editor.selection(),
@@ -291,7 +296,7 @@ fn replace_all_requires_explicit_confirmation_and_supports_deletion() {
         ..KeyStroke::plain(Key::Enter)
     }));
     assert_eq!(editor.text(), "  ");
-    editor.ctrl('_');
+    editor.command(Command::Edit(Edit::Undo));
     assert_eq!(editor.text(), "foo foo foo");
 }
 #[test]
@@ -299,7 +304,7 @@ fn cancelling_each_replace_phase_restores_origin_without_edits() {
     for phase in 0..3 {
         let mut editor = Editor::new("foo foo");
         editor.select(Selection::caret(4));
-        editor.alt('%');
+        editor.command(Command::Replace);
         editor.input(UserInput::Paste("foo".into()));
         if phase > 0 {
             editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
@@ -321,7 +326,7 @@ fn replacement_dialog_refreshes_match_after_other_view_edits() {
     editor.event(Event::AddView(document));
     let other = editor.app.active_view().unwrap();
     editor.event(Event::Focus(target));
-    editor.alt('%');
+    editor.command(Command::Replace);
     editor.input(UserInput::Paste("foo".into()));
     editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
     editor.event(Event::Edit {
@@ -367,7 +372,7 @@ fn help_scrolls_and_returns_without_editing_or_moving_selection() {
 #[test]
 fn f4_replaces_all_only_in_replacement_review() {
     let mut editor = Editor::new("foo foo");
-    editor.ctrl('s');
+    editor.command(Command::Search);
     editor.input(UserInput::Key(KeyStroke::plain(Key::F(4))));
     assert!(matches!(
         editor.layers.active(),
@@ -392,9 +397,9 @@ fn tab_and_backtab_indent_selected_lines_without_replacing_text() {
         ..KeyStroke::plain(Key::BackTab)
     }));
     assert_eq!(editor.text(), "a\r\nb\r\nc");
-    editor.ctrl('_');
+    editor.command(Command::Edit(Edit::Undo));
     assert_eq!(editor.text(), "    a\r\n    b\r\nc");
-    editor.ctrl('_');
+    editor.command(Command::Edit(Edit::Undo));
     assert_eq!(editor.text(), "a\r\nb\r\nc");
     assert_eq!(editor.selection(), original);
 }
@@ -410,7 +415,7 @@ fn document_input_and_deletion_keep_carets_outside_merged_graphemes() {
             Edit::TypeChar('\u{200d}')
         }));
         assert_eq!(editor.selection(), Selection::caret(11));
-        editor.ctrl('_');
+        editor.command(Command::Edit(Edit::Undo));
         assert_eq!(editor.selection(), Selection::caret(4));
     }
     let mut editor = Editor::new("🇨x🇳");
@@ -427,4 +432,17 @@ fn document_input_and_deletion_keep_carets_outside_merged_graphemes() {
         soda::editor::Direction::Backward,
     )));
     assert_eq!(editor.text(), " foo");
+}
+
+fn insert_layers() -> Layers {
+    let mut layers = Layers::default();
+    layers
+        .execute(
+            soda::interaction::Command::SetMode(soda::interaction::EditMode::Insert),
+            &Application::default(),
+            Duration::ZERO,
+            std::path::Path::new("/"),
+        )
+        .unwrap();
+    layers
 }

@@ -4,7 +4,10 @@
 mod bindings;
 mod buffer;
 pub use buffer::BufferSession;
+mod ex;
+pub use ex::ExSession;
 mod commands;
+pub mod vim;
 pub use commands::Command;
 mod exit;
 pub use exit::{ExitScope, ExitSession};
@@ -26,13 +29,16 @@ pub use routing::{Key, KeyStroke, UserInput};
 mod search;
 pub use search::{SearchResults, SearchSession};
 mod sequence;
+pub use sequence::{BindingError, Keymap};
 mod session;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum EditMode {
-    #[default]
     Insert,
+    #[default]
     Normal,
+    Visual,
+    VisualLine,
 }
 use crate::{
     application::{Application, Event, Operation, Update},
@@ -41,6 +47,7 @@ use crate::{
 use session::Transition;
 use std::time::Duration;
 
+#[derive(Clone, Debug)]
 pub enum Input {
     Help,
     Text(InputKey),
@@ -70,17 +77,20 @@ pub enum Message {
     Clear,
     Set(String),
 }
-/// Events execute in order after session reduction. Runtime stops the batch at
-/// its first failure and requests quit only after its events succeed.
+/// Events, then deferred commands execute after session reduction. Runtime
+/// stops at the first failure and requests quit only after the batch succeeds.
 #[derive(Default)]
 pub struct Response {
     pub events: Vec<Event>,
+    pub commands: Vec<Command>,
     pub message: Message,
     pub effects: Vec<PickerEffect>,
     pub path_requests: Vec<path::PathRequest>,
     pub quit: bool,
     pub redraw: bool,
 }
+pub type CommandHandler = fn(&Application) -> Result<Command, EditError>;
+
 /// Owns editing input state and one modal layer. Read-only access keeps transitions inside
 /// this manager; callers must execute responses and observe resulting updates.
 ///
@@ -93,17 +103,50 @@ pub struct Layers {
     active: Option<Layer>,
     mode: EditMode,
     sequence: sequence::Sequence,
+    keymap: Keymap,
+    vim: vim::State,
+    handlers: std::collections::BTreeMap<String, CommandHandler>,
     page_rows: usize,
     help_rows: usize,
     picker_rows: usize,
 }
 impl Layers {
+    pub fn bind(
+        &mut self,
+        mode: EditMode,
+        keys: &[KeyStroke],
+        command: Command,
+    ) -> Result<(), BindingError> {
+        self.keymap.bind(mode, keys, command)?;
+        self.sequence.clear();
+        self.vim.clear();
+        Ok(())
+    }
+    pub fn unbind_input(&mut self, key: KeyStroke) -> Result<(), BindingError> {
+        self.keymap.unbind_input(key)
+    }
+    pub fn bind_input(&mut self, key: KeyStroke, input: Input) -> Result<(), BindingError> {
+        self.keymap.bind_input(key, input)
+    }
+    pub fn unbind(&mut self, mode: EditMode, keys: &[KeyStroke]) -> Result<(), BindingError> {
+        self.sequence.clear();
+        self.vim.clear();
+        self.keymap.unbind(mode, keys)
+    }
+    pub fn register_command(&mut self, name: impl Into<String>, handler: CommandHandler) {
+        self.handlers.insert(name.into(), handler);
+    }
+    pub fn editor_caret(&self) -> Option<usize> {
+        self.vim.caret()
+    }
     pub fn edit_mode(&self) -> EditMode {
         self.mode
     }
     pub fn input_hint(&self) -> String {
         if self.sequence.active() {
             self.sequence.hint()
+        } else if self.vim.active() {
+            self.vim.hint()
         } else {
             format!("{:?}  {}", self.mode, help::HINT)
         }
@@ -118,7 +161,9 @@ impl Layers {
         time: Duration,
     ) -> Result<Response, EditError> {
         self.sequence.clear();
+        self.vim.clear();
         let mut response = self.close(app, time)?;
+        response.events.extend(self.end_insert_group(app, time));
         if let Layer::Picker(session) = &layer {
             response.effects.push(PickerEffect::Run(session.task()));
         }
@@ -153,6 +198,16 @@ impl Layers {
         app: &Application,
         time: Duration,
     ) -> Result<InputResult, EditError> {
+        if matches!(input, Input::Confirm)
+            && let Some(Layer::Search { session, .. }) = &self.active
+        {
+            if let Some(backward) = session.vim_direction() {
+                self.vim.search_backward = backward;
+            }
+            if session.query().is_valid() {
+                self.vim.last_search = Some(session.query().clone());
+            }
+        }
         let Some(layer) = &mut self.active else {
             return Ok(InputResult::Pass);
         };
@@ -168,14 +223,68 @@ impl Layers {
         update: &Update,
         time: Duration,
     ) -> Result<Response, EditError> {
-        if update.active_changed {
+        let group_end = if update.active_changed {
+            self.end_insert_group(app, time)
+        } else {
+            vec![]
+        };
+        let active_document = app
+            .active_view()
+            .and_then(|id| app.view(id))
+            .map(|view| view.document_id);
+        if update.active_changed
+            || update
+                .edit
+                .as_ref()
+                .is_some_and(|edit| edit.text_changed && Some(edit.document_id) == active_document)
+        {
             self.sequence.clear();
+            self.vim.clear();
+            if update.active_changed || matches!(self.mode, EditMode::Visual | EditMode::VisualLine)
+            {
+                self.vim.reset();
+                if matches!(self.mode, EditMode::Visual | EditMode::VisualLine) {
+                    self.mode = EditMode::Normal;
+                }
+            }
+        }
+        if matches!(self.mode, EditMode::Visual | EditMode::VisualLine)
+            && update
+                .edit
+                .as_ref()
+                .is_some_and(|edit| edit.selection_changed)
+            && !self.vim_visual_valid(app)
+        {
+            self.mode = EditMode::Normal;
+            self.vim.reset();
         }
         let Some(layer) = &mut self.active else {
-            return Ok(Response::default());
+            let mut response = self.vim_normalize(app, time);
+            response.events.extend(group_end);
+            return Ok(response);
         };
         let transition = layer.observe(app, update, time)?;
-        Ok(self.transition(transition).unwrap_or_default())
+        let mut response = self.transition(transition).unwrap_or_default();
+        response.events.extend(group_end);
+        Ok(response)
+    }
+    fn end_insert_group(&mut self, app: &Application, time: Duration) -> Vec<Event> {
+        let Some(view) = self.vim.insert_view.take().and_then(|id| app.view(id)) else {
+            return vec![];
+        };
+        let selection = app
+            .workspace()
+            .editor(view.document_id)
+            .unwrap()
+            .model()
+            .session(view.session_id)
+            .unwrap()
+            .selection();
+        vec![Event::Edit {
+            view: view.id,
+            command: crate::editor::Command::EndUndoGroup(selection),
+            time,
+        }]
     }
     pub fn application_failed(&mut self, operation: Operation, error: String) -> Response {
         match &mut self.active {

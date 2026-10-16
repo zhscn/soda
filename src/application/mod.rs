@@ -197,6 +197,7 @@ pub struct Application {
     open_revision: u64,
     pending_opens: BTreeMap<OpenId, OpenIntent>,
     clipboard: String,
+    clipboard_linewise: bool,
 }
 impl Application {
     pub fn new(service: FileService) -> Self {

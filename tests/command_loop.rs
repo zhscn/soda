@@ -12,7 +12,7 @@ fn setup() -> (Application, Layers) {
     let mut app = Application::default();
     app.dispatch(Event::NewDocument(Language::PlainText))
         .unwrap();
-    (app, Layers::default())
+    (app, configured_layers())
 }
 fn handled(result: InputResult) -> Response {
     let InputResult::Handled(response) = result else {
@@ -260,7 +260,7 @@ fn releases_and_unsupported_modifiers_never_edit_or_submit() {
 #[test]
 fn commands_with_no_active_view_are_safe_and_new_document_recovers() {
     let app = Application::default();
-    let mut layers = Layers::default();
+    let mut layers = configured_layers();
     for command in [
         Command::Close,
         Command::NextView,
@@ -299,4 +299,50 @@ fn document_paste_preserves_status_and_is_one_undoable_command() {
     assert!(matches!(response.message, Message::Clear));
     apply(&mut app, &mut layers, response);
     assert!(text(&app).is_empty());
+}
+
+fn configured_layers() -> Layers {
+    let mut layers = Layers::default();
+    layers
+        .execute(
+            Command::SetMode(soda::interaction::EditMode::Insert),
+            &Application::default(),
+            Duration::ZERO,
+            Path::new("/"),
+        )
+        .unwrap();
+    let prefix = KeyStroke {
+        control: true,
+        ..KeyStroke::plain(Key::Char('x'))
+    };
+    for (ch, control, command) in [
+        ('f', true, Command::Open),
+        ('s', true, Command::Save { choose_path: false }),
+        ('n', false, Command::New),
+    ] {
+        layers
+            .bind(
+                soda::interaction::EditMode::Insert,
+                &[
+                    prefix,
+                    KeyStroke {
+                        control,
+                        ..KeyStroke::plain(Key::Char(ch))
+                    },
+                ],
+                command,
+            )
+            .unwrap();
+    }
+    layers
+        .bind(
+            soda::interaction::EditMode::Insert,
+            &[KeyStroke {
+                control: true,
+                ..KeyStroke::plain(Key::Char('_'))
+            }],
+            Command::Edit(EditCommand::Undo),
+        )
+        .unwrap();
+    layers
 }

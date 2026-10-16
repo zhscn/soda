@@ -7,6 +7,7 @@ use std::path::PathBuf;
 fn runtime() -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
     r.start(None);
+    r.command(Command::SetMode(soda::interaction::EditMode::Insert));
     r
 }
 fn key(r: &mut Runtime, code: Key) {
@@ -23,11 +24,10 @@ fn switch_reuses_a_view_without_preview_and_cancel_leaves_focus() {
     assert!(matches!(r.layer(), Some(Layer::Buffer(s)) if s.rows().len() == 2));
     key(&mut r, Key::Esc);
     assert_eq!(r.app().active_view(), Some(second));
-    r.input(UserInput::Key(KeyStroke {
-        control: true,
-        ..KeyStroke::plain(Key::Char('x'))
-    }));
+    r.command(Command::SetMode(soda::interaction::EditMode::Normal));
+    key(&mut r, Key::Char(':'));
     key(&mut r, Key::Char('b'));
+    key(&mut r, Key::Enter);
     key(&mut r, Key::Enter);
     assert_eq!(r.app().active_view(), Some(first));
     assert_eq!(r.app().views().count(), 2);
@@ -70,8 +70,8 @@ fn filtering_no_matches_and_external_document_changes_are_safe() {
     key(&mut r, Key::Enter);
     assert!(r.layer().is_some());
     r.input(UserInput::Key(KeyStroke {
-        alt: true,
-        ..KeyStroke::plain(Key::Char('a'))
+        control: true,
+        ..KeyStroke::plain(Key::Char('u'))
     }));
     r.input(UserInput::Paste("UNTITLED".into()));
     assert!(matches!(r.layer(), Some(Layer::Buffer(s)) if s.rows().len() == 2));

@@ -67,10 +67,11 @@ impl Layers {
         file_root: &Path,
     ) -> Result<InputResult, EditError> {
         if matches!(input, UserInput::FocusLost) {
-            if !self.sequence.active() {
+            if !self.sequence.active() && !self.vim.active() {
                 return Ok(InputResult::Blocked);
             }
             self.sequence.clear();
+            self.vim.clear();
             return Ok(InputResult::Handled(super::Response {
                 redraw: true,
                 message: Message::Clear,
@@ -82,7 +83,10 @@ impl Layers {
         }
         if self.active().is_some() {
             let input = match input {
-                UserInput::Key(key) => bindings::modal_key(key),
+                UserInput::Key(key) => self
+                    .keymap
+                    .input(key)
+                    .unwrap_or_else(|| bindings::modal_key(key)),
                 UserInput::Paste(text) => Input::Paste(text),
                 UserInput::Unrecognized | UserInput::FocusLost => Input::Unrecognized,
             };
@@ -93,43 +97,100 @@ impl Layers {
                 && !key.shift
                 && !key.unsupported_modifiers
                 && ((key.code == Key::Esc && !key.control)
-                    || (key.code == Key::Char('g') && key.control));
-            if cancel && self.sequence.active() {
+                    || (key.control && matches!(key.code, Key::Char('[' | 'c'))));
+            if cancel && (self.sequence.active() || self.vim.active()) {
+                let exit_visual = self.vim.active()
+                    && matches!(
+                        self.mode,
+                        super::EditMode::Visual | super::EditMode::VisualLine
+                    );
                 self.sequence.clear();
+                self.vim.clear();
+                if exit_visual {
+                    return self.execute(
+                        Command::Vim(super::vim::VimCommand::Insert(super::vim::Insert::Leave)),
+                        app,
+                        time,
+                        file_root,
+                    );
+                }
                 return Ok(InputResult::Handled(super::Response {
                     redraw: true,
                     message: Message::Clear,
                     ..super::Response::default()
                 }));
             }
-            if self.sequence.active()
-                || super::sequence::Sequence::starts(*key, self.mode == super::EditMode::Normal)
+            let mapped = if !self.vim.active() || self.sequence.active() {
+                self.sequence.push(*key, self.mode, &self.keymap)
+            } else {
+                super::sequence::Resolution::Pass
+            };
+            match mapped {
+                super::sequence::Resolution::Complete(command) => {
+                    self.vim.clear();
+                    return self.execute(command, app, time, file_root);
+                }
+                super::sequence::Resolution::Prefix => {
+                    return Ok(InputResult::Handled(super::Response {
+                        redraw: true,
+                        message: Message::Clear,
+                        ..super::Response::default()
+                    }));
+                }
+                super::sequence::Resolution::Invalid => {
+                    return Ok(InputResult::Handled(super::Response {
+                        redraw: true,
+                        message: Message::Set("Undefined key sequence".into()),
+                        ..super::Response::default()
+                    }));
+                }
+                super::sequence::Resolution::Pass => {}
+            }
+            let vim_key = match key.code {
+                Key::Char(ch) => Some(ch),
+                Key::Left => Some(if key.shift { 'b' } else { 'h' }),
+                Key::Right => Some(if key.shift { 'w' } else { 'l' }),
+                Key::Up if !key.shift => Some('k'),
+                Key::Down if !key.shift => Some('j'),
+                Key::Home => Some('0'),
+                Key::End => Some('$'),
+                _ => None,
+            };
+            if self.mode != super::EditMode::Insert
+                && !key.alt
+                && !key.control
+                && !key.unsupported_modifiers
+                && let Some(ch) = vim_key
             {
-                return match self.sequence.push(*key) {
-                    super::sequence::Resolution::Complete(command) => {
-                        self.execute(command, app, time, file_root)
-                    }
-                    super::sequence::Resolution::Prefix => {
-                        Ok(InputResult::Handled(super::Response {
-                            redraw: true,
-                            message: Message::Clear,
-                            ..super::Response::default()
-                        }))
-                    }
-                    super::sequence::Resolution::Invalid => {
-                        Ok(InputResult::Handled(super::Response {
-                            redraw: true,
-                            message: Message::Set("Undefined key sequence".into()),
-                            ..super::Response::default()
-                        }))
-                    }
+                return match self.vim.key(
+                    ch,
+                    matches!(
+                        self.mode,
+                        super::EditMode::Visual | super::EditMode::VisualLine
+                    ),
+                ) {
+                    Ok(Some(command)) => self.execute(command, app, time, file_root),
+                    Ok(None) => Ok(InputResult::Handled(super::Response {
+                        redraw: true,
+                        message: Message::Clear,
+                        ..super::Response::default()
+                    })),
+                    Err(error) => Ok(InputResult::Handled(super::Response {
+                        redraw: true,
+                        message: Message::Set(format!("{error}: {ch}")),
+                        ..super::Response::default()
+                    })),
                 };
             }
-        } else if self.sequence.active() {
+            if self.vim.active() && !cancel {
+                self.vim.clear();
+                return Ok(InputResult::Blocked);
+            }
+        } else if self.sequence.active() || self.vim.active() {
             self.sequence.clear();
+            self.vim.clear();
             return Ok(InputResult::Handled(super::Response {
                 redraw: true,
-                message: Message::Clear,
                 ..super::Response::default()
             }));
         }

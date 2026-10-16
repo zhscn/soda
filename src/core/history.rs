@@ -34,6 +34,21 @@ pub(crate) struct HistoryRestore<Owner> {
     pub owner: Owner,
 }
 impl<Owner: Copy + Eq> History<Owner> {
+    pub fn set_group_start(&mut self, owner: Owner, before: Selection) {
+        if self.group.is_some_and(|(id, _, _)| id == owner)
+            && let Some(entry) = self.undo.last_mut()
+        {
+            entry.before = before;
+        }
+    }
+    pub fn finish_group(&mut self, owner: Owner, after: Selection) {
+        if self.group.is_some_and(|(id, _, _)| id == owner)
+            && let Some(entry) = self.undo.last_mut()
+        {
+            entry.after = after;
+        }
+        self.break_group();
+    }
     pub fn break_group(&mut self) {
         self.group = None;
     }

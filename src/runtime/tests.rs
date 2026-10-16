@@ -21,6 +21,7 @@ fn key_with(code: KeyCode, modifiers: u8) -> KeyStroke {
 fn host() -> Runtime {
     let mut runtime = Runtime::new(PathBuf::from("/")).unwrap();
     runtime.start(None);
+    runtime.command(Action::SetMode(crate::interaction::EditMode::Insert));
     runtime
 }
 
@@ -149,10 +150,7 @@ fn search_input_is_modal_and_cancel_restores_selection() {
             .unwrap()
             .selection()
     };
-    host.input(TerminalEvent::Key(key_with(
-        KeyCode::Char('s'),
-        KeyModifiers::CONTROL,
-    )));
+    host.command(Action::Search);
     host.input(TerminalEvent::Paste("one".into()));
     assert_eq!(state(&host), crate::core::Selection { anchor: 0, head: 3 });
     host.input(key(KeyCode::F(3)));
@@ -163,10 +161,7 @@ fn search_input_is_modal_and_cancel_restores_selection() {
             head: 11
         }
     );
-    host.input(TerminalEvent::Key(key_with(
-        KeyCode::Char('_'),
-        KeyModifiers::CONTROL,
-    )));
+    host.command(Action::Edit(Command::Undo));
     assert_eq!(
         state(&host),
         crate::core::Selection {
@@ -188,7 +183,10 @@ fn search_confirmation_repeats_in_editor_and_paste_replaces_match() {
     host.command(Action::Search);
     host.input(TerminalEvent::Paste("one".into()));
     host.input(key(KeyCode::Enter));
-    host.input(key(KeyCode::F(3)));
+    host.command(Action::Edit(Command::Find {
+        backward: false,
+        wrap: true,
+    }));
     host.input(TerminalEvent::Paste("中".into()));
     let view = host.app.view(host.app.active_view().unwrap()).unwrap();
     assert_eq!(

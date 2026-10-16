@@ -104,14 +104,7 @@ impl PathInput {
         true
     }
     fn resolve(&self, text: &str) -> Result<PathBuf, String> {
-        if text == "~" || text.starts_with("~/") {
-            return self
-                .home
-                .as_ref()
-                .map(|home| home.join(text.strip_prefix("~/").unwrap_or("")))
-                .ok_or_else(|| "Home directory is unavailable".into());
-        }
-        Ok(self.base.join(text))
+        resolve_path(&self.base, self.home.as_deref(), std::path::Path::new(text))
     }
     fn request(&mut self) -> Response {
         self.invalidate();
@@ -321,3 +314,17 @@ fn candidate_rows(entries: Vec<DirectoryEntry>) -> Vec<MatchedCandidate<PathEntr
 
 #[cfg(test)]
 mod tests;
+
+pub(crate) fn resolve_path(
+    base: &std::path::Path,
+    home: Option<&std::path::Path>,
+    path: &std::path::Path,
+) -> Result<PathBuf, String> {
+    if let Ok(suffix) = path.strip_prefix("~") {
+        return home
+            .filter(|home| home.is_absolute())
+            .map(|home| home.join(suffix))
+            .ok_or_else(|| "Home directory is unavailable".into());
+    }
+    Ok(base.join(path))
+}

@@ -18,7 +18,7 @@ impl Driver {
     fn new() -> Self {
         let mut driver = Self {
             app: Application::default(),
-            layers: Layers::default(),
+            layers: insert_layers(),
             effects: vec![],
             quit: false,
             error: String::new(),
@@ -389,4 +389,17 @@ fn waiting_session_does_not_adopt_a_later_save_for_the_same_document() {
     driver.finish_save();
     assert!(driver.app.workspace().editor(document).is_some());
     assert!(driver.layers.active().is_some());
+}
+
+fn insert_layers() -> Layers {
+    let mut layers = Layers::default();
+    layers
+        .execute(
+            soda::interaction::Command::SetMode(soda::interaction::EditMode::Insert),
+            &Application::default(),
+            Duration::ZERO,
+            std::path::Path::new("/"),
+        )
+        .unwrap();
+    layers
 }
