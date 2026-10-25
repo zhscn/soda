@@ -6,6 +6,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct DocumentId(u64);
+impl DocumentId {
+    /// Stable number for display, such as naming untitled documents.
+    pub fn number(self) -> u64 {
+        self.0
+    }
+}
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct SessionId(u64);
 impl SessionId {

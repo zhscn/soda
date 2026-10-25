@@ -98,27 +98,7 @@ fn draw(runtime: &Runtime, width: u16, height: u16) -> io::Result<()> {
         }
         queue!(output, Clear(ClearType::UntilNewLine))?;
     }
-    if let Some(Prompt::Picker(session)) = runtime.layer() {
-        draw_candidates(
-            &mut output,
-            &session.results().rows,
-            session.list(),
-            width,
-            height,
-            list_rows,
-        )?;
-    }
-    if let Some(Prompt::Buffer(session)) = runtime.layer() {
-        draw_candidates(
-            &mut output,
-            session.rows(),
-            session.list(),
-            width,
-            height,
-            list_rows,
-        )?;
-    }
-    if let Some(Prompt::Palette(session)) = runtime.layer() {
+    if let Some(Prompt::CommandLine(session)) = runtime.layer() {
         draw_candidates(
             &mut output,
             session.rows(),
@@ -129,7 +109,6 @@ fn draw(runtime: &Runtime, width: u16, height: u16) -> io::Result<()> {
         )?;
     }
     let path = match runtime.layer() {
-        Some(Prompt::Open(field) | Prompt::Save(_, field)) => Some(field),
         Some(Prompt::Exit(session)) => session.path_input(),
         _ => None,
     };

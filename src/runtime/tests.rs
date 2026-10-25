@@ -29,18 +29,16 @@ fn key(code: KeyCode) -> TerminalEvent {
     TerminalEvent::Key(key_with(code, KeyModifiers::NONE))
 }
 #[test]
-fn path_prompt_owns_input_and_stays_bound_to_original_document() {
+fn command_line_owns_input_and_closes_when_focus_moves() {
     let mut host = host();
     let first = host.app.active_view().unwrap();
     let document = host.app.view(first).unwrap().document_id;
     host.command(Action::Save { choose_path: true });
     host.input(TerminalEvent::Paste("目录/file.txt".into()));
-    host.dispatch(Event::NewDocument(Language::PlainText));
-    let Some(Prompt::Save(target, field)) = host.layers.active() else {
+    let Some(Prompt::CommandLine(line)) = host.layers.active() else {
         panic!()
     };
-    assert_eq!(*target, document);
-    assert_eq!(field.text(), "目录/file.txt");
+    assert_eq!(line.input().text(), "saveas 目录/file.txt");
     assert!(
         host.app
             .workspace()
@@ -50,7 +48,9 @@ fn path_prompt_owns_input_and_stays_bound_to_original_document() {
             .snapshot()
             .is_empty()
     );
-    host.input(key(KeyCode::Esc));
+    // Commands act on the view active when they run, so a focus change
+    // closes the command line instead of retargeting it.
+    host.dispatch(Event::NewDocument(Language::PlainText));
     assert!(host.layers.active().is_none());
 }
 #[test]
@@ -203,7 +203,7 @@ fn search_confirmation_repeats_in_editor_and_paste_replaces_match() {
 #[test]
 fn prompt_selection_cursor_and_modifier_events_have_distinct_effects() {
     let mut host = host();
-    host.command(Action::Open);
+    host.command(Action::Ex("open ".into()));
     host.input(TerminalEvent::Paste("路径/file".into()));
     host.dirty = false;
     host.input(TerminalEvent::Key(key_with(
@@ -217,15 +217,16 @@ fn prompt_selection_cursor_and_modifier_events_have_distinct_effects() {
         KeyModifiers::SHIFT,
     )));
     assert!(host.dirty);
-    let Some(Prompt::Open(field)) = host.layers.active() else {
+    let Some(Prompt::CommandLine(line)) = host.layers.active() else {
         panic!()
     };
+    let field = line.input();
     assert_eq!(&field.text()[field.selection().range()], "e");
     host.input(TerminalEvent::Paste("X".into()));
-    let Some(Prompt::Open(field)) = host.layers.active() else {
+    let Some(Prompt::CommandLine(line)) = host.layers.active() else {
         panic!()
     };
-    assert_eq!(field.text(), "路径/filX");
+    assert_eq!(line.input().text(), "open 路径/filX");
     host.dirty = false;
     let mut release = key_with(KeyCode::Char('a'), KeyModifiers::NONE);
     release.release = true;

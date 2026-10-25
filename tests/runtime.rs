@@ -97,22 +97,27 @@ fn path_completion_opens_existing_files_and_saves_new_names() {
     runtime.command(soda::interaction::Command::SetMode(
         soda::interaction::EditMode::Insert,
     ));
-    runtime.command(Command::Open);
+    runtime.command(Command::Ex("open ".into()));
     runtime.input(UserInput::Paste("sr".into()));
+    let rows = |r: &Runtime| match r.layer() {
+        Some(Layer::CommandLine(line)) => line
+            .rows()
+            .iter()
+            .map(|row| row.candidate.label.clone())
+            .collect::<Vec<_>>(),
+        _ => vec![],
+    };
+    wait(&mut runtime, |r| rows(r) == ["src/"]);
     runtime.input(UserInput::Key(KeyStroke::plain(Key::Tab)));
-    wait(
-        &mut runtime,
-        |r| matches!(r.layer(), Some(Layer::Open(f)) if !f.rows().is_empty()),
-    );
-    runtime.input(UserInput::Key(KeyStroke::plain(Key::Tab)));
-    wait(
-        &mut runtime,
-        |r| matches!(r.layer(), Some(Layer::Open(f)) if f.rows().iter().any(|row| row.candidate.label == "main.cpp")),
-    );
+    wait(&mut runtime, |r| {
+        rows(r).iter().any(|row| row == "main.cpp")
+    });
     // Parent is first; selecting the file does not modify the input until Tab.
     runtime.input(UserInput::Key(KeyStroke::plain(Key::Down)));
     runtime.input(UserInput::Key(KeyStroke::plain(Key::Tab)));
-    assert!(matches!(runtime.layer(), Some(Layer::Open(f)) if f.text() == path.to_str().unwrap()));
+    assert!(
+        matches!(runtime.layer(), Some(Layer::CommandLine(l)) if l.input().text() == "open src/main.cpp")
+    );
     runtime.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
     wait(&mut runtime, |r| {
         r.app().views().any(|v| {
@@ -120,12 +125,18 @@ fn path_completion_opens_existing_files_and_saves_new_names() {
         })
     });
     runtime.command(Command::Save { choose_path: true });
+    assert!(
+        matches!(runtime.layer(), Some(Layer::CommandLine(l)) if l.input().text() == "saveas src/main.cpp")
+    );
     let target = directory.path().join("new.cpp");
     runtime.input(UserInput::Key(KeyStroke {
         control: true,
         ..KeyStroke::plain(Key::Char('u'))
     }));
-    runtime.input(UserInput::Paste(target.to_str().unwrap().into()));
+    runtime.input(UserInput::Paste(format!(
+        "saveas {}",
+        target.to_str().unwrap()
+    )));
     runtime.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
     wait(&mut runtime, |_| target.exists());
     assert_eq!(std::fs::read_to_string(target).unwrap(), "int main() {}\n");

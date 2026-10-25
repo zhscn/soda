@@ -143,21 +143,24 @@ impl Workspace {
         self.collect_events();
         let path = self.service.resolve_path(path)?;
         match self.open(&path) {
-            Ok(id) => Ok(id),
             Err(FileError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {
-                let configuration = self.service.configuration(&path)?;
-                let editor = Editor::new("", FileService::language(&configuration));
-                Ok(self.insert(
-                    editor,
-                    FileState {
-                        path: Some(path),
-                        configuration,
-                        ..Default::default()
-                    },
-                ))
+                self.create_named(path)
             }
-            Err(error) => Err(error),
+            result => result,
         }
+    }
+    /// Registers an empty, unsaved document bound to a path not on disk yet.
+    fn create_named(&mut self, path: PathBuf) -> Result<DocumentId, FileError> {
+        let configuration = self.service.configuration(&path)?;
+        let editor = Editor::new("", FileService::language(&configuration));
+        Ok(self.insert(
+            editor,
+            FileState {
+                path: Some(path),
+                configuration,
+                ..Default::default()
+            },
+        ))
     }
     /// Explicit disk reload. Local edits require discard=true; history retains
     /// the replaced contents as one undo unit and document identity is stable.
@@ -280,7 +283,20 @@ impl Workspace {
             return Err(FileError::StaleCompletion);
         }
         self.open_requests.remove(&completion.id);
-        let loaded = completion.result.take().unwrap()?;
+        // A missing file opens as a named document created on first save.
+        let loaded = match completion.result.take().unwrap() {
+            Err(FileError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {
+                if self
+                    .pending
+                    .values()
+                    .any(|pending| pending.path == completion.path)
+                {
+                    return Err(FileError::PathInUse(completion.path.clone()));
+                }
+                return self.create_named(completion.path.clone());
+            }
+            result => result?,
+        };
         if let Some(id) = self.paths.get(&loaded.path) {
             return Ok(*id);
         }

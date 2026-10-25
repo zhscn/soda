@@ -36,6 +36,10 @@ impl CandidateListState {
     pub fn selected(&self) -> Option<CandidateKey> {
         self.selected
     }
+    /// Whether the selection comes from explicit navigation, not a default.
+    pub fn user_selected(&self) -> bool {
+        self.user_selected
+    }
     pub fn first_visible(&self) -> usize {
         self.first_visible
     }

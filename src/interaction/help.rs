@@ -51,11 +51,8 @@ pub fn text(keymap: &Keymap, registry: &Registry) -> String {
     }
     out.push_str("\nCommands (: or <space>:)\n");
     for info in registry.commands() {
-        let name = if info.args.is_empty() {
-            info.name
-        } else {
-            format!("{} {}", info.name, info.args)
-        };
+        let name = format!("{} {}", info.name, info.synopsis());
+        let name = name.trim_end();
         out.push_str(&format!("  {name:<38} {}\n", info.doc));
     }
     out.push('\n');

@@ -83,7 +83,7 @@ fn default_mode_is_normal_and_ex_prompt_dispatches_builtin_commands() {
     keys(&mut r, ":b<CR>");
     assert!(matches!(
         r.layer(),
-        Some(soda::interaction::Layer::Buffer(_))
+        Some(soda::interaction::Layer::CommandLine(_))
     ));
 }
 #[test]
@@ -92,11 +92,14 @@ fn overrides_and_registered_rust_commands_are_mode_scoped() {
     r.bind(
         EditMode::Normal,
         &[KeyStroke::plain(Key::Char('/'))],
-        Command::Open,
+        Command::Ex("open ".into()),
     )
     .unwrap();
     keys(&mut r, "/");
-    assert!(matches!(r.layer(), Some(soda::interaction::Layer::Open(_))));
+    assert!(matches!(
+        r.layer(),
+        Some(soda::interaction::Layer::CommandLine(_))
+    ));
     keys(&mut r, "<Esc>");
     r.register_command("end", |_| {
         Ok(Command::Edit(Edit::Move {
@@ -137,7 +140,7 @@ fn overrides_and_registered_rust_commands_are_mode_scoped() {
         r.bind(
             EditMode::Normal,
             &[KeyStroke::plain(Key::Char(' '))],
-            Command::Open
+            Command::Ex("open ".into())
         )
         .is_ok()
     );

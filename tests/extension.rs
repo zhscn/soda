@@ -91,7 +91,7 @@ fn prompts_share_readline_keys() {
     keys(&mut r, "<esc>:");
     r.input(UserInput::Paste("abc def".into()));
     keys(&mut r, "<c-a><c-f><c-k>");
-    let Some(Layer::Ex(_)) = r.layer() else {
+    let Some(Layer::CommandLine(_)) = r.layer() else {
         panic!("command line closed");
     };
     keys(&mut r, "<c-y><c-y>");
@@ -109,12 +109,35 @@ fn command_line_resolves_names_aliases_and_line_numbers() {
     keys(&mut r, ":");
     r.input(UserInput::Paste("no-such-command".into()));
     keys(&mut r, "<ret>");
-    assert!(r.layer().is_none());
-    assert!(r.message().contains("unknown command"), "{}", r.message());
-    keys(&mut r, ":");
+    let text = r.layer().unwrap().presentation().text;
+    assert!(text.contains("unknown command"), "{text}");
+    keys(&mut r, "<esc>:");
     r.input(UserInput::Paste("ls".into()));
     keys(&mut r, "<ret>");
-    assert!(matches!(r.layer(), Some(Layer::Buffer(_))));
+    assert!(matches!(r.layer(), Some(Layer::CommandLine(_))));
+    keys(&mut r, "<esc>:");
+    r.input(UserInput::Paste("open".into()));
+    keys(&mut r, "<ret>");
+    assert!(matches!(r.layer(), Some(Layer::CommandLine(_))));
+}
+
+#[test]
+fn open_accepts_a_path_argument() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a b.txt"), "content").unwrap();
+    let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.start(None);
+    keys(&mut r, ":");
+    r.input(UserInput::Paste("open a b.txt".into()));
+    keys(&mut r, "<ret>");
+    for _ in 0..500 {
+        r.poll();
+        if state(&r).0 == "content" {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("file did not open: {}", r.message());
 }
 
 #[test]
@@ -143,7 +166,7 @@ fn configuration_maps_defines_and_reports_line_numbers() {
     keys(&mut r, ":");
     r.input(UserInput::Paste("ls".into()));
     keys(&mut r, "<c-j>");
-    assert!(matches!(r.layer(), Some(Layer::Buffer(_))));
+    assert!(matches!(r.layer(), Some(Layer::CommandLine(_))));
     keys(&mut r, "<esc>");
     // unmap restores the default interpretation; nop hides a default.
     r.source("init", "unmap insert <c-l>\nmap insert <c-a> nop\n");
@@ -181,7 +204,7 @@ fn defined_commands_take_arguments_and_bound_their_expansion() {
 fn palette_runs_commands_and_prefills_required_arguments() {
     let mut r = runtime("");
     keys(&mut r, "<esc><space>:");
-    assert!(matches!(r.layer(), Some(Layer::Palette(_))));
+    assert!(matches!(r.layer(), Some(Layer::CommandLine(_))));
     r.input(UserInput::Paste("new".into()));
     keys(&mut r, "<ret>");
     assert!(r.layer().is_none());

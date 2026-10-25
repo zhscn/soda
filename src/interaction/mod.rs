@@ -1,10 +1,8 @@
 //! Frontend-independent routing and built-in sessions. Layers own editing mode,
 //! literal key sequences and session lifecycle;
 //! feature reducers return transitions and Runtime executes their responses.
-mod buffer;
-pub use buffer::BufferSession;
-mod ex;
-pub use ex::ExSession;
+mod command_line;
+pub use command_line::{CommandLine, Completion};
 mod commands;
 pub mod vim;
 pub use commands::Command;
@@ -16,16 +14,10 @@ mod input;
 pub use input::{InputKey, InputMotion, InputUpdate, TextInput};
 mod layer;
 pub use layer::Layer;
-mod list;
-pub use list::ListSession;
-mod palette;
-pub use palette::PaletteSession;
 pub mod picker;
 pub mod shell;
-use picker::{ListMotion, PickerCompletion, PickerEffect, PickerSession};
+use picker::{ListMotion, PickerCompletion, PickerEffect};
 pub mod path;
-mod prompt;
-pub use prompt::GotoSession;
 mod replace;
 pub use replace::{ReplacePhase, ReplaceSession};
 mod routing;
@@ -35,7 +27,7 @@ pub use search::{SearchResults, SearchSession};
 mod keymap;
 pub use keymap::{BindingError, Context, Keymap, LineEdit};
 mod registry;
-pub use registry::{BUILTINS, CommandHandler, CommandInfo, Registry};
+pub use registry::{BUILTINS, CommandHandler, CommandInfo, Registry, Slot, SlotKind};
 mod session;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -186,9 +178,6 @@ impl Layers {
         self.vim.clear();
         let mut response = self.close(app, time)?;
         response.events.extend(self.end_insert_group(app, time));
-        if let Layer::Picker(session) = &layer {
-            response.effects.push(PickerEffect::Run(session.task()));
-        }
         layer.resize(self.help_rows, self.picker_rows);
         self.active = Some(layer);
         response.redraw = true;
@@ -314,19 +303,11 @@ impl Layers {
             _ => Response::default(),
         }
     }
-    pub fn start_picker(
-        &mut self,
-        session: PickerSession,
-        app: &Application,
-        time: Duration,
-    ) -> Result<Response, EditError> {
-        self.enter(Layer::Picker(session), app, time)
-    }
     pub fn picker_failed(&mut self, error: String) -> Response {
-        let Some(Layer::Picker(session)) = &mut self.active else {
+        let Some(Layer::CommandLine(session)) = &mut self.active else {
             return Response::default();
         };
-        session.fail(error);
+        session.picker_failed(error);
         Response {
             redraw: true,
             ..Response::default()
@@ -334,22 +315,27 @@ impl Layers {
     }
     pub fn picker_finished(&mut self, completion: PickerCompletion) -> Response {
         match &mut self.active {
-            Some(Layer::Picker(session)) => Response {
-                redraw: session.accept(completion),
+            Some(Layer::CommandLine(session)) => Response {
+                redraw: session.picker_finished(completion),
                 ..Response::default()
             },
             _ => Response::default(),
         }
     }
-    pub fn path_finished(&mut self, completion: path::PathCompletion) -> Response {
-        let accepted = match &mut self.active {
-            Some(Layer::Open(field) | Layer::Save(_, field)) => field.accept(completion),
-            Some(Layer::Exit(session)) => session.path_finished(completion),
-            _ => false,
-        };
-        Response {
-            redraw: accepted,
-            ..Response::default()
+    pub fn path_finished(
+        &mut self,
+        completion: path::PathCompletion,
+        app: &Application,
+    ) -> Response {
+        match &mut self.active {
+            Some(Layer::CommandLine(session)) => {
+                session.path_finished(completion, app).unwrap_or_default()
+            }
+            Some(Layer::Exit(session)) => Response {
+                redraw: session.path_finished(completion),
+                ..Response::default()
+            },
+            _ => Response::default(),
         }
     }
     pub fn resize_help(&mut self, rows: usize) {
@@ -361,17 +347,8 @@ impl Layers {
     pub fn resize_picker(&mut self, rows: usize) -> bool {
         self.picker_rows = rows;
         match &mut self.active {
-            Some(Layer::Picker(session)) => session.resize(rows),
-            Some(Layer::Buffer(session)) => {
+            Some(Layer::CommandLine(session)) => {
                 session.resize(rows);
-                true
-            }
-            Some(Layer::Palette(session)) => {
-                session.resize(rows);
-                true
-            }
-            Some(Layer::Open(field) | Layer::Save(_, field)) => {
-                field.resize(rows);
                 true
             }
             Some(Layer::Exit(session)) => {

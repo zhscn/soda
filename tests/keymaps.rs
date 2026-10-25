@@ -40,12 +40,16 @@ fn text(r: &Runtime) -> &str {
 #[test]
 fn overrides_can_use_literal_sequences_without_affecting_insert_or_defaults() {
     let mut r = runtime();
-    r.bind(EditMode::Normal, &[key(' '), key('f')], Command::Open)
-        .unwrap();
+    r.bind(
+        EditMode::Normal,
+        &[key(' '), key('f')],
+        Command::Ex("open ".into()),
+    )
+    .unwrap();
     send(&mut r, key(' '));
     assert!(r.layer().is_none());
     send(&mut r, key('f'));
-    assert!(matches!(r.layer(), Some(Layer::Open(_))));
+    assert!(matches!(r.layer(), Some(Layer::CommandLine(_))));
     send(&mut r, KeyStroke::plain(Key::Esc));
     send(&mut r, key('i'));
     send(&mut r, key(' '));
@@ -59,7 +63,8 @@ fn overrides_can_use_literal_sequences_without_affecting_insert_or_defaults() {
 fn prefix_conflicts_and_reserved_cancellation_are_rejected_without_replacing_bindings() {
     let mut r = runtime();
     let prefix = [ctrl('x'), key('f')];
-    r.bind(EditMode::Normal, &prefix, Command::Open).unwrap();
+    r.bind(EditMode::Normal, &prefix, Command::Ex("open ".into()))
+        .unwrap();
     assert_eq!(
         r.bind(EditMode::Normal, &[ctrl('x')], Command::New),
         Err(BindingError::PrefixConflict)
@@ -76,18 +81,22 @@ fn prefix_conflicts_and_reserved_cancellation_are_rejected_without_replacing_bin
         ),
         Err(BindingError::InvalidKey)
     );
-    r.bind(EditMode::Normal, &prefix, Command::SwitchBuffer)
+    r.bind(EditMode::Normal, &prefix, Command::Ex("buffer ".into()))
         .unwrap();
     send(&mut r, ctrl('x'));
     send(&mut r, key('f'));
-    assert!(matches!(r.layer(), Some(Layer::Buffer(_))));
+    assert!(matches!(r.layer(), Some(Layer::CommandLine(_))));
 }
 #[test]
 fn prefixes_consume_invalid_input_and_reset_on_focus_loss_release_and_commands() {
     let mut r = runtime();
     r.command(Command::SetMode(EditMode::Insert));
-    r.bind(EditMode::Insert, &[ctrl('x'), key('f')], Command::Open)
-        .unwrap();
+    r.bind(
+        EditMode::Insert,
+        &[ctrl('x'), key('f')],
+        Command::Ex("open ".into()),
+    )
+    .unwrap();
     send(&mut r, ctrl('x'));
     let mut release = key('f');
     release.release = true;
@@ -102,7 +111,7 @@ fn prefixes_consume_invalid_input_and_reset_on_focus_loss_release_and_commands()
     send(&mut r, key('f'));
     assert_eq!(text(&r), "f");
     send(&mut r, ctrl('x'));
-    r.command(Command::Open);
+    r.command(Command::Ex("open ".into()));
     send(&mut r, KeyStroke::plain(Key::Esc));
     send(&mut r, key('f'));
     assert_eq!(text(&r), "ff");
@@ -138,11 +147,13 @@ fn named_commands_and_input_overrides_use_separate_controlled_entry_points() {
         }),
     )
     .unwrap();
-    r.command(Command::Open);
+    r.command(Command::Ex("open ".into()));
     r.input(UserInput::Paste("path".into()));
     send(&mut r, KeyStroke::plain(Key::Home));
     send(&mut r, ctrl('f'));
-    assert!(matches!(r.layer(),Some(Layer::Open(f)) if f.selection() == Selection::caret(1)));
+    assert!(
+        matches!(r.layer(), Some(Layer::CommandLine(l)) if l.input().selection() == Selection::caret(1))
+    );
     assert_eq!(text(&r), "custom");
 }
 #[test]

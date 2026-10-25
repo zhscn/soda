@@ -1,7 +1,7 @@
 use soda::{
     application::{Application, Event},
     interaction::{
-        Input, InputKey, InputResult, Layer, Layers,
+        CommandLine, Input, InputKey, InputResult, Layer, Layers,
         picker::{
             Candidate, CandidateKey, CandidateListState, ListMotion, MatchedCandidate,
             PickerCompletion, PickerEffect, PickerLimits, PickerResults, PickerRunner,
@@ -46,13 +46,17 @@ fn packet(
 }
 fn setup(root: &Path, app: &Application) -> (Layers, PickerTask) {
     let mut layers = insert_layers();
-    let response = layers
-        .start_picker(
-            PickerSession::new(root.into(), PickerLimits::default()).unwrap(),
+    let InputResult::Handled(response) = layers
+        .execute(
+            soda::interaction::Command::Ex("project ".into()),
             app,
             Duration::ZERO,
+            root,
         )
-        .unwrap();
+        .unwrap()
+    else {
+        panic!()
+    };
     let task = response
         .effects
         .into_iter()
@@ -63,18 +67,45 @@ fn setup(root: &Path, app: &Application) -> (Layers, PickerTask) {
         .unwrap();
     (layers, task)
 }
-fn session(layers: &Layers) -> &PickerSession {
-    let Some(Layer::Picker(session)) = layers.active() else {
+fn start(layers: &mut Layers, root: &Path, app: &Application) -> soda::interaction::Response {
+    let InputResult::Handled(response) = layers
+        .execute(
+            soda::interaction::Command::Ex("project ".into()),
+            app,
+            Duration::ZERO,
+            root,
+        )
+        .unwrap()
+    else {
         panic!()
     };
-    session
+    response
+}
+fn line(layers: &Layers) -> &CommandLine {
+    let Some(Layer::CommandLine(line)) = layers.active() else {
+        panic!()
+    };
+    line
+}
+fn session(layers: &Layers) -> &PickerSession {
+    line(layers).files().unwrap()
+}
+fn selected_path(layers: &Layers) -> Option<PathBuf> {
+    let line = line(layers);
+    let index = line.list().index(line.rows())?;
+    line.rows()[index]
+        .candidate
+        .payload
+        .replacement
+        .as_ref()
+        .map(PathBuf::from)
 }
 fn query(layers: &mut Layers, text: &str, app: &Application) -> PickerTask {
     layers
         .handle(Input::Text(InputKey::SelectAll), app, Duration::ZERO)
         .unwrap();
     let InputResult::Handled(response) = layers
-        .handle(Input::Paste(text.into()), app, Duration::ZERO)
+        .handle(Input::Paste(format!("project {text}")), app, Duration::ZERO)
         .unwrap()
     else {
         panic!()
@@ -181,9 +212,10 @@ fn query_aba_rejects_old_result_and_loading_cannot_confirm() {
     else {
         panic!()
     };
-    assert!(
-        matches!(response.events.as_slice(), [Event::Open(path)] if path == Path::new("/right"))
-    );
+    assert!(matches!(
+        response.commands.as_slice(),
+        [soda::interaction::Command::Named(line)] if line == "project /right"
+    ));
     assert!(layers.active().is_none());
     assert!(last_a.obsolete());
     assert!(
@@ -207,7 +239,7 @@ fn input_cursor_and_candidate_navigation_are_independent() {
     layers
         .handle(Input::Text(InputKey::SelectAll), &app, Duration::ZERO)
         .unwrap();
-    let selected = session(&layers).input().selection();
+    let selected = line(&layers).input().selection();
     let InputResult::Handled(response) = layers
         .handle(
             Input::Candidate {
@@ -223,15 +255,15 @@ fn input_cursor_and_candidate_navigation_are_independent() {
     };
     assert!(response.effects.is_empty());
     assert!(response.events.is_empty());
-    assert_eq!(session(&layers).input().selection(), selected);
-    assert_eq!(session(&layers).selected_path(), Some(Path::new("/two")));
+    assert_eq!(line(&layers).input().selection(), selected);
+    assert_eq!(selected_path(&layers).as_deref(), Some(Path::new("/two")));
     layers.picker_finished(packet(
         &task,
         1,
         vec![row(2, "same", "/two"), row(1, "same", "/one")],
     ));
-    assert_eq!(session(&layers).selected_path(), Some(Path::new("/two")));
-    assert_eq!(session(&layers).input().selection(), selected);
+    assert_eq!(selected_path(&layers).as_deref(), Some(Path::new("/two")));
+    assert_eq!(line(&layers).input().selection(), selected);
 }
 
 #[test]
@@ -261,13 +293,7 @@ fn cancellation_and_reopening_do_not_accept_previous_session() {
     let (mut layers, task) = setup(root.path(), &app);
     layers.handle(Input::Cancel, &app, Duration::ZERO).unwrap();
     assert!(task.obsolete());
-    layers
-        .start_picker(
-            PickerSession::new(root.path().into(), PickerLimits::default()).unwrap(),
-            &app,
-            Duration::ZERO,
-        )
-        .unwrap();
+    start(&mut layers, root.path(), &app);
     assert!(
         !layers
             .picker_finished(packet(&task, 100, vec![row(1, "stale", "/stale")]))
@@ -471,7 +497,7 @@ fn traversal_excludes_symlink_files_and_directories() {
 }
 
 #[test]
-fn replacing_search_with_picker_restores_search_origin() {
+fn replacing_search_with_another_layer_restores_search_origin() {
     use soda::{
         core::Selection,
         editor::{Command, Language},
@@ -516,10 +542,9 @@ fn replacing_search_with_picker_restores_search_origin() {
     for event in response.events {
         app.dispatch(event).unwrap();
     }
-    let root = tempfile::tempdir().unwrap();
     let response = layers
-        .start_picker(
-            PickerSession::new(root.path().into(), PickerLimits::default()).unwrap(),
+        .enter(
+            Layer::Help(soda::interaction::HelpSession::default()),
             &app,
             Duration::ZERO,
         )
@@ -539,7 +564,7 @@ fn replacing_search_with_picker_restores_search_origin() {
             .selection(),
         Selection::caret(0)
     );
-    assert!(matches!(layers.active(), Some(Layer::Picker(_))));
+    assert!(matches!(layers.active(), Some(Layer::Help(_))));
 }
 
 #[test]
@@ -585,7 +610,11 @@ fn long_path_query_reports_limit_and_worker_remains_usable() {
         .handle(Input::Text(InputKey::SelectAll), &app, Duration::ZERO)
         .unwrap();
     let InputResult::Handled(response) = layers
-        .handle(Input::Paste(label.clone()), &app, Duration::ZERO)
+        .handle(
+            Input::Paste(format!("project {label}")),
+            &app,
+            Duration::ZERO,
+        )
         .unwrap()
     else {
         panic!()
@@ -678,10 +707,7 @@ fn managed_close_and_replacement_emit_cancellation_and_invalidate_tasks() {
     let (mut layers, task) = setup(root.path(), &app);
     let response = layers
         .enter(
-            Layer::Open(soda::interaction::path::PathInput::new(
-                std::env::current_dir().unwrap(),
-                "",
-            )),
+            Layer::Help(soda::interaction::HelpSession::default()),
             &app,
             Duration::ZERO,
         )
@@ -690,7 +716,7 @@ fn managed_close_and_replacement_emit_cancellation_and_invalidate_tasks() {
     assert!(
         matches!(response.effects.as_slice(), [PickerEffect::Cancel(id)] if *id == task.key().source.session)
     );
-    assert!(matches!(layers.active(), Some(Layer::Open(_))));
+    assert!(matches!(layers.active(), Some(Layer::Help(_))));
     let response = layers.close(&app, Duration::ZERO).unwrap();
     assert!(response.redraw);
     assert!(layers.active().is_none());

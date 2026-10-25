@@ -65,6 +65,11 @@ impl TextInput {
         }
         self.replace(self.selection.range(), &text)
     }
+    /// Replaces a byte range and places the caret after the new text.
+    pub fn replace_range(&mut self, range: std::ops::Range<usize>, text: &str) -> InputUpdate {
+        let text: String = text.chars().filter(|ch| !ch.is_control()).collect();
+        self.replace(range, &text)
+    }
     fn replace(&mut self, range: std::ops::Range<usize>, text: &str) -> InputUpdate {
         let before = self.selection;
         let text_changed = self.text[range.clone()] != *text;

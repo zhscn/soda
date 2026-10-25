@@ -19,9 +19,9 @@ fn switch_reuses_a_view_without_preview_and_cancel_leaves_focus() {
     let first = r.app().active_view().unwrap();
     r.command(Command::New);
     let second = r.app().active_view().unwrap();
-    r.command(Command::SwitchBuffer);
+    r.command(Command::Named("buffer".into()));
     assert_eq!(r.app().active_view(), Some(second));
-    assert!(matches!(r.layer(), Some(Layer::Buffer(s)) if s.rows().len() == 2));
+    assert!(matches!(r.layer(), Some(Layer::CommandLine(s)) if s.rows().len() == 2));
     key(&mut r, Key::Esc);
     assert_eq!(r.app().active_view(), Some(second));
     r.command(Command::SetMode(soda::interaction::EditMode::Normal));
@@ -40,9 +40,9 @@ fn hidden_dirty_document_is_listed_and_confirm_creates_a_view() {
     let document = r.app().view(first).unwrap().document_id;
     r.input(UserInput::Paste("unsaved".into()));
     r.dispatch(Event::CloseView(first));
-    r.command(Command::SwitchBuffer);
+    r.command(Command::Named("buffer".into()));
     assert!(
-        matches!(r.layer(), Some(Layer::Buffer(s)) if s.rows().len() == 1 && s.rows()[0].candidate.label.contains("[+]"))
+        matches!(r.layer(), Some(Layer::CommandLine(s)) if s.rows().len() == 1 && s.rows()[0].candidate.label.contains("[+]"))
     );
     key(&mut r, Key::Enter);
     let view = r.app().view(r.app().active_view().unwrap()).unwrap();
@@ -65,21 +65,18 @@ fn filtering_no_matches_and_external_document_changes_are_safe() {
     let view = r.app().active_view().unwrap();
     let document = r.app().view(view).unwrap().document_id;
     r.command(Command::New);
-    r.command(Command::SwitchBuffer);
+    r.command(Command::Named("buffer".into()));
     r.input(UserInput::Paste("no such buffer".into()));
     key(&mut r, Key::Enter);
     assert!(r.layer().is_some());
-    r.input(UserInput::Key(KeyStroke {
-        control: true,
-        ..KeyStroke::plain(Key::Char('u'))
-    }));
-    r.input(UserInput::Paste("UNTITLED".into()));
-    assert!(matches!(r.layer(), Some(Layer::Buffer(s)) if s.rows().len() == 2));
+    key(&mut r, Key::Esc);
+    r.command(Command::Ex("buffer UNTITLED".into()));
+    assert!(matches!(r.layer(), Some(Layer::CommandLine(s)) if s.rows().len() == 2));
     r.dispatch(Event::CloseDocument {
         document,
         discard: false,
     });
-    assert!(matches!(r.layer(), Some(Layer::Buffer(s)) if s.rows().len() == 1));
+    assert!(matches!(r.layer(), Some(Layer::CommandLine(s)) if s.rows().len() == 1));
     key(&mut r, Key::Enter);
     assert!(r.layer().is_none());
     assert_eq!(r.app().views().count(), 1);
@@ -94,8 +91,8 @@ fn multiple_views_produce_one_candidate_and_empty_updates_do_not_redraw() {
         .document_id;
     r.dispatch(Event::AddView(doc));
     let active = r.app().active_view().unwrap();
-    r.command(Command::SwitchBuffer);
-    assert!(matches!(r.layer(), Some(Layer::Buffer(s)) if s.rows().len() == 1));
+    r.command(Command::Named("buffer".into()));
+    assert!(matches!(r.layer(), Some(Layer::CommandLine(s)) if s.rows().len() == 1));
     r.take_redraw();
     r.poll();
     assert!(!r.take_redraw());

@@ -246,10 +246,12 @@ fn modal_routing_blocks_unknown_input_and_requires_explicit_discard() {
     ));
     layers
         .enter(
-            Layer::Open(soda::interaction::path::PathInput::new(
+            Layer::CommandLine(Box::new(soda::interaction::CommandLine::new(
+                "open ",
+                soda::interaction::Registry::default().commands(),
                 std::env::current_dir().unwrap(),
-                "",
-            )),
+                &app,
+            ))),
             &app,
             Duration::ZERO,
         )
@@ -400,20 +402,19 @@ fn selection_only_input_repaints_without_restarting_preview() {
 }
 
 #[test]
-fn save_prompt_closes_when_target_document_closes() {
+fn command_line_closes_when_its_view_closes() {
     let (mut app, view) = setup("a");
     let document = app.view(view).unwrap().document_id;
     let mut layers = {
         let mut layers = insert_layers();
         layers
             .enter(
-                Layer::Save(
-                    document,
-                    soda::interaction::path::PathInput::new(
-                        std::env::current_dir().unwrap(),
-                        "file.txt",
-                    ),
-                ),
+                Layer::CommandLine(Box::new(soda::interaction::CommandLine::new(
+                    "saveas file.txt",
+                    soda::interaction::Registry::default().commands(),
+                    std::env::current_dir().unwrap(),
+                    &app,
+                ))),
                 &app,
                 Duration::ZERO,
             )
@@ -443,10 +444,12 @@ fn prompt_navigation_and_filtered_paste_do_not_generate_file_commands() {
         let mut layers = insert_layers();
         layers
             .enter(
-                Layer::Open(soda::interaction::path::PathInput::new(
+                Layer::CommandLine(Box::new(soda::interaction::CommandLine::new(
+                    "open 路径/a.cpp",
+                    soda::interaction::Registry::default().commands(),
                     std::env::current_dir().unwrap(),
-                    "路径/a.cpp",
-                )),
+                    &app,
+                ))),
                 &app,
                 Duration::ZERO,
             )
@@ -467,47 +470,39 @@ fn prompt_navigation_and_filtered_paste_do_not_generate_file_commands() {
             .unwrap(),
         InputResult::Blocked
     ));
-    let Some(Layer::Open(field)) = layers.active() else {
+    let Some(Layer::CommandLine(line)) = layers.active() else {
         panic!()
     };
-    assert_eq!(field.text(), "路径/a.cpp");
+    assert_eq!(line.input().text(), "open 路径/a.cpp");
     let InputResult::Handled(response) =
         layers.handle(Input::Confirm, &app, Duration::ZERO).unwrap()
     else {
         panic!()
     };
     assert!(response.redraw);
-    assert!(
-        matches!(response.events.as_slice(), [Event::Open(path)] if path == &std::env::current_dir().unwrap().join("路径/a.cpp"))
-    );
+    assert!(response.events.is_empty());
+    assert!(matches!(
+        response.commands.as_slice(),
+        [soda::interaction::Command::Named(line)] if line == "open 路径/a.cpp"
+    ));
     assert!(layers.active().is_none());
 }
 
 #[test]
 fn all_builtin_sessions_share_the_cancel_lifecycle_contract() {
-    use soda::interaction::{
-        ExitScope, ExitSession, GotoSession, HelpSession, ReplaceSession,
-        picker::{PickerLimits, PickerSession},
-    };
+    use soda::interaction::{ExitScope, ExitSession, HelpSession, ReplaceSession};
     let (mut app, view) = setup("dirty");
     let document = app.view(view).unwrap().document_id;
-    let directory = tempfile::tempdir().unwrap();
     let sessions = vec![
-        Layer::Open(soda::interaction::path::PathInput::new(
+        Layer::CommandLine(Box::new(soda::interaction::CommandLine::new(
+            "project ",
+            soda::interaction::Registry::default().commands(),
             std::env::current_dir().unwrap(),
-            "",
-        )),
-        Layer::Save(
-            document,
-            soda::interaction::path::PathInput::new(std::env::current_dir().unwrap(), ""),
-        ),
-        Layer::Goto(GotoSession::new(view)),
+            &app,
+        ))),
         Layer::Help(HelpSession::default()),
         Layer::Exit(ExitSession::new(&app, ExitScope::Close(document)).unwrap()),
         Layer::Replace(ReplaceSession::new(&app, view).unwrap()),
-        Layer::Picker(
-            PickerSession::new(directory.path().to_owned(), PickerLimits::default()).unwrap(),
-        ),
         Layer::Search {
             input: TextInput::default(),
             session: SearchSession::new(&app, view).unwrap(),

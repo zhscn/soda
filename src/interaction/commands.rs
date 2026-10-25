@@ -1,10 +1,8 @@
 //! Application command reduction. Commands resolve their targets on the owner
 //! thread and return ordered application events and platform effects.
 use super::{
-    BufferSession, ExitScope, ExitSession, GotoSession, HelpSession, Layer, Layers, Message,
-    ReplaceSession, Response, SearchSession, TextInput,
-    path::PathInput,
-    picker::{PickerLimits, PickerSession},
+    CommandLine, ExitScope, ExitSession, HelpSession, Layer, Layers, Message, ReplaceSession,
+    Response, SearchSession, TextInput,
 };
 use crate::{
     application::{Application, ClipboardAction, Event},
@@ -43,18 +41,17 @@ pub enum Command {
     },
     Pipe(String),
     Shell(String),
-    Palette,
     Nop,
     OpenPath(std::path::PathBuf),
+    /// Switch to the open document with this buffer name.
+    Buffer(String),
     SavePath(std::path::PathBuf),
     WriteQuit,
     Clipboard(ClipboardAction),
-    Goto,
     Page {
         backward: bool,
         extend: bool,
     },
-    Open,
     New,
     Close,
     Reload,
@@ -66,8 +63,6 @@ pub enum Command {
     NextView,
     Search,
     Replace,
-    PickFiles,
-    SwitchBuffer,
 }
 
 impl Layers {
@@ -204,7 +199,35 @@ impl Layers {
             }
             Command::Vim(command) => response = self.vim_execute(command, app, time),
             Command::Ex(text) => {
-                response = self.enter(Layer::Ex(super::ExSession::new(&text)), app, time)?
+                let line =
+                    CommandLine::new(&text, self.registry.commands(), file_root.to_owned(), app);
+                response = self.enter(Layer::CommandLine(Box::new(line)), app, time)?;
+                if let Some(Layer::CommandLine(line)) = &mut self.active {
+                    let first = line.refresh(app, true);
+                    response.effects.extend(first.effects);
+                    response.path_requests.extend(first.path_requests);
+                }
+            }
+            Command::Buffer(name) => {
+                let name = name.trim();
+                match app
+                    .workspace()
+                    .documents()
+                    .find(|id| super::command_line::buffer_name(app, *id) == name)
+                {
+                    Some(document) => {
+                        let active = app
+                            .active_view()
+                            .and_then(|id| app.view(id))
+                            .filter(|v| v.document_id == document);
+                        let view =
+                            active.or_else(|| app.views().find(|v| v.document_id == document));
+                        response
+                            .events
+                            .push(view.map_or(Event::AddView(document), |v| Event::Focus(v.id)));
+                    }
+                    None => response.message = Message::Set(format!("No buffer named {name}")),
+                }
             }
             Command::Named(line) => {
                 if let Some(handler) = self.registry.handler(line.trim()) {
@@ -243,13 +266,6 @@ impl Layers {
             Command::Shell(shell) => {
                 let view = app.active_view().and_then(|id| app.view(id));
                 response.shell = Some(Box::new(super::shell::run(app, view, shell, file_root)));
-            }
-            Command::Palette => {
-                response = self.enter(
-                    Layer::Palette(super::PaletteSession::new(&self.registry)),
-                    app,
-                    time,
-                )?;
             }
             Command::Nop => {}
             Command::OpenPath(path) | Command::SavePath(path) => {
@@ -295,11 +311,6 @@ impl Layers {
                     time,
                 )?
             }
-            Command::Goto => {
-                if let Some(view) = app.active_view() {
-                    response = self.enter(Layer::Goto(GotoSession::new(view)), app, time)?;
-                }
-            }
             Command::Page { backward, extend } => {
                 if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
                     let count = self.page_rows.saturating_sub(1).max(1);
@@ -330,15 +341,6 @@ impl Layers {
                         anchor: crate::core::ByteOffset(snapshot.line_start(top).unwrap()),
                         horizontal_column: view.viewport.horizontal_column,
                     });
-                }
-            }
-            Command::SwitchBuffer => {
-                response = self.enter(Layer::Buffer(BufferSession::new(app)), app, time)?;
-            }
-            Command::PickFiles => {
-                match PickerSession::new(file_root.to_owned(), PickerLimits::default()) {
-                    Ok(session) => response = self.start_picker(session, app, time)?,
-                    Err(error) => response.message = Message::Set(error.to_string()),
                 }
             }
             Command::Replace => {
@@ -374,13 +376,6 @@ impl Layers {
                         time,
                     });
                 }
-            }
-            Command::Open => {
-                response = self.enter(
-                    Layer::Open(PathInput::new(file_root.to_owned(), "")),
-                    app,
-                    time,
-                )?
             }
             Command::New => response
                 .events
@@ -429,12 +424,15 @@ impl Layers {
                     let document = view.document_id;
                     let path = app.workspace().file(document).unwrap().path();
                     if choose_path || path.is_none() {
-                        let text = path.map_or_else(String::new, |p| p.display().to_string());
-                        response = self.enter(
-                            Layer::Save(document, PathInput::new(file_root.to_owned(), &text)),
+                        let text = path.map_or_else(String::new, |p| {
+                            p.strip_prefix(file_root).unwrap_or(p).display().to_string()
+                        });
+                        return self.execute(
+                            Command::Ex(format!("saveas {text}")),
                             app,
                             time,
-                        )?;
+                            file_root,
+                        );
                     } else {
                         response.events.push(Event::Save {
                             document,

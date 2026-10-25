@@ -115,7 +115,7 @@ fn modal_focus_blocks_both_keyboard_and_direct_application_commands() {
             .unwrap(),
         InputResult::Blocked
     ));
-    assert!(matches!(layers.active(), Some(Layer::Open(_))));
+    assert!(matches!(layers.active(), Some(Layer::CommandLine(_))));
     let response = handled(route(
         &mut layers,
         &app,
@@ -130,17 +130,23 @@ fn modal_focus_blocks_both_keyboard_and_direct_application_commands() {
 fn modal_confirm_and_cancel_are_consumed_once() {
     let (mut app, mut layers) = setup();
     handled(sequence(&mut layers, &app, 'f', true));
-    // An empty path closes the prompt but must not insert a newline.
+    // A missing path keeps the command line open and must not insert a newline.
     let response = handled(route(
         &mut layers,
         &app,
         UserInput::Key(KeyStroke::plain(Key::Enter)),
     ));
-    assert!(response.events.is_empty());
+    assert!(response.events.is_empty() && response.commands.is_empty());
     apply(&mut app, &mut layers, response);
-    assert!(layers.active().is_none());
+    assert!(
+        layers
+            .active()
+            .unwrap()
+            .presentation()
+            .text
+            .contains("needs PATH")
+    );
     assert!(text(&app).is_empty());
-    handled(sequence(&mut layers, &app, 'f', true));
     let response = handled(route(
         &mut layers,
         &app,
@@ -159,29 +165,15 @@ fn modal_confirm_and_cancel_are_consumed_once() {
 }
 
 #[test]
-fn save_prompt_keeps_its_target_after_external_focus_change() {
+fn save_prompt_closes_after_external_focus_change() {
     let (mut app, mut layers) = setup();
-    let first = app.view(app.active_view().unwrap()).unwrap().document_id;
     handled(sequence(&mut layers, &app, 's', true));
+    assert!(matches!(layers.active(), Some(Layer::CommandLine(_))));
     let update = app
         .dispatch(Event::NewDocument(Language::PlainText))
         .unwrap();
     let response = layers.observe(&app, &update, Duration::ZERO).unwrap();
     apply(&mut app, &mut layers, response);
-    handled(route(
-        &mut layers,
-        &app,
-        UserInput::Paste("target.txt".into()),
-    ));
-    let response = handled(route(
-        &mut layers,
-        &app,
-        UserInput::Key(KeyStroke::plain(Key::Enter)),
-    ));
-    assert_eq!(response.events.len(), 1);
-    assert!(
-        matches!(&response.events[0], Event::Save { document, target: Some(path) } if *document == first && path == Path::new("/target.txt"))
-    );
     assert!(layers.active().is_none());
 }
 
@@ -191,7 +183,12 @@ fn picker_start_and_cancel_return_worker_effects() {
     let (app, mut layers) = setup();
     let response = handled(
         layers
-            .execute(Command::PickFiles, &app, Duration::ZERO, directory.path())
+            .execute(
+                Command::Ex("project ".into()),
+                &app,
+                Duration::ZERO,
+                directory.path(),
+            )
             .unwrap(),
     );
     assert!(matches!(response.message, Message::Clear));
@@ -199,10 +196,10 @@ fn picker_start_and_cancel_return_worker_effects() {
         response.effects.as_slice(),
         [PickerEffect::Run(_)]
     ));
-    let Some(Layer::Picker(session)) = layers.active() else {
+    let Some(Layer::CommandLine(line)) = layers.active() else {
         panic!()
     };
-    let id = session.id();
+    let id = line.picker().unwrap();
     let response = handled(route(
         &mut layers,
         &app,
@@ -215,21 +212,25 @@ fn picker_start_and_cancel_return_worker_effects() {
 }
 
 #[test]
-fn invalid_picker_root_reports_error_without_installing_layer() {
+fn invalid_picker_root_reports_error_in_the_command_line() {
     let (app, mut layers) = setup();
     let response = handled(
         layers
             .execute(
-                Command::PickFiles,
+                Command::Ex("project ".into()),
                 &app,
                 Duration::ZERO,
                 Path::new("relative-root"),
             )
             .unwrap(),
     );
-    assert!(matches!(response.message, Message::Set(_)));
     assert!(response.effects.is_empty() && response.events.is_empty());
-    assert!(layers.active().is_none());
+    let presentation = layers.active().unwrap().presentation();
+    assert!(
+        presentation.text.contains("absolute"),
+        "{}",
+        presentation.text
+    );
 }
 
 #[test]
@@ -316,7 +317,7 @@ fn configured_layers() -> Layers {
         ..KeyStroke::plain(Key::Char('x'))
     };
     for (ch, control, command) in [
-        ('f', true, Command::Open),
+        ('f', true, Command::Ex("open ".into())),
         ('s', true, Command::Save { choose_path: false }),
         ('n', false, Command::New),
     ] {

@@ -280,7 +280,10 @@ fn dropped_completion_is_applied_by_poll_and_reload_maps_viewports() {
 fn failed_open_and_abandoned_request_leave_application_usable() {
     let dir = tempfile::tempdir().unwrap();
     let mut app = Application::default();
-    let request = open(&mut app, dir.path().join("missing.txt"));
+    // A directory cannot be read as a file; a missing file would open as a
+    // new named document instead.
+    fs::create_dir(dir.path().join("folder")).unwrap();
+    let request = open(&mut app, dir.path().join("folder"));
     let completion = app.workspace().service().read_request(request);
     assert!(app.dispatch(Event::OpenFinished(completion)).is_err());
     assert!(app.views().next().is_none());
@@ -440,7 +443,8 @@ fn cancelling_or_failing_latest_open_does_not_reactivate_older_intent() {
         let mut app = Application::default();
         let (initial, _) = new(&mut app);
         let first = open(&mut app, a);
-        let second = open(&mut app, dir.path().join("missing.txt"));
+        fs::create_dir(dir.path().join("folder")).unwrap();
+        let second = open(&mut app, dir.path().join("folder"));
         if cancel {
             app.dispatch(Event::CancelOpen(second.id())).unwrap();
         }

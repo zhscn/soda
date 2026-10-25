@@ -52,6 +52,9 @@ impl Editor {
             for event in response.events {
                 self.event(event);
             }
+            for command in response.commands {
+                self.command(command);
+            }
         }
     }
     fn select(&mut self, selection: Selection) {
@@ -132,7 +135,7 @@ fn internal_paste_replaces_selection_and_modal_shortcuts_are_blocked() {
     assert_eq!(editor.text(), "first first");
     editor.command(Command::Edit(Edit::Undo));
     assert_eq!(editor.text(), "first second");
-    editor.command(Command::Open);
+    editor.command(Command::Ex("open ".into()));
     editor.command(Command::Clipboard(soda::application::ClipboardAction::Cut));
     editor.command(Command::Clipboard(
         soda::application::ClipboardAction::Paste,
@@ -230,7 +233,7 @@ fn page_navigation_uses_visible_rows_and_preserves_goal_column() {
 #[test]
 fn goto_validates_input_clamps_location_and_cancel_keeps_selection() {
     let mut editor = Editor::new("one\n中e\u{301}x\n");
-    editor.command(Command::Goto);
+    editor.command(Command::Ex("goto ".into()));
     editor.input(UserInput::Paste("0:1".into()));
     editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
     assert!(editor.layers.active().is_some());
@@ -239,16 +242,16 @@ fn goto_validates_input_clamps_location_and_cancel_keeps_selection() {
         control: true,
         ..KeyStroke::plain(Key::Char('u'))
     }));
-    editor.input(UserInput::Paste("2:4".into()));
+    editor.input(UserInput::Paste("goto 2:4".into()));
     editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
     assert!(editor.layers.active().is_none());
     assert_eq!(editor.selection().head, "one\n中e\u{301}".len());
     let before = editor.selection();
-    editor.command(Command::Goto);
+    editor.command(Command::Ex("goto ".into()));
     editor.input(UserInput::Paste("999:999".into()));
     editor.input(UserInput::Key(KeyStroke::plain(Key::Esc)));
     assert_eq!(editor.selection(), before);
-    editor.command(Command::Goto);
+    editor.command(Command::Ex("goto ".into()));
     editor.input(UserInput::Paste("999:999".into()));
     editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
     assert_eq!(editor.selection().head, editor.text().len());
@@ -256,7 +259,7 @@ fn goto_validates_input_clamps_location_and_cancel_keeps_selection() {
 #[test]
 fn goto_closes_when_external_focus_changes() {
     let mut editor = Editor::new("one");
-    editor.command(Command::Goto);
+    editor.command(Command::Ex("goto ".into()));
     editor.event(Event::NewDocument(Language::PlainText));
     assert!(editor.layers.active().is_none());
 }

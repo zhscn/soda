@@ -374,7 +374,7 @@ impl Runtime {
             let Some(completion) = self.paths.poll() else {
                 break;
             };
-            let response = self.layers.path_finished(completion);
+            let response = self.layers.path_finished(completion, &self.app);
             self.respond(response, self.epoch.elapsed());
         }
         if let Some(completion) = self.shell.poll() {

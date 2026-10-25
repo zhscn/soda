@@ -16,13 +16,85 @@ use std::collections::BTreeMap;
 pub type CommandHandler = fn(&Application) -> Result<Command, EditError>;
 const MAX_DEPTH: usize = 16;
 
+/// How the command line completes an argument and whether Enter requires
+/// one of the candidates.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SlotKind {
+    Path,
+    File,
+    Buffer,
+    Mode,
+    Word,
+    Rest,
+}
+impl SlotKind {
+    pub fn requires_match(self) -> bool {
+        matches!(self, Self::File | Self::Buffer | Self::Mode)
+    }
+}
+/// A positional argument. Every slot but the last is one word; the last
+/// takes the rest of the line.
+#[derive(Clone, Copy, Debug)]
+pub struct Slot {
+    pub name: &'static str,
+    pub kind: SlotKind,
+    pub required: bool,
+}
+const fn slot(name: &'static str, kind: SlotKind) -> Slot {
+    Slot {
+        name,
+        kind,
+        required: true,
+    }
+}
+const PATH: Slot = slot("PATH", SlotKind::Path);
+const OPTIONAL_PATH: Slot = Slot {
+    required: false,
+    ..PATH
+};
+const MODE: Slot = slot("MODE", SlotKind::Mode);
+const KEYS: Slot = slot("KEYS", SlotKind::Word);
+const ARGUMENTS: &[Slot] = &[Slot {
+    name: "ARGS",
+    kind: SlotKind::Rest,
+    required: false,
+}];
+/// Formats slots as a synopsis such as `MODE KEYS COMMAND` or `[PATH]`.
+pub fn synopsis(slots: &[Slot]) -> String {
+    slots
+        .iter()
+        .map(|slot| {
+            if slot.required {
+                slot.name.to_owned()
+            } else {
+                format!("[{}]", slot.name)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 pub struct Builtin {
     pub name: &'static str,
     pub aliases: &'static [&'static str],
-    /// Argument synopsis; empty when the command takes no argument.
-    pub args: &'static str,
+    pub slots: &'static [Slot],
     pub doc: &'static str,
     build: fn(&str) -> Result<Command, String>,
+}
+/// Commands with a required argument run without one open the command line
+/// prefilled with their name, like an Emacs `interactive` declaration.
+fn interactive(name: &str) -> Command {
+    Command::Ex(format!("{name} "))
+}
+fn location(text: &str) -> Result<Command, String> {
+    let parse = || {
+        let (line, column) = text.trim().split_once(':').unwrap_or((text.trim(), "1"));
+        Some(Command::Edit(Edit::Goto {
+            line: line.parse::<usize>().ok()?.checked_sub(1)?,
+            column: column.parse::<usize>().ok()?.checked_sub(1)?,
+        }))
+    };
+    parse().ok_or_else(|| "expected positive LINE[:COLUMN]".into())
 }
 fn bare(command: Command) -> impl Fn(&str) -> Result<Command, String> {
     move |args| {
@@ -65,30 +137,35 @@ fn move_line(backward: bool, extend: bool) -> Command {
 }
 
 macro_rules! builtin {
-    ($name:literal $(| $alias:literal)*, $args:literal, $doc:literal, $build:expr) => {
+    ($name:literal $(| $alias:literal)*, [$($slot:expr),*], $doc:literal, $build:expr) => {
         Builtin {
             name: $name,
             aliases: &[$($alias),*],
-            args: $args,
+            slots: &[$($slot),*],
             doc: $doc,
             build: $build,
         }
     };
     ($name:literal $(| $alias:literal)*, $doc:literal, $command:expr) => {
-        builtin!($name $(| $alias)*, "", $doc, |args| bare($command)(args))
+        builtin!($name $(| $alias)*, [], $doc, |args| bare($command)(args))
     };
 }
 pub static BUILTINS: &[Builtin] = &[
     builtin!(
         "edit" | "e",
-        "[PATH]",
+        [OPTIONAL_PATH],
         "Open a file; reload the current file without PATH",
         |a| { Ok(path_or(a, Command::OpenPath, Command::Reload)) }
     ),
-    builtin!("open", "Open a path with completion", Command::Open),
+    builtin!(
+        "open" | "o",
+        [PATH],
+        "Open a file; a new file is created when saved",
+        |a| { Ok(path_or(a, Command::OpenPath, interactive("open"))) }
+    ),
     builtin!(
         "write" | "w",
-        "[PATH]",
+        [OPTIONAL_PATH],
         "Save; save to PATH when given",
         |a| {
             Ok(path_or(
@@ -98,7 +175,7 @@ pub static BUILTINS: &[Builtin] = &[
             ))
         }
     ),
-    builtin!("saveas", "[PATH]", "Save to PATH, or choose a path", |a| {
+    builtin!("saveas", [PATH], "Save to another path", |a| {
         Ok(path_or(
             a,
             Command::SavePath,
@@ -121,9 +198,14 @@ pub static BUILTINS: &[Builtin] = &[
         Command::Close
     ),
     builtin!(
-        "buffers" | "b" | "buffer" | "ls" | "files",
-        "Choose an open document",
-        Command::SwitchBuffer
+        "buffer" | "b" | "buffers" | "ls" | "files",
+        [slot("NAME", SlotKind::Buffer)],
+        "Switch to an open document",
+        |a| Ok(if a.is_empty() {
+            interactive("buffer")
+        } else {
+            Command::Buffer(a.into())
+        })
     ),
     builtin!(
         "next-view" | "bn" | "bnext",
@@ -131,15 +213,28 @@ pub static BUILTINS: &[Builtin] = &[
         Command::NextView
     ),
     builtin!("new" | "enew", "Create an untitled document", Command::New),
-    builtin!("project", "Pick a project file", Command::PickFiles),
+    builtin!(
+        "project",
+        [slot("FILE", SlotKind::File)],
+        "Open a project file",
+        |a| { Ok(path_or(a, Command::OpenPath, interactive("project"))) }
+    ),
     builtin!("search", "Search the document", Command::Search),
     builtin!("replace", "Search and replace", Command::Replace),
-    builtin!("goto", "Go to line[:column]", Command::Goto),
-    builtin!("help", "Show key bindings and commands", Command::Help),
-    builtin!("commands", "Choose a command to run", Command::Palette),
     builtin!(
-        "command-line",
-        "Open the : command line",
+        "goto",
+        [slot("LINE[:COLUMN]", SlotKind::Word)],
+        "Go to a line and logical column",
+        |a| if a.is_empty() {
+            Ok(interactive("goto"))
+        } else {
+            location(a)
+        }
+    ),
+    builtin!("help", "Show key bindings and commands", Command::Help),
+    builtin!(
+        "commands" | "command-line",
+        "Open the command line to choose a command",
         Command::Ex(String::new())
     ),
     builtin!(
@@ -260,7 +355,7 @@ pub static BUILTINS: &[Builtin] = &[
     ),
     builtin!(
         "map",
-        "MODE KEYS COMMAND",
+        [MODE, KEYS, slot("COMMAND", SlotKind::Rest)],
         "Bind keys in normal, visual, insert or prompt",
         |a| {
             let (mode, rest) = split(a);
@@ -272,7 +367,7 @@ pub static BUILTINS: &[Builtin] = &[
             })
         }
     ),
-    builtin!("unmap", "MODE KEYS", "Remove a user binding", |a| {
+    builtin!("unmap", [MODE, KEYS], "Remove a user binding", |a| {
         let (mode, sequence) = split(a);
         Ok(Command::Unmap {
             context: context(mode)?,
@@ -281,7 +376,7 @@ pub static BUILTINS: &[Builtin] = &[
     }),
     builtin!(
         "define-command",
-        "NAME BODY",
+        [slot("NAME", SlotKind::Word), slot("BODY", SlotKind::Rest)],
         "Define a command from ;-separated commands",
         |a| {
             let (name, body) = split(a);
@@ -293,13 +388,13 @@ pub static BUILTINS: &[Builtin] = &[
     ),
     builtin!(
         "pipe",
-        "SHELL-COMMAND",
+        [slot("SHELL-COMMAND", SlotKind::Rest)],
         "Replace the selection or document with command output",
         |a| { Ok(Command::Pipe(required(a)?)) }
     ),
     builtin!(
         "shell",
-        "SHELL-COMMAND",
+        [slot("SHELL-COMMAND", SlotKind::Rest)],
         "Run a shell command and show its status",
         |a| { Ok(Command::Shell(required(a)?)) }
     ),
@@ -310,11 +405,67 @@ enum Entry {
     Native(CommandHandler),
     User(String),
 }
-/// A command name with its documentation, for help and the palette.
+/// A command name with its signature and documentation, for help and the
+/// command line.
+#[derive(Clone)]
 pub struct CommandInfo {
     pub name: String,
-    pub args: &'static str,
+    pub aliases: &'static [&'static str],
+    pub slots: &'static [Slot],
     pub doc: String,
+    builtin: Option<&'static Builtin>,
+}
+impl CommandInfo {
+    pub fn synopsis(&self) -> String {
+        synopsis(self.slots)
+    }
+    pub fn named(&self, name: &str) -> bool {
+        self.name == name || self.aliases.contains(&name)
+    }
+}
+pub enum CheckError {
+    /// A required slot is empty; the command line can continue with it.
+    Missing(&'static str),
+    Invalid(String),
+}
+impl std::fmt::Display for CheckError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Missing(slot) => write!(f, "needs {slot}"),
+            Self::Invalid(error) => f.write_str(error),
+        }
+    }
+}
+/// Checks a command line against a catalog without running it: the name must
+/// exist, required slots must be filled and built-in arguments must parse.
+pub fn check(catalog: &[CommandInfo], line: &str) -> Result<(), CheckError> {
+    let line = line.trim();
+    if line.parse::<usize>().is_ok_and(|n| n > 0) {
+        return Ok(());
+    }
+    let (name, args) = split(line);
+    let info = catalog
+        .iter()
+        .find(|info| info.named(name))
+        .ok_or_else(|| CheckError::Invalid(format!("unknown command: {name}")))?;
+    let mut rest = args;
+    for (index, slot) in info.slots.iter().enumerate() {
+        let (word, tail) = if index + 1 == info.slots.len() {
+            (rest, "")
+        } else {
+            split(rest)
+        };
+        if word.is_empty() && slot.required {
+            return Err(CheckError::Missing(slot.name));
+        }
+        rest = tail;
+    }
+    match info.builtin {
+        Some(builtin) => (builtin.build)(args)
+            .map(|_| ())
+            .map_err(CheckError::Invalid),
+        None => Ok(()),
+    }
 }
 
 #[derive(Default)]
@@ -439,20 +590,32 @@ impl Registry {
     pub fn commands(&self) -> Vec<CommandInfo> {
         let builtins = BUILTINS.iter().map(|b| CommandInfo {
             name: b.name.into(),
-            args: b.args,
+            aliases: b.aliases,
+            slots: b.slots,
             doc: b.doc.into(),
+            builtin: Some(b),
         });
         let edits = LINE_EDITS.iter().map(|(name, _, doc)| CommandInfo {
             name: (*name).into(),
-            args: "",
+            aliases: &[],
+            slots: &[],
             doc: (*doc).into(),
+            builtin: None,
         });
-        let custom = self.entries.iter().map(|(name, entry)| CommandInfo {
-            name: name.clone(),
-            args: "",
-            doc: match entry {
-                Entry::Native(_) => "Registered command".into(),
-                Entry::User(body) => body.clone(),
+        let custom = self.entries.iter().map(|(name, entry)| match entry {
+            Entry::Native(_) => CommandInfo {
+                name: name.clone(),
+                aliases: &[],
+                slots: &[],
+                doc: "Registered command".into(),
+                builtin: None,
+            },
+            Entry::User(body) => CommandInfo {
+                name: name.clone(),
+                aliases: &[],
+                slots: ARGUMENTS,
+                doc: body.clone(),
+                builtin: None,
             },
         });
         builtins.chain(edits).chain(custom).collect()
