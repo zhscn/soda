@@ -332,6 +332,67 @@ mod tests {
         }
     }
 
+    /// Typing a file from scratch visits unfinished prefixes that random edits
+    /// of complete samples rarely reach.
+    #[test]
+    fn incremental_analysis_matches_full_parse_while_typing() {
+        for source in [
+            "(){case :;\n",
+            "void f() {\nif (x)\ng();\nswitch (v) {\ncase 1:\nwork();\nbreak;\ndefault:\n;\n}\nauto v = call(a,\nb);\n}\n",
+            "namespace a {\nclass C : public Base {\npublic:\nC(int x)\n: x_(x),\ny_(2) {\n}\nprivate:\nint x_;\n};\n}\n",
+            "#if A\nstruct S {\nS() : a(1)\n, b(2) {}\n#else\nvoid f() { do { x(); } while (y); }\n#endif\n};\n",
+        ] {
+            let mut tree = parse("");
+            for (end, _) in source.char_indices().skip(1).chain([(source.len(), ' ')]) {
+                tree = reparse(&tree, source[..end].into()).0;
+                assert_full(&tree);
+            }
+        }
+    }
+
+    /// Replays typing of real sources: `SODA_TYPING_CORPUS=<dir> cargo test
+    /// --release -- --ignored typing_corpus`. 4000 bytes from the middle of each
+    /// file are typed one character at a time and checked against a full parse.
+    #[test]
+    #[ignore]
+    fn incremental_analysis_matches_full_parse_while_typing_corpus() {
+        let dir = std::env::var_os("SODA_TYPING_CORPUS").expect("SODA_TYPING_CORPUS");
+        let mut paths: Vec<_> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.extension()
+                    .is_some_and(|ext| ["h", "hpp", "cc", "cpp"].contains(&&*ext.to_string_lossy()))
+            })
+            .collect();
+        paths.sort();
+        for path in paths {
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            // Skip license headers and includes: start at a line in the middle.
+            let start = text[..text.len() / 2].rfind('\n').map_or(0, |i| i + 1);
+            let end = (start..=text.len().min(start + 4000))
+                .rev()
+                .find(|&i| text.is_char_boundary(i))
+                .unwrap();
+            let source = &text[start..end];
+            let mut tree = parse("");
+            for (end, _) in source.char_indices().skip(1).chain([(source.len(), ' ')]) {
+                let prefix = &source[..end];
+                let previous = tree.source().to_owned();
+                tree = std::panic::catch_unwind(|| reparse(&tree, prefix.into()).0)
+                    .unwrap_or_else(|_| panic!("{}: {previous:?} -> {prefix:?}", path.display()));
+                let full = parse_with_options(tree.source(), tree.parser_options());
+                assert!(
+                    tree.tokens == full.tokens && tree.nodes == full.nodes,
+                    "{}: {previous:?} -> {prefix:?}",
+                    path.display()
+                );
+            }
+        }
+    }
+
     #[test]
     fn container_repairs_reuse_siblings_inside_large_namespaces_and_classes() {
         let functions = (0..500)

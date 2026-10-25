@@ -165,7 +165,7 @@ pub(super) fn repair(
     parser.tree.nodes = old.nodes[..prefix_nodes].to_vec();
     parser.tree.nodes.reserve(old.nodes.len() - prefix_nodes);
     parser.tree.nodes[id].children.truncate(keep);
-    parser.stack = ancestors;
+    parser.stack = ancestors.clone();
     parser.enum_body = enum_body;
     // A closed island cannot consult or change conditional frames: neither its
     // original nor edited token range contains a directive. Outer branch facts
@@ -223,8 +223,12 @@ pub(super) fn repair(
     let node_delta = parser.tree.nodes.len() as isize - suffix_node as isize;
     // Prefix nodes outside the repaired container can span it or own following
     // siblings. Only their old references are remapped; new child IDs stay local.
+    // An unclosed ancestor can end exactly at an end-of-file boundary and must
+    // still grow with the repaired items it contains.
     for (index, node) in parser.tree.nodes[..prefix_nodes].iter_mut().enumerate() {
-        if node.tokens.end > suffix_token {
+        if node.tokens.end > suffix_token
+            || (node.tokens.end == suffix_token && ancestors.contains(&index))
+        {
             node.tokens.end = shifted(node.tokens.end, suffix_token, token_delta);
         }
         if index != id {
