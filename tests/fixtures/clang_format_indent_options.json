@@ -1,5 +1,5 @@
 {
-  "reference": "clang-format version 23.1.3 (Fedora 23.1.3-1.fc45)",
+  "reference": "clang-format version 23.1.4 (Fedora 23.1.4-1.fc45)",
   "cases": [
     {
       "name": "tabs-Never-2-4",
@@ -988,6 +988,18 @@
         "UseTab": "Always"
       },
       "expected": "#if A\n#\t\tdefine X 1\n#\t\tif B\n#\t\t\t\tdefine Y 2\n#\t\tendif\n#endif\n"
+    },
+    {
+      "name": "lambda-contexts",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "AllowShortLambdasOnASingleLine": "None"
+      },
+      "expected": "void f() {\n  if ([&] {\n        work();\n        return done();\n      }()) {\n    go();\n  }\n  call(first, [&] {\n    work();\n  });\n  int value = compute(\n      [&](int x) {\n        return x;\n      },\n      other);\n  auto g =\n      [&](int x) {\n        return x;\n      };\n  auto h =\n      [&](int x) -> int {\n    return x;\n  };\n  const auto [a,\n              b] = [&]() {\n    return pair();\n  }();\n  return ok() && [&] {\n    return x;\n  }();\n}\n"
     }
   ],
   "unsupported_profiles": []

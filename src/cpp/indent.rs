@@ -3,7 +3,7 @@ use super::indent_rules::{
 };
 use super::{
     CppRules, NodeKind as N, PPDirectiveIndent, SyntaxTree, TokenKind as K, column_width,
-    lexer::{significant_before, spanning},
+    lexer::{significant_after, significant_before, spanning},
     materialize,
 };
 use crate::core::{Change, EditError, Snapshot};
@@ -197,6 +197,114 @@ impl Computer<'_> {
         }
         self.tree.range(id).start
     }
+    fn lambda_body(&self, id: usize) -> bool {
+        self.tree.nodes[id].kind == N::CompoundStatement
+            && self.tree.nodes[id].parent.is_some_and(|parent| {
+                matches!(
+                    self.tree.nodes[parent].kind,
+                    N::ParenGroup | N::BracketGroup | N::BraceGroup | N::OpaqueDeclaration
+                )
+            })
+    }
+    /// The `[` introducing the lambda whose body opens at token `open`, and
+    /// whether the lambda declares a trailing return type.
+    fn lambda_introducer(&self, open: usize) -> Option<(usize, bool)> {
+        let tokens = &self.tree.tokens;
+        let mut at = tokens[open].range.start;
+        let mut arrow = false;
+        loop {
+            let i = significant_before(tokens, at)?;
+            match tokens[i].kind {
+                K::RBracket => {
+                    return Some((
+                        self.tree.nodes[self.tree.token_owner(i)].tokens.start,
+                        arrow,
+                    ));
+                }
+                // Parameters and template arguments of the declarator.
+                K::RParen | K::Greater => {
+                    at = tokens[self.tree.nodes[self.tree.token_owner(i)].tokens.start]
+                        .range
+                        .start;
+                }
+                // Specifiers, trailing return types and their qualifiers.
+                K::Identifier | K::ColonColon | K::Arrow | K::Amp | K::AmpAmp | K::Star => {
+                    arrow |= tokens[i].kind == K::Arrow;
+                    at = tokens[i].range.start;
+                }
+                _ => return None,
+            }
+        }
+    }
+    /// clang-format's NestedBlockIndent for a lambda body (the Signature
+    /// LambdaBodyIndentation): the body is one level deeper and the closing
+    /// brace aligns with it.
+    fn lambda_base(&self, body: usize) -> usize {
+        let open = self.tree.nodes[body].tokens.start;
+        let (start, arrow) = self.lambda_introducer(open).unwrap_or((open, false));
+        let scope = self.tree.nodes[body].parent.unwrap();
+        self.nested_block_indent(scope, start, arrow)
+    }
+    /// NestedBlockIndent of `scope` on reaching token `until`. A line that
+    /// starts at the scope's own level resets it to that line's column, or
+    /// past a leading conditional operator; nested groups inherit it from
+    /// their opener, and an if/for condition starts it after its parenthesis.
+    fn nested_block_indent(&self, scope: usize, until: usize, arrow: bool) -> usize {
+        let tokens = &self.tree.tokens;
+        let node = &self.tree.nodes[scope];
+        let opener = node.tokens.start;
+        let group = node.kind.is_group();
+        let mut indent = if !group {
+            self.indent(self.line_of(tokens[opener].range.start))
+        } else if node.kind == N::ParenGroup
+            && self.condition_paren(opener)
+            && let Some(first) = significant_after(tokens, tokens[opener].range.end)
+        {
+            self.column(tokens[first].range.start)
+        } else {
+            self.nested_block_indent(node.parent.unwrap(), opener, false)
+        };
+        let line_first = |i: usize| self.first(self.line_of(tokens[i].range.start)) == Some(i);
+        // Tokens at this scope's level, including openers of its direct children.
+        let level = |i: usize| {
+            let owner = self.tree.token_owner(i);
+            owner == scope
+                || (self.tree.nodes[owner].parent == Some(scope)
+                    && self.tree.nodes[owner].tokens.start == i)
+        };
+        let mut conditional = false;
+        let scanned = tokens.iter().enumerate().take(until);
+        for (i, token) in scanned.skip(opener + usize::from(group)) {
+            if token.kind.is_trivia() || !level(i) {
+                continue;
+            }
+            let ternary = token.kind == K::Question || (conditional && token.kind == K::Colon);
+            conditional |= token.kind == K::Question;
+            if line_first(i) && token.kind != K::Arrow {
+                indent = self.column(token.range.start) + if ternary { 2 } else { 0 };
+            }
+        }
+        // A wrapped lambda with a trailing return type at statement level is
+        // laid out like a free-standing function.
+        if line_first(until) && !(arrow && !group) {
+            indent = self.column(tokens[until].range.start);
+        }
+        indent
+    }
+    fn condition_paren(&self, opener: usize) -> bool {
+        let tokens = &self.tree.tokens;
+        let Some(keyword) = significant_before(tokens, tokens[opener].range.start) else {
+            return false;
+        };
+        match tokens[keyword].kind {
+            K::IfKw | K::ForKw => true,
+            K::Identifier if &self.tree.source[tokens[keyword].range.clone()] == "constexpr" => {
+                significant_before(tokens, tokens[keyword].range.start)
+                    .is_some_and(|i| tokens[i].kind == K::IfKw)
+            }
+            _ => false,
+        }
+    }
     fn first(&self, line: usize) -> Option<usize> {
         let r = self.snapshot.line_content_range(line)?;
         let start = self
@@ -277,11 +385,12 @@ impl Computer<'_> {
                     ) =>
                 {
                     let anchor = self.origin(id);
-                    return self.fixed(
-                        IndentRole::ClosingToken,
-                        self.indent(self.line_of(anchor)),
-                        Some(anchor),
-                    );
+                    let column = if self.lambda_body(id) {
+                        self.lambda_base(id)
+                    } else {
+                        self.indent(self.line_of(anchor))
+                    };
+                    return self.fixed(IndentRole::ClosingToken, column, Some(anchor));
                 }
                 K::PreprocessorHash => {
                     if self.style.directive.layout == PPDirectiveIndent::Leave {
@@ -511,12 +620,10 @@ impl Computer<'_> {
                     d.anchor = Some(self.tree.range(section).start);
                     return d;
                 }
-                let role = match parent {
-                    Some(N::FunctionDefinition) => IndentRole::FunctionBody,
-                    Some(
-                        N::ParenGroup | N::BracketGroup | N::BraceGroup | N::OpaqueDeclaration,
-                    ) => IndentRole::LambdaBody,
-                    _ => IndentRole::CompoundBody,
+                let (role, base) = match parent {
+                    _ if self.lambda_body(id) => (IndentRole::LambdaBody, self.lambda_base(id)),
+                    Some(N::FunctionDefinition) => (IndentRole::FunctionBody, base),
+                    _ => (IndentRole::CompoundBody, base),
                 };
                 self.slot(role, S::BlockBody, base, Some(anchor))
             }

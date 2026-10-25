@@ -1,4 +1,6 @@
-use super::{Node, NodeKind as N, ParserOptions, SyntaxTree, TokenKind as K, lex};
+use super::{
+    Node, NodeKind as N, ParserOptions, SyntaxTree, TokenKind as K, lex, lexer::significant_after,
+};
 use crate::core::Snapshot;
 use std::sync::Arc;
 
@@ -899,6 +901,9 @@ impl Parser {
         let mut has_question = false;
         let mut terminated = false;
         let mut body_candidate = false;
+        // A lambda introducer seen in expression position; its body is a
+        // nested block and does not end the declaration.
+        let mut lambda = false;
         let mut standalone_macro = false;
         let mut label_candidate = false;
         let mut linkage = LinkageHead::Other;
@@ -925,6 +930,7 @@ impl Parser {
                 break;
             }
             if k == K::LParen {
+                let parameters = lambda;
                 self.group(k);
                 if standalone_macro && self.newline_ahead() {
                     terminated = true;
@@ -933,16 +939,28 @@ impl Parser {
                 standalone_macro = false;
                 label_candidate = false;
                 prev = K::RParen;
-                body_candidate = true;
+                body_candidate = !parameters;
                 continue;
             }
             if k == K::LBracket {
-                let lambda = matches!(prev, K::EndOfFile | K::Equals | K::Comma | K::ReturnKw);
+                let subscript = matches!(
+                    prev,
+                    K::Identifier
+                        | K::RParen
+                        | K::RBracket
+                        | K::Greater
+                        | K::StringLiteral
+                        | K::Number
+                        | K::OperatorKw
+                );
+                let attribute = prev == K::EndOfFile
+                    && significant_after(&self.tree.tokens, self.tree.tokens[self.pos].range.end)
+                        .is_some_and(|i| self.tree.tokens[i].kind == K::LBracket);
                 self.group(k);
                 standalone_macro = false;
                 label_candidate = false;
                 prev = K::RBracket;
-                body_candidate |= lambda;
+                lambda = !subscript && !attribute;
                 continue;
             }
             if k == K::LBrace {
@@ -952,6 +970,13 @@ impl Parser {
                     self.body(N::NamespaceBody);
                     terminated = true;
                     break;
+                }
+                if lambda {
+                    self.body(N::CompoundStatement);
+                    lambda = false;
+                    label_candidate = false;
+                    prev = K::RBrace;
+                    continue;
                 }
                 if body_candidate {
                     self.tree.nodes[id].kind = N::FunctionDefinition;
@@ -988,6 +1013,7 @@ impl Parser {
             }
             has_question |= k == K::Question;
             body_candidate &= Self::suffix(k);
+            lambda &= Self::suffix(k);
             let first = prev == K::EndOfFile && k == K::Identifier;
             let spelling = self.text(self.pos);
             standalone_macro = first && self.statement_macro(spelling);

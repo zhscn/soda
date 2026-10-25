@@ -49,6 +49,11 @@ for layout in ['BeforeHash', 'AfterHash']:
                 {'IndentPPDirectives': layout, 'IndentWidth': indent, 'PPIndentWidth': pp,
                  'TabWidth': tab, 'UseTab': tabs},
                 '#if A\n#define X 1\n#if B\n#define Y 2\n#endif\n#endif\n'))
+lambdas = ('void f() {\nif ([&] {\nwork();\nreturn done();\n}()) {\ngo();\n}\n'
+           'call(first, [&] {\nwork();\n});\nint value = compute(\n[&](int x) {\nreturn x;\n},\nother);\n'
+           'auto g =\n[&](int x) {\nreturn x;\n};\nauto h =\n[&](int x) -> int {\nreturn x;\n};\n'
+           'const auto [a,\nb] = [&]() {\nreturn pair();\n}();\nreturn ok() && [&] {\nreturn x;\n}();\n}\n')
+profiles.append(('lambda-contexts', {'AllowShortLambdasOnASingleLine': 'None'}, lambdas))
 cases = []
 unsupported = []
 for label, options, code in profiles:
