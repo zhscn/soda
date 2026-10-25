@@ -429,7 +429,13 @@ fn enter_replaces_existing_code_prefix_and_composes_auxiliary_spacing() {
             (
                 "void f() {\n    ^ \tfoo();\n}",
                 0,
-                "void f() {\n    \n    ^foo();\n}",
+                // Structural indentation clears the line left blank; disabled
+                // formatting only inherits and keeps it.
+                if disable_format {
+                    "void f() {\n    \n    ^foo();\n}"
+                } else {
+                    "void f() {\n\n    ^foo();\n}"
+                },
             ),
             (
                 "void f() {\n^old\ntext    foo();\n}",
@@ -449,6 +455,11 @@ fn enter_replaces_existing_code_prefix_and_composes_auxiliary_spacing() {
         (
             "void f() {\r\n^ \tfoo();\r\n}",
             "void f() {\r\n\r\n    ^foo();\r\n}",
+        ),
+        // A second Enter on an auto-indented blank line leaves it empty.
+        (
+            "void f() {\n    a();\n    ^\n}",
+            "void f() {\n    a();\n\n    ^\n}",
         ),
     ] {
         assert_atomic_input(input, 0, None, &CppStyle::default(), expected);

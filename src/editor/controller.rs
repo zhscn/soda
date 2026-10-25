@@ -261,7 +261,11 @@ impl Editor {
                     }
                     Command::Enter => {
                         let mut language = self.model.document.language.clone();
-                        let tx = operations::prepare_enter(&state, &mut language)?;
+                        let tx = operations::prepare_enter(
+                            &state,
+                            self.model.document.newline(),
+                            &mut language,
+                        )?;
                         prepared_language = Some(language);
                         (tx, EditOrigin::Input)
                     }

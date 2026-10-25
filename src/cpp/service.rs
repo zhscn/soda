@@ -2,6 +2,7 @@
 //! with respect to the document; a cloned session isolates speculative analysis.
 use super::{
     CppRules, IndentRole, SyntaxTree, TokenKind as K, compute_indent, lex,
+    lexer::{significant_after, significant_before, spanning, token_at},
     parse_snapshot_with_options,
 };
 use crate::{
@@ -50,19 +51,31 @@ impl CppSession {
     }
     fn analyze(&mut self, snapshot: &Snapshot) -> Arc<SyntaxTree> {
         if !self.matches(snapshot) {
+            let full = || {
+                let tree = parse_snapshot_with_options(snapshot, self.rules.parser_options());
+                let work = super::AnalysisWork {
+                    strategy: super::ParseStrategy::Full,
+                    scanned_bytes: snapshot.text().len(),
+                    reparsed_tokens: tree.tokens().len(),
+                    reused_nodes: 0,
+                    fallback: None,
+                };
+                (tree, work)
+            };
             let (tree, work) = match &self.analysis {
-                Some(previous) => super::parser::reparse(previous, snapshot.shared_text()),
-                None => {
-                    let tree = parse_snapshot_with_options(snapshot, self.rules.parser_options());
-                    let work = super::AnalysisWork {
-                        strategy: super::ParseStrategy::Full,
-                        scanned_bytes: snapshot.text().len(),
-                        reparsed_tokens: tree.tokens().len(),
-                        reused_nodes: 0,
-                        fallback: None,
-                    };
-                    (tree, work)
-                }
+                // Repair defects are found by differential tests in debug
+                // builds; a release build pays one full parse instead of
+                // losing the user's unsaved buffers.
+                Some(previous) => std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    super::parser::reparse(previous, snapshot.shared_text())
+                }))
+                .unwrap_or_else(|panic| {
+                    if cfg!(debug_assertions) {
+                        std::panic::resume_unwind(panic)
+                    }
+                    full()
+                }),
+                None => full(),
             };
             self.analysis = Some(Arc::new(tree));
             self.work = Some(work);
@@ -86,21 +99,14 @@ impl CppSession {
                 &scanned
             }
         };
-        let verbatim = tokens.iter().any(|token| {
-            token.range.start < position
-                && (position < token.range.end
-                    || (token.unterminated && position == token.range.end))
-                && matches!(
-                    token.kind,
-                    K::RawStringLiteral | K::StringLiteral | K::CharacterLiteral
-                )
+        let verbatim = spanning(tokens, position).is_some_and(|token| {
+            matches!(
+                token.kind,
+                K::RawStringLiteral | K::StringLiteral | K::CharacterLiteral
+            )
         });
-        let left = tokens.iter().enumerate().rfind(|(_, t)| {
-            t.range.end <= position && !t.kind.is_trivia() && t.kind != K::EndOfFile
-        });
-        let right = tokens
-            .iter()
-            .find(|t| t.range.start >= position && !t.kind.is_trivia() && t.kind != K::EndOfFile);
+        let left = significant_before(tokens, position).map(|index| (index, &tokens[index]));
+        let right = significant_after(tokens, position).map(|index| &tokens[index]);
         let expand_pair = match (left, right) {
             (Some((index, left)), Some(right))
                 if left.kind == K::LBrace
@@ -150,10 +156,9 @@ impl CppSession {
         }
         let tree = self.analyze(snapshot);
         if pp_word {
-            if !tree.tokens().iter().any(|token| {
+            if !token_at(tree.tokens(), request.position).is_some_and(|token| {
                 let word = &tree.source()[token.range.clone()];
                 token.preprocessor
-                    && token.range.contains(&request.position)
                     && word
                         .bytes()
                         .next()
@@ -170,11 +175,9 @@ impl CppSession {
                 '#' => K::PreprocessorHash,
                 _ => return Ok(IndentAdvice::Unavailable),
             };
-            if !tree
-                .tokens()
-                .iter()
-                .any(|token| token.range.start == request.position && token.kind == expected)
-            {
+            if !token_at(tree.tokens(), request.position).is_some_and(|token| {
+                token.range.start == request.position && token.kind == expected
+            }) {
                 return Ok(IndentAdvice::Unavailable);
             }
         }

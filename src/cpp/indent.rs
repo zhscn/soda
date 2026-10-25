@@ -3,6 +3,7 @@ use super::indent_rules::{
 };
 use super::{
     CppRules, NodeKind as N, PPDirectiveIndent, SyntaxTree, TokenKind as K, column_width,
+    lexer::{significant_before, spanning},
     materialize,
 };
 use crate::core::{Change, EditError, Snapshot};
@@ -210,10 +211,7 @@ impl Computer<'_> {
     }
     fn run(&self) -> IndentDecision {
         let start = self.snapshot.line_start(self.line).unwrap();
-        if let Some(t) = self.tree.tokens.iter().find(|t| {
-            t.range.start < start
-                && (start < t.range.end || (t.unterminated && start == t.range.end))
-        }) {
+        if let Some(t) = spanning(&self.tree.tokens, start) {
             let role = match t.kind {
                 K::RawStringLiteral => Some(IndentRole::PreservedRawString),
                 K::BlockComment => Some(IndentRole::PreservedBlockComment),
@@ -417,10 +415,7 @@ impl Computer<'_> {
         let mut id = if first.is_some() {
             self.tree.node_at(query)
         } else {
-            let prev =
-                self.tree.tokens.iter().rfind(|t| {
-                    !t.kind.is_trivia() && t.kind != K::EndOfFile && t.range.end <= query
-                });
+            let prev = significant_before(&self.tree.tokens, query).map(|i| &self.tree.tokens[i]);
             let mut node = self.tree.node_at(prev.map_or(query, |t| t.range.start));
             while node != 0
                 && !self.tree.nodes[node].incomplete

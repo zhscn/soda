@@ -133,6 +133,38 @@ pub fn lex(source: &str) -> Vec<Token> {
     Scanner::new(source, 0).collect()
 }
 
+// Lossless tokens are contiguous and ordered, so offset queries are binary
+// searches; only the trivia run next to the offset is scanned.
+fn significant(token: &Token) -> bool {
+    !token.kind.is_trivia() && token.kind != TokenKind::EndOfFile
+}
+/// The token containing `offset`.
+pub(crate) fn token_at(tokens: &[Token], offset: usize) -> Option<&Token> {
+    tokens
+        .get(tokens.partition_point(|t| t.range.end <= offset))
+        .filter(|t| t.range.start <= offset)
+}
+/// The token split by `offset`, including an unterminated token ending there.
+pub(crate) fn spanning(tokens: &[Token], offset: usize) -> Option<&Token> {
+    tokens
+        .get(tokens.partition_point(|t| t.range.end < offset))
+        .filter(|t| {
+            t.range.start < offset
+                && (offset < t.range.end || (t.unterminated && offset == t.range.end))
+        })
+}
+/// Index of the last significant token ending at or before `offset`.
+pub(crate) fn significant_before(tokens: &[Token], offset: usize) -> Option<usize> {
+    (0..tokens.partition_point(|t| t.range.end <= offset))
+        .rev()
+        .find(|&i| significant(&tokens[i]))
+}
+/// Index of the first significant token starting at or after `offset`.
+pub(crate) fn significant_after(tokens: &[Token], offset: usize) -> Option<usize> {
+    (tokens.partition_point(|t| t.range.start < offset)..tokens.len())
+        .find(|&i| significant(&tokens[i]))
+}
+
 /// Scanning can resume immediately after a standalone newline token: strings,
 /// comments and escaped newlines cannot contain such a checkpoint.
 struct Scanner<'a> {

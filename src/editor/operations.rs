@@ -120,8 +120,22 @@ fn advice_changes(
     }
 }
 
+/// A document's newline is its first line terminator; text without one uses LF.
+pub(super) fn detect_newline(snapshot: &Snapshot) -> &'static str {
+    let (Some(line), Some(content)) = (snapshot.line_range(0), snapshot.line_content_range(0))
+    else {
+        return "\n";
+    };
+    if line.end - content.end == 2 {
+        "\r\n"
+    } else {
+        "\n"
+    }
+}
+
 pub(super) fn prepare_enter(
     state: &EditorState,
+    newline: &str,
     language: &mut LanguageSession,
 ) -> Result<Transaction, EditError> {
     let range = state.selection().range();
@@ -136,15 +150,6 @@ pub(super) fn prepare_enter(
             .0
     };
     let advice = language.enter_advice(removed.snapshot(), range.start)?;
-    let newline = if state
-        .snapshot()
-        .chunks()
-        .any(|chunk| chunk.contains("\r\n"))
-    {
-        "\r\n"
-    } else {
-        "\n"
-    };
     let inserted = if advice.expand_pair {
         newline.repeat(2)
     } else {
@@ -183,7 +188,22 @@ pub(super) fn prepare_enter(
         } else {
             0
         };
+    // Structural indentation makes the indentation of a line left blank
+    // meaningless; clear it rather than leave trailing whitespace behind.
+    let structural = matches!(indent, IndentAdvice::Set { .. });
     let mut corrections = advice_changes(snapshot, line, indent, true)?;
+    if structural
+        && let Some(left) = line.checked_sub(1)
+        && let Some(blank) = snapshot.line_content_range(left)
+        && !blank.is_empty()
+        && snapshot
+            .byte_slice(blank.clone())
+            .unwrap()
+            .bytes()
+            .all(|b| matches!(b, b' ' | b'\t'))
+    {
+        corrections.push(Change::new(blank, ""));
+    }
     if advice.expand_pair {
         let query = IndentRequest {
             line: line + 1,
@@ -282,7 +302,11 @@ pub(super) fn prepare_insert(state: &EditorState, text: String) -> Result<Transa
 
 /// Stateless transaction planning for callers that manage their own state.
 pub fn enter(state: &EditorState, language: impl Into<Language>) -> Result<Transaction, EditError> {
-    prepare_enter(state, &mut LanguageSession::new(language.into()))
+    prepare_enter(
+        state,
+        detect_newline(state.snapshot()),
+        &mut LanguageSession::new(language.into()),
+    )
 }
 pub fn type_char(
     state: &EditorState,

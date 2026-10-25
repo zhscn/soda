@@ -56,6 +56,7 @@ pub struct Document {
     pub(super) language: LanguageSession,
     history: History<SessionId>,
     config_generation: u64,
+    newline: &'static str,
     pub(crate) file: crate::files::FileState,
 }
 impl Document {
@@ -66,9 +67,11 @@ impl Document {
                 value.checked_add(1)
             })
             .expect("document identities exhausted");
+        let snapshot = EditorState::new(text).snapshot().clone();
         Self {
             id: DocumentId(id),
-            snapshot: EditorState::new(text).snapshot().clone(),
+            newline: super::operations::detect_newline(&snapshot),
+            snapshot,
             language: LanguageSession::new(language),
             history: History::default(),
             config_generation: 0,
@@ -92,6 +95,10 @@ impl Document {
     }
     pub fn whitespace(&self) -> crate::language::WhitespacePolicy {
         self.language.whitespace()
+    }
+    /// The line terminator inserted by Enter, detected when text is loaded.
+    pub fn newline(&self) -> &'static str {
+        self.newline
     }
     pub fn config_generation(&self) -> u64 {
         self.config_generation
@@ -138,6 +145,9 @@ impl Document {
             mapping,
         };
         self.snapshot = next.snapshot().clone();
+        if origin == EditOrigin::Reload {
+            self.newline = super::operations::detect_newline(&self.snapshot);
+        }
         Ok(Commit {
             update,
             restore_selection: (owner, next.selection()),
