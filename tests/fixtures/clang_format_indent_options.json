@@ -1000,6 +1000,17 @@
         "AllowShortLambdasOnASingleLine": "None"
       },
       "expected": "void f() {\n  if ([&] {\n        work();\n        return done();\n      }()) {\n    go();\n  }\n  call(first, [&] {\n    work();\n  });\n  int value = compute(\n      [&](int x) {\n        return x;\n      },\n      other);\n  auto g =\n      [&](int x) {\n        return x;\n      };\n  auto h =\n      [&](int x) -> int {\n    return x;\n  };\n  const auto [a,\n              b] = [&]() {\n    return pair();\n  }();\n  return ok() && [&] {\n    return x;\n  }();\n}\n"
+    },
+    {
+      "name": "argument-alignment",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never"
+      },
+      "expected": "void f(unsigned Level,\n       const Map<A *, B<C>>\n           &Active,\n       function_ref<bool(int A,\n                         int B)>\n           Check) {\n  State.push(ParenState(/*Tok=*/nullptr, First,\n                        /*AvoidBinPacking=*/false,\n                        /*NoLineBreak=*/false));\n  for (auto I = List.begin(),\n            E = List.end();\n       I != E; ++I) {\n    work();\n  }\n  if (Ready)\n    return First() &&\n           !Second();\n  Value =\n      // comment\n      compute(x);\n  if (A ||\n      // comment\n      B) {\n    go();\n  }\n  Details.push(\n      new (Context) Diagnostic{\n          First,\n          Second});\n}\n"
     }
   ],
   "unsupported_profiles": []

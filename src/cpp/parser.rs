@@ -708,8 +708,16 @@ impl Parser {
         let id = self.open(kind);
         self.advance();
         let mut pending = false;
+        let mut prev = opener;
         loop {
             let k = self.kind();
+            if k == K::Less
+                && matches!(prev, K::Identifier | K::TemplateKw)
+                && self.template_args_in(true)
+            {
+                prev = K::Greater;
+                continue;
+            }
             if k == K::EndOfFile {
                 break;
             }
@@ -719,8 +727,12 @@ impl Parser {
                 return;
             }
             if matches!(k, K::LParen | K::LBracket) {
+                // A nested block follows a lambda introducer and its parameters;
+                // `new (place) T{...}` and other parenthesized groups do not open one.
+                let lambda = k == K::LBracket || pending;
                 self.group(k);
-                pending = true;
+                pending = lambda;
+                prev = Self::delimiter(k).1;
                 continue;
             }
             if k == K::LBrace && opener != K::LBracket {
@@ -730,6 +742,7 @@ impl Parser {
                     self.group(k);
                 }
                 pending = false;
+                prev = K::RBrace;
                 continue;
             }
             if opener == K::LParen
@@ -770,18 +783,53 @@ impl Parser {
                 }
             }
             pending &= Self::suffix(k);
+            prev = k;
             self.advance();
         }
         self.missing(closer);
         self.close(id);
     }
     fn template_args(&mut self) -> bool {
+        self.template_args_in(false)
+    }
+    /// In an expression, clang-format's angle heuristics reject comparisons
+    /// such as `a < b && c > d` that would otherwise balance.
+    fn template_args_in(&mut self, expression: bool) -> bool {
+        let Some(end) = self.template_end(expression) else {
+            return false;
+        };
+        self.template_group(end);
+        true
+    }
+    /// Groups inside template arguments, so nested argument lists and
+    /// parentheses are scopes for continuation layout. A `>>` closing two
+    /// lists ends both nodes at the same token.
+    fn template_group(&mut self, end: usize) {
+        let id = self.open(N::TemplateArgumentList);
+        self.advance();
+        while self.pos < end {
+            match self.kind() {
+                k @ (K::LParen | K::LBracket) if self.stack.len() < MAX_NESTING => self.group(k),
+                K::Less if self.stack.len() < MAX_NESTING => match self.template_end(false) {
+                    Some(inner) if inner <= end => self.template_group(inner),
+                    _ => self.advance(),
+                },
+                _ => self.advance(),
+            }
+        }
+        self.close(id);
+    }
+    /// The token index after the `>` closing the argument list at the cursor.
+    fn template_end(&mut self, expression: bool) -> Option<usize> {
         self.skip();
         let mut angle = 0isize;
         let mut paren = 0;
         let mut bracket = 0;
         let mut count = 0;
         let mut end = None;
+        let mut logical = false;
+        let mut ternary = false;
+        let source = self.tree.source.as_bytes();
         for i in self.pos..self.tree.tokens.len() {
             let k = self.tree.tokens[i].kind;
             if k.is_trivia() {
@@ -822,16 +870,31 @@ impl Parser {
                     bracket -= 1;
                 }
                 K::Semicolon | K::LBrace | K::RBrace | K::EndOfFile => break,
+                K::PipePipe | K::AmpAmp if paren == 0 && bracket == 0 => {
+                    // `&&` without surrounding spaces is a reference declarator.
+                    let range = &self.tree.tokens[i].range;
+                    logical |= k == K::PipePipe
+                        || (range.start > 0
+                            && source[range.start - 1].is_ascii_whitespace()
+                            && source.get(range.end).is_some_and(u8::is_ascii_whitespace));
+                }
+                K::Question | K::Colon if paren == 0 && bracket == 0 => ternary = true,
                 _ => {}
             }
         }
-        let Some(end) = end else {
-            return false;
-        };
-        let id = self.open(N::TemplateArgumentList);
-        self.pos = end;
-        self.close(id);
-        true
+        let end = end?;
+        if expression {
+            let tokens = &self.tree.tokens;
+            let next = significant_after(tokens, tokens[end - 1].range.end).map(|i| tokens[i].kind);
+            let literal = matches!(
+                next,
+                Some(K::Number | K::StringLiteral | K::CharacterLiteral | K::RawStringLiteral)
+            );
+            if logical || literal || (ternary && !matches!(next, Some(K::LParen | K::LBrace))) {
+                return None;
+            }
+        }
+        Some(end)
     }
     fn ctor(&mut self) {
         let list = self.open(N::CtorInitializerList);

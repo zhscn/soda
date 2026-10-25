@@ -137,3 +137,43 @@ fn reference_layouts_restore_indentation_for_each_rule_profile() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+#[test]
+fn reference_layouts_survive_typing_from_scratch() {
+    let fixture: Value =
+        serde_json::from_str(include_str!("fixtures/clang_format_indent_options.json")).unwrap();
+    let base = preset("LLVM").unwrap();
+    let mut failures = Vec::new();
+    for case in fixture["cases"].as_array().unwrap() {
+        // Enter after a wrapped return type cannot know that a function name,
+        // not an ordinary continuation, follows; reindent covers that layout.
+        if case["name"] == "wrapped-name-False" {
+            continue;
+        }
+        let expected = case["expected"].as_str().unwrap();
+        let config = parse_config(
+            &case["options"].to_string(),
+            &base,
+            "Cpp",
+            false,
+            UnknownOptions::Error,
+        )
+        .unwrap()
+        .unwrap();
+        let mut editor = soda::editor::Editor::new("", config.rules);
+        for line in expected.split_inclusive('\n') {
+            for ch in line.trim_start_matches([' ', '\t']).chars() {
+                let command = if ch == '\n' {
+                    soda::editor::Command::Enter
+                } else {
+                    soda::editor::Command::TypeChar(ch)
+                };
+                editor.execute(command).unwrap();
+            }
+        }
+        if editor.state().snapshot().text() != expected {
+            failures.push(case["name"].as_str().unwrap().to_owned());
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

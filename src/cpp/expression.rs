@@ -114,6 +114,8 @@ struct Fake<'a> {
     tokens: &'a mut [Sim],
     pos: usize,
     depth: usize,
+    /// Enclosing scopes still closed by an already consumed token such as `>>`.
+    pending: usize,
 }
 impl Fake<'_> {
     fn current(&self) -> i32 {
@@ -138,9 +140,25 @@ impl Fake<'_> {
         }
         self.tokens[start].fake_left.push(prec);
         self.tokens[start].starts_binary |= prec > 0;
-        if self.pos < self.tokens.len() {
+        // An expression still open at the end of input stays open; one ended
+        // by a closer such as a final `>>` closes before it.
+        if self.pos < self.tokens.len() || self.pending > 0 {
             self.tokens[self.pos.saturating_sub(1)].fake_right += 1;
         }
+    }
+    fn scope(&mut self) {
+        while self.pos < self.tokens.len() && self.tokens[self.pos].scope != -1 {
+            self.pos += 1;
+            self.parse(0);
+            if self.pending > 0 {
+                self.pending -= 1;
+                return;
+            }
+        }
+        if let Some(t) = self.tokens.get(self.pos) {
+            self.pending = t.close_count - 1;
+        }
+        self.pos += 1;
     }
     fn parse(&mut self, prec: i32) {
         if self.depth >= 128 {
@@ -152,10 +170,15 @@ impl Fake<'_> {
         self.depth -= 1;
     }
     fn parse_inner(&mut self, prec: i32) {
+        if self.pending > 0 {
+            return;
+        }
+        // Operands start after `return` and any line comments before them;
+        // a block comment such as `/*Arg=*/` belongs to its operand.
         while self
             .tokens
             .get(self.pos)
-            .is_some_and(|t| t.kind == K::ReturnKw)
+            .is_some_and(|t| matches!(t.kind, K::ReturnKw | K::LineComment))
         {
             self.pos += 1;
         }
@@ -196,7 +219,8 @@ impl Fake<'_> {
         while self.pos < self.tokens.len() {
             self.parse(prec + 1);
             let current = self.current();
-            if self.pos >= self.tokens.len()
+            if self.pending > 0
+                || self.pos >= self.tokens.len()
                 || self.tokens[self.pos].scope == -1
                 || (current != -1 && current < prec)
                 || (current == 3 && prec == 2 && self.tokens[self.pos].colon)
@@ -204,11 +228,7 @@ impl Fake<'_> {
                 break;
             }
             if self.tokens[self.pos].scope == 1 {
-                while self.pos < self.tokens.len() && self.tokens[self.pos].scope != -1 {
-                    self.pos += 1;
-                    self.parse(0);
-                }
-                self.pos += 1;
+                self.scope();
             } else {
                 if current == prec {
                     if let Some(last) = latest {
@@ -239,6 +259,10 @@ struct Frame {
     variable: i64,
     start_call: i64,
     wrapped: bool,
+    /// A `for` header: its clauses declare and assign like statements.
+    header: bool,
+    /// A braced initializer list, whose elements are values, not declarations.
+    braced: bool,
 }
 struct Replay<'a> {
     stack: Vec<Frame>,
@@ -271,7 +295,10 @@ impl Replay<'_> {
             }
             f.last = col + if t.shift { 3 } else { 0 };
         } else if let Some(p) = prev {
-            if t.kind == K::Equals && self.depth == 0 && self.top().variable == 0 {
+            if t.kind == K::Equals
+                && (self.depth == 0 || self.top().header)
+                && self.top().variable == 0
+            {
                 let variable = prev2
                     .filter(|p2| {
                         matches!(p2.kind, K::Star | K::Amp) && p2.column + p2.length == p.column
@@ -286,6 +313,7 @@ impl Replay<'_> {
             if p.scope == 1 && prev2.is_some_and(|p2| matches!(p2.kind, K::IfKw | K::ForKw)) {
                 self.top_mut().last = col;
                 self.top_mut().nested = col;
+                self.top_mut().header = prev2.is_some_and(|p2| p2.kind == K::ForKw);
             } else if p.kind == K::Comma
                 || p.question
                 || p.colon
@@ -297,6 +325,9 @@ impl Replay<'_> {
             {
                 self.top_mut().last = col;
             }
+        }
+        if t.kind == K::Semicolon && self.top().header {
+            self.top_mut().variable = 0;
         }
         if t.shift && self.top().shift == 0 {
             self.top_mut().shift = col;
@@ -379,6 +410,7 @@ impl Replay<'_> {
             let mut state = Frame {
                 structural: top.structural,
                 last: top.last,
+                braced: t.braced,
                 ..Frame::default()
             };
             if t.block {
@@ -458,6 +490,27 @@ impl Replay<'_> {
         if prev.is_some_and(|p| matches!(p.kind, K::ColonColon | K::Equals)) {
             return continuation;
         }
+        // A declared name or declarator wrapped after its type continues the
+        // parameter, like clang-format's StartOfName and PointerOrReference.
+        if self.depth > 0
+            && !f.braced
+            && matches!(t.kind, K::Identifier | K::Amp | K::AmpAmp | K::Star)
+            && !t.binary
+            && prev.is_some_and(|p| {
+                !p.binary
+                    && matches!(
+                        p.kind,
+                        K::Identifier
+                            | K::Greater
+                            | K::GreaterGreater
+                            | K::Star
+                            | K::Amp
+                            | K::AmpAmp
+                    )
+            })
+        {
+            return continuation;
+        }
         if prev.is_some_and(|p| p.kind == K::RParen) && !t.binary && t.kind != K::Colon {
             return continuation;
         }
@@ -483,6 +536,15 @@ pub(super) fn continuation(
     let mut region = controlling;
     while let Some(parent) = tree.nodes[region].parent {
         if tree.nodes[parent].kind.is_layout_boundary() {
+            break;
+        }
+        // A braceless control body is its own logical line; only the
+        // condition continues the control statement.
+        if matches!(
+            tree.nodes[parent].kind,
+            N::IfStatement | N::ElseClause | N::ForStatement | N::WhileStatement | N::DoStatement
+        ) && tree.nodes[region].kind != N::ParenGroup
+        {
             break;
         }
         region = parent;
@@ -549,7 +611,9 @@ pub(super) fn continuation(
             continue;
         }
         let token_line = snapshot.line_of(t.range.start)?;
-        if comment && token_line == previous_line {
+        // Trailing line comments do not take part in layout; block comments
+        // such as `/*Arg=*/` are ordinary tokens and can anchor alignment.
+        if t.kind == K::LineComment && token_line == previous_line {
             continue;
         }
         if t.range.start >= line_start {
@@ -588,18 +652,26 @@ pub(super) fn continuation(
         {
             s.scope = -1;
             s.braced = n.kind == N::BraceGroup;
+            // Only `>>` closes two argument lists; an unterminated enclosing
+            // group can end at the same token without being closed by it.
             let mut parent = n.parent;
             while let Some(id) = parent {
                 let n = &tree.nodes[id];
-                if !n.kind.is_group() || i + 1 != n.tokens.end {
+                if n.kind != N::TemplateArgumentList
+                    || t.kind != K::GreaterGreater
+                    || i + 1 != n.tokens.end
+                {
                     break;
                 }
                 s.close_count += 1;
                 parent = n.parent;
             }
         }
-        if s.scope == 0 && !after_operator {
-            let prev = sim.last();
+        if s.scope == 0 && !after_operator && !comment {
+            let prev = sim
+                .iter()
+                .rev()
+                .find(|s| !matches!(s.kind, K::LineComment | K::BlockComment));
             let operand = prev.is_some_and(Sim::operand);
             if t.kind == K::Colon {
                 if tree.is_constructor_colon(i) {
@@ -644,6 +716,7 @@ pub(super) fn continuation(
         tokens: &mut sim,
         pos: 0,
         depth: 0,
+        pending: 0,
     }
     .parse(0);
     let synthetic = Sim::new(K::Identifier);
@@ -672,6 +745,11 @@ pub(super) fn continuation(
     };
     let mut nc = None;
     for i in 0..count {
+        // Line comments are never operands and leave the layout unchanged;
+        // the following line continues from the preceding code token.
+        if sim[i].kind == K::LineComment {
+            continue;
+        }
         replay.step(
             &sim[i],
             i.checked_sub(1).map(|j| &sim[j]),
