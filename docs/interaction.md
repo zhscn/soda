@@ -57,40 +57,123 @@ Normal 计数限制为 10,000。输入 operator 或 g 等前缀后，Esc、Ctrl-
 
 BeginUndoGroup 保存操作开始前的选区，EndUndoGroup 保存结束时的选区。打开新行时的定位、缩进和后续输入因此可以作为一次撤销恢复，并在 redo 时恢复 Normal 光标。失败事务不改变分组计划；移动、保存、其他会话操作、焦点切换和进入功能会话建立分组边界。Vim 层不维护第二份文本或撤销历史。
 
-## 绑定与命令扩展
+## 命令、键位与配置
 
-默认键位遵循上表。`Keymap::bind` 和 Runtime::bind 在指定 EditMode 中覆盖单键或最多四个按键的显式序列，完整绑定不可同时是另一个绑定的前缀。重复绑定替换原动作，unbind 移除覆盖并恢复默认解释。自定义绑定先于默认 Vim 解释器；自定义序列的前缀会占用相应输入，不会在失败时重放给 Vim 解释器。进入 operator-pending 后由 Vim 语法处理后续输入。第二个及以后的按键不能使用保留的取消键。
+交互能力按 kakoune 的方式组织：所有用户可调用的操作都是有名字的命令，键位、`:` 命令行、配置文件和帮助只引用命令名。扩展通过组合命令和调用外部进程实现，不嵌入脚本语言。命令表是唯一的接入面；以后需要脚本时（候选为 Steel），脚本运行时向同一张表注册命令，不直接访问 Runtime 的命令循环。Chez 拥有独立的执行环境，与编辑器的 owner-thread 命令循环难以共存，不作为嵌入候选。
 
-自定义前缀没有超时，底部展示等待状态；未知序列被整体消费。释放事件不改变前缀，粘贴或焦点离开终端时取消前缀。默认映射中普通字符直接进入 Vim 解释器，不经过修饰键合成。
+### 命令表
 
-输入组件先于编辑区接收输入。`bind_input` 为这些组件覆盖一个按键到 Input 的映射，不执行文档命令或切换编辑模式。默认输入支持左右、Home/End、Ctrl-B/E 的首尾移动，Ctrl-W/U 删除，Ctrl-P/N 选择候选，Esc/Ctrl-C 取消。这样可以为文档 Insert 和输入组件分别增加所需绑定，同时保持组件的焦点与生命周期。
+`interaction::registry` 保存命令。每个条目包含名字、别名、参数形式和一行说明；条目有三种来源：
 
-`register_command(name, handler)` 注册 Rust 函数，接收只读 Application 并返回类型化 Command。绑定或命令面板通过 Command::Named 调用它。函数可计算事务、选择内置工作流或调用其他现有操作；它不能直接修改路由器或同步读取后续输入。返回 Named 的递归分发会被拒绝。注册接口是 Rust API，当前不加载用户键位配置文件。
+| 来源 | 定义方式 | 名字规则 |
+| --- | --- | --- |
+| 内置 | 静态表，参数解析为类型化 `Command` | 固定，不可替换 |
+| Rust 注册 | `register_command(name, handler)`，处理函数读取只读 Application 并返回 `Command` | 不可与内置名或别名冲突；重复注册替换 |
+| 用户定义 | `define-command NAME BODY` | 同上；与 Rust 注册共享名字空间 |
 
-## 命令面板
+命令行的第一个空白分隔词是命令名，其余部分去掉首尾空白后整体作为参数，由命令自己解释：路径参数保留内部空格，`map` 再拆分模式、按键和目标。`Command::Named(line)` 携带一条命令行，在执行时解析，因此绑定可以引用之后才定义的命令。`:` 命令行、配置文件、键位目标和 `define-command` 的命令体使用同一个解析器；`:42` 这种纯数字输入仍表示跳转到行。
 
-Normal 下 `:` 打开 ExSession。它只解析固定命令名和剩余的路径参数，不解释脚本、shell 转义或表达式。
+用户定义命令的命令体用 `;` 分隔多条命令行，`\;` 表示字面分号。`%arg{1}` 到 `%arg{9}` 替换为按空白拆分的调用参数，`%arg{@}` 替换为完整参数。展开在执行时进行，嵌套用户命令最多展开 16 层，超过时整条命令失败且不执行任何部分；未知命令名和参数错误同样在执行前报告。展开得到的命令依次执行，与 `Response.commands` 一样在第一次失败时停止；某条命令打开交互组件后，后续命令被阻止。Rust 处理函数在轮到它时才读取 Application，返回 `Named` 会被拒绝，避免处理函数之间的递归分发。
 
-| 命令 | 行为 |
-| --- | --- |
-| :e PATH / :e | 打开指定文件 / 重新加载当前文件 |
-| :open | 打开带补全的路径组件 |
-| :w / :w PATH / :saveas | 保存 / 保存到指定路径 / 打开另存为组件 |
-| :q / :wq | 退出 / 先保存当前文档再退出 |
-| :bd | 关闭当前文档 |
-| :b / :buffers / :files | 缓冲区选择组件 |
-| :bn / :enew | 下一个视图 / 新文档 |
-| :project / :help | 项目文件组件 / 帮助 |
+### 键位上下文
 
-路径参数保留内部空格，相对路径以 Runtime 的文件根目录解析，支持 `~/`。新文件在保存前不写磁盘。打开、保存和离开文档沿用 Soda 的异步任务、冲突检测与保存/丢弃/取消流程；这些组件不模拟 Vim 的窗口和 Ex 执行环境。`:wq` 只自动保存当前文档，其他未保存文档仍需明确处理。其他无参数命令名交给已注册的 Rust 命令。
+键位按上下文解析：`normal`、`visual`（同时用于字符和整行 Visual）、`insert` 和 `prompt`（所有输入框、picker 与确认对话框）。每个上下文依次查找：
 
-ExSession 返回待执行 Command 并结束输入会话，Runtime 再执行命令。事件与命令批次在第一次失败时停止，已经完成的操作保留。命令处理器启动后续交互会话，不在输入框内部阻塞等待。
+1. 用户层：`map` 和 Rust `bind`（prompt 为 `bind_input`）写入；`unmap`、`unbind` 和 `unbind_input` 删除用户条目，默认解释随之恢复。
+2. 默认层：`interaction::keymap` 中的静态表，引用命令名并在启动时解析，测试保证每个默认条目都能解析。
+3. 兜底：normal/visual 的普通字符交给 Vim 语法；insert 和 prompt 的可打印字符直接输入。
 
-## 内置帮助
+用户层的完整绑定不能同时是另一个用户绑定的前缀；用户层前缀会遮住默认层中相同开头的单键。序列最多四个按键。Esc、Ctrl-[ 和 Ctrl-C 取消待完成序列，不能作为序列的第二个及以后的按键。要关闭某个默认键，把它绑定到 `nop`。
 
-编辑区的 `F1` 打开只读帮助页，方向键、PageUp/PageDown 与 Home/End 浏览内容，F1、Enter 或 Esc 返回编辑区。帮助不修改文档、选区和编辑视口，并阻止编辑命令传播。前端提供可见行数，帮助组件只维护首个可见行。
+`prompt` 上下文的目标是输入动作，不是应用命令：`confirm`、`cancel`、`complete`、`complete-backward`、`candidate-next`、`candidate-previous`、`candidate-first`、`candidate-last`、`page-next`、`page-previous`、`match-next`、`match-previous`、`replace-all`、`help`、`select-all`、`nop`，以及下面的行编辑名。prompt 绑定只接受单个按键。输入组件因此不会执行文档命令或切换编辑模式。
 
-`--help` 与内置帮助使用同一份快捷键说明；编辑区没有状态消息时显示常用键提示。替换确认同时提供 F4 和 Ctrl-Enter，F4 可用于不能区分 Ctrl-Enter 的终端。
+Normal 的默认绑定除 Vim 语法外还有 `<c-r>` 重做、`<c-f>` / `<c-b>` 翻页、`<f1>` 帮助，以及 helix 式的空格菜单：`<space>f` 项目文件、`<space>b` 缓冲区、`<space>:` 命令面板。Insert 中方向键、Enter、Tab 和 Shift-Tab 分别绑定 `move-up`/`move-down`、`newline`、`insert-tab` 和 `outdent`。
+
+### 按键记法
+
+单个字符直接书写；带修饰键或特殊键写在尖括号中，大小写不敏感：`<c-x>`、`<a-f>`（`<m-f>` 同义）、`<s-tab>`、`<c-s-left>`。特殊键名为 `esc`、`ret`（`cr`、`enter`）、`tab`、`backtab`、`bs`（`backspace`）、`del`、`space`、`lt`、`left`、`right`、`up`、`down`、`home`、`end`、`pageup`、`pagedown` 和 `f1` 到 `f12`。序列直接拼接，例如 `<space>f`、`<c-x><c-s>`。帮助和前缀提示使用同一记法输出。
+
+### 行编辑键
+
+Insert 和 prompt 共享一组 readline 风格的行编辑命令。名字只定义一次，在 Insert 中转换为编辑命令，在输入框中转换为 `InputKey`：
+
+| 默认键 | 命令 | 说明 |
+| --- | --- | --- |
+| Left / Right、Ctrl-B / Ctrl-F | `char-left` / `char-right` | 按字符簇移动 |
+| Ctrl-Left / Ctrl-Right、Alt-B / Alt-F | `word-left` / `word-right` | 按词移动 |
+| Home / End、Ctrl-A / Ctrl-E | `line-start` / `line-end` | 到行首 / 行尾 |
+| Backspace / Ctrl-H、Delete / Ctrl-D | `delete-backward` / `delete-forward` | 删除字符簇；Insert 的退格保留按缩进单位回退 |
+| Ctrl-W、Ctrl-Backspace、Alt-Backspace | `delete-word-backward` | 删除到前一个词边界 |
+| Ctrl-Delete、Alt-D | `delete-word-forward` | 删除到后一个词边界 |
+| Ctrl-U | `kill-line-start` | 删除到行首 |
+| Ctrl-K | `kill-line-end` | 剪切到行尾；位于行尾时剪切换行 |
+| Ctrl-Y | `yank` | 粘贴剪切内容 |
+
+Shift 加方向键、Home 和 End 扩展选区，对应 `extend-` 前缀的同名命令。Insert 中 `kill-line-end` 写入应用剪贴板，`yank` 等同于粘贴剪贴板；输入框使用组件自己的剪切缓冲。连续剪切不合并。Normal 和 Visual 不使用这组键，保持 Vim 语义。
+
+这组键替换了 Vim Insert 中的少数原义：Ctrl-A/E 的重复插入与行尾滚动、Ctrl-K 二合字符、Ctrl-D 减少缩进（由 Shift-Tab 承担）、Ctrl-Y 复制上一行字符。Ctrl-N/Ctrl-P 在 Insert 中保留给以后的补全。
+
+### 配置文件
+
+启动时读取 `$XDG_CONFIG_HOME/soda/init`，未设置时读取 `~/.config/soda/init`；文件不存在时不报错。每行是一条命令行，空行和 `#` 开头的行被忽略。配置文件只接受 `map`、`unmap` 和 `define-command`，打开文件、切换模式等操作不能在启动时执行。错误行被跳过并记录行号，其余行照常生效，第一条错误显示在状态栏。`--no-config` 跳过配置文件。
+
+```
+# ~/.config/soda/init
+map normal <space>f project
+map normal <space>b buffers
+map insert <c-s> write
+define-command fmt pipe clang-format --assume-filename="$SODA_FILE"
+map normal <space>= fmt
+define-command grep-word shell grep -rn %arg{1} .
+```
+
+`map MODE KEYS COMMAND`、`unmap MODE KEYS` 和 `define-command NAME BODY` 也可以在 `:` 中执行，对当前会话立即生效，不写回配置文件。
+
+### 外部进程
+
+`pipe CMD` 把当前选区交给 `sh -c CMD` 的标准输入；没有选区时使用整个文档。命令成功退出后，标准输出作为一次可撤销编辑替换原范围。`shell CMD` 只运行命令，标准输入为空，退出状态和输出的第一行显示在状态栏。两者都以 Runtime 的文件根目录为工作目录，并提供环境变量 `SODA_FILE`（未命名文档时不设置）、`SODA_LINE` 和 `SODA_COLUMN`（从 1 开始）。
+
+外部命令在后台线程运行，同一时间只有一个；运行期间编辑照常进行。完成后若文档已经变化，`pipe` 的结果被丢弃并提示。非零退出不修改文档，状态栏显示标准错误的第一行。输出限制为 16 MiB，超出时丢弃结果；非 UTF-8 输出同样拒绝。退出编辑器不会等待或终止仍在运行的命令。
+
+### 命令面板与帮助
+
+`:` 打开命令行，确认后关闭并执行，错误显示在状态栏。`commands` 命令（默认 `<space>:`）打开命令面板：一个候选列表，列出内置、Rust 注册和用户定义命令的名字与说明，输入筛选，确认执行；需要参数的命令确认后转为预填命令名的 `:` 命令行。
+
+编辑区的 `F1` 打开只读帮助页，方向键、PageUp/PageDown 与 Home/End 浏览内容，F1、Enter 或 Esc 返回编辑区。帮助页由当前键位表生成：分上下文列出键、命令名和说明，包括用户绑定；Vim 语法（计数、operator、motion）是固定说明。`--help` 输出默认键位生成的同一份内容。帮助不修改文档、选区和编辑视口，并阻止编辑命令传播。
+
+### 内置命令
+
+| 命令 | 别名 | 行为 |
+| --- | --- | --- |
+| `edit [PATH]` | `e` | 打开指定文件；无参数时重新加载当前文件 |
+| `open` | | 打开带补全的路径组件 |
+| `write [PATH]` | `w` | 保存；指定路径时保存到该路径 |
+| `saveas [PATH]` | | 打开另存为组件或保存到指定路径 |
+| `quit` | `q` | 退出 |
+| `write-quit` | `wq`、`x` | 先保存当前文档再退出 |
+| `close` | `bd`、`bdelete` | 关闭当前文档 |
+| `buffers` | `b`、`buffer`、`ls`、`files` | 缓冲区选择组件 |
+| `next-view` | `bn`、`bnext` | 下一个视图 |
+| `new` | `enew` | 新文档 |
+| `project` | | 项目文件组件 |
+| `search` / `replace` / `goto` | | 搜索、替换和跳转组件 |
+| `help` / `commands` | | 帮助 / 命令面板 |
+| `command-line` | | 打开 `:` 命令行 |
+| `undo` / `redo`、`copy` / `cut` / `paste` | | 历史与剪贴板 |
+| `move-up` / `move-down`、`document-start` / `document-end` | | 移动；`extend-move-up` / `extend-move-down` 扩展选区 |
+| `page-up` / `page-down`、`select-all` | | 翻页与全选 |
+| `normal-mode` / `insert-mode` / `visual-mode` | | 切换编辑模式 |
+| `indent` / `outdent`、`insert-tab` / `insert-literal-tab`、`newline` | | 缩进、Tab 和语言感知换行 |
+| 行编辑命令 | | 见上表 |
+| `map` / `unmap` / `define-command` | | 键位与命令定义 |
+| `pipe` / `shell` | | 外部进程 |
+| `nop` | | 不执行任何操作，用于屏蔽默认键 |
+
+打开、保存和离开文档沿用 Soda 的异步任务、冲突检测与保存/丢弃/取消流程，不模拟 Vim 的窗口和 Ex 执行环境。`write-quit` 只自动保存当前文档，其他未保存文档仍需明确处理。相对路径以 Runtime 的文件根目录解析，支持 `~/`。
+
+### 交互基础件
+
+模态交互只由三种基础件组成：单行输入（`TextInput`，路径补全由 `PathInput` 扩展）、输入加候选列表（`CandidateListState` 与结果模型）、确认对话框。新功能优先组合这些基础件，在接受时输出一条命令或事件；只有确实存在多步状态的流程（离开文档确认、搜索替换）使用专用会话。命令面板和缓冲区切换共用同一个静态候选列表会话。
 
 ## 关闭、退出与重新加载
 
@@ -228,13 +311,7 @@ Picker 默认将文字输入焦点留在 `TextInput`。当前候选与输入光�
 
 ## 当前终端入口
 
-输入框的默认操作：
-
-- `Left` / `Right`、`Home` / `End`：移动光标；配合 `Shift` 扩展选区。
-- `Ctrl-Left` / `Ctrl-Right`：按词移动；配合 `Shift` 扩展选区。
-- `Ctrl-B` / `Ctrl-E`：到输入首尾。
-- `Backspace` / `Delete`：删除选区或相邻 grapheme；配合 `Ctrl` 按词删除。
-- 输入文字或粘贴：替换选区。
+输入框使用“行编辑键”一节的默认键；文字输入或粘贴替换选区。Ctrl-P / Ctrl-N 和上下方向键选择候选，Tab / Shift-Tab 补全，Enter 确认，Esc / Ctrl-C 取消。
 
 文件 picker 的默认操作：
 

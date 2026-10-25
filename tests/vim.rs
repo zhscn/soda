@@ -103,7 +103,8 @@ fn overrides_and_registered_rust_commands_are_mode_scoped() {
             motion: soda::editor::Motion::LineEnd,
             extend: false,
         }))
-    });
+    })
+    .unwrap();
     let binding = [
         KeyStroke::plain(Key::Char(' ')),
         KeyStroke::plain(Key::Char('e')),

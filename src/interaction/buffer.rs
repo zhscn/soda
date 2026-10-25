@@ -2,52 +2,50 @@
 //! no view; confirming reuses a live view or creates one through Application.
 use super::{
     Input, Presentation, Response, TextInput,
-    picker::{Candidate, CandidateKey, CandidateListState, MatchedCandidate},
-    session::{Transition, edit_field, field_presentation},
+    list::{ListInput, ListSession},
+    picker::{CandidateKey, CandidateListState, MatchedCandidate},
+    session::Transition,
 };
 use crate::{
     application::{Application, Event},
     editor::DocumentId,
 };
-use std::{collections::BTreeMap, sync::Arc};
+use std::collections::BTreeMap;
 
 pub struct BufferSession {
-    input: TextInput,
-    rows: Vec<MatchedCandidate<DocumentId>>,
-    list: CandidateListState,
+    list: ListSession<DocumentId>,
     keys: BTreeMap<DocumentId, CandidateKey>,
     next_key: u64,
 }
 impl BufferSession {
     pub fn new(app: &Application) -> Self {
         let mut session = Self {
-            input: TextInput::default(),
-            rows: vec![],
-            list: CandidateListState::default(),
+            list: ListSession::new("Switch buffer: ", ""),
             keys: BTreeMap::new(),
             next_key: 0,
         };
-        session.refresh(app);
+        let rows = session.rows_for(app);
+        session.list.set_rows(rows);
         session
     }
     pub fn input(&self) -> &TextInput {
-        &self.input
+        self.list.input()
     }
     pub fn rows(&self) -> &[MatchedCandidate<DocumentId>] {
-        &self.rows
+        self.list.rows()
     }
     pub fn list(&self) -> &CandidateListState {
-        &self.list
+        self.list.list()
     }
     pub(super) fn resize(&mut self, rows: usize) {
-        self.list.resize(&self.rows, rows);
+        self.list.resize(rows);
     }
-    fn refresh(&mut self, app: &Application) -> bool {
+    fn rows_for(&mut self, app: &Application) -> Vec<(CandidateKey, String, DocumentId)> {
         let active = app
             .active_view()
             .and_then(|view| app.view(view))
             .map(|v| v.document_id);
-        let query = self.input.text().to_lowercase();
+        let query = self.list.query().to_lowercase();
         self.keys
             .retain(|id, _| app.workspace().editor(*id).is_some());
         let mut rows = Vec::new();
@@ -77,43 +75,24 @@ impl BufferSession {
                     ""
                 }
             );
-            rows.push(MatchedCandidate {
-                candidate: Arc::new(Candidate {
-                    key,
-                    label,
-                    payload: id,
-                }),
-                score: 0,
-                highlights: vec![],
-            });
+            rows.push((key, label, id));
         }
         // Offer another buffer first while preserving document order within groups.
-        rows.sort_by_key(|row| active == Some(row.candidate.payload));
-        let changed = self.rows.len() != rows.len()
-            || self.rows.iter().zip(&rows).any(|(old, new)| {
-                old.candidate.key != new.candidate.key || old.candidate.label != new.candidate.label
-            });
-        if !changed {
-            return false;
-        }
-        self.list.update(&self.rows, &rows);
-        self.rows = rows;
-        true
+        rows.sort_by_key(|row| active == Some(row.2));
+        rows
     }
     pub(super) fn observe(&mut self, app: &Application) -> Transition {
+        let rows = self.rows_for(app);
         Transition::active(Response {
-            redraw: self.refresh(app),
+            redraw: self.list.set_rows(rows),
             ..Response::default()
         })
     }
     pub(super) fn handle(&mut self, input: Input, app: &Application) -> Transition {
-        match input {
-            Input::Cancel => Transition::close(),
-            Input::Confirm => {
-                let Some(index) = self.list.index(&self.rows) else {
-                    return Transition::redraw();
-                };
-                let document = self.rows[index].candidate.payload;
+        match self.list.handle(input) {
+            ListInput::Cancel => Transition::close(),
+            ListInput::Accept(None) => Transition::redraw(),
+            ListInput::Accept(Some(&document)) => {
                 if app.workspace().editor(document).is_none() {
                     return self.observe(app);
                 }
@@ -128,30 +107,16 @@ impl BufferSession {
                     ..Response::default()
                 })
             }
-            Input::Candidate { motion, wrap } => {
-                if self.list.navigate(&self.rows, motion, wrap) {
-                    Transition::redraw()
-                } else {
-                    Transition::Blocked
-                }
+            ListInput::Query => {
+                let rows = self.rows_for(app);
+                self.list.restart(rows);
+                Transition::redraw()
             }
-            input => match edit_field(&mut self.input, input) {
-                Some(update) if update.text_changed => {
-                    self.list.reset();
-                    self.refresh(app);
-                    self.list.update(&[], &self.rows);
-                    Transition::redraw()
-                }
-                Some(update) if update.selection_changed => Transition::redraw(),
-                _ => Transition::Blocked,
-            },
+            ListInput::Redraw => Transition::redraw(),
+            ListInput::Blocked => Transition::Blocked,
         }
     }
     pub(super) fn presentation(&self) -> Presentation {
-        let mut p = field_presentation("Switch buffer: ".into(), &self.input);
-        if self.rows.is_empty() {
-            p.text.push_str(" [no matches]");
-        }
-        p
+        self.list.presentation()
     }
 }

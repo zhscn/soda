@@ -118,6 +118,16 @@ fn draw(runtime: &Runtime, width: u16, height: u16) -> io::Result<()> {
             list_rows,
         )?;
     }
+    if let Some(Prompt::Palette(session)) = runtime.layer() {
+        draw_candidates(
+            &mut output,
+            session.rows(),
+            session.list(),
+            width,
+            height,
+            list_rows,
+        )?;
+    }
     let path = match runtime.layer() {
         Some(Prompt::Open(field) | Prompt::Save(_, field)) => Some(field),
         Some(Prompt::Exit(session)) => session.path_input(),
@@ -201,14 +211,31 @@ fn draw_spans(output: &mut impl Write, spans: &[layout::Span]) -> io::Result<()>
     queue!(output, SetAttribute(Attribute::Reset))
 }
 
+/// `$XDG_CONFIG_HOME/soda/init`, falling back to `~/.config/soda/init`.
+pub fn config_path() -> Option<PathBuf> {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
+    Some(base.join("soda").join("init"))
+}
 /// Run the terminal frontend using the shared owner-thread runtime.
-pub fn run(path: Option<PathBuf>) -> io::Result<()> {
+pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err(io::Error::other("interactive editing requires a terminal"));
     }
     let _terminal = Terminal::enter()?;
     let mut runtime = Runtime::new(std::env::current_dir()?)?;
     runtime.start(path);
+    if let Some(config) = config.then(config_path).flatten() {
+        match std::fs::read_to_string(&config) {
+            Ok(text) => {
+                runtime.source(&config.display().to_string(), &text);
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => runtime.report(format!("{}: {error}", config.display())),
+        }
+    }
     let mut dimensions = None;
     while !runtime.quit_requested() {
         runtime.poll();

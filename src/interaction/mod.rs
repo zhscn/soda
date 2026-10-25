@@ -1,7 +1,6 @@
 //! Frontend-independent routing and built-in sessions. Layers own editing mode,
 //! literal key sequences and session lifecycle;
 //! feature reducers return transitions and Runtime executes their responses.
-mod bindings;
 mod buffer;
 pub use buffer::BufferSession;
 mod ex;
@@ -17,7 +16,12 @@ mod input;
 pub use input::{InputKey, InputMotion, InputUpdate, TextInput};
 mod layer;
 pub use layer::Layer;
+mod list;
+pub use list::ListSession;
+mod palette;
+pub use palette::PaletteSession;
 pub mod picker;
+pub mod shell;
 use picker::{ListMotion, PickerCompletion, PickerEffect, PickerSession};
 pub mod path;
 mod prompt;
@@ -25,11 +29,13 @@ pub use prompt::GotoSession;
 mod replace;
 pub use replace::{ReplacePhase, ReplaceSession};
 mod routing;
-pub use routing::{Key, KeyStroke, UserInput};
+pub use routing::{Key, KeyStroke, UserInput, key_notation};
 mod search;
 pub use search::{SearchResults, SearchSession};
-mod sequence;
-pub use sequence::{BindingError, Keymap};
+mod keymap;
+pub use keymap::{BindingError, Context, Keymap, LineEdit};
+mod registry;
+pub use registry::{BUILTINS, CommandHandler, CommandInfo, Registry};
 mod session;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -86,10 +92,10 @@ pub struct Response {
     pub message: Message,
     pub effects: Vec<PickerEffect>,
     pub path_requests: Vec<path::PathRequest>,
+    pub shell: Option<Box<shell::ShellRequest>>,
     pub quit: bool,
     pub redraw: bool,
 }
-pub type CommandHandler = fn(&Application) -> Result<Command, EditError>;
 
 /// Owns editing input state and one modal layer. Read-only access keeps transitions inside
 /// this manager; callers must execute responses and observe resulting updates.
@@ -102,10 +108,10 @@ pub type CommandHandler = fn(&Application) -> Result<Command, EditError>;
 pub struct Layers {
     active: Option<Layer>,
     mode: EditMode,
-    sequence: sequence::Sequence,
+    sequence: keymap::Sequence,
     keymap: Keymap,
     vim: vim::State,
-    handlers: std::collections::BTreeMap<String, CommandHandler>,
+    registry: Registry,
     page_rows: usize,
     help_rows: usize,
     picker_rows: usize,
@@ -117,24 +123,40 @@ impl Layers {
         keys: &[KeyStroke],
         command: Command,
     ) -> Result<(), BindingError> {
-        self.keymap.bind(mode, keys, command)?;
+        let label = match &command {
+            Command::Named(line) => line.clone(),
+            command => format!("{command:?}"),
+        };
+        self.keymap.bind(mode.into(), keys, command, label)?;
         self.sequence.clear();
         self.vim.clear();
         Ok(())
     }
     pub fn unbind_input(&mut self, key: KeyStroke) -> Result<(), BindingError> {
-        self.keymap.unbind_input(key)
+        self.keymap.unbind(Context::Prompt, &[key])
     }
     pub fn bind_input(&mut self, key: KeyStroke, input: Input) -> Result<(), BindingError> {
-        self.keymap.bind_input(key, input)
+        let label = format!("{input:?}");
+        self.keymap.bind_input(key, input, label)
     }
     pub fn unbind(&mut self, mode: EditMode, keys: &[KeyStroke]) -> Result<(), BindingError> {
         self.sequence.clear();
         self.vim.clear();
-        self.keymap.unbind(mode, keys)
+        self.keymap.unbind(mode.into(), keys)
     }
-    pub fn register_command(&mut self, name: impl Into<String>, handler: CommandHandler) {
-        self.handlers.insert(name.into(), handler);
+    /// Registers a Rust command under a name that is not built in.
+    pub fn register_command(
+        &mut self,
+        name: impl Into<String>,
+        handler: CommandHandler,
+    ) -> Result<(), String> {
+        self.registry.register(name, handler)
+    }
+    pub fn keymap(&self) -> &Keymap {
+        &self.keymap
+    }
+    pub fn registry(&self) -> &Registry {
+        &self.registry
     }
     pub fn editor_caret(&self) -> Option<usize> {
         self.vim.caret()
@@ -341,6 +363,10 @@ impl Layers {
         match &mut self.active {
             Some(Layer::Picker(session)) => session.resize(rows),
             Some(Layer::Buffer(session)) => {
+                session.resize(rows);
+                true
+            }
+            Some(Layer::Palette(session)) => {
                 session.resize(rows);
                 true
             }

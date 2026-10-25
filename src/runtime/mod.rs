@@ -15,9 +15,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod shell;
+
 pub struct Runtime {
     // Workers drop before the application so in-progress file writes can finish.
     files: FileRunner,
+    shell: shell::ShellRunner,
     picker: PickerRunner,
     paths: PathRunner,
     app: Application,
@@ -41,6 +44,7 @@ impl Runtime {
         }
         Ok(Self {
             files: FileRunner::new()?,
+            shell: shell::ShellRunner::default(),
             picker: PickerRunner::new()?,
             paths: PathRunner::new()?,
             app,
@@ -99,9 +103,26 @@ impl Runtime {
     pub fn register_command(
         &mut self,
         name: impl Into<String>,
-        handler: fn(&Application) -> Result<Command, EditError>,
-    ) {
-        self.layers.register_command(name, handler);
+        handler: crate::interaction::CommandHandler,
+    ) -> Result<(), String> {
+        self.layers.register_command(name, handler)
+    }
+    /// Applies configuration text; the first error is also shown as the
+    /// status message, prefixed by `origin` and its line number.
+    pub fn source(&mut self, origin: &str, text: &str) -> Vec<(usize, String)> {
+        let errors = self.layers.source(text);
+        if let Some((line, error)) = errors.first() {
+            self.message = format!("{origin}:{line}: {error}");
+            self.dirty = true;
+        }
+        errors
+    }
+    pub fn report(&mut self, message: String) {
+        self.message = message;
+        self.dirty = true;
+    }
+    pub fn shell_running(&self) -> bool {
+        self.shell.busy()
     }
     pub fn editor_caret(&self) -> Option<usize> {
         self.layers.editor_caret()
@@ -260,6 +281,12 @@ impl Runtime {
         for request in response.path_requests {
             self.paths.submit(request);
         }
+        if let Some(request) = response.shell {
+            self.message = match self.shell.submit(*request) {
+                Ok(()) => "Running shell command…".into(),
+                Err(error) => error.into(),
+            };
+        }
         for effect in response.effects {
             match effect {
                 PickerEffect::Run(task) => {
@@ -350,7 +377,41 @@ impl Runtime {
             let response = self.layers.path_finished(completion);
             self.respond(response, self.epoch.elapsed());
         }
+        if let Some(completion) = self.shell.poll() {
+            self.shell_finished(completion);
+        }
         self.dispatch(Event::PollFiles);
+    }
+    fn shell_finished(&mut self, completion: shell::ShellCompletion) {
+        let name = completion.command;
+        self.dirty = true;
+        match (completion.result, completion.pipe) {
+            (Ok(output), Some(target)) => {
+                let tx = crate::core::Transaction::new(
+                    target.version,
+                    vec![crate::core::Change::new(target.range, output)],
+                );
+                let applied = self.dispatch(Event::Edit {
+                    view: target.view,
+                    command: crate::editor::Command::Apply(tx),
+                    time: self.epoch.elapsed(),
+                });
+                self.message = if applied {
+                    String::new()
+                } else {
+                    format!("{name}: document changed while it ran; output discarded")
+                };
+            }
+            (Ok(output), None) => {
+                let line = output.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
+                self.message = if line.is_empty() {
+                    format!("{name}: done")
+                } else {
+                    line.trim().to_owned()
+                };
+            }
+            (Err(error), _) => self.message = format!("{name}: {error}"),
+        }
     }
 }
 

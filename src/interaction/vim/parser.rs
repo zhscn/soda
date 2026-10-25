@@ -211,7 +211,7 @@ impl State {
                 reverse: ch == 'N',
                 count,
             }),
-            ':' => Command::Ex,
+            ':' => Command::Ex(String::new()),
             _ => {
                 self.clear();
                 return Err("Unsupported Normal command");

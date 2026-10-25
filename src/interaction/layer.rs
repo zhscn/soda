@@ -19,6 +19,7 @@ pub enum Layer {
     Goto(GotoSession),
     Ex(super::ExSession),
     Buffer(BufferSession),
+    Palette(super::PaletteSession),
     Open(PathInput),
     Save(DocumentId, PathInput),
     Exit(ExitSession),
@@ -41,6 +42,7 @@ impl Layer {
             Self::Goto(session) => session.handle(input, app, time),
             Self::Ex(session) => session.handle(input),
             Self::Buffer(session) => session.handle(input, app),
+            Self::Palette(session) => session.handle(input),
             Self::Open(field) => prompt::path_input(PathTarget::Open, field, input),
             Self::Save(document, field) => {
                 prompt::path_input(PathTarget::Save(*document), field, input)
@@ -76,6 +78,7 @@ impl Layer {
         match self {
             Self::Help(session) => session.resize(help_rows),
             Self::Buffer(session) => session.resize(picker_rows),
+            Self::Palette(session) => session.resize(picker_rows),
             Self::Picker(session) => {
                 session.resize(picker_rows);
             }
@@ -89,6 +92,7 @@ impl Layer {
             Self::Goto(session) => session.presentation(),
             Self::Ex(session) => session.presentation(),
             Self::Buffer(session) => session.presentation(),
+            Self::Palette(session) => session.presentation(),
             Self::Open(field) => prompt::path_presentation(PathTarget::Open, field),
             Self::Save(document, field) => {
                 prompt::path_presentation(PathTarget::Save(*document), field)

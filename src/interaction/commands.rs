@@ -20,20 +20,48 @@ pub enum Command {
     Edit(EditCommand),
     SetMode(super::EditMode),
     Vim(super::vim::VimCommand),
-    Ex,
+    /// Open the command line with initial text.
+    Ex(String),
+    /// A command line resolved through the registry when executed.
     Named(String),
+    Line {
+        edit: super::LineEdit,
+        extend: bool,
+    },
+    Map {
+        context: super::Context,
+        keys: Vec<super::KeyStroke>,
+        target: String,
+    },
+    Unmap {
+        context: super::Context,
+        keys: Vec<super::KeyStroke>,
+    },
+    Define {
+        name: String,
+        body: String,
+    },
+    Pipe(String),
+    Shell(String),
+    Palette,
+    Nop,
     OpenPath(std::path::PathBuf),
     SavePath(std::path::PathBuf),
     WriteQuit,
     Clipboard(ClipboardAction),
     Goto,
-    Page { backward: bool, extend: bool },
+    Page {
+        backward: bool,
+        extend: bool,
+    },
     Open,
     New,
     Close,
     Reload,
     Help,
-    Save { choose_path: bool },
+    Save {
+        choose_path: bool,
+    },
     Quit,
     NextView,
     Search,
@@ -43,6 +71,64 @@ pub enum Command {
 }
 
 impl Layers {
+    /// Applies a configuration command: `map`, `unmap` or `define-command`.
+    pub fn configure(&mut self, command: Command) -> Result<(), String> {
+        self.sequence.clear();
+        self.vim.clear();
+        match command {
+            Command::Map {
+                context: super::Context::Prompt,
+                keys,
+                target,
+            } => {
+                let input = super::keymap::prompt_action(target.trim())
+                    .ok_or_else(|| format!("unknown prompt action: {target}"))?;
+                let [key] = keys[..] else {
+                    return Err("prompt bindings use a single key".into());
+                };
+                self.keymap
+                    .bind_input(key, input, target)
+                    .map_err(|e| e.to_string())
+            }
+            Command::Map {
+                context,
+                keys,
+                target,
+            } => {
+                if !self.registry.knows(&target) {
+                    return Err(format!("unknown command: {target}"));
+                }
+                self.keymap
+                    .bind(context, &keys, Command::Named(target.clone()), target)
+                    .map_err(|e| e.to_string())
+            }
+            Command::Unmap { context, keys } => self
+                .keymap
+                .unbind(context, &keys)
+                .map_err(|e| e.to_string()),
+            Command::Define { name, body } => self.registry.define(name, body),
+            _ => Err("only map, unmap and define-command are allowed here".into()),
+        }
+    }
+    /// Applies configuration text line by line. Failed lines are skipped and
+    /// reported with their one-based line numbers.
+    pub fn source(&mut self, text: &str) -> Vec<(usize, String)> {
+        let mut errors = vec![];
+        for (index, line) in text.lines().enumerate() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            let result = self
+                .registry
+                .parse_builtin(line)
+                .and_then(|command| self.configure(command));
+            if let Err(error) = result {
+                errors.push((index + 1, error));
+            }
+        }
+        errors
+    }
     pub fn set_page_rows(&mut self, rows: usize) {
         self.page_rows = rows;
     }
@@ -117,23 +203,55 @@ impl Layers {
                 }
             }
             Command::Vim(command) => response = self.vim_execute(command, app, time),
-            Command::Ex => {
-                response = self.enter(Layer::Ex(super::ExSession::default()), app, time)?
+            Command::Ex(text) => {
+                response = self.enter(Layer::Ex(super::ExSession::new(&text)), app, time)?
             }
-            Command::Named(name) => {
-                if let Some(handler) = self.handlers.get(&name) {
+            Command::Named(line) => {
+                if let Some(handler) = self.registry.handler(line.trim()) {
                     let command = handler(app)?;
                     if matches!(command, Command::Named(_)) {
                         response.message = Message::Set(
-                            "Named commands cannot recursively dispatch named commands".into(),
+                            "Registered commands cannot recursively dispatch named commands".into(),
                         );
                     } else {
                         return self.execute(command, app, time, file_root);
                     }
                 } else {
-                    response.message = Message::Set(format!("Unknown command: {name}"));
+                    match self.registry.expand(&line) {
+                        Ok(mut commands) if commands.len() == 1 => {
+                            return self.execute(commands.pop().unwrap(), app, time, file_root);
+                        }
+                        Ok(commands) => response.commands = commands,
+                        Err(error) => response.message = Message::Set(error),
+                    }
                 }
             }
+            Command::Line { edit, extend } => {
+                return self.execute(edit.command(extend), app, time, file_root);
+            }
+            Command::Map { .. } | Command::Unmap { .. } | Command::Define { .. } => {
+                if let Err(error) = self.configure(command) {
+                    response.message = Message::Set(error);
+                }
+            }
+            Command::Pipe(shell) => {
+                if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
+                    response.shell =
+                        Some(Box::new(super::shell::pipe(app, view, shell, file_root)));
+                }
+            }
+            Command::Shell(shell) => {
+                let view = app.active_view().and_then(|id| app.view(id));
+                response.shell = Some(Box::new(super::shell::run(app, view, shell, file_root)));
+            }
+            Command::Palette => {
+                response = self.enter(
+                    Layer::Palette(super::PaletteSession::new(&self.registry)),
+                    app,
+                    time,
+                )?;
+            }
+            Command::Nop => {}
             Command::OpenPath(path) | Command::SavePath(path) => {
                 let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
                 match super::path::resolve_path(file_root, home.as_deref(), &path) {
@@ -168,7 +286,14 @@ impl Layers {
                 }
             }
             Command::Help => {
-                response = self.enter(Layer::Help(HelpSession::default()), app, time)?
+                response = self.enter(
+                    Layer::Help(HelpSession::new(super::help::text(
+                        &self.keymap,
+                        &self.registry,
+                    ))),
+                    app,
+                    time,
+                )?
             }
             Command::Goto => {
                 if let Some(view) = app.active_view() {

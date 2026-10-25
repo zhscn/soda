@@ -112,7 +112,8 @@ fn named_commands_and_input_overrides_use_separate_controlled_entry_points() {
     let mut r = runtime();
     r.register_command("insert", |_| {
         Ok(Command::Edit(Edit::InsertText("custom".into())))
-    });
+    })
+    .unwrap();
     r.bind(
         EditMode::Normal,
         &[key('Q')],
@@ -121,10 +122,12 @@ fn named_commands_and_input_overrides_use_separate_controlled_entry_points() {
     .unwrap();
     send(&mut r, key('Q'));
     assert_eq!(text(&r), "custom");
-    r.register_command("recursive", |_| Ok(Command::Named("recursive".into())));
+    r.register_command("recursive", |_| Ok(Command::Named("recursive".into())))
+        .unwrap();
     r.command(Command::Named("recursive".into()));
     assert!(r.message().contains("recursively"));
-    r.register_command("failed", |_| Err(EditError::InvalidRange));
+    r.register_command("failed", |_| Err(EditError::InvalidRange))
+        .unwrap();
     r.command(Command::Named("failed".into()));
     assert!(r.message().contains("invalid text range"));
     r.bind_input(
