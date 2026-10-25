@@ -1,7 +1,7 @@
 //! Static dispatch for built-in sessions. Feature reducers own interaction
 //! behavior; the layer manager owns installation, removal and geometry.
 use super::{
-    CommandLine, ExitSession, HelpSession, Input, Presentation, ReplaceSession, Response,
+    CommandLine, HelpSession, Input, Presentation, ReplaceSession, Response, SaveWait,
     SearchSession, TextInput, session::Transition,
 };
 use crate::{
@@ -12,7 +12,7 @@ use std::time::Duration;
 
 pub enum Layer {
     CommandLine(Box<CommandLine>),
-    Exit(ExitSession),
+    Saving(SaveWait),
     Help(HelpSession),
     Replace(ReplaceSession),
     Search {
@@ -29,7 +29,7 @@ impl Layer {
     ) -> Result<Transition, EditError> {
         Ok(match self {
             Self::CommandLine(session) => session.handle(input, app),
-            Self::Exit(session) => session.handle(input, app),
+            Self::Saving(wait) => wait.handle(input),
             Self::Help(session) => session.handle(input),
             Self::Replace(session) => session.handle(input, app, time)?,
             Self::Search {
@@ -46,7 +46,7 @@ impl Layer {
     ) -> Result<Transition, EditError> {
         Ok(match self {
             Self::CommandLine(session) => session.observe(app),
-            Self::Exit(session) => session.observe(app, update),
+            Self::Saving(wait) => wait.observe(app, update),
             Self::Replace(session) => session.observe(app, update, time)?,
             Self::Search { session, .. } => session.observe_transition(app, update, time)?,
             Self::Help(_) => Transition::active(Response::default()),
@@ -56,14 +56,13 @@ impl Layer {
         match self {
             Self::Help(session) => session.resize(help_rows),
             Self::CommandLine(session) => session.resize(picker_rows),
-            Self::Exit(session) => session.resize(picker_rows),
             _ => {}
         }
     }
     pub fn presentation(&self) -> Presentation {
         match self {
             Self::CommandLine(session) => session.presentation(),
-            Self::Exit(session) => session.presentation(),
+            Self::Saving(wait) => wait.presentation(),
             Self::Help(session) => session.presentation(),
             Self::Replace(session) => session.presentation(),
             Self::Search { input, session } => session.presentation(input),

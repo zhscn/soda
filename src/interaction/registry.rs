@@ -2,7 +2,7 @@
 //! the command palette. Built-in names are fixed; registered Rust handlers and
 //! user definitions share one replaceable namespace.
 use super::{
-    Command, EditMode,
+    Command, Departure, EditMode,
     keymap::{Context, LINE_EDITS, LineEdit, PROMPT_ACTIONS},
     vim::{Insert, VimCommand},
 };
@@ -23,13 +23,29 @@ pub enum SlotKind {
     Path,
     File,
     Buffer,
-    Mode,
+    /// One of fixed words.
+    Choice(&'static [Choice]),
     Word,
     Rest,
 }
 impl SlotKind {
     pub fn requires_match(self) -> bool {
-        matches!(self, Self::File | Self::Buffer | Self::Mode)
+        matches!(self, Self::File | Self::Buffer | Self::Choice(_))
+    }
+}
+/// A word of a `Choice` slot. A key makes the slot's keymap: typed while
+/// the slot is empty, it chooses the word and confirms at once.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Choice {
+    pub word: &'static str,
+    pub key: Option<char>,
+    pub doc: &'static str,
+}
+const fn word(word: &'static str, doc: &'static str) -> Choice {
+    Choice {
+        word,
+        key: None,
+        doc,
     }
 }
 /// A positional argument. Every slot but the last is one word; the last
@@ -52,7 +68,33 @@ const OPTIONAL_PATH: Slot = Slot {
     required: false,
     ..PATH
 };
-const MODE: Slot = slot("MODE", SlotKind::Mode);
+const MODE: Slot = slot(
+    "MODE",
+    SlotKind::Choice(&[
+        word("normal", "Normal mode keys"),
+        word("visual", "Visual mode keys"),
+        word("insert", "Insert mode keys"),
+        word("prompt", "Command line and prompt keys"),
+    ]),
+);
+/// How to leave a document with unsaved changes: `save [PATH]` or `discard`.
+const DEPARTURE: &[Slot] = &[
+    Slot {
+        name: "DECISION",
+        kind: SlotKind::Choice(&[
+            Choice {
+                key: Some('s'),
+                ..word("save", "Save first, then continue")
+            },
+            Choice {
+                key: Some('d'),
+                ..word("discard", "Discard the unsaved changes")
+            },
+        ]),
+        required: false,
+    },
+    OPTIONAL_PATH,
+];
 const KEYS: Slot = slot("KEYS", SlotKind::Word);
 const ARGUMENTS: &[Slot] = &[Slot {
     name: "ARGS",
@@ -119,6 +161,17 @@ fn required(args: &str) -> Result<String, String> {
         Ok(args.to_owned())
     }
 }
+fn departure(args: &str) -> Result<Option<Departure>, String> {
+    match split(args) {
+        ("", _) => Ok(None),
+        ("save", path) => Ok(Some(Departure::Save(
+            (!path.is_empty()).then(|| path.into()),
+        ))),
+        ("discard", "") => Ok(Some(Departure::Discard)),
+        ("discard", _) => Err("discard takes no PATH".into()),
+        (word, _) => Err(format!("expected save or discard, not {word}")),
+    }
+}
 fn split(args: &str) -> (&str, &str) {
     args.split_once(char::is_whitespace)
         .map_or((args, ""), |(head, tail)| (head, tail.trim_start()))
@@ -155,7 +208,13 @@ pub static BUILTINS: &[Builtin] = &[
         "edit" | "e",
         [OPTIONAL_PATH],
         "Open a file; reload the current file without PATH",
-        |a| { Ok(path_or(a, Command::OpenPath, Command::Reload)) }
+        |a| { Ok(path_or(a, Command::OpenPath, Command::Reload(None))) }
+    ),
+    builtin!(
+        "reload",
+        [DEPARTURE[0], DEPARTURE[1]],
+        "Reload the current file from disk",
+        |a| departure(a).map(Command::Reload)
     ),
     builtin!(
         "open" | "o",
@@ -184,8 +243,9 @@ pub static BUILTINS: &[Builtin] = &[
     }),
     builtin!(
         "quit" | "q",
-        "Quit, confirming unsaved documents",
-        Command::Quit
+        [DEPARTURE[0], DEPARTURE[1]],
+        "Quit, deciding for each unsaved document",
+        |a| departure(a).map(Command::Quit)
     ),
     builtin!(
         "write-quit" | "wq" | "x",
@@ -194,8 +254,9 @@ pub static BUILTINS: &[Builtin] = &[
     ),
     builtin!(
         "close" | "bd" | "bdelete",
+        [DEPARTURE[0], DEPARTURE[1]],
         "Close the current document",
-        Command::Close
+        |a| departure(a).map(Command::Close)
     ),
     builtin!(
         "buffer" | "b" | "buffers" | "ls" | "files",

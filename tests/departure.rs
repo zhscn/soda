@@ -62,6 +62,9 @@ impl Driver {
         for event in response.events {
             self.event(event);
         }
+        for command in response.commands {
+            self.command(command);
+        }
     }
     fn command(&mut self, command: Command) {
         let result = self
@@ -84,9 +87,22 @@ impl Driver {
     fn key(&mut self, key: Key) {
         self.input(UserInput::Key(KeyStroke::plain(key)));
     }
-    fn path(&mut self, path: &Path) {
-        self.input(UserInput::Paste(path.to_str().unwrap().into()));
+    /// Types into the command line and confirms.
+    fn answer(&mut self, text: &str) {
+        self.input(UserInput::Paste(text.into()));
         self.key(Key::Enter);
+    }
+    fn path(&mut self, path: &Path) {
+        self.answer(path.to_str().unwrap());
+    }
+    fn line(&self) -> String {
+        match self.layers.active() {
+            Some(Layer::CommandLine(line)) => line.input().text().to_owned(),
+            _ => panic!("command line is not open"),
+        }
+    }
+    fn shown(&self) -> String {
+        self.layers.active().unwrap().presentation().text
     }
     fn finish_save(&mut self) {
         let Effect::Save(request) = self.effects.remove(0) else {
@@ -119,8 +135,9 @@ fn close_unnamed_document_saves_before_removing_view() {
     let path = directory.path().join("new.txt");
     let mut driver = Driver::new();
     let document = driver.document();
-    driver.command(Command::Close);
+    driver.command(Command::Close(None));
     driver.key(Key::Char('s'));
+    assert_eq!(driver.line(), "close save ");
     driver.path(&path);
     assert!(driver.app.workspace().editor(document).is_some());
     assert!(driver.app.workspace().is_saving(document));
@@ -135,8 +152,8 @@ fn cancelling_departure_does_not_cancel_an_in_progress_save() {
     let path = directory.path().join("new.txt");
     let mut driver = Driver::new();
     let document = driver.document();
-    driver.command(Command::Close);
-    driver.key(Key::Char('s'));
+    driver.command(Command::Close(None));
+    driver.answer("s");
     driver.path(&path);
     driver.key(Key::Esc);
     driver.finish_save();
@@ -151,8 +168,8 @@ fn newer_edits_after_save_request_require_another_decision() {
     let mut driver = Driver::new();
     let view = driver.app.active_view().unwrap();
     let document = driver.document();
-    driver.command(Command::Close);
-    driver.key(Key::Char('s'));
+    driver.command(Command::Close(None));
+    driver.answer("s");
     driver.path(&path);
     driver.event(Event::Edit {
         view,
@@ -162,16 +179,10 @@ fn newer_edits_after_save_request_require_another_decision() {
     driver.finish_save();
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "local");
     assert_eq!(driver.text(document), "local newer");
-    assert!(
-        driver
-            .layers
-            .active()
-            .unwrap()
-            .presentation()
-            .text
-            .contains("Newer edits remain")
-    );
-    driver.key(Key::Char('s'));
+    // The departure runs again and asks about the newer edits.
+    assert_eq!(driver.line(), "close ");
+    assert!(driver.shown().contains("unsaved"));
+    driver.answer("s");
     driver.finish_save();
     assert!(driver.app.workspace().editor(document).is_none());
     assert_eq!(std::fs::read_to_string(path).unwrap(), "local newer");
@@ -185,67 +196,38 @@ fn save_failure_keeps_document_and_dialog_available_for_retry_or_cancel() {
     driver.command(Command::Edit(Edit::InsertText(" changed".into())));
     std::fs::write(&path, "external").unwrap();
     let document = driver.document();
-    driver.command(Command::Close);
-    driver.key(Key::Char('s'));
+    driver.command(Command::Close(None));
+    driver.answer("s");
     driver.finish_save();
     assert_eq!(driver.text(document), "local changed");
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "external");
-    assert!(matches!(driver.layers.active(), Some(Layer::Exit(_))));
-    assert!(
-        driver
-            .layers
-            .active()
-            .unwrap()
-            .presentation()
-            .text
-            .contains("disk content changed")
-    );
+    assert_eq!(driver.line(), "close save");
+    assert!(driver.shown().contains("disk content changed"));
     driver.key(Key::Esc);
     assert!(!driver.quit);
     assert_eq!(driver.text(document), "local changed");
 }
 #[test]
-fn quit_decisions_cover_hidden_documents_and_cancel_preserves_discarded_buffers() {
+fn quit_decides_each_unsaved_document_in_turn() {
     let mut driver = Driver::new();
     let first = driver.document();
     driver.command(Command::New);
     driver.command(Command::Edit(Edit::InsertText("second".into())));
     let second = driver.document();
-    driver.command(Command::Quit);
+    // The active document is asked about first; Enter alone picks save.
+    driver.command(Command::Quit(None));
+    assert_eq!(driver.line(), "quit ");
+    assert!(driver.shown().contains("unsaved [untitled"));
+    // The decision slot's keymap answers with one key.
     driver.key(Key::Char('d'));
-    let Some(Layer::Exit(session)) = driver.layers.active() else {
-        panic!()
-    };
-    assert_eq!(session.document(), second);
+    assert!(driver.app.workspace().editor(second).is_none());
+    assert_eq!(driver.line(), "quit ");
     driver.key(Key::Esc);
     assert!(!driver.quit);
     assert_eq!(driver.text(first), "local");
-    assert_eq!(driver.text(second), "second");
-    driver.command(Command::Quit);
-    driver.key(Key::Char('d'));
-    driver.key(Key::Char('d'));
+    driver.command(Command::Quit(None));
+    driver.answer("discard");
     assert!(driver.quit);
-}
-#[test]
-fn edits_after_a_discard_decision_are_not_silently_discarded() {
-    let mut driver = Driver::new();
-    let first_view = driver.app.active_view().unwrap();
-    let first = driver.document();
-    driver.command(Command::New);
-    driver.command(Command::Edit(Edit::InsertText("second".into())));
-    driver.command(Command::Quit);
-    driver.key(Key::Char('d'));
-    driver.event(Event::Edit {
-        view: first_view,
-        command: Edit::InsertText(" newer".into()),
-        time: Duration::ZERO,
-    });
-    driver.key(Key::Char('d'));
-    assert!(!driver.quit);
-    let Some(Layer::Exit(session)) = driver.layers.active() else {
-        panic!()
-    };
-    assert_eq!(session.document(), first);
 }
 #[test]
 fn reload_protects_local_edits_and_explicit_discard_loads_disk() {
@@ -256,11 +238,11 @@ fn reload_protects_local_edits_and_explicit_discard_loads_disk() {
     driver.command(Command::Edit(Edit::InsertText(" changed".into())));
     let document = driver.document();
     std::fs::write(&path, "external").unwrap();
-    driver.command(Command::Reload);
+    driver.command(Command::Reload(None));
     driver.key(Key::Esc);
     assert_eq!(driver.text(document), "local changed");
-    driver.command(Command::Reload);
-    driver.key(Key::Char('d'));
+    driver.command(Command::Reload(None));
+    driver.answer("d");
     assert_eq!(driver.text(document), "external");
     assert!(driver.layers.active().is_none());
     driver.command(Command::Edit(Edit::Undo));
@@ -273,8 +255,8 @@ fn path_preflight_failure_retains_input_for_correction() {
     let path = directory.path().join("missing").join("file.txt");
     let mut driver = Driver::new();
     let document = driver.document();
-    driver.command(Command::Close);
-    driver.key(Key::Char('s'));
+    driver.command(Command::Close(None));
+    driver.answer("s");
     driver.path(&path);
     assert!(driver.effects.is_empty());
     let presentation = driver.layers.active().unwrap().presentation();
@@ -289,8 +271,8 @@ fn dropped_save_request_returns_to_decision_instead_of_closing() {
     let directory = tempfile::tempdir().unwrap();
     let mut driver = Driver::new();
     let document = driver.document();
-    driver.command(Command::Close);
-    driver.key(Key::Char('s'));
+    driver.command(Command::Close(None));
+    driver.answer("s");
     driver.path(&directory.path().join("file.txt"));
     driver.effects.clear();
     driver.event(Event::PollFiles);
@@ -318,7 +300,7 @@ fn reload_undo_restores_the_initiating_views_directed_selection() {
     let original = soda::core::Selection { anchor: 3, head: 2 };
     driver.command(Command::Edit(Edit::SetSelection(original)));
     std::fs::write(path, "XYZ").unwrap();
-    driver.command(Command::Reload);
+    driver.command(Command::Reload(None));
     driver.command(Command::Edit(Edit::Undo));
     assert_eq!(driver.text(document), "local");
     let session = driver.app.view(view).unwrap().session_id;
@@ -340,8 +322,8 @@ fn reload_undo_restores_the_initiating_views_directed_selection() {
 fn unrelated_failure_cannot_reset_a_waiting_departure() {
     let directory = tempfile::tempdir().unwrap();
     let mut driver = Driver::new();
-    driver.command(Command::Close);
-    driver.key(Key::Char('s'));
+    driver.command(Command::Close(None));
+    driver.answer("s");
     driver.path(&directory.path().join("file.txt"));
     let response = driver.layers.application_failed(
         soda::application::Operation::Other,
@@ -366,8 +348,8 @@ fn waiting_session_does_not_adopt_a_later_save_for_the_same_document() {
     let directory = tempfile::tempdir().unwrap();
     let mut driver = Driver::new();
     let document = driver.document();
-    driver.command(Command::Close);
-    driver.key(Key::Char('s'));
+    driver.command(Command::Close(None));
+    driver.answer("s");
     driver.path(&directory.path().join("first.txt"));
     driver.effects.clear();
     // This independent save collects the first request's cancellation before

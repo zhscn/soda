@@ -5,9 +5,9 @@ mod command_line;
 pub use command_line::{CommandLine, Completion};
 mod commands;
 pub mod vim;
-pub use commands::Command;
-mod exit;
-pub use exit::{ExitScope, ExitSession};
+pub use commands::{Command, Departure};
+mod departure;
+pub use departure::SaveWait;
 pub mod help;
 pub use help::HelpSession;
 mod input;
@@ -27,7 +27,7 @@ pub use search::{SearchResults, SearchSession};
 mod keymap;
 pub use keymap::{BindingError, Context, Keymap, LineEdit};
 mod registry;
-pub use registry::{BUILTINS, CommandHandler, CommandInfo, Registry, Slot, SlotKind};
+pub use registry::{BUILTINS, Choice, CommandHandler, CommandInfo, Registry, Slot, SlotKind};
 mod session;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -298,10 +298,12 @@ impl Layers {
         }]
     }
     pub fn application_failed(&mut self, operation: Operation, error: String) -> Response {
-        match &mut self.active {
-            Some(Layer::Exit(session)) => session.operation_failed(operation, error),
-            _ => Response::default(),
-        }
+        let Some(Layer::Saving(wait)) = &self.active else {
+            return Response::default();
+        };
+        wait.operation_failed(operation, error)
+            .and_then(|transition| self.transition(transition))
+            .unwrap_or_default()
     }
     pub fn picker_failed(&mut self, error: String) -> Response {
         let Some(Layer::CommandLine(session)) = &mut self.active else {
@@ -331,10 +333,6 @@ impl Layers {
             Some(Layer::CommandLine(session)) => {
                 session.path_finished(completion, app).unwrap_or_default()
             }
-            Some(Layer::Exit(session)) => Response {
-                redraw: session.path_finished(completion),
-                ..Response::default()
-            },
             _ => Response::default(),
         }
     }
@@ -348,10 +346,6 @@ impl Layers {
         self.picker_rows = rows;
         match &mut self.active {
             Some(Layer::CommandLine(session)) => {
-                session.resize(rows);
-                true
-            }
-            Some(Layer::Exit(session)) => {
                 session.resize(rows);
                 true
             }

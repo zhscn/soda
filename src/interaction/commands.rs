@@ -1,13 +1,13 @@
 //! Application command reduction. Commands resolve their targets on the owner
 //! thread and return ordered application events and platform effects.
 use super::{
-    CommandLine, ExitScope, ExitSession, HelpSession, Layer, Layers, Message, ReplaceSession,
-    Response, SearchSession, TextInput,
+    CommandLine, HelpSession, Layer, Layers, Message, ReplaceSession, Response, SaveWait,
+    SearchSession, TextInput,
 };
 use crate::{
     application::{Application, ClipboardAction, Event},
     core::EditError,
-    editor::{Command as EditCommand, Language},
+    editor::{Command as EditCommand, DocumentId, Language},
 };
 use std::{path::Path, time::Duration};
 
@@ -20,6 +20,11 @@ pub enum Command {
     Vim(super::vim::VimCommand),
     /// Open the command line with initial text.
     Ex(String),
+    /// Open the command line with a note on what it asks about.
+    Ask {
+        line: String,
+        note: String,
+    },
     /// A command line resolved through the registry when executed.
     Named(String),
     Line {
@@ -53,16 +58,23 @@ pub enum Command {
         extend: bool,
     },
     New,
-    Close,
-    Reload,
+    Close(Option<Departure>),
+    Reload(Option<Departure>),
     Help,
     Save {
         choose_path: bool,
     },
-    Quit,
+    Quit(Option<Departure>),
     NextView,
     Search,
     Replace,
+}
+/// How `close`, `reload` and `quit` treat a document with unsaved changes.
+/// Without one, they ask through the command line.
+#[derive(Clone, Debug)]
+pub enum Departure {
+    Save(Option<std::path::PathBuf>),
+    Discard,
 }
 
 impl Layers {
@@ -198,9 +210,17 @@ impl Layers {
                 }
             }
             Command::Vim(command) => response = self.vim_execute(command, app, time),
-            Command::Ex(text) => {
-                let line =
+            Command::Ex(_) | Command::Ask { .. } => {
+                let (text, note) = match command {
+                    Command::Ask { line, note } => (line, Some(note)),
+                    Command::Ex(text) => (text, None),
+                    _ => unreachable!(),
+                };
+                let mut line =
                     CommandLine::new(&text, self.registry.commands(), file_root.to_owned(), app);
+                if let Some(note) = note {
+                    line = line.with_note(note);
+                }
                 response = self.enter(Layer::CommandLine(Box::new(line)), app, time)?;
                 if let Some(Layer::CommandLine(line)) = &mut self.active {
                     let first = line.refresh(app, true);
@@ -285,21 +305,12 @@ impl Layers {
                 }
             }
             Command::WriteQuit => {
-                if let Some(session) = ExitSession::write_quit(app, file_root.to_owned()) {
-                    response = self.enter(Layer::Exit(session), app, time)?;
-                    if let Some(Layer::Exit(session)) = &mut self.active
-                        && let super::session::Transition::Active(next) =
-                            session.handle(super::Input::Text(super::InputKey::Char('s')), app)
-                    {
-                        let mut next = next;
-                        let mut events = response.events;
-                        events.append(&mut next.events);
-                        next.events = events;
-                        response = next;
-                    }
-                } else {
-                    return self.execute(Command::Quit, app, time, file_root);
-                }
+                let dirty = app
+                    .active_view()
+                    .and_then(|id| app.view(id))
+                    .is_some_and(|view| app.workspace().is_dirty(view.document_id));
+                let decision = dirty.then_some(Departure::Save(None));
+                return self.execute(Command::Quit(decision), app, time, file_root);
             }
             Command::Help => {
                 response = self.enter(
@@ -380,42 +391,27 @@ impl Layers {
             Command::New => response
                 .events
                 .push(Event::NewDocument(Language::PlainText)),
-            Command::Close | Command::Reload => {
+            Command::Close(decision) => {
                 if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
                     let document = view.document_id;
-                    let reload = matches!(command, Command::Reload);
-                    if reload && app.workspace().file(document).unwrap().path().is_none() {
+                    if app.workspace().is_dirty(document) && !app.workspace().is_saving(document) {
+                        return self.depart("close", document, decision, app, time, file_root);
+                    }
+                    response = self.leave(document, false, app);
+                }
+            }
+            Command::Reload(decision) => {
+                if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
+                    let document = view.document_id;
+                    if app.workspace().file(document).unwrap().path().is_none() {
                         response.message =
                             Message::Set("Untitled document has no file to reload".into());
-                    } else if app.workspace().is_saving(document) {
-                        response.message =
-                            Message::Set("Save in progress; wait before leaving document".into());
-                    } else if app.workspace().is_dirty(document) {
-                        let scope = if reload {
-                            ExitScope::Reload(view.id)
-                        } else {
-                            ExitScope::Close(document)
-                        };
-                        response = self.enter(
-                            Layer::Exit(
-                                ExitSession::new_with_root(app, scope, file_root.to_owned())
-                                    .unwrap(),
-                            ),
-                            app,
-                            time,
-                        )?;
+                    } else if app.workspace().is_dirty(document)
+                        && !app.workspace().is_saving(document)
+                    {
+                        return self.depart("reload", document, decision, app, time, file_root);
                     } else {
-                        response.events.push(if reload {
-                            Event::Reload {
-                                view: view.id,
-                                discard: false,
-                            }
-                        } else {
-                            Event::CloseDocument {
-                                document,
-                                discard: false,
-                            }
-                        });
+                        response = self.leave(document, true, app);
                     }
                 }
             }
@@ -441,7 +437,18 @@ impl Layers {
                     }
                 }
             }
-            Command::Quit => {
+            Command::Quit(decision) => {
+                let active = app
+                    .active_view()
+                    .and_then(|id| app.view(id))
+                    .map(|view| view.document_id);
+                let dirty = active
+                    .filter(|id| app.workspace().is_dirty(*id))
+                    .or_else(|| {
+                        app.workspace()
+                            .documents()
+                            .find(|id| app.workspace().is_dirty(*id))
+                    });
                 if app
                     .workspace()
                     .documents()
@@ -449,19 +456,8 @@ impl Layers {
                 {
                     response.message =
                         Message::Set("Save in progress; quit after it completes".into());
-                } else if app
-                    .workspace()
-                    .documents()
-                    .any(|id| app.workspace().is_dirty(id))
-                {
-                    response = self.enter(
-                        Layer::Exit(
-                            ExitSession::new_with_root(app, ExitScope::Quit, file_root.to_owned())
-                                .unwrap(),
-                        ),
-                        app,
-                        time,
-                    )?;
+                } else if let Some(document) = dirty {
+                    return self.depart("quit", document, decision, app, time, file_root);
                 } else {
                     response.quit = true;
                 }
@@ -480,6 +476,111 @@ impl Layers {
         }
         if matches!(response.message, Message::Keep) {
             response.message = Message::Clear;
+        }
+        Ok(super::InputResult::Handled(response))
+    }
+}
+impl Layers {
+    /// Closes or reloads a document that needs no decision.
+    fn leave(&self, document: DocumentId, reload: bool, app: &Application) -> Response {
+        let mut response = Response {
+            redraw: true,
+            ..Response::default()
+        };
+        if app.workspace().is_saving(document) {
+            response.message =
+                Message::Set("Save in progress; wait before leaving document".into());
+        } else if reload {
+            let view = app.active_view().unwrap();
+            response.events.push(Event::Reload {
+                view,
+                discard: false,
+            });
+        } else {
+            response.events.push(Event::CloseDocument {
+                document,
+                discard: false,
+            });
+        }
+        response
+    }
+    /// Leaves a dirty document by the decision, asking for one through the
+    /// command line when there is none. Each step is a command line; nothing
+    /// nests.
+    fn depart(
+        &mut self,
+        action: &str,
+        document: DocumentId,
+        decision: Option<Departure>,
+        app: &Application,
+        time: Duration,
+        file_root: &Path,
+    ) -> Result<super::InputResult, EditError> {
+        let name = super::command_line::buffer_name(app, document);
+        let mut response = Response {
+            redraw: true,
+            message: Message::Clear,
+            ..Response::default()
+        };
+        match decision {
+            None => {
+                let ask = Command::Ask {
+                    line: format!("{action} "),
+                    note: format!("unsaved {name}"),
+                };
+                return self.execute(ask, app, time, file_root);
+            }
+            Some(Departure::Discard) => {
+                if action == "reload" {
+                    response.events.push(Event::Reload {
+                        view: app.active_view().unwrap(),
+                        discard: true,
+                    });
+                } else {
+                    response.events.push(Event::CloseDocument {
+                        document,
+                        discard: true,
+                    });
+                }
+                // Quitting continues with the next unsaved document.
+                if action == "quit" {
+                    response.commands.push(Command::Named("quit".into()));
+                }
+            }
+            Some(Departure::Save(None))
+                if app.workspace().file(document).unwrap().path().is_none() =>
+            {
+                let ask = Command::Ask {
+                    line: format!("{action} save "),
+                    note: format!("{name} needs a PATH"),
+                };
+                return self.execute(ask, app, time, file_root);
+            }
+            Some(Departure::Save(path)) => {
+                let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+                let target = match path {
+                    Some(path) => {
+                        match super::path::resolve_path(file_root, home.as_deref(), &path) {
+                            Ok(target) => Some(target),
+                            Err(error) => {
+                                response.message = Message::Set(error);
+                                return Ok(super::InputResult::Handled(response));
+                            }
+                        }
+                    }
+                    None => None,
+                };
+                let retry = target.as_ref().map_or_else(
+                    || format!("{action} save"),
+                    |target| {
+                        let shown = target.strip_prefix(file_root).unwrap_or(target);
+                        format!("{action} save {}", shown.display())
+                    },
+                );
+                let wait = SaveWait::new(app, document, action.to_owned(), retry);
+                response = self.enter(Layer::Saving(wait), app, time)?;
+                response.events.push(Event::Save { document, target });
+            }
         }
         Ok(super::InputResult::Handled(response))
     }

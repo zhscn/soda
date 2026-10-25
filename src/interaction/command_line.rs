@@ -30,7 +30,6 @@ pub struct Completion {
     pub replacement: Option<String>,
     pub directory: bool,
 }
-const MODES: [&str; 4] = ["normal", "visual", "insert", "prompt"];
 
 /// What the cursor is completing: the command name or one of its slots.
 #[derive(Clone, Copy, PartialEq)]
@@ -74,6 +73,8 @@ pub struct CommandLine {
     query: Option<Query>,
     directory: Option<Directory>,
     files: Option<PickerSession>,
+    /// What the line asks about, such as the document a departure concerns.
+    note: Option<String>,
     error: Option<String>,
 }
 fn row(
@@ -142,8 +143,14 @@ impl CommandLine {
             query: None,
             directory: None,
             files: None,
+            note: None,
             error: None,
         }
+    }
+    /// Shows a note before the input until the line closes.
+    pub fn with_note(mut self, note: String) -> Self {
+        self.note = Some(note);
+        self
     }
     pub fn input(&self) -> &TextInput {
         &self.input
@@ -234,11 +241,15 @@ impl CommandLine {
             None => vec![],
             Some(query) => match query.target {
                 Target::Name => self.names(&query.text),
-                Target::Slot(SlotKind::Mode) => MODES
+                Target::Slot(SlotKind::Choice(choices)) => choices
                     .iter()
                     .enumerate()
-                    .filter(|(_, mode)| mode.starts_with(&query.text))
-                    .map(|(i, mode)| row(i as u64, (*mode).into(), Some((*mode).into()), false))
+                    .filter(|(_, choice)| choice.word.starts_with(&query.text))
+                    .map(|(i, choice)| {
+                        let key = choice.key.map_or_else(String::new, |k| format!("[{k}] "));
+                        let label = format!("{:<12} {key}{}", choice.word, choice.doc);
+                        row(i as u64, label, Some(choice.word.into()), false)
+                    })
                     .collect(),
                 Target::Slot(SlotKind::Buffer) => buffers(app, &query.text),
                 Target::Slot(SlotKind::Path) => self.paths(&query.text, &mut response),
@@ -560,8 +571,27 @@ impl CommandLine {
         self.input.replace_range(start..location.range.end, "");
         true
     }
+    /// The slot keymap: a key of an empty `Choice` slot chooses its word.
+    fn choice_key(&mut self, key: char) -> bool {
+        let location = self.locate();
+        let Some(Target::Slot(SlotKind::Choice(choices))) = location.target else {
+            return false;
+        };
+        let Some(choice) = choices.iter().find(|c| c.key == Some(key)) else {
+            return false;
+        };
+        if !location.range.is_empty() || !self.input.selection().range().is_empty() {
+            return false;
+        }
+        self.input.replace_range(location.range, choice.word);
+        true
+    }
     pub(super) fn handle(&mut self, input: Input, app: &Application) -> Transition {
         match input {
+            Input::Text(InputKey::Char(key)) if self.choice_key(key) => {
+                self.refresh(app, false);
+                self.confirm(app)
+            }
             Input::Cancel => self.close(vec![]),
             Input::Confirm => self.confirm(app),
             Input::Complete { backward: true } => {
@@ -610,7 +640,11 @@ impl CommandLine {
         })
     }
     pub(super) fn presentation(&self) -> Presentation {
-        let mut presentation = field_presentation(":".into(), &self.input);
+        let label = self
+            .note
+            .as_ref()
+            .map_or_else(|| ":".to_owned(), |note| format!("[{note}] :"));
+        let mut presentation = field_presentation(label, &self.input);
         if let Some(error) = &self.error {
             presentation.text.push_str(&format!(" [{error}]"));
         } else if self.loading() {

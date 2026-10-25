@@ -86,17 +86,17 @@ fn bracketed_paste_is_one_undoable_edit() {
 #[test]
 fn close_prompts_for_dirty_buffer_and_last_clean_buffer_can_close() {
     let mut host = host();
-    host.command(Action::Close);
+    host.command(Action::Close(None));
     assert!(host.app.active_view().is_none());
     host.command(Action::New);
     let view = host.app.active_view().unwrap();
     host.command(Action::Edit(Command::InsertText("unsaved".into())));
-    host.command(Action::Close);
+    host.command(Action::Close(None));
     assert_eq!(host.app.active_view(), Some(view));
-    assert!(matches!(host.layers.active(), Some(Prompt::Exit(_))));
+    assert!(matches!(host.layers.active(), Some(Prompt::CommandLine(_))));
     host.input(key(KeyCode::Esc));
     host.command(Action::Edit(Command::Undo));
-    host.command(Action::Close);
+    host.command(Action::Close(None));
     assert!(host.app.active_view().is_none());
 }
 #[test]
@@ -110,8 +110,8 @@ fn quit_checks_hidden_documents_and_waits_for_pending_saves() {
         .unwrap()
         .document_id;
     host.dispatch(Event::NewDocument(Language::PlainText));
-    host.command(Action::Quit);
-    assert!(matches!(host.layers.active(), Some(Prompt::Exit(_))));
+    host.command(Action::Quit(None));
+    assert!(matches!(host.layers.active(), Some(Prompt::CommandLine(_))));
     host.input(key(KeyCode::Esc));
     assert!(!host.quit);
     let update = host
@@ -121,14 +121,15 @@ fn quit_checks_hidden_documents_and_waits_for_pending_saves() {
             target: Some(directory.path().join("a.txt")),
         })
         .unwrap();
-    host.command(Action::Quit);
+    host.command(Action::Quit(None));
     assert!(host.layers.active().is_none());
     assert!(!host.quit);
     assert!(host.message.contains("Save in progress"));
     drop(update);
     host.dispatch(Event::PollFiles);
-    host.command(Action::Quit);
-    host.input(key(KeyCode::Char('y')));
+    host.command(Action::Quit(None));
+    host.input(TerminalEvent::Paste("discard".into()));
+    host.input(key(KeyCode::Enter));
     assert!(host.quit);
 }
 #[test]

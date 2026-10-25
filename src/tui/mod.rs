@@ -108,20 +108,6 @@ fn draw(runtime: &Runtime, width: u16, height: u16) -> io::Result<()> {
             list_rows,
         )?;
     }
-    let path = match runtime.layer() {
-        Some(Prompt::Exit(session)) => session.path_input(),
-        _ => None,
-    };
-    if let Some(field) = path.filter(|field| field.visible()) {
-        draw_candidates(
-            &mut output,
-            field.rows(),
-            field.list(),
-            width,
-            height,
-            list_rows,
-        )?;
-    }
     if let Some(Prompt::Help(session)) = runtime.layer() {
         for y in 0..height.saturating_sub(2) {
             queue!(output, MoveTo(0, y), Clear(ClearType::CurrentLine))?;

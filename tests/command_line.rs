@@ -108,8 +108,11 @@ fn matching_slots_complete_by_cursor_position_and_require_a_candidate() {
     let root = tree();
     let mut r = runtime(root.path());
     keys(&mut r, ":");
-    r.input(UserInput::Paste("map no".into()));
-    assert_eq!(rows(&r), ["normal"]);
+    r.input(UserInput::Paste("map ".into()));
+    // Choices without keys take typed text.
+    keys(&mut r, "no");
+    assert_eq!(rows(&r).len(), 1);
+    assert!(rows(&r)[0].starts_with("normal "));
     keys(&mut r, "<tab>");
     assert_eq!(text(&r), "map normal ");
     assert!(rows(&r).is_empty(), "KEYS has no candidates");

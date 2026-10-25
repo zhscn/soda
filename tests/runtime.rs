@@ -143,7 +143,7 @@ fn path_completion_opens_existing_files_and_saves_new_names() {
 }
 
 #[test]
-fn departure_path_completion_can_be_cancelled_and_reused_before_saving() {
+fn departure_asks_for_a_path_through_the_command_line() {
     let directory = tempfile::tempdir().unwrap();
     std::fs::create_dir(directory.path().join("dest")).unwrap();
     let mut runtime = Runtime::new(directory.path().to_owned()).unwrap();
@@ -152,24 +152,21 @@ fn departure_path_completion_can_be_cancelled_and_reused_before_saving() {
         soda::interaction::EditMode::Insert,
     ));
     runtime.input(UserInput::Paste("content".into()));
-    runtime.command(Command::Close);
-    runtime.input(UserInput::Key(KeyStroke::plain(Key::Char('s'))));
+    runtime.command(Command::Close(None));
+    runtime.input(UserInput::Paste("s".into()));
+    runtime.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
     runtime.input(UserInput::Paste("de".into()));
-    runtime.input(UserInput::Key(KeyStroke::plain(Key::Tab)));
+    let line = |r: &Runtime| match r.layer() {
+        Some(Layer::CommandLine(line)) => line.input().text().to_owned(),
+        _ => String::new(),
+    };
+    assert_eq!(line(&runtime), "close save de");
     wait(
         &mut runtime,
-        |r| matches!(r.layer(), Some(Layer::Exit(s)) if s.path_input().is_some_and(|f| !f.rows().is_empty())),
-    );
-    runtime.input(UserInput::Key(KeyStroke::plain(Key::Esc)));
-    assert!(
-        matches!(runtime.layer(), Some(Layer::Exit(s)) if s.path_input().is_some_and(|f| !f.visible() && f.text() == "de"))
+        |r| matches!(r.layer(), Some(Layer::CommandLine(l)) if !l.rows().is_empty()),
     );
     runtime.input(UserInput::Key(KeyStroke::plain(Key::Tab)));
-    wait(
-        &mut runtime,
-        |r| matches!(r.layer(), Some(Layer::Exit(s)) if s.path_input().is_some_and(|f| !f.rows().is_empty())),
-    );
-    runtime.input(UserInput::Key(KeyStroke::plain(Key::Tab)));
+    assert_eq!(line(&runtime), "close save dest/");
     runtime.input(UserInput::Paste("new.txt".into()));
     runtime.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
     wait(&mut runtime, |r| {

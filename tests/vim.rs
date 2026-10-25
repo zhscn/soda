@@ -189,8 +189,11 @@ fn write_quit_saves_the_active_document_before_asking_about_other_dirty_buffers(
     wait(&mut r, &|_| {
         std::fs::read_to_string(&path).is_ok_and(|text| text == "active!")
     });
+    // After the save completes, quit asks about the other dirty buffer.
+    wait(&mut r, &|r| {
+        matches!(r.layer(), Some(soda::interaction::Layer::CommandLine(_)))
+    });
     assert!(!r.quit_requested());
-    assert!(matches!(r.layer(), Some(soda::interaction::Layer::Exit(_))));
     keys(&mut r, "<Esc>");
     assert!(!r.quit_requested());
 }

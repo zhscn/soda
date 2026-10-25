@@ -269,46 +269,30 @@ fn modal_routing_blocks_unknown_input_and_requires_explicit_discard() {
         panic!()
     };
     assert!(response.redraw);
-    layers
-        .enter(
-            Layer::Exit(
-                soda::interaction::ExitSession::new(&app, soda::interaction::ExitScope::Quit)
-                    .unwrap(),
-            ),
+    layers.close(&app, Duration::ZERO).unwrap();
+    // Leaving a dirty document asks; Enter alone chooses save, never discard.
+    let InputResult::Handled(response) = layers
+        .execute(
+            soda::interaction::Command::Quit(None),
             &app,
             Duration::ZERO,
+            std::path::Path::new("/"),
         )
-        .unwrap();
+        .unwrap()
+    else {
+        panic!()
+    };
+    assert!(!response.quit);
     let InputResult::Handled(response) =
         layers.handle(Input::Confirm, &app, Duration::ZERO).unwrap()
     else {
         panic!()
     };
     assert!(!response.quit);
-    assert!(layers.active().is_none());
-    layers
-        .enter(
-            Layer::Exit(
-                soda::interaction::ExitSession::new(&app, soda::interaction::ExitScope::Quit)
-                    .unwrap(),
-            ),
-            &app,
-            Duration::ZERO,
-        )
-        .unwrap();
     assert!(matches!(
-        layers
-            .handle(Input::Paste("y".into()), &app, Duration::ZERO)
-            .unwrap(),
-        InputResult::Blocked
+        &response.commands[..],
+        [soda::interaction::Command::Named(line)] if line == "quit save"
     ));
-    let InputResult::Handled(response) = layers
-        .handle(Input::Text(InputKey::Char('y')), &app, Duration::ZERO)
-        .unwrap()
-    else {
-        panic!()
-    };
-    assert!(response.quit);
 }
 
 #[test]
@@ -490,7 +474,7 @@ fn prompt_navigation_and_filtered_paste_do_not_generate_file_commands() {
 
 #[test]
 fn all_builtin_sessions_share_the_cancel_lifecycle_contract() {
-    use soda::interaction::{ExitScope, ExitSession, HelpSession, ReplaceSession};
+    use soda::interaction::{HelpSession, ReplaceSession, SaveWait};
     let (mut app, view) = setup("dirty");
     let document = app.view(view).unwrap().document_id;
     let sessions = vec![
@@ -501,7 +485,12 @@ fn all_builtin_sessions_share_the_cancel_lifecycle_contract() {
             &app,
         ))),
         Layer::Help(HelpSession::default()),
-        Layer::Exit(ExitSession::new(&app, ExitScope::Close(document)).unwrap()),
+        Layer::Saving(SaveWait::new(
+            &app,
+            document,
+            "close".into(),
+            "close save".into(),
+        )),
         Layer::Replace(ReplaceSession::new(&app, view).unwrap()),
         Layer::Search {
             input: TextInput::default(),

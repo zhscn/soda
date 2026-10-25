@@ -263,7 +263,7 @@ fn commands_with_no_active_view_are_safe_and_new_document_recovers() {
     let app = Application::default();
     let mut layers = configured_layers();
     for command in [
-        Command::Close,
+        Command::Close(None),
         Command::NextView,
         Command::Search,
         Command::Save { choose_path: false },
