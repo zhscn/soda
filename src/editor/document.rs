@@ -57,7 +57,6 @@ pub struct Document {
     history: History<SessionId>,
     config_generation: u64,
     newline: &'static str,
-    pub(crate) file: crate::files::FileState,
 }
 impl Document {
     pub(super) fn new(text: impl Into<String>, language: Language) -> Self {
@@ -75,14 +74,7 @@ impl Document {
             language: LanguageSession::new(language),
             history: History::default(),
             config_generation: 0,
-            file: crate::files::FileState::default(),
         }
-    }
-    pub fn file(&self) -> &crate::files::FileState {
-        &self.file
-    }
-    pub fn is_dirty(&self) -> bool {
-        self.file.is_dirty(&self.snapshot)
     }
     pub fn id(&self) -> DocumentId {
         self.id

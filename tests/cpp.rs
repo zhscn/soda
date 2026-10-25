@@ -9,7 +9,7 @@ fn enter_at(input: &str, style: &CppStyle) -> String {
     let p = input.find('^').unwrap();
     let mut s = input.to_owned();
     s.remove(p);
-    let mut e = Editor::new(s);
+    let mut e = StandaloneEditor::new(s);
     let mut tx = Transaction::new(0, vec![]);
     tx.selection = Some(Selection::caret(p));
     e.dispatch(tx).unwrap();
@@ -62,7 +62,7 @@ fn expression_replay_uses_actual_layout() {
     ] {
         assert_eq!(col(text, line, &s).target_column, expected, "{text}");
     }
-    let mut e = Editor::new("  return WithColor(OS)\n.get()\n<< \"e\";\n");
+    let mut e = StandaloneEditor::new("  return WithColor(OS)\n.get()\n<< \"e\";\n");
     for line in [1, 2] {
         e.dispatch(reindent(e.state(), line, s.compile().unwrap()).unwrap())
             .unwrap();
@@ -148,7 +148,7 @@ fn macro_continuation_and_conditional_reconciliation() {
         "void f() {\n    do {\n        g();\n#ifdef A\n        h(x);\n    } while (x);\n#else\n        h(y);\n    } while (y);\n#endif\n    tail();\n}\n",
         "void f() {\n#ifdef A\n    if (x)\n#else\n    if (y)\n#endif\n        return;\n    tail();\n}\n",
     ] {
-        let mut e = Editor::new(text);
+        let mut e = StandaloneEditor::new(text);
         let lines = e.state().snapshot().line_count();
         for line in 0..lines - 1 {
             e.dispatch(reindent(e.state(), line, s.compile().unwrap()).unwrap())
@@ -240,7 +240,7 @@ fn stale_analysis_is_rejected_and_literal_contents_are_preserved() {
         EditError::AnalysisMismatch
     );
     for text in ["auto s = R\"d(\n  keep\n)d\";", "/* a\n  keep\n*/"] {
-        let mut e = Editor::new(text);
+        let mut e = StandaloneEditor::new(text);
         e.dispatch(reindent(e.state(), 1, CppStyle::default().compile().unwrap()).unwrap())
             .unwrap();
         assert_eq!(e.state().snapshot().text(), text);
@@ -286,7 +286,7 @@ fn typed_labels_and_closers_are_atomic_and_protected() {
         let caret = input.find('^').unwrap();
         let mut text = input.to_owned();
         text.remove(caret);
-        let mut e = Editor::new(text);
+        let mut e = StandaloneEditor::new(text);
         let mut select = Transaction::new(0, vec![]);
         select.selection = Some(Selection::caret(caret));
         e.dispatch(select).unwrap();
@@ -312,7 +312,7 @@ fn typed_labels_and_closers_are_atomic_and_protected() {
 fn enter_on_each_input_prefix_is_safe_and_reversible() {
     let sample = "namespace n {\nclass C {\npublic:\n    C();\n};\nC::C()\n    : a_(1),\n      b_{2}\n{\n    switch (x) {\n    case 1:\n        f([&] { return 1; });\n    default:\n        break;\n    }\n}\n}\n";
     for p in 0..=sample.len() {
-        let mut e = Editor::new(&sample[..p]);
+        let mut e = StandaloneEditor::new(&sample[..p]);
         let mut select = Transaction::new(0, vec![]);
         select.selection = Some(Selection::caret(p));
         e.dispatch(select).unwrap();
@@ -398,7 +398,7 @@ fn assert_atomic_input(
         anchor: caret + selected_bytes,
         head: caret,
     };
-    let mut editor = Editor::new(text.clone());
+    let mut editor = StandaloneEditor::new(text.clone());
     let mut select = Transaction::new(0, vec![]);
     select.selection = Some(selection);
     editor.dispatch(select).unwrap();

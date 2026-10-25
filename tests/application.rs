@@ -55,14 +55,7 @@ fn open_edit_switch_save_close() {
     let completion = app.workspace().service().write(*request);
     app.dispatch(Event::SaveFinished(completion)).unwrap();
     assert_eq!(fs::read_to_string(path).unwrap(), "xabc");
-    assert!(
-        !app.workspace()
-            .editor(doc)
-            .unwrap()
-            .model()
-            .document()
-            .is_dirty()
-    );
+    assert!(!app.workspace().is_dirty(doc));
     let update = app
         .dispatch(Event::CloseDocument {
             document: doc,
@@ -133,14 +126,7 @@ fn shared_document_maps_selection_and_viewport_and_releases_sessions() {
     );
     app.dispatch(Event::CloseView(a)).unwrap();
     assert_eq!(app.active_view(), None);
-    assert!(
-        app.workspace()
-            .editor(doc)
-            .unwrap()
-            .model()
-            .document()
-            .is_dirty()
-    );
+    assert!(app.workspace().is_dirty(doc));
     app.dispatch(Event::AddView(doc)).unwrap();
 }
 
@@ -358,14 +344,7 @@ fn failed_save_releases_reservation_and_preserves_views() {
     ));
     assert!(!app.workspace().is_saving(doc));
     assert_eq!(app.active_view(), Some(view));
-    assert!(
-        app.workspace()
-            .editor(doc)
-            .unwrap()
-            .model()
-            .document()
-            .is_dirty()
-    );
+    assert!(app.workspace().is_dirty(doc));
     assert_eq!(fs::read_to_string(path).unwrap(), "external");
 }
 
@@ -445,13 +424,7 @@ fn latest_open_intent_wins_in_both_completion_orders() {
         }
         let active = app.view(app.active_view().unwrap()).unwrap();
         assert_eq!(
-            app.workspace()
-                .editor(active.document_id)
-                .unwrap()
-                .model()
-                .document()
-                .file()
-                .path(),
+            app.workspace().file(active.document_id).unwrap().path(),
             Some(b.as_path())
         );
         assert_eq!(app.views().count(), 3);

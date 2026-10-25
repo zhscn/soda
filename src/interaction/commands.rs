@@ -263,15 +263,14 @@ impl Layers {
             Command::Close | Command::Reload => {
                 if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
                     let document = view.document_id;
-                    let editor = app.workspace().editor(document).unwrap();
                     let reload = matches!(command, Command::Reload);
-                    if reload && editor.model().document().file().path().is_none() {
+                    if reload && app.workspace().file(document).unwrap().path().is_none() {
                         response.message =
                             Message::Set("Untitled document has no file to reload".into());
                     } else if app.workspace().is_saving(document) {
                         response.message =
                             Message::Set("Save in progress; wait before leaving document".into());
-                    } else if editor.model().document().is_dirty() {
+                    } else if app.workspace().is_dirty(document) {
                         let scope = if reload {
                             ExitScope::Reload(view.id)
                         } else {
@@ -303,14 +302,7 @@ impl Layers {
             Command::Save { choose_path } => {
                 if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
                     let document = view.document_id;
-                    let path = app
-                        .workspace()
-                        .editor(document)
-                        .unwrap()
-                        .model()
-                        .document()
-                        .file()
-                        .path();
+                    let path = app.workspace().file(document).unwrap().path();
                     if choose_path || path.is_none() {
                         let text = path.map_or_else(String::new, |p| p.display().to_string());
                         response = self.enter(
@@ -334,14 +326,11 @@ impl Layers {
                 {
                     response.message =
                         Message::Set("Save in progress; quit after it completes".into());
-                } else if app.workspace().documents().any(|id| {
-                    app.workspace()
-                        .editor(id)
-                        .unwrap()
-                        .model()
-                        .document()
-                        .is_dirty()
-                }) {
+                } else if app
+                    .workspace()
+                    .documents()
+                    .any(|id| app.workspace().is_dirty(id))
+                {
                     response = self.enter(
                         Layer::Exit(
                             ExitSession::new_with_root(app, ExitScope::Quit, file_root.to_owned())

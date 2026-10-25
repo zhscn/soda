@@ -22,12 +22,11 @@ fn utf8_bom_and_mixed_line_endings_round_trip_exactly() {
         fs::write(&path, bytes).unwrap();
         let mut workspace = Workspace::default();
         let id = workspace.open(&path).unwrap();
-        let document = workspace.editor(id).unwrap().model().document();
         assert_eq!(
-            document.file().has_utf8_bom(),
+            workspace.file(id).unwrap().has_utf8_bom(),
             bytes.starts_with(b"\xef\xbb\xbf")
         );
-        assert!(!document.is_dirty());
+        assert!(!workspace.is_dirty(id));
         let update = workspace.save(id, None).unwrap();
         assert!(!update.dirty);
         assert_eq!(fs::read(&path).unwrap(), *bytes);
@@ -111,12 +110,20 @@ fn save_confirms_only_the_requested_snapshot_and_undo_can_be_clean() {
     let mut editor = workspace.editor_mut(id).unwrap();
     editor.execute(Command::Undo).unwrap();
     assert_eq!(editor.state().snapshot().text(), "ab");
-    assert!(!editor.model().document().is_dirty());
     assert!(editor.model().text_revision() > revision);
-    editor.execute(Command::Undo).unwrap();
-    assert!(editor.model().document().is_dirty());
-    editor.execute(Command::Redo).unwrap();
-    assert!(!editor.model().document().is_dirty());
+    assert!(!workspace.is_dirty(id));
+    workspace
+        .editor_mut(id)
+        .unwrap()
+        .execute(Command::Undo)
+        .unwrap();
+    assert!(workspace.is_dirty(id));
+    workspace
+        .editor_mut(id)
+        .unwrap()
+        .execute(Command::Redo)
+        .unwrap();
+    assert!(!workspace.is_dirty(id));
 }
 
 #[test]
@@ -142,16 +149,7 @@ fn external_changes_and_deletion_block_save_without_losing_local_content() {
         workspace.editor(id).unwrap().state().snapshot().text(),
         "localdisk"
     );
-    assert_eq!(
-        workspace
-            .editor(id)
-            .unwrap()
-            .model()
-            .document()
-            .file()
-            .saved_revision(),
-        Some(0)
-    );
+    assert_eq!(workspace.file(id).unwrap().saved_revision(), Some(0));
     fs::remove_file(&path).unwrap();
     assert!(workspace.externally_modified(id).unwrap());
     assert!(matches!(
@@ -161,7 +159,7 @@ fn external_changes_and_deletion_block_save_without_losing_local_content() {
     fs::write(&path, "disk").unwrap();
     assert!(!workspace.externally_modified(id).unwrap());
     workspace.save(id, None).unwrap();
-    assert!(!workspace.editor(id).unwrap().model().document().is_dirty());
+    assert!(!workspace.is_dirty(id));
 }
 
 #[test]
@@ -183,17 +181,8 @@ fn write_failure_releases_reservation_and_preserves_untitled_document() {
     let completion = workspace.service().write(request);
     assert!(completion.result().is_err());
     assert!(workspace.finish_save(completion).is_err());
-    assert!(
-        workspace
-            .editor(id)
-            .unwrap()
-            .model()
-            .document()
-            .file()
-            .path()
-            .is_none()
-    );
-    assert!(workspace.editor(id).unwrap().model().document().is_dirty());
+    assert!(workspace.file(id).unwrap().path().is_none());
+    assert!(workspace.is_dirty(id));
     fs::create_dir(&parent).unwrap();
     workspace.save(id, Some(&path)).unwrap();
     assert_eq!(fs::read_to_string(&path).unwrap(), "unsaved");
@@ -224,16 +213,7 @@ fn cpp_configuration_is_loaded_reloaded_and_changed_on_save_as() {
     let update = workspace.save(id, Some(&target)).unwrap();
     assert!(update.language_changed);
     assert_eq!(width(&workspace), 6);
-    assert_eq!(
-        workspace
-            .editor(id)
-            .unwrap()
-            .model()
-            .document()
-            .file()
-            .path(),
-        Some(target.as_path())
-    );
+    assert_eq!(workspace.file(id).unwrap().path(), Some(target.as_path()));
     assert_ne!(workspace.open(&path).unwrap(), id);
     assert_eq!(workspace.open(&target).unwrap(), id);
 }
@@ -425,7 +405,7 @@ fn preparing_save_seals_history_group_at_the_saved_snapshot() {
     let mut editor = workspace.editor_mut(id).unwrap();
     editor.execute(Command::Undo).unwrap();
     assert_eq!(editor.state().snapshot().text(), "ab");
-    assert!(!editor.model().document().is_dirty());
+    assert!(!workspace.is_dirty(id));
 }
 
 #[test]
@@ -472,7 +452,7 @@ fn dropped_completed_save_confirms_its_snapshot_and_keeps_notifications() {
         .unwrap()
         .execute(Command::Undo)
         .unwrap();
-    assert!(!workspace.editor(id).unwrap().model().document().is_dirty());
+    assert!(!workspace.is_dirty(id));
     workspace.close(id).unwrap();
 }
 
@@ -610,7 +590,7 @@ fn open_or_create_registers_named_empty_file_and_loads_path_configuration() {
     let mut workspace = Workspace::default();
     let id = workspace.open_or_create(&path).unwrap();
     assert!(!path.exists());
-    assert!(workspace.editor(id).unwrap().model().document().is_dirty());
+    assert!(workspace.is_dirty(id));
     assert_eq!(workspace.open_or_create(&path).unwrap(), id);
     match workspace.editor(id).unwrap().model().language() {
         Language::Cpp(rules) => assert_eq!(rules.whitespace().indent_width, 3),
@@ -619,7 +599,7 @@ fn open_or_create_registers_named_empty_file_and_loads_path_configuration() {
     workspace.save(id, None).unwrap();
     assert!(path.exists());
     assert_eq!(fs::read(&path).unwrap(), b"");
-    assert!(!workspace.editor(id).unwrap().model().document().is_dirty());
+    assert!(!workspace.is_dirty(id));
 }
 
 #[test]
@@ -646,15 +626,7 @@ fn explicit_reload_guards_dirty_content_and_preserves_identity_and_undo() {
         workspace.editor(id).unwrap().state().snapshot().text(),
         "prefix new suffix\r\n"
     );
-    assert!(
-        workspace
-            .editor(id)
-            .unwrap()
-            .model()
-            .document()
-            .file()
-            .has_utf8_bom()
-    );
+    assert!(workspace.file(id).unwrap().has_utf8_bom());
     assert!(!workspace.externally_modified(id).unwrap());
     workspace
         .editor_mut(id)
@@ -665,13 +637,13 @@ fn explicit_reload_guards_dirty_content_and_preserves_identity_and_undo() {
         workspace.editor(id).unwrap().state().snapshot().text(),
         "xprefix old suffix\r\n"
     );
-    assert!(workspace.editor(id).unwrap().model().document().is_dirty());
+    assert!(workspace.is_dirty(id));
     workspace
         .editor_mut(id)
         .unwrap()
         .execute(Command::Redo)
         .unwrap();
-    assert!(!workspace.editor(id).unwrap().model().document().is_dirty());
+    assert!(!workspace.is_dirty(id));
 }
 
 #[test]

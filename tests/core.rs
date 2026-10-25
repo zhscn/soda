@@ -2,7 +2,7 @@ use soda::core::*;
 
 #[test]
 fn transactions_are_atomic_utf8_checked_and_versioned() {
-    let mut editor = Editor::new("a界b\r\n\tend");
+    let mut editor = StandaloneEditor::new("a界b\r\n\tend");
     let old = editor.state().snapshot().clone();
     let invalid = Transaction::new(0, vec![Change::new(1..2, "x")]);
     assert_eq!(
@@ -28,7 +28,7 @@ fn transactions_are_atomic_utf8_checked_and_versioned() {
 }
 #[test]
 fn overlapping_changes_and_invalid_result_selection_do_not_mutate() {
-    let mut editor = Editor::new("abc");
+    let mut editor = StandaloneEditor::new("abc");
     for changes in [
         vec![Change::new(0..2, "x"), Change::new(1..3, "y")],
         vec![Change::new(1..1, "x"), Change::new(1..1, "y")],
@@ -65,7 +65,7 @@ fn position_mapping_handles_replacement_boundaries_and_adjacent_insertions() {
 }
 #[test]
 fn explicit_history_groups_and_branching_redo() {
-    let mut e = Editor::new("");
+    let mut e = StandaloneEditor::new("");
     for (p, ch) in [(0, "a"), (1, "b")] {
         let mut tx = Transaction::new(e.state().snapshot().version(), vec![Change::new(p..p, ch)]);
         tx.history_group = Some(7);
@@ -98,7 +98,7 @@ fn snapshots_index_crlf_trailing_lines_and_unicode_bytes() {
 
 #[test]
 fn selection_transactions_do_not_advance_text_revision() {
-    let mut editor = Editor::new("abc");
+    let mut editor = StandaloneEditor::new("abc");
     let mut tx = Transaction::new(0, vec![]);
     tx.selection = Some(Selection::caret(2));
     editor.dispatch(tx).unwrap();
@@ -108,7 +108,7 @@ fn selection_transactions_do_not_advance_text_revision() {
 
 #[test]
 fn net_zero_history_groups_still_advance_revision_on_restore() {
-    let mut editor = Editor::new("abc");
+    let mut editor = StandaloneEditor::new("abc");
     for (range, text) in [(1..1, "x"), (1..2, "")] {
         let mut tx = Transaction::new(
             editor.state().snapshot().version(),

@@ -154,12 +154,12 @@ impl Snapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Editor, EditorState, Selection, Transaction};
+    use crate::core::{EditorState, Selection, StandaloneEditor, Transaction};
 
     #[test]
     fn chunked_queries_edits_and_history_do_not_flatten_text() {
         let input = format!("{}{}", "a界\tb\r\n".repeat(8192), "界".repeat(4096));
-        let mut editor = Editor::new(input.clone());
+        let mut editor = StandaloneEditor::new(input.clone());
         let old = editor.state().snapshot().clone();
         assert!(old.chunks().count() > 1);
         assert_eq!(old.line(8192).as_deref(), Some("界".repeat(4096).as_str()));

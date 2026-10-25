@@ -17,7 +17,7 @@ mod state;
 mod text;
 
 pub use state::{
-    Association, Change, ChangeMap, EditError, Editor, EditorState, Selection, Transaction,
-    UserEvent,
+    Association, Change, ChangeMap, EditError, EditorState, Selection, StandaloneEditor,
+    Transaction, UserEvent,
 };
 pub use text::Snapshot;

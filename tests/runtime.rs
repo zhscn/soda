@@ -29,11 +29,8 @@ fn headless_runtime_opens_edits_saves_and_observes_completion() {
             runtime
                 .app()
                 .workspace()
-                .editor(view.document_id)
+                .file(view.document_id)
                 .unwrap()
-                .model()
-                .document()
-                .file()
                 .path()
                 == Some(path.as_path())
         })
@@ -50,16 +47,7 @@ fn headless_runtime_opens_edits_saves_and_observes_completion() {
         !runtime.app().workspace().is_saving(document)
     });
     assert_eq!(std::fs::read_to_string(path).unwrap(), "new 中");
-    assert!(
-        !runtime
-            .app()
-            .workspace()
-            .editor(document)
-            .unwrap()
-            .model()
-            .document()
-            .is_dirty()
-    );
+    assert!(!runtime.app().workspace().is_dirty(document));
     assert!(runtime.message().starts_with("Saved "));
 }
 #[test]
@@ -128,15 +116,7 @@ fn path_completion_opens_existing_files_and_saves_new_names() {
     runtime.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
     wait(&mut runtime, |r| {
         r.app().views().any(|v| {
-            r.app()
-                .workspace()
-                .editor(v.document_id)
-                .unwrap()
-                .model()
-                .document()
-                .file()
-                .path()
-                == Some(path.as_path())
+            r.app().workspace().file(v.document_id).unwrap().path() == Some(path.as_path())
         })
     });
     runtime.command(Command::Save { choose_path: true });

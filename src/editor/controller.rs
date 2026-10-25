@@ -1,6 +1,6 @@
 use super::{
     Direction, EditorModel, Language, Motion, commands,
-    document::{DocumentId, DocumentUpdate, EditOrigin, SessionId},
+    document::{Commit, DocumentId, DocumentUpdate, EditOrigin, SessionId},
     history::InputHistory,
     operations,
     search::SearchQuery,
@@ -76,12 +76,6 @@ impl Editor {
         self.model.document.break_group();
         self.input_history.end();
     }
-    pub(crate) fn bind_file(&mut self, file: crate::files::FileState) {
-        self.model.document.file = file;
-    }
-    pub(crate) fn file_state_mut(&mut self) -> &mut crate::files::FileState {
-        &mut self.model.document.file
-    }
     pub fn model(&self) -> &EditorModel {
         &self.model
     }
@@ -119,17 +113,14 @@ impl Editor {
         command: Command,
         time: Duration,
     ) -> Result<EditorUpdate, EditError> {
+        // Input history is staged and installed only when the command succeeds.
         let mut history = self.input_history.clone();
         let event = match &command {
             Command::TypeChar(ch) if !matches!(ch, '\n' | '\r') => Some(UserEvent::Input),
-            Command::Delete {
-                direction: Direction::Backward,
-                ..
-            } => Some(UserEvent::DeleteBackward),
-            Command::Delete {
-                direction: Direction::Forward,
-                ..
-            } => Some(UserEvent::DeleteForward),
+            Command::Delete { direction, .. } => Some(match direction {
+                Direction::Backward => UserEvent::DeleteBackward,
+                Direction::Forward => UserEvent::DeleteForward,
+            }),
             _ => None,
         };
         history.owner_changed(id);
@@ -145,10 +136,9 @@ impl Editor {
         ) {
             history.end();
         }
-        let preserves_explicit_group = matches!(&command, Command::Apply(_))
-            || history.compound(id).is_some()
-            || matches!(&command, Command::BeginUndoGroup(_));
-        let mut used_group = None;
+        let preserves_explicit_group =
+            matches!(&command, Command::Apply(_) | Command::BeginUndoGroup(_))
+                || history.compound(id).is_some();
         let state = self
             .model
             .session(id)
@@ -161,246 +151,27 @@ impl Editor {
             .map(|session| (session.id(), session.selection()))
             .collect();
         let mut language_changed = false;
-        let commit = match command {
-            Command::BeginUndoGroup(selection) => {
-                EditorState::from_snapshot(self.model.document.snapshot().clone(), selection)?;
-                history.begin(id, selection)?;
-                self.model.document.break_group();
-                None
-            }
-            Command::EndUndoGroup(selection) => {
-                EditorState::from_snapshot(self.model.document.snapshot().clone(), selection)?;
-                self.model.document.finish_group(id, selection);
-                self.model.set_selection(id, selection)?;
-                None
-            }
-            Command::Undo => self.model.document.restore(id, false)?,
-            Command::Redo => self.model.document.restore(id, true)?,
-            Command::SetLanguage(language) => {
-                language_changed = self.model.document.configure(language)?;
-                if language_changed {
-                    for session in self.model.sessions.values_mut() {
-                        session.goal_column = None;
+        let mut used_group = None;
+        let commit = match self.step(id, &state, command, &mut history, &mut language_changed)? {
+            Step::Done(commit) => commit,
+            Step::Edit {
+                mut tx,
+                origin,
+                language,
+            } => {
+                let compound = history.compound(id);
+                if !tx.changes.is_empty() {
+                    if let Some(group) = compound {
+                        tx.history_group = Some(group);
+                        tx.user_event = None;
+                    } else if let Some(event) = event {
+                        let group = history.plan(id, event, time, &state)?;
+                        tx.history_group = Some(group);
+                        tx.user_event = Some(event);
+                        used_group = Some(group);
                     }
                 }
-                None
-            }
-            Command::SelectAll => {
-                self.model.set_selection(
-                    id,
-                    Selection {
-                        anchor: 0,
-                        head: state.snapshot().len_bytes(),
-                    },
-                )?;
-                None
-            }
-            Command::Goto { line, column } => {
-                let line = line.min(state.snapshot().line_count() - 1);
-                let offset = crate::core::offset_at_logical_column(
-                    state.snapshot(),
-                    line,
-                    crate::core::LogicalColumn(column),
-                    self.model.document.language.whitespace().tab_width,
-                )?;
-                self.model.set_selection(id, Selection::caret(offset.0))?;
-                None
-            }
-            Command::SetSelection(selection) => {
-                self.model.set_selection(id, selection)?;
-                None
-            }
-            Command::Move { motion, extend } => {
-                let goal = self.model.session(id).unwrap().goal_column;
-                let (selection, goal) = commands::move_selection(
-                    &state,
-                    motion,
-                    extend,
-                    goal,
-                    &self.model.document.language,
-                )?;
-                self.model.set_selection(id, selection)?;
-                self.model.sessions.get_mut(&id).unwrap().goal_column = goal;
-                None
-            }
-            Command::SetSearchQuery(query) => {
-                self.model.sessions.get_mut(&id).unwrap().search.query = Some(query);
-                None
-            }
-            Command::Find { backward, wrap } => {
-                if let Some(query) = self.model.session(id).unwrap().search.query()
-                    && let Some(range) = super::search::find(
-                        state.snapshot(),
-                        query,
-                        state.selection().range(),
-                        backward,
-                        wrap,
-                    )
-                {
-                    self.model.set_selection(
-                        id,
-                        Selection {
-                            anchor: range.start,
-                            head: range.end,
-                        },
-                    )?;
-                }
-                None
-            }
-            command => {
-                let mut prepared_language = None;
-                let (mut tx, origin) = match command {
-                    Command::InsertText(text) => {
-                        (operations::prepare_insert(&state, text)?, EditOrigin::Paste)
-                    }
-                    Command::TypeChar(ch) => {
-                        let mut language = self.model.document.language.clone();
-                        let tx = operations::prepare_char(&state, ch, &mut language)?;
-                        prepared_language = Some(language);
-                        (tx, EditOrigin::Input)
-                    }
-                    Command::Enter => {
-                        let mut language = self.model.document.language.clone();
-                        let tx = operations::prepare_enter(
-                            &state,
-                            self.model.document.newline(),
-                            &mut language,
-                        )?;
-                        prepared_language = Some(language);
-                        (tx, EditOrigin::Input)
-                    }
-                    Command::Reindent(line) => (
-                        operations::prepare_reindent(
-                            &state,
-                            line,
-                            &mut self.model.document.language,
-                        )?,
-                        EditOrigin::Reindent,
-                    ),
-                    Command::Delete { direction, smart } => (
-                        commands::delete(&state, direction, smart, &self.model.document.language)?,
-                        EditOrigin::Delete,
-                    ),
-                    Command::DeleteWord(direction) => (
-                        commands::delete_word(&state, direction)?,
-                        EditOrigin::Delete,
-                    ),
-                    Command::InsertTab => (
-                        commands::insert_tab(&state, false, &self.model.document.language)?,
-                        EditOrigin::Indent,
-                    ),
-                    Command::InsertLiteralTab => (
-                        commands::insert_tab(&state, true, &self.model.document.language)?,
-                        EditOrigin::Input,
-                    ),
-                    Command::IndentSelection { outdent } => (
-                        commands::indent_selection(&state, outdent, &self.model.document.language),
-                        EditOrigin::Indent,
-                    ),
-                    Command::ReplaceCurrent(text) => {
-                        let selected = state.selection().range();
-                        let matches =
-                            self.model
-                                .session(id)
-                                .unwrap()
-                                .search
-                                .query()
-                                .is_some_and(|query| {
-                                    query.is_valid()
-                                        && state
-                                            .snapshot()
-                                            .byte_slice(selected.clone())
-                                            .is_some_and(|slice| slice == query.text())
-                                });
-                        (
-                            if matches {
-                                operations::prepare_insert(&state, text)?
-                            } else {
-                                Transaction::new(state.snapshot().version(), vec![])
-                            },
-                            EditOrigin::Replace,
-                        )
-                    }
-                    Command::ReplaceAll(text) => {
-                        let changes = self
-                            .model
-                            .session(id)
-                            .unwrap()
-                            .search
-                            .query()
-                            .map(|query| {
-                                query
-                                    .cursor(state.snapshot())
-                                    .map(|range| Change::new(range, text.clone()))
-                                    .collect()
-                            })
-                            .unwrap_or_default();
-                        (
-                            Transaction::new(state.snapshot().version(), changes),
-                            EditOrigin::Replace,
-                        )
-                    }
-                    Command::ReloadText(text) => {
-                        let old = state.snapshot().text();
-                        let prefix: usize = old
-                            .chars()
-                            .zip(text.chars())
-                            .take_while(|(left, right)| left == right)
-                            .map(|(ch, _)| ch.len_utf8())
-                            .sum();
-                        let suffix: usize = old[prefix..]
-                            .chars()
-                            .rev()
-                            .zip(text[prefix..].chars().rev())
-                            .take_while(|(left, right)| left == right)
-                            .map(|(ch, _)| ch.len_utf8())
-                            .sum();
-                        let changes = if prefix == old.len() && prefix == text.len() {
-                            vec![]
-                        } else {
-                            vec![Change::new(
-                                prefix..old.len() - suffix,
-                                &text[prefix..text.len() - suffix],
-                            )]
-                        };
-                        (
-                            Transaction::new(state.snapshot().version(), changes),
-                            EditOrigin::Reload,
-                        )
-                    }
-                    Command::Apply(tx) => (tx, EditOrigin::Transaction),
-                    _ => unreachable!(),
-                };
-                if !tx.changes.is_empty()
-                    && let Some(group) = history.compound(id)
-                {
-                    tx.history_group = Some(group);
-                    tx.user_event = None;
-                } else if !tx.changes.is_empty()
-                    && let Some(event) = event
-                {
-                    let group = history.plan(id, event, time, &state)?;
-                    tx.history_group = Some(group);
-                    tx.user_event = Some(event);
-                    used_group = Some(group);
-                }
-                if tx.changes.is_empty() {
-                    // Validation is shared with text transactions, but a selection
-                    // update does not publish a new document revision or history.
-                    let (next, _) = state.apply(tx)?;
-                    if history.compound(id).is_some() {
-                        self.model.set_selection_in_group(id, next.selection())?;
-                    } else {
-                        self.model.set_selection(id, next.selection())?;
-                    }
-                    None
-                } else {
-                    let commit = self.model.document.commit(id, &state, tx, origin)?;
-                    if let Some(language) = prepared_language {
-                        self.model.document.language = language;
-                    }
-                    Some(commit)
-                }
+                self.commit_edit(id, &state, tx, origin, language, compound.is_some())?
             }
         };
         if let Some(commit) = &commit {
@@ -449,6 +220,185 @@ impl Editor {
             sessions,
         })
     }
+    /// Session, history and configuration commands apply directly; text
+    /// commands only plan a transaction against `state`.
+    fn step(
+        &mut self,
+        id: SessionId,
+        state: &EditorState,
+        command: Command,
+        history: &mut InputHistory,
+        language_changed: &mut bool,
+    ) -> Result<Step, EditError> {
+        let document = &mut self.model.document;
+        let edit = |tx, origin| Step::Edit {
+            tx,
+            origin,
+            language: None,
+        };
+        Ok(match command {
+            Command::BeginUndoGroup(selection) => {
+                EditorState::from_snapshot(document.snapshot().clone(), selection)?;
+                history.begin(id, selection)?;
+                document.break_group();
+                Step::Done(None)
+            }
+            Command::EndUndoGroup(selection) => {
+                EditorState::from_snapshot(document.snapshot().clone(), selection)?;
+                document.finish_group(id, selection);
+                self.model.set_selection(id, selection)?;
+                Step::Done(None)
+            }
+            Command::Undo => Step::Done(document.restore(id, false)?),
+            Command::Redo => Step::Done(document.restore(id, true)?),
+            Command::SetLanguage(language) => {
+                *language_changed = document.configure(language)?;
+                if *language_changed {
+                    for session in self.model.sessions.values_mut() {
+                        session.goal_column = None;
+                    }
+                }
+                Step::Done(None)
+            }
+            Command::SelectAll => {
+                let selection = Selection {
+                    anchor: 0,
+                    head: state.snapshot().len_bytes(),
+                };
+                self.model.set_selection(id, selection)?;
+                Step::Done(None)
+            }
+            Command::Goto { line, column } => {
+                let line = line.min(state.snapshot().line_count() - 1);
+                let offset = crate::core::offset_at_logical_column(
+                    state.snapshot(),
+                    line,
+                    crate::core::LogicalColumn(column),
+                    document.language.whitespace().tab_width,
+                )?;
+                self.model.set_selection(id, Selection::caret(offset.0))?;
+                Step::Done(None)
+            }
+            Command::SetSelection(selection) => {
+                self.model.set_selection(id, selection)?;
+                Step::Done(None)
+            }
+            Command::Move { motion, extend } => {
+                let goal = self.model.session(id).unwrap().goal_column;
+                let language = &self.model.document.language;
+                let (selection, goal) =
+                    commands::move_selection(state, motion, extend, goal, language)?;
+                self.model.set_selection(id, selection)?;
+                self.model.sessions.get_mut(&id).unwrap().goal_column = goal;
+                Step::Done(None)
+            }
+            Command::SetSearchQuery(query) => {
+                self.model.sessions.get_mut(&id).unwrap().search.query = Some(query);
+                Step::Done(None)
+            }
+            Command::Find { backward, wrap } => {
+                if let Some(query) = self.model.session(id).unwrap().search.query()
+                    && let Some(range) = super::search::find(
+                        state.snapshot(),
+                        query,
+                        state.selection().range(),
+                        backward,
+                        wrap,
+                    )
+                {
+                    let selection = Selection {
+                        anchor: range.start,
+                        head: range.end,
+                    };
+                    self.model.set_selection(id, selection)?;
+                }
+                Step::Done(None)
+            }
+            // Typed input and Enter plan against a speculative language session
+            // that is installed only if the transaction commits.
+            Command::TypeChar(ch) => {
+                let mut language = document.language.clone();
+                let tx = operations::prepare_char(state, ch, &mut language)?;
+                Step::Edit {
+                    tx,
+                    origin: EditOrigin::Input,
+                    language: Some(language),
+                }
+            }
+            Command::Enter => {
+                let mut language = document.language.clone();
+                let tx = operations::prepare_enter(state, document.newline(), &mut language)?;
+                Step::Edit {
+                    tx,
+                    origin: EditOrigin::Input,
+                    language: Some(language),
+                }
+            }
+            Command::InsertText(text) => {
+                edit(operations::prepare_insert(state, text)?, EditOrigin::Paste)
+            }
+            Command::Reindent(line) => edit(
+                operations::prepare_reindent(state, line, &mut document.language)?,
+                EditOrigin::Reindent,
+            ),
+            Command::Delete { direction, smart } => edit(
+                commands::delete(state, direction, smart, &document.language)?,
+                EditOrigin::Delete,
+            ),
+            Command::DeleteWord(direction) => {
+                edit(commands::delete_word(state, direction)?, EditOrigin::Delete)
+            }
+            Command::InsertTab => edit(
+                commands::insert_tab(state, false, &document.language)?,
+                EditOrigin::Indent,
+            ),
+            Command::InsertLiteralTab => edit(
+                commands::insert_tab(state, true, &document.language)?,
+                EditOrigin::Input,
+            ),
+            Command::IndentSelection { outdent } => edit(
+                commands::indent_selection(state, outdent, &document.language),
+                EditOrigin::Indent,
+            ),
+            Command::ReplaceCurrent(text) => {
+                let query = self.model.session(id).unwrap().search.query();
+                edit(replace_current(state, query, text)?, EditOrigin::Replace)
+            }
+            Command::ReplaceAll(text) => {
+                let query = self.model.session(id).unwrap().search.query();
+                edit(replace_all(state, query, &text), EditOrigin::Replace)
+            }
+            Command::ReloadText(text) => edit(reload(state, &text), EditOrigin::Reload),
+            Command::Apply(tx) => edit(tx, EditOrigin::Transaction),
+        })
+    }
+    /// Commits text changes, or applies a selection-only result.
+    fn commit_edit(
+        &mut self,
+        id: SessionId,
+        state: &EditorState,
+        tx: Transaction,
+        origin: EditOrigin,
+        language: Option<super::language::LanguageSession>,
+        in_group: bool,
+    ) -> Result<Option<Commit>, EditError> {
+        if tx.changes.is_empty() {
+            // Validation is shared with text transactions, but a selection
+            // update does not publish a new document revision or history.
+            let (next, _) = state.apply(tx)?;
+            if in_group {
+                self.model.set_selection_in_group(id, next.selection())?;
+            } else {
+                self.model.set_selection(id, next.selection())?;
+            }
+            return Ok(None);
+        }
+        let commit = self.model.document.commit(id, state, tx, origin)?;
+        if let Some(language) = language {
+            self.model.document.language = language;
+        }
+        Ok(Some(commit))
+    }
     /// Reports each command outcome and continues after failed commands.
     pub fn run(
         &mut self,
@@ -460,4 +410,70 @@ impl Editor {
             observe(&self.model, update);
         }
     }
+}
+
+enum Step {
+    Done(Option<Commit>),
+    Edit {
+        tx: Transaction,
+        origin: EditOrigin,
+        language: Option<super::language::LanguageSession>,
+    },
+}
+/// Replaces the selection only while it is the current search match.
+fn replace_current(
+    state: &EditorState,
+    query: Option<&SearchQuery>,
+    text: String,
+) -> Result<Transaction, EditError> {
+    let selected = state.selection().range();
+    let matches = query.is_some_and(|query| {
+        query.is_valid()
+            && state
+                .snapshot()
+                .byte_slice(selected)
+                .is_some_and(|slice| slice == query.text())
+    });
+    if matches {
+        operations::prepare_insert(state, text)
+    } else {
+        Ok(Transaction::new(state.snapshot().version(), vec![]))
+    }
+}
+fn replace_all(state: &EditorState, query: Option<&SearchQuery>, text: &str) -> Transaction {
+    let changes = query
+        .map(|query| {
+            query
+                .cursor(state.snapshot())
+                .map(|range| Change::new(range, text))
+                .collect()
+        })
+        .unwrap_or_default();
+    Transaction::new(state.snapshot().version(), changes)
+}
+/// Replaces only the differing middle so unchanged text keeps its positions.
+fn reload(state: &EditorState, text: &str) -> Transaction {
+    let old = state.snapshot().text();
+    let prefix: usize = old
+        .chars()
+        .zip(text.chars())
+        .take_while(|(left, right)| left == right)
+        .map(|(ch, _)| ch.len_utf8())
+        .sum();
+    let suffix: usize = old[prefix..]
+        .chars()
+        .rev()
+        .zip(text[prefix..].chars().rev())
+        .take_while(|(left, right)| left == right)
+        .map(|(ch, _)| ch.len_utf8())
+        .sum();
+    let changes = if prefix == old.len() && prefix == text.len() {
+        vec![]
+    } else {
+        vec![Change::new(
+            prefix..old.len() - suffix,
+            &text[prefix..text.len() - suffix],
+        )]
+    };
+    Transaction::new(state.snapshot().version(), changes)
 }

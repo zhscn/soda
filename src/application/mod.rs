@@ -153,6 +153,7 @@ pub struct Update {
 #[derive(Debug)]
 pub enum Error {
     UnknownView,
+    Edit(EditError),
     File(FileError),
 }
 impl From<FileError> for Error {
@@ -162,13 +163,14 @@ impl From<FileError> for Error {
 }
 impl From<EditError> for Error {
     fn from(error: EditError) -> Self {
-        Self::File(error.into())
+        Self::Edit(error)
     }
 }
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnknownView => f.write_str("unknown view"),
+            Self::Edit(e) => e.fmt(f),
             Self::File(e) => e.fmt(f),
         }
     }
@@ -176,6 +178,7 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::Edit(e) => Some(e),
             Self::File(e) => Some(e),
             Self::UnknownView => None,
         }

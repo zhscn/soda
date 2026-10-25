@@ -218,14 +218,19 @@ pub(super) fn frame(
             tab,
         ));
     }
-    let path = document
-        .file()
-        .path()
+    let path = app
+        .workspace()
+        .file(view.document_id)
+        .and_then(|file| file.path())
         .map_or_else(|| "[untitled]".into(), |p| p.display().to_string());
     let status = format!(
         "{}{}{}  {}:{}  :open Open  :w Save  :q Quit",
         path,
-        if document.is_dirty() { " *" } else { "" },
+        if app.workspace().is_dirty(view.document_id) {
+            " *"
+        } else {
+            ""
+        },
         if app.workspace().is_saving(view.document_id) {
             " [saving]"
         } else {

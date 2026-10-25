@@ -1,5 +1,5 @@
 //! A parser-free edit trace for timing the core and observing process memory.
-use soda::core::{Change, Editor, Transaction};
+use soda::core::{Change, StandaloneEditor, Transaction};
 use std::{error::Error, time::Instant};
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -9,7 +9,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .transpose()?
         .unwrap_or(256);
     let source = "int value;\n".repeat(100_000);
-    let mut editor = Editor::new(source.clone());
+    let mut editor = StandaloneEditor::new(source.clone());
     let mut length = source.len();
     let started = Instant::now();
     for step in 0..edits {

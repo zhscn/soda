@@ -56,8 +56,7 @@ impl BufferSession {
                 self.next_key += 1;
                 CandidateKey(self.next_key)
             });
-            let document = app.workspace().editor(id).unwrap().model().document();
-            let name = document.file().path().map_or_else(
+            let name = app.workspace().file(id).unwrap().path().map_or_else(
                 || format!("[untitled {}]", key.0),
                 |path| path.to_string_lossy().into_owned(),
             );
@@ -72,7 +71,11 @@ impl BufferSession {
                 "{}{}{}",
                 if active == Some(id) { "* " } else { "  " },
                 name,
-                if document.is_dirty() { " [+]" } else { "" }
+                if app.workspace().is_dirty(id) {
+                    " [+]"
+                } else {
+                    ""
+                }
             );
             rows.push(MatchedCandidate {
                 candidate: Arc::new(Candidate {

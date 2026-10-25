@@ -126,7 +126,7 @@ fn named_commands_and_input_overrides_use_separate_controlled_entry_points() {
     assert!(r.message().contains("recursively"));
     r.register_command("failed", |_| Err(EditError::InvalidRange));
     r.command(Command::Named("failed".into()));
-    assert!(r.message().contains("InvalidRange"));
+    assert!(r.message().contains("invalid text range"));
     r.bind_input(
         ctrl('f'),
         Input::Text(InputKey::Move {

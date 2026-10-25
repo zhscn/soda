@@ -294,7 +294,7 @@ fn config_widths_access_levels_and_disabled_format_reach_editor() {
         6
     );
     let c = parsed("DisableFormat: true\n");
-    let mut editor = Editor::new("class C {\n        public:\n};");
+    let mut editor = StandaloneEditor::new("class C {\n        public:\n};");
     editor
         .dispatch(reindent(editor.state(), 1, &c.rules).unwrap())
         .unwrap();
@@ -340,7 +340,7 @@ fn bundled_presets_match_llvm_23_when_reference_tool_is_available() {
 fn preprocessor_after_hash_spacing_is_a_local_atomic_edit() {
     let style = parsed("IndentPPDirectives: AfterHash\nPPIndentWidth: 2\n").rules;
     let source = "#if A\n#if B\n#define X 1\n#else\n#define X 2\n#endif\n#endif\n";
-    let mut editor = Editor::new(source);
+    let mut editor = StandaloneEditor::new(source);
     for line in 0..7 {
         editor
             .dispatch(reindent(editor.state(), line, &style).unwrap())
@@ -350,7 +350,7 @@ fn preprocessor_after_hash_spacing_is_a_local_atomic_edit() {
         editor.state().snapshot().text(),
         "#if A\n#  if B\n#    define X 1\n#  else\n#    define X 2\n#  endif\n#endif\n"
     );
-    let mut editor = Editor::new("#if A\n    \n#endif\n");
+    let mut editor = StandaloneEditor::new("#if A\n    \n#endif\n");
     let mut select = Transaction::new(0, vec![]);
     select.selection = Some(Selection::caret(10));
     editor.dispatch(select).unwrap();
@@ -361,7 +361,7 @@ fn preprocessor_after_hash_spacing_is_a_local_atomic_edit() {
     assert_eq!(editor.state().selection().head, 9);
     editor.undo().unwrap();
     assert_eq!(editor.state().snapshot().text(), "#if A\n    \n#endif\n");
-    let mut editor = Editor::new("#if A\nbody();#define X 1\n#endif\n");
+    let mut editor = StandaloneEditor::new("#if A\nbody();#define X 1\n#endif\n");
     let p = editor.state().snapshot().text().find("#define").unwrap();
     let mut select = Transaction::new(0, vec![]);
     select.selection = Some(Selection::caret(p));
@@ -662,7 +662,7 @@ fn google_cpp_config_with_legacy_short_function_style_loads_from_disk() {
     let document = workspace.open(&path).unwrap();
     let editor = workspace.editor(document).unwrap();
     assert_eq!(editor.model().document().whitespace().indent_width, 2);
-    let configuration = editor.model().document().file().configuration().unwrap();
+    let configuration = workspace.file(document).unwrap().configuration().unwrap();
     assert_eq!(
         configuration.config.values["AllowShortFunctionsOnASingleLine"],
         "Empty"

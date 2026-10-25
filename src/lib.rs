@@ -1,4 +1,7 @@
-//! UI-independent editing state and C++ indentation queries.
+//! A terminal editor built around structural C++ indentation: `core` owns text
+//! and transactions, `cpp` maintains an incremental syntax tree for indent
+//! queries, `editor` plans atomic input, and `application`, `interaction`,
+//! `runtime` and `tui` turn key input into those commands.
 pub mod config;
 pub mod core;
 pub mod cpp;

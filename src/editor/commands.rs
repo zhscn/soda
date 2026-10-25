@@ -220,9 +220,8 @@ pub(super) fn insert_tab(
     let text = if use_tab {
         "\t".to_owned()
     } else {
-        let column = logical_column_at(state.snapshot(), ByteOffset(position), settings.tab_width)
-            .unwrap()
-            .0;
+        let column =
+            logical_column_at(state.snapshot(), ByteOffset(position), settings.tab_width)?.0;
         " ".repeat(settings.tab_width.get() - column % settings.tab_width.get())
     };
     super::operations::prepare_insert(state, text)

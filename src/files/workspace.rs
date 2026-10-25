@@ -46,6 +46,7 @@ struct PendingSave {
 pub struct Workspace {
     service: FileService,
     editors: BTreeMap<DocumentId, Editor>,
+    files: BTreeMap<DocumentId, FileState>,
     paths: BTreeMap<PathBuf, DocumentId>,
     pending: BTreeMap<DocumentId, PendingSave>,
     next_save: u64,
@@ -68,6 +69,7 @@ impl Default for Workspace {
         Self {
             service: FileService::default(),
             editors: BTreeMap::new(),
+            files: BTreeMap::new(),
             paths: BTreeMap::new(),
             pending: BTreeMap::new(),
             next_save: 0,
@@ -105,11 +107,27 @@ impl Workspace {
     pub fn documents(&self) -> impl Iterator<Item = DocumentId> + '_ {
         self.editors.keys().copied()
     }
-    pub fn new_document(&mut self, language: impl Into<Language>) -> DocumentId {
-        let editor = Editor::new("", language);
+    pub fn file(&self, id: DocumentId) -> Option<&FileState> {
+        self.files.get(&id)
+    }
+    /// Whether text or encoding differs from the loaded or saved baseline.
+    pub fn is_dirty(&self, id: DocumentId) -> bool {
+        match (self.editors.get(&id), self.files.get(&id)) {
+            (Some(editor), Some(file)) => file.is_dirty(editor.model().document().snapshot()),
+            _ => false,
+        }
+    }
+    fn insert(&mut self, editor: Editor, file: FileState) -> DocumentId {
         let id = editor.model().document().id();
+        if let Some(path) = &file.path {
+            self.paths.insert(path.clone(), id);
+        }
         self.editors.insert(id, editor);
+        self.files.insert(id, file);
         id
+    }
+    pub fn new_document(&mut self, language: impl Into<Language>) -> DocumentId {
+        self.insert(Editor::new("", language), FileState::default())
     }
     pub fn open(&mut self, path: &Path) -> Result<DocumentId, FileError> {
         match self.prepare_open(path)? {
@@ -128,16 +146,15 @@ impl Workspace {
             Ok(id) => Ok(id),
             Err(FileError::Io { source, .. }) if source.kind() == std::io::ErrorKind::NotFound => {
                 let configuration = self.service.configuration(&path)?;
-                let mut editor = Editor::new("", FileService::language(&configuration));
-                let id = editor.model().document().id();
-                editor.bind_file(FileState {
-                    path: Some(path.clone()),
-                    configuration,
-                    ..Default::default()
-                });
-                self.paths.insert(path, id);
-                self.editors.insert(id, editor);
-                Ok(id)
+                let editor = Editor::new("", FileService::language(&configuration));
+                Ok(self.insert(
+                    editor,
+                    FileState {
+                        path: Some(path),
+                        configuration,
+                        ..Default::default()
+                    },
+                ))
             }
             Err(error) => Err(error),
         }
@@ -170,17 +187,10 @@ impl Workspace {
         if self.pending.contains_key(&id) {
             return Err(FileError::Busy);
         }
-        let document = self
-            .editors
-            .get(&id)
-            .ok_or(FileError::UnknownDocument)?
-            .model()
-            .document();
-        if document.is_dirty() && !discard {
+        if self.is_dirty(id) && !discard {
             return Err(FileError::UnsavedChanges);
         }
-        let path = document
-            .file()
+        let path = self.files[&id]
             .path()
             .ok_or(FileError::Untitled)?
             .to_owned();
@@ -209,17 +219,20 @@ impl Workspace {
         edit.config_generation = editor.model().document().config_generation();
         let snapshot = editor.model().document().snapshot().for_history();
         let revision = snapshot.version();
-        editor.bind_file(FileState {
-            path: Some(loaded.path.clone()),
-            bom: loaded.bom,
-            saved: Some(DiskImage {
-                snapshot,
-                bom: loaded.bom,
-            }),
-            saved_revision: Some(revision),
-            configuration: loaded.configuration,
-        });
         editor.checkpoint_history();
+        self.files.insert(
+            id,
+            FileState {
+                path: Some(loaded.path.clone()),
+                bom: loaded.bom,
+                saved: Some(DiskImage {
+                    snapshot,
+                    bom: loaded.bom,
+                }),
+                saved_revision: Some(revision),
+                configuration: loaded.configuration,
+            },
+        );
         self.paths.remove(&path);
         self.paths.insert(loaded.path.clone(), id);
         Ok(ReloadUpdate {
@@ -281,11 +294,10 @@ impl Workspace {
         self.insert_loaded(loaded)
     }
     fn insert_loaded(&mut self, loaded: LoadedFile) -> Result<DocumentId, FileError> {
-        let mut editor = Editor::new(loaded.text, FileService::language(&loaded.configuration));
-        let id = editor.model().document().id();
+        let editor = Editor::new(loaded.text, FileService::language(&loaded.configuration));
         let snapshot = editor.model().document().snapshot().for_history();
-        editor.bind_file(FileState {
-            path: Some(loaded.path.clone()),
+        let file = FileState {
+            path: Some(loaded.path),
             bom: loaded.bom,
             saved: Some(DiskImage {
                 snapshot,
@@ -293,24 +305,18 @@ impl Workspace {
             }),
             saved_revision: Some(0),
             configuration: loaded.configuration,
-        });
-        self.paths.insert(loaded.path, id);
-        self.editors.insert(id, editor);
-        Ok(id)
+        };
+        Ok(self.insert(editor, file))
     }
     pub fn close(&mut self, id: DocumentId) -> Result<(), FileError> {
         self.collect_events();
         if self.pending.contains_key(&id) {
             return Err(FileError::Busy);
         }
-        if self
-            .editors
-            .get(&id)
-            .ok_or(FileError::UnknownDocument)?
-            .model()
-            .document()
-            .is_dirty()
-        {
+        if !self.editors.contains_key(&id) {
+            return Err(FileError::UnknownDocument);
+        }
+        if self.is_dirty(id) {
             return Err(FileError::UnsavedChanges);
         }
         self.discard_document(id)
@@ -321,9 +327,9 @@ impl Workspace {
         if self.pending.contains_key(&id) {
             return Err(FileError::Busy);
         }
-        let editor = self.editors.remove(&id).ok_or(FileError::UnknownDocument)?;
-        if let Some(path) = editor.model().document().file().path() {
-            self.paths.remove(path);
+        self.editors.remove(&id).ok_or(FileError::UnknownDocument)?;
+        if let Some(path) = self.files.remove(&id).and_then(|file| file.path) {
+            self.paths.remove(&path);
         }
         Ok(())
     }
@@ -344,9 +350,8 @@ impl Workspace {
             .ok_or(FileError::UnknownDocument)?
             .model()
             .document();
-        let target = target
-            .or_else(|| document.file().path())
-            .ok_or(FileError::Untitled)?;
+        let file = &self.files[&id];
+        let target = target.or_else(|| file.path()).ok_or(FileError::Untitled)?;
         let path = self.service.resolve_path(target)?;
         if self.paths.get(&path).is_some_and(|owner| *owner != id)
             || self.pending.values().any(|pending| pending.path == path)
@@ -354,7 +359,7 @@ impl Workspace {
         {
             return Err(FileError::PathInUse(path));
         }
-        let same_path = document.file().path() == Some(path.as_path());
+        let same_path = file.path() == Some(path.as_path());
         let configuration = if same_path {
             None
         } else {
@@ -376,13 +381,9 @@ impl Workspace {
             path: path.clone(),
             image: DiskImage {
                 snapshot: document.snapshot().clone(),
-                bom: document.file().has_utf8_bom(),
+                bom: file.has_utf8_bom(),
             },
-            expected: if same_path {
-                document.file().saved.clone()
-            } else {
-                None
-            },
+            expected: if same_path { file.saved.clone() } else { None },
             configuration,
             config_generation: document.config_generation(),
         };
@@ -427,7 +428,8 @@ impl Workspace {
             .editors
             .get_mut(&plan.document_id)
             .ok_or(FileError::UnknownDocument)?;
-        let old_path = editor.model().document().file().path().map(Path::to_owned);
+        let file = self.files.get_mut(&plan.document_id).unwrap();
+        let old_path = file.path.clone();
         let changing_path = old_path.as_deref() != Some(plan.path.as_path());
         let language_changed = if changing_path
             && editor.model().document().config_generation() == plan.config_generation
@@ -440,7 +442,6 @@ impl Workspace {
         } else {
             false
         };
-        let file = editor.file_state_mut();
         file.path = Some(plan.path.clone());
         file.saved = Some(DiskImage {
             snapshot: plan.image.snapshot.for_history(),
@@ -459,7 +460,7 @@ impl Workspace {
             document_id: plan.document_id,
             path: plan.path,
             saved_revision: plan.image.snapshot.version(),
-            dirty: editor.model().document().is_dirty(),
+            dirty: self.is_dirty(plan.document_id),
             language_changed,
         })
     }
@@ -528,27 +529,19 @@ impl Workspace {
     /// Compares disk bytes to the loaded/saved baseline, independently of local
     /// edits. A missing previously saved file is also an external change.
     pub fn externally_modified(&self, id: DocumentId) -> Result<bool, FileError> {
-        let document = self
-            .editors
-            .get(&id)
-            .ok_or(FileError::UnknownDocument)?
-            .model()
-            .document();
-        let Some(path) = document.file().path() else {
+        let file = self.files.get(&id).ok_or(FileError::UnknownDocument)?;
+        let Some(path) = file.path() else {
             return Ok(false);
         };
-        Ok(!self.service.check(path, document.file().saved.as_ref())?)
+        Ok(!self.service.check(path, file.saved.as_ref())?)
     }
     /// Explicitly reloads path-dependent configuration through the language
     /// command boundary, preserving text, selection and history.
     pub fn reload_configuration(&mut self, id: DocumentId) -> Result<bool, FileError> {
         let path = self
-            .editors
+            .files
             .get(&id)
             .ok_or(FileError::UnknownDocument)?
-            .model()
-            .document()
-            .file()
             .path()
             .ok_or(FileError::Untitled)?
             .to_owned();
@@ -557,7 +550,7 @@ impl Workspace {
         let changed = editor
             .execute(Command::SetLanguage(FileService::language(&configuration)))?
             .language_changed;
-        editor.file_state_mut().configuration = configuration;
+        self.files.get_mut(&id).unwrap().configuration = configuration;
         Ok(changed)
     }
 }

@@ -81,7 +81,16 @@ pub enum EditError {
 }
 impl fmt::Display for EditError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{self:?}")
+        f.write_str(match self {
+            Self::AnalysisMismatch => "language analysis does not match the text",
+            Self::StaleVersion => "edit targets an outdated revision",
+            Self::InvalidRange => "invalid text range",
+            Self::OverlappingChanges => "edit contains overlapping changes",
+            Self::InvalidSelection => "invalid selection",
+            Self::VersionExhausted => "revision counter exhausted",
+            Self::UnknownSession => "unknown editing session",
+            Self::WrongDocument => "position belongs to another document",
+        })
     }
 }
 impl std::error::Error for EditError {}
@@ -242,11 +251,11 @@ impl EditorState {
 }
 
 /// Single-session adapter using the same history as document controllers.
-pub struct Editor {
+pub struct StandaloneEditor {
     state: EditorState,
     history: super::History<()>,
 }
-impl Editor {
+impl StandaloneEditor {
     pub fn new(text: impl Into<String>) -> Self {
         Self {
             state: EditorState::new(text),

@@ -191,7 +191,7 @@ fn file_and_editor_styles_produce_identical_atomic_edits_with_mixed_tabs() {
             let text = input.replace('|', "");
             let mut results = Vec::new();
             for rules in [&native, &c.rules] {
-                let mut editor = Editor::new(text.clone());
+                let mut editor = StandaloneEditor::new(text.clone());
                 let mut selection = Transaction::new(0, vec![]);
                 selection.selection = Some(Selection::caret(position));
                 editor.dispatch(selection).unwrap();

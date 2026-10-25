@@ -1,6 +1,6 @@
 use soda::editor::enter;
 use soda::{
-    core::{Editor, Selection, Transaction},
+    core::{Selection, StandaloneEditor, Transaction},
     cpp::CppStyle,
 };
 
@@ -154,7 +154,7 @@ fn enter_regression_corpus() {
         let caret = input.find('^').unwrap();
         let mut text = input.to_owned();
         text.remove(caret);
-        let mut editor = Editor::new(text.clone());
+        let mut editor = StandaloneEditor::new(text.clone());
         let mut select = Transaction::new(0, vec![]);
         select.selection = Some(Selection::caret(caret));
         editor.dispatch(select).unwrap();

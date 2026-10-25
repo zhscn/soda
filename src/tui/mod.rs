@@ -86,12 +86,17 @@ fn draw(runtime: &Runtime, width: u16, height: u16) -> io::Result<()> {
         } else {
             SetCursorStyle::SteadyBlock
         },
-        SetAttribute(Attribute::Reset),
-        Clear(ClearType::All)
+        SetAttribute(Attribute::Reset)
     )?;
-    for (y, row) in frame.rows.iter().enumerate() {
+    // Overwrite rows in place and clear only their tails; clearing the whole
+    // screen before every frame flickers.
+    let editor_rows = usize::from(height.saturating_sub(2)).max(frame.rows.len());
+    for y in 0..editor_rows {
         queue!(output, MoveTo(0, y as u16))?;
-        draw_spans(&mut output, row)?;
+        if let Some(row) = frame.rows.get(y) {
+            draw_spans(&mut output, row)?;
+        }
+        queue!(output, Clear(ClearType::UntilNewLine))?;
     }
     if let Some(Prompt::Picker(session)) = runtime.layer() {
         draw_candidates(
@@ -153,7 +158,8 @@ fn draw(runtime: &Runtime, width: u16, height: u16) -> io::Result<()> {
                     0,
                     usize::from(width)
                 )),
-                SetAttribute(Attribute::Reset)
+                SetAttribute(Attribute::Reset),
+                Clear(ClearType::UntilNewLine)
             )?;
         }
         let presentation = runtime.layer().map_or_else(
@@ -171,6 +177,7 @@ fn draw(runtime: &Runtime, width: u16, height: u16) -> io::Result<()> {
         let (footer, prompt_cursor) = layout::prompt_row(&presentation, usize::from(width));
         queue!(output, MoveTo(0, height - 1))?;
         draw_spans(&mut output, &footer)?;
+        queue!(output, Clear(ClearType::UntilNewLine))?;
         if runtime.layer().is_some() {
             cursor = prompt_cursor.map(|x| (x.min(usize::from(width - 1)) as u16, height - 1));
         }

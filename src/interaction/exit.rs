@@ -47,14 +47,10 @@ impl ExitSession {
         let current = match scope {
             ExitScope::Close(document) => document,
             ExitScope::Reload(view) => app.view(view)?.document_id,
-            ExitScope::Quit => app.workspace().documents().find(|id| {
-                app.workspace()
-                    .editor(*id)
-                    .unwrap()
-                    .model()
-                    .document()
-                    .is_dirty()
-            })?,
+            ExitScope::Quit => app
+                .workspace()
+                .documents()
+                .find(|id| app.workspace().is_dirty(*id))?,
         };
         app.workspace().editor(current)?;
         Some(Self {
@@ -70,13 +66,7 @@ impl ExitSession {
     }
     pub(super) fn write_quit(app: &Application, root: PathBuf) -> Option<Self> {
         let current = app.view(app.active_view()?)?.document_id;
-        if !app
-            .workspace()
-            .editor(current)?
-            .model()
-            .document()
-            .is_dirty()
-        {
+        if !app.workspace().is_dirty(current) {
             return None;
         }
         let mut session = Self::new_with_root(app, ExitScope::Quit, root)?;
@@ -187,10 +177,10 @@ impl ExitSession {
         }
     }
     fn save(&mut self, app: &Application, target: Option<PathBuf>) -> Transition {
-        let Some(editor) = app.workspace().editor(self.current) else {
+        let Some(file) = app.workspace().file(self.current) else {
             return self.advance(app, false);
         };
-        if target.is_none() && editor.model().document().file().path().is_none() {
+        if target.is_none() && file.path().is_none() {
             self.phase = Phase::Path(PathInput::new(self.root.clone(), ""));
             self.resize(self.page_rows);
             return Transition::active(Response {
@@ -280,14 +270,7 @@ impl ExitSession {
                 }
                 match &file.result {
                     Ok(_) => {
-                        if app
-                            .workspace()
-                            .editor(self.current)
-                            .unwrap()
-                            .model()
-                            .document()
-                            .is_dirty()
-                        {
+                        if app.workspace().is_dirty(self.current) {
                             self.phase = Phase::Question;
                             self.error = Some("Newer edits remain; save again or cancel".into());
                             return Transition::active(Response {
@@ -333,13 +316,7 @@ impl ExitSession {
                                 .snapshot()
                                 .version(),
                         )
-                        && app
-                            .workspace()
-                            .editor(*id)
-                            .unwrap()
-                            .model()
-                            .document()
-                            .is_dirty()
+                        && app.workspace().is_dirty(*id)
                 }) {
                     self.current = document;
                     self.name = document_name(app, document);
@@ -365,8 +342,8 @@ impl ExitSession {
 
 fn document_name(app: &Application, document: DocumentId) -> String {
     app.workspace()
-        .editor(document)
-        .and_then(|editor| editor.model().document().file().path())
+        .file(document)
+        .and_then(|file| file.path())
         .map_or_else(
             || "[untitled]".to_owned(),
             |path| path.display().to_string(),
