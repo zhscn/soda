@@ -309,6 +309,19 @@ impl Runtime {
         self.settle(time);
         done
     }
+    /// Buffer names and text of documents with unsaved edits.
+    pub fn unsaved(&self) -> Vec<(String, String)> {
+        let workspace = self.app.workspace();
+        workspace
+            .documents()
+            .filter(|document| workspace.is_dirty(*document))
+            .map(|document| {
+                let editor = workspace.editor(document).unwrap();
+                let text = editor.model().document().snapshot().text().to_owned();
+                (self.app.document_name(document), text)
+            })
+            .collect()
+    }
     /// Takes back what an earlier session left with `persist`.
     pub fn restore(&mut self, text: &str) {
         let mut state = state::State::parse(text);
