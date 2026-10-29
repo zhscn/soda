@@ -23,6 +23,12 @@ impl Driver {
             quit: false,
             error: String::new(),
         };
+        // These tests follow departures, so saves write the text unchanged.
+        driver.event(Event::SetOption {
+            scope: soda::options::Scope::Global,
+            name: "final-newline",
+            value: soda::options::Value::Bool(false),
+        });
         driver.event(Event::NewDocument(Language::PlainText));
         driver.command(Command::Edit(Edit::InsertText("local".into())));
         driver

@@ -40,6 +40,8 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `line-numbers` | absolute/relative/off | absolute | 行号栏；relative 时光标行显示自身行号，其他行显示距离 |
 | `scroll-lines` | 1–100 | 3 | 鼠标滚轮每格滚动的行数 |
 | `mouse` | true/false | true | 关闭后终端恢复自己的文本选择 |
+| `trim-trailing-whitespace` | true/false | true | 保存时去掉上次加载或保存以来编辑过的行的行尾空白 |
+| `final-newline` | true/false | true | 保存时给有内容的文件补上末尾换行 |
 | `auto-reload` | true/false | true | 磁盘上变化了的文件没有未保存编辑时自动重新加载 |
 | `clipboard` | system/internal | system | internal 时复制和粘贴不经过系统剪贴板 |
 

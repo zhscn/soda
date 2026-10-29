@@ -102,6 +102,18 @@ pub const OPTIONS: &[OptionInfo] = &[
         doc: "Take mouse input; turn off to use the terminal's own selection",
     },
     OptionInfo {
+        name: "trim-trailing-whitespace",
+        kind: Kind::Bool,
+        default: Value::Bool(true),
+        doc: "On save, trim trailing spaces and tabs from lines edited since the last save",
+    },
+    OptionInfo {
+        name: "final-newline",
+        kind: Kind::Bool,
+        default: Value::Bool(true),
+        doc: "On save, end a file that has text with a line break",
+    },
+    OptionInfo {
         name: "auto-reload",
         kind: Kind::Bool,
         default: Value::Bool(true),

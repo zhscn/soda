@@ -244,7 +244,7 @@ fn a_typed_decision_leaves_room_for_its_path_and_a_question_takes_one_key() {
     });
     assert_eq!(
         std::fs::read_to_string(root.path().join("copy.txt")).unwrap(),
-        "xa"
+        "xa\n"
     );
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "a");
     // Asked about an unsaved document, one key answers.

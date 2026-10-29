@@ -17,6 +17,7 @@
 mod clipboard;
 pub use clipboard::ClipboardAction;
 mod display;
+mod tidy;
 mod windows;
 pub use display::Placement;
 pub use windows::{Area, Axis, Direction, Node, Side, Windows};
@@ -290,6 +291,8 @@ pub struct Application {
     rules: display::Rules,
     options: crate::options::Options,
     context: Option<ViewId>,
+    /// What was edited since each file was loaded or saved.
+    touched: tidy::Touched,
 }
 impl Application {
     pub fn new(service: FileService) -> Self {
@@ -488,6 +491,13 @@ impl Application {
             self.apply_options(edit.document_id, update);
         }
         if let Some(change) = &edit.document {
+            if self
+                .workspace
+                .file(edit.document_id)
+                .is_some_and(|file| file.scratch().is_none())
+            {
+                self.touched.record(change);
+            }
             for view in self
                 .views
                 .values_mut()
@@ -661,6 +671,61 @@ impl Application {
         self.focus(Some(view));
         Ok(())
     }
+    /// Trims edited lines and adds a final line break, as options ask, in
+    /// one undoable step before a save.
+    fn tidy(&mut self, document: DocumentId, update: &mut Update) -> Result<(), Error> {
+        let options = &self.options;
+        let trim = options.bool(Some(document), "trim-trailing-whitespace");
+        let final_newline = options.bool(Some(document), "final-newline");
+        let snapshot = self
+            .workspace
+            .editor(document)
+            .ok_or(FileError::UnknownDocument)?
+            .model()
+            .document()
+            .snapshot()
+            .clone();
+        let touched = if trim {
+            self.touched.get(document)
+        } else {
+            &[]
+        };
+        let changes = tidy::changes(&snapshot, touched, final_newline);
+        // The focused view's caret is the one most likely at the end.
+        let Some(view) = self
+            .active
+            .filter(|id| self.views[id].document_id == document)
+            .or_else(|| {
+                self.views
+                    .values()
+                    .find(|view| view.document_id == document)
+                    .map(|view| view.id)
+            })
+        else {
+            return Ok(());
+        };
+        if !changes.is_empty() {
+            // A caret at the end stays before the added line break, so typing
+            // after a save continues the same line.
+            let map = crate::core::ChangeMap::from_sorted(&changes);
+            let selection = self
+                .workspace
+                .editor(document)
+                .unwrap()
+                .model()
+                .session(self.views[&view].session_id)
+                .unwrap()
+                .selection();
+            let mut tx = crate::core::Transaction::new(snapshot.version(), changes);
+            tx.selection = Some(Selection {
+                anchor: map.map(selection.anchor, Association::Before),
+                head: map.map(selection.head, Association::Before),
+            });
+            self.edit(view, Command::Apply(tx), Duration::ZERO, update)?;
+        }
+        self.touched.forget(document);
+        Ok(())
+    }
     fn append_scratch(
         &mut self,
         name: &str,
@@ -779,6 +844,7 @@ impl Application {
                     self.views.remove(id);
                 }
                 self.options.forget(document);
+                self.touched.forget(document);
                 self.repair_windows();
                 update.closed_views = ids;
                 update.closed_documents.push(document);
@@ -917,6 +983,9 @@ impl Application {
                 update.notices.push(Notice::Opened(view));
             }
             Event::Save { document, target } => {
+                // A save that would be refused leaves the text alone.
+                self.workspace.check_save(document, target.as_deref())?;
+                self.tidy(document, &mut update)?;
                 update.effects.push(Effect::Save(Box::new(
                     self.workspace.prepare_save(document, target.as_deref())?,
                 )));

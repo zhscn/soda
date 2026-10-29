@@ -46,7 +46,7 @@ fn headless_runtime_opens_edits_saves_and_observes_completion() {
     wait(&mut runtime, |runtime| {
         !runtime.app().workspace().is_saving(document)
     });
-    assert_eq!(std::fs::read_to_string(path).unwrap(), "new 中");
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "new 中\n");
     assert!(!runtime.app().workspace().is_dirty(document));
     assert!(runtime.message().starts_with("Saved "));
 }
@@ -174,6 +174,6 @@ fn departure_asks_for_a_path_through_the_command_line() {
     });
     assert_eq!(
         std::fs::read_to_string(directory.path().join("dest/new.txt")).unwrap(),
-        "content"
+        "content\n"
     );
 }

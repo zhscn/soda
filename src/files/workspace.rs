@@ -367,21 +367,18 @@ impl Workspace {
     }
     /// Resolves the target and reserves it until the result is applied. One
     /// save per document can be outstanding; ordinary editing remains available.
-    pub fn prepare_save(
+    /// The checks `prepare_save` makes before it reserves anything, so that
+    /// work before a save can be skipped when the save would be refused.
+    pub fn check_save(
         &mut self,
         id: DocumentId,
         target: Option<&Path>,
-    ) -> Result<SaveRequest, FileError> {
+    ) -> Result<PathBuf, FileError> {
         self.collect_events();
         if self.pending.contains_key(&id) {
             return Err(FileError::Busy);
         }
-        let document = self
-            .editors
-            .get(&id)
-            .ok_or(FileError::UnknownDocument)?
-            .model()
-            .document();
+        self.editors.get(&id).ok_or(FileError::UnknownDocument)?;
         let file = &self.files[&id];
         let target = target.or_else(|| file.path()).ok_or(FileError::Untitled)?;
         let path = self.service.resolve_path(target)?;
@@ -391,6 +388,16 @@ impl Workspace {
         {
             return Err(FileError::PathInUse(path));
         }
+        Ok(path)
+    }
+    pub fn prepare_save(
+        &mut self,
+        id: DocumentId,
+        target: Option<&Path>,
+    ) -> Result<SaveRequest, FileError> {
+        let path = self.check_save(id, target)?;
+        let document = self.editors[&id].model().document();
+        let file = &self.files[&id];
         let same_path = file.path() == Some(path.as_path());
         let configuration = if same_path {
             None

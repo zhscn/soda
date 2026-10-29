@@ -189,7 +189,7 @@ fn write_quit_saves_the_active_document_before_asking_about_other_dirty_buffers(
     wait(&mut r, &|r| r.message().starts_with("Saved "));
     keys(&mut r, "A!<Esc>:wq<CR>");
     wait(&mut r, &|_| {
-        std::fs::read_to_string(&path).is_ok_and(|text| text == "active!")
+        std::fs::read_to_string(&path).is_ok_and(|text| text == "active!\n")
     });
     // After the save completes, quit asks about the other dirty buffer.
     wait(&mut r, &|r| {

@@ -54,7 +54,8 @@ fn open_edit_switch_save_close() {
     };
     let completion = app.workspace().service().write(*request);
     app.dispatch(Event::SaveFinished(completion)).unwrap();
-    assert_eq!(fs::read_to_string(path).unwrap(), "xabc");
+    // Saving adds the final line break.
+    assert_eq!(fs::read_to_string(path).unwrap(), "xabc\n");
     assert!(!app.workspace().is_dirty(doc));
     let update = app
         .dispatch(Event::CloseDocument {
@@ -193,7 +194,7 @@ fn saving_an_old_revision_does_not_clear_new_edits() {
     let completion = app.workspace().service().write(*request);
     let update = app.dispatch(Event::SaveFinished(completion)).unwrap();
     assert!(update.files[0].result.as_ref().unwrap().dirty);
-    assert_eq!(fs::read_to_string(dir.path().join("a.txt")).unwrap(), "a");
+    assert_eq!(fs::read_to_string(dir.path().join("a.txt")).unwrap(), "a\n");
 }
 
 #[test]
@@ -272,7 +273,8 @@ fn dropped_completion_is_applied_by_poll_and_reload_maps_viewports() {
             .state()
             .snapshot()
             .text(),
-        "abc"
+        // As saved, with the final line break.
+        "abc\n"
     );
 }
 
