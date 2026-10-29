@@ -75,8 +75,6 @@ pub fn default_text() -> String {
     text(&Keymap::default(), &Registry::default())
 }
 
-pub const HINT: &str = "i Insert  / Search  : Commands  F1 Help";
-
 pub struct HelpSession {
     text: String,
     first_line: usize,

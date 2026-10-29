@@ -218,9 +218,6 @@ impl Runtime {
     pub fn search_history(&self) -> &[String] {
         self.layers.search_history()
     }
-    pub fn input_hint(&self) -> String {
-        self.layers.input_hint()
-    }
     /// The register a macro is being recorded into.
     pub fn recording(&self) -> Option<char> {
         self.layers.recording()

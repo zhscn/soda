@@ -220,15 +220,6 @@ impl Layers {
     pub fn edit_mode(&self) -> EditMode {
         self.mode
     }
-    pub fn input_hint(&self) -> String {
-        if self.sequence.active() {
-            self.sequence.hint()
-        } else if self.vim.active() {
-            self.vim.hint()
-        } else {
-            format!("{:?}  {}", self.mode, help::HINT)
-        }
-    }
     /// Keys typed toward an unfinished binding or Vim command, if any.
     pub fn pending(&self) -> Option<String> {
         if self.sequence.active() {

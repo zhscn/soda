@@ -8,7 +8,7 @@ use super::{
 };
 use crate::{
     application::{Area, ViewId},
-    interaction::{CommandLine, EditMode, Layer, help::HINT},
+    interaction::{CommandLine, EditMode, Layer},
     runtime::Runtime,
 };
 use ratatui::{
@@ -572,13 +572,8 @@ fn message(buf: &mut Buffer, area: Rect, runtime: &Runtime, theme: &Theme) -> Op
             cursor.map(|x| Position::new(area.x + x.min(width.saturating_sub(1)) as u16, area.y))
         }
         _ => {
-            let (text, style) = if runtime.message().is_empty() {
-                // Key hints only while editing; panels explain themselves.
-                (if runtime.layer().is_none() { HINT } else { "" }, theme.dim)
-            } else {
-                (runtime.message(), theme.text)
-            };
-            buf.set_stringn(area.x, area.y, layout::plain(text, 0, width), width, style);
+            let text = layout::plain(runtime.message(), 0, width);
+            buf.set_stringn(area.x, area.y, text, width, theme.text);
             None
         }
     }
@@ -812,7 +807,7 @@ mod tests {
         assert!(rows[12].starts_with(" NORMAL  [untitled "));
         assert!(rows[12].contains("] [+]"));
         assert!(rows[12].trim_end().ends_with("3:1  100%"));
-        assert!(rows[13].starts_with("i Insert"));
+        assert_eq!(rows[13].trim(), "", "the message row is empty without a message");
         keys(&mut r, "<space>");
         assert!(screen(&mut r, 60, 14).contains("f  Open a project file"));
         keys(&mut r, "<esc>");

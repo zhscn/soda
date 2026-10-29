@@ -656,9 +656,6 @@ impl Sequence {
             }
         }
     }
-    pub fn hint(&self) -> String {
-        format!("{} …  (Esc cancels)", super::key_notation(&self.keys))
-    }
     pub fn keys(&self) -> &[KeyStroke] {
         &self.keys
     }
