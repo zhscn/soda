@@ -79,6 +79,18 @@ impl LanguageSession {
             Session::PlainText(policy) => policy.clone(),
         }
     }
+    /// Whether quotes are typed in pairs.
+    pub fn pairs_quotes(&self) -> bool {
+        matches!(self.inner, Session::Cpp(_))
+    }
+    /// Whether a position is inside a comment or a string or character
+    /// literal, where brackets and quotes are text.
+    pub fn in_literal(&mut self, snapshot: &Snapshot, position: usize) -> Result<bool, EditError> {
+        match &mut self.inner {
+            Session::PlainText(_) => Ok(false),
+            Session::Cpp(session) => session.in_literal(snapshot, position),
+        }
+    }
     pub fn triggers(&self, ch: char) -> bool {
         match &self.inner {
             Session::PlainText(_) => false,

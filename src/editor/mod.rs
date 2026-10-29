@@ -11,6 +11,7 @@ mod document;
 mod language;
 mod model;
 mod operations;
+mod pairs;
 
 pub use controller::{Command, Editor, EditorUpdate, SessionUpdate};
 pub use document::{Document, DocumentId, DocumentUpdate, EditOrigin, SessionId};

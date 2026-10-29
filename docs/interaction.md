@@ -120,6 +120,16 @@ BeginUndoGroup 保存操作开始前的选区，EndUndoGroup 保存结束时的�
 
 Normal 的默认绑定除 Vim 语法外还有 `<c-r>` 重做、`<c-f>` / `<c-b>` 翻页、`<f1>` 帮助，以及 helix 式的空格菜单：`<space>f` 项目文件、`<space>b` 缓冲区、`<space>:` 命令面板。Insert 中方向键、Enter、Tab 和 Shift-Tab 分别绑定 `move-up`/`move-down`、`newline`、`insert-tab` 和 `outdent`。
 
+### 括号配对
+
+Insert 中按选项 `auto-pairs`（默认开）成对输入括号，与 Emacs 的 electric-pair-mode 相同，计算在编辑器的同一个输入事务中完成，一次撤销：
+- 输入 `(`、`[`、`{` 时，若光标后是行尾、空白、右括号、`;` 或 `,`，同时插入右括号，光标留在中间；在 `{|}` 中回车展开成三行。
+- 输入的右括号与光标后的字符相同时，越过它而不插入。
+- 退格时光标在空的一对之间，两边一起删除。
+- 有选区时输入左括号，用这一对包住选区，选区保持在内部。
+- 引号只在 C++ 中配对：前一个字符是字母、数字、`_` 或引号时不配对（`don't`、`x'`）；字符串内输入同一个引号会越过结尾的引号。C++ 的注释、字符串和字符字面量内不配对任何字符。
+- 粘贴不配对。
+
 ### 按键记法
 
 单个字符直接书写；带修饰键或特殊键写在尖括号中，大小写不敏感：`<c-x>`、`<a-f>`（`<m-f>` 同义）、`<s-tab>`、`<c-s-left>`。特殊键名为 `esc`、`ret`（`cr`、`enter`）、`tab`、`backtab`、`bs`（`backspace`）、`del`、`space`、`lt`、`left`、`right`、`up`、`down`、`home`、`end`、`pageup`、`pagedown` 和 `f1` 到 `f12`。序列直接拼接，例如 `<space>f`、`<c-x><c-s>`。帮助和前缀提示使用同一记法输出。

@@ -19,6 +19,8 @@ pub enum Command {
     SetLanguage(Language),
     /// Whitespace settings for plain text; other languages ignore them.
     SetWhitespace(crate::language::WhitespacePolicy),
+    /// Whether typed brackets and quotes come in pairs.
+    SetAutoPairs(bool),
     Undo,
     BeginUndoGroup(Selection),
     EndUndoGroup(Selection),
@@ -149,6 +151,7 @@ impl Editor {
                 | Command::EndUndoGroup(_)
                 | Command::SetLanguage(_)
                 | Command::SetWhitespace(_)
+                | Command::SetAutoPairs(_)
                 | Command::ReloadText(_)
         ) {
             history.end();
@@ -272,6 +275,10 @@ impl Editor {
                 *language_changed = document.set_whitespace(policy);
                 Step::Done(None)
             }
+            Command::SetAutoPairs(on) => {
+                document.auto_pairs = on;
+                Step::Done(None)
+            }
             Command::SetLanguage(language) => {
                 *language_changed = document.configure(language)?;
                 if *language_changed {
@@ -339,7 +346,18 @@ impl Editor {
             // that is installed only if the transaction commits.
             Command::TypeChar(ch) => {
                 let mut language = document.language.clone();
-                let tx = operations::prepare_char(state, ch, &mut language)?;
+                let typed = if document.auto_pairs {
+                    super::pairs::typed(state, ch, &mut language)?
+                } else {
+                    None
+                };
+                let tx = match &typed {
+                    Some(super::pairs::Typed::Pair(close)) => {
+                        operations::prepare_char_with(state, ch, Some(*close), &mut language)?
+                    }
+                    Some(typed) => super::pairs::transaction(state, ch, typed).unwrap(),
+                    None => operations::prepare_char(state, ch, &mut language)?,
+                };
                 Step::Edit {
                     tx,
                     origin: EditOrigin::Input,
@@ -362,10 +380,23 @@ impl Editor {
                 operations::prepare_reindent(state, line, &mut document.language)?,
                 EditOrigin::Reindent,
             ),
-            Command::Delete { direction, smart } => edit(
-                commands::delete(state, direction, smart, &document.language)?,
-                EditOrigin::Delete,
-            ),
+            Command::Delete { direction, smart } => {
+                let pair = (document.auto_pairs && direction == Direction::Backward)
+                    .then(|| super::pairs::empty_pair(state, &document.language))
+                    .flatten();
+                let tx = match pair {
+                    Some(range) => {
+                        let mut tx = Transaction::new(
+                            state.snapshot().version(),
+                            vec![Change::new(range.clone(), "")],
+                        );
+                        tx.selection = Some(Selection::caret(range.start));
+                        tx
+                    }
+                    None => commands::delete(state, direction, smart, &document.language)?,
+                };
+                edit(tx, EditOrigin::Delete)
+            }
             Command::DeleteWord(direction) => {
                 edit(commands::delete_word(state, direction)?, EditOrigin::Delete)
             }

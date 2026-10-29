@@ -145,6 +145,32 @@ impl CppSession {
         }
         self.analysis.as_ref().unwrap().clone()
     }
+    /// Whether a position is inside a comment or a string or character
+    /// literal; the end of a line comment counts as inside.
+    pub fn in_literal(&mut self, snapshot: &Snapshot, position: usize) -> Result<bool, EditError> {
+        if !snapshot.is_char_boundary(position) {
+            return Err(EditError::InvalidRange);
+        }
+        let known = self.analysis.is_some().then(|| self.analyze(snapshot));
+        let scanned;
+        let tokens = match &known {
+            Some(tree) => tree.tokens(),
+            None => {
+                scanned = lex(snapshot.text());
+                &scanned
+            }
+        };
+        Ok(tokens
+            .get(tokens.partition_point(|t| t.range.end < position))
+            .filter(|t| t.range.start < position)
+            .is_some_and(|token| match token.kind {
+                K::LineComment => true,
+                K::BlockComment | K::StringLiteral | K::RawStringLiteral | K::CharacterLiteral => {
+                    position < token.range.end || token.unterminated
+                }
+                _ => false,
+            }))
+    }
     pub fn enter_advice(
         &mut self,
         snapshot: &Snapshot,

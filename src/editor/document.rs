@@ -63,6 +63,8 @@ pub struct Document {
     history: History<SessionId>,
     config_generation: u64,
     newline: &'static str,
+    /// Type brackets and quotes in pairs.
+    pub(super) auto_pairs: bool,
 }
 impl Document {
     pub(super) fn new(text: impl Into<String>, language: Language) -> Self {
@@ -76,6 +78,7 @@ impl Document {
         Self {
             id: DocumentId(id),
             newline: super::operations::detect_newline(&snapshot),
+            auto_pairs: false,
             snapshot,
             language: LanguageSession::new(language),
             history: History::default(),

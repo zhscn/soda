@@ -84,6 +84,12 @@ pub const OPTIONS: &[OptionInfo] = &[
         doc: "Indent with spaces rather than tabs; C++ follows clang-format instead",
     },
     OptionInfo {
+        name: "auto-pairs",
+        kind: Kind::Bool,
+        default: Value::Bool(true),
+        doc: "Type brackets, and quotes in C++, in pairs; Backspace removes an empty pair",
+    },
+    OptionInfo {
         name: "line-numbers",
         kind: Kind::Choice(&["absolute", "relative", "off"]),
         default: Value::Choice("absolute"),

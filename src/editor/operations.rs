@@ -249,13 +249,20 @@ pub(super) fn prepare_char(
     ch: char,
     language: &mut LanguageSession,
 ) -> Result<Transaction, EditError> {
+    prepare_char_with(state, ch, None, language)
+}
+/// Types a character, followed by a closer that stays after the caret.
+pub(super) fn prepare_char_with(
+    state: &EditorState,
+    ch: char,
+    closer: Option<char>,
+    language: &mut LanguageSession,
+) -> Result<Transaction, EditError> {
     let range = state.selection().range();
     let position = range.start;
-    let input = InputEdit::new(
-        state,
-        Change::new(range, ch.to_string()),
-        position + ch.len_utf8(),
-    )?;
+    let mut text = ch.to_string();
+    text.extend(closer);
+    let input = InputEdit::new(state, Change::new(range, text), position + ch.len_utf8())?;
     if !language.triggers(ch) {
         return input.finish(vec![]);
     }

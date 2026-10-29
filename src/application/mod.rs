@@ -349,12 +349,15 @@ impl Application {
                 crate::language::TabPolicy::ForIndentation
             },
         };
-        if let Some(mut editor) = self.workspace.editor_mut(document)
-            && editor
+        let pairs = options.bool(Some(document), "auto-pairs");
+        if let Some(mut editor) = self.workspace.editor_mut(document) {
+            let _ = editor.execute(Command::SetAutoPairs(pairs));
+            if editor
                 .execute(Command::SetWhitespace(policy))
                 .is_ok_and(|edit| edit.language_changed)
-        {
-            self.changed_document(document, update);
+            {
+                self.changed_document(document, update);
+            }
         }
     }
     /// The windows on screen. The active view is always in one of them.
