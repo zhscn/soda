@@ -1,7 +1,7 @@
-//! Project search results. The search runs on a Runtime worker and its
-//! output becomes the `*grep*` scratch document, one match per line as
-//! `path:line:column: text`; Enter on such a line, or stepping through the
-//! lines, opens the location.
+//! Results documents: project search writes `*grep*`, one match per line
+//! as `path:line:column: text`, and `run` writes its output to `*run*`,
+//! where compilers report `path:line[:column]: message`. Enter on such a
+//! line, or stepping through the latest results, opens the location.
 use super::{Message, Response};
 use crate::{
     application::{Application, Event, ViewId},
@@ -11,6 +11,7 @@ use crate::{
 use std::{path::Path, time::Duration};
 
 pub const SCRATCH: &str = "*grep*";
+pub const RUN: &str = "*run*";
 
 /// A search for the Runtime to run.
 #[derive(Clone, Debug)]
@@ -19,19 +20,29 @@ pub struct GrepRequest {
     pub root: std::path::PathBuf,
 }
 
-/// The path, zero-based line and zero-based byte column of a result line.
+/// The path, zero-based line and zero-based byte column of a result line,
+/// `path:line:column:` or `path:line:`; a missing column is the first.
 pub fn location(line: &str) -> Option<(&str, usize, usize)> {
-    let mut parts = line.splitn(4, ':');
-    let path = parts.next().filter(|path| !path.is_empty())?;
-    let number = parts.next()?.parse::<usize>().ok()?.checked_sub(1)?;
-    let column = parts.next()?.parse::<usize>().ok()?.checked_sub(1)?;
-    parts.next()?;
+    let (path, rest) = line.split_once(':')?;
+    let path = path.trim_start();
+    if path.is_empty() || path.contains(char::is_whitespace) {
+        return None;
+    }
+    let (number, rest) = rest.split_once(':')?;
+    let number = number.parse::<usize>().ok()?.checked_sub(1)?;
+    let column = rest
+        .split_once(':')
+        .and_then(|(column, _)| column.parse::<usize>().ok());
+    let column = match column {
+        Some(column) => column.checked_sub(1)?,
+        None => 0,
+    };
     Some((path, number, column))
 }
 
-/// The `*grep*` document's view to step through: one on screen if any.
-fn results_view(app: &Application) -> Option<ViewId> {
-    let document = app.workspace().scratch(SCRATCH)?;
+/// A results document's view to step through: one on screen if any.
+fn results_view(app: &Application, name: &str) -> Option<ViewId> {
+    let document = app.workspace().scratch(name)?;
     app.views()
         .filter(|view| view.document_id == document)
         .max_by_key(|view| app.windows().contains(view.id))
@@ -73,13 +84,14 @@ pub(super) fn jump(app: &Application, file_root: &Path, response: &mut Response)
 /// it, as Vim's `:cnext` and `:cprevious`.
 pub(super) fn step(
     app: &Application,
+    results: &str,
     file_root: &Path,
     backward: bool,
     time: Duration,
     response: &mut Response,
 ) {
-    let Some(view) = results_view(app).and_then(|id| app.view(id)) else {
-        response.message = Message::Set("No search results".into());
+    let Some(view) = results_view(app, results).and_then(|id| app.view(id)) else {
+        response.message = Message::Set("No results".into());
         return;
     };
     let editor = app.workspace().editor(view.document_id).unwrap();
@@ -137,5 +149,14 @@ mod tests {
         assert_eq!(super::location("src/a.rs:0:5: x"), None);
         assert_eq!(super::location("no location here"), None);
         assert_eq!(super::location("a:b:c: d"), None);
+        assert_eq!(
+            super::location("src/a.cpp:3: error: x"),
+            Some(("src/a.cpp", 2, 0))
+        );
+        assert_eq!(
+            super::location("src/a.cpp:3:7: error: x"),
+            Some(("src/a.cpp", 2, 6))
+        );
+        assert_eq!(super::location("note: see a.cpp:3"), None);
     }
 }

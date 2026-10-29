@@ -81,10 +81,15 @@ pub enum Command {
     /// Opens the location on the caret line, or moves to the next line's
     /// first non-blank as Vim's Enter does.
     Jump,
-    /// Opens the next or previous search result.
-    GrepStep {
+    /// Opens the next or previous location in the latest results: search
+    /// matches or `run` output.
+    ResultStep {
         backward: bool,
     },
+    /// Runs a command whose output streams into the `*run*` document.
+    Run(String),
+    /// Stops background work: the run, the shell command and the search.
+    Stop,
     /// Sets an option globally, or for the current document.
     SetOption {
         local: bool,
@@ -558,6 +563,7 @@ impl Layers {
                 }
             }
             Command::Grep(pattern) => {
+                self.results = super::grep::SCRATCH;
                 response.grep = Some(Box::new(super::grep::GrepRequest {
                     pattern,
                     root: file_root.to_owned(),
@@ -572,9 +578,15 @@ impl Layers {
                     ]);
                 }
             }
-            Command::GrepStep { backward } => {
-                super::grep::step(app, file_root, backward, time, &mut response)
+            Command::ResultStep { backward } => {
+                super::grep::step(app, self.results, file_root, backward, time, &mut response)
             }
+            Command::Run(shell) => {
+                self.results = super::grep::RUN;
+                let view = app.active_view().and_then(|id| app.view(id));
+                response.run = Some(Box::new(super::shell::run(app, view, shell, file_root)));
+            }
+            Command::Stop => response.stop = true,
             Command::SetOption { local, name, value } => {
                 let document = app
                     .active_view()

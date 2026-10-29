@@ -644,14 +644,25 @@ pub static BUILTINS: &[Builtin] = &[
         Command::Jump
     ),
     builtin!(
-        "grep-next" | "cn" | "cnext",
-        "Open the next search result",
-        Command::GrepStep { backward: false }
+        "next-result" | "cn" | "cnext",
+        "Open the next location in the latest search or run output",
+        Command::ResultStep { backward: false }
     ),
     builtin!(
-        "grep-previous" | "cp" | "cprevious",
-        "Open the previous search result",
-        Command::GrepStep { backward: true }
+        "previous-result" | "cp" | "cprevious",
+        "Open the previous location in the latest search or run output",
+        Command::ResultStep { backward: true }
+    ),
+    builtin!(
+        "run" | "make",
+        [slot("SHELL-COMMAND", SlotKind::Rest)],
+        "Run a command in the background; its output streams into *run*",
+        |a| { Ok(Command::Run(required(a)?)) }
+    ),
+    builtin!(
+        "stop",
+        "Stop the running run, shell command and search",
+        Command::Stop
     ),
     builtin!(
         "display",

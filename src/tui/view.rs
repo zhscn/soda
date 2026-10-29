@@ -454,6 +454,9 @@ fn status(
     if runtime.grep_running() {
         right.push(Text::raw("searching…  "));
     }
+    if runtime.run_running() {
+        right.push(Text::raw("run…  "));
+    }
     if runtime.shell_running() {
         right.push(Text::raw("running…  "));
     }

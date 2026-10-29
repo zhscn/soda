@@ -101,6 +101,10 @@ pub struct Response {
     pub path_requests: Vec<path::PathRequest>,
     pub shell: Option<Box<shell::ShellRequest>>,
     pub grep: Option<Box<grep::GrepRequest>>,
+    /// A command for `run`, whose output streams into `*run*`.
+    pub run: Option<Box<shell::ShellRequest>>,
+    /// Stop background work.
+    pub stop: bool,
     /// Input to route again, after the rest of the response, for `.` and
     /// macros.
     pub replay: Vec<UserInput>,
@@ -126,6 +130,8 @@ pub struct Layers {
     vim: vim::State,
     registry: Registry,
     hooks: hooks::Hooks,
+    /// The results document `]q` and `[q` step through: the latest filled.
+    results: &'static str,
     page_rows: usize,
     help_rows: usize,
     picker_rows: usize,

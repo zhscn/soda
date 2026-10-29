@@ -1,9 +1,10 @@
 //! One external command at a time on a background thread. Completion carries
 //! the pipe target so the owner thread can reject output for a newer revision.
+//! `stop` ends the command's process group.
 use crate::interaction::shell::{PipeTarget, ShellRequest};
 use std::{
     io::Write,
-    process::{Command, Stdio},
+    process::{Child, Stdio},
     sync::mpsc::{self, Receiver, TryRecvError},
 };
 
@@ -17,6 +18,7 @@ pub struct ShellCompletion {
 }
 struct Running {
     command: String,
+    pid: u32,
     pipe: Option<PipeTarget>,
     result: Receiver<Result<String, String>>,
 }
@@ -32,21 +34,7 @@ fn first_line(text: &[u8]) -> String {
         .trim()
         .to_owned()
 }
-fn execute(request: &ShellRequest, input: Option<String>) -> Result<String, String> {
-    let mut command = Command::new("sh");
-    command
-        .arg("-c")
-        .arg(&request.command)
-        .current_dir(&request.cwd)
-        .envs(request.env.iter().map(|(k, v)| (k, v)))
-        .stdin(if input.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|e| format!("cannot run sh: {e}"))?;
+fn execute(mut child: Child, input: Option<String>) -> Result<String, String> {
     // Feed stdin from another thread so a full stdout pipe cannot deadlock.
     let writer = input.zip(child.stdin.take()).map(|(input, mut stdin)| {
         std::thread::spawn(move || {
@@ -59,10 +47,7 @@ fn execute(request: &ShellRequest, input: Option<String>) -> Result<String, Stri
     }
     if !output.status.success() {
         let detail = first_line(&output.stderr);
-        let status = output
-            .status
-            .code()
-            .map_or_else(|| "was terminated".into(), |code| format!("exited {code}"));
+        let status = super::process::describe(output.status);
         return Err(if detail.is_empty() {
             status
         } else {
@@ -78,28 +63,47 @@ impl ShellRunner {
     pub fn busy(&self) -> bool {
         self.running.is_some()
     }
-    pub fn submit(&mut self, mut request: ShellRequest) -> Result<(), &'static str> {
+    pub fn submit(&mut self, mut request: ShellRequest) -> Result<(), String> {
         if self.busy() {
-            return Err("Another shell command is still running");
+            return Err("Another shell command is still running".into());
         }
         let (send, receive) = mpsc::channel();
         let mut pipe = request.pipe.take();
         let input = pipe
             .as_mut()
             .map(|target| std::mem::take(&mut target.input));
-        let command = request.command.clone();
+        let child = super::process::shell(&request)
+            .stdin(if input.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("cannot run sh: {e}"))?;
+        let pid = child.id();
         std::thread::Builder::new()
             .name("soda-shell".into())
             .spawn(move || {
-                let _ = send.send(execute(&request, input));
+                let _ = send.send(execute(child, input));
             })
             .map_err(|_| "cannot start a shell thread")?;
         self.running = Some(Running {
-            command,
+            command: request.command,
+            pid,
             pipe,
             result: receive,
         });
         Ok(())
+    }
+    /// Stops the running command; its completion still arrives. Returns
+    /// whether one was running.
+    pub fn stop(&mut self) -> bool {
+        if let Some(running) = &self.running {
+            super::process::terminate(running.pid);
+        }
+        self.running.is_some()
     }
     pub fn poll(&mut self) -> Option<ShellCompletion> {
         let result = match self.running.as_ref()?.result.try_recv() {

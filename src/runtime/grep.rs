@@ -58,6 +58,14 @@ impl GrepRunner {
         });
         Ok(())
     }
+    /// Abandons the running search. Returns whether one was running.
+    pub fn stop(&mut self) -> bool {
+        let running = self.running.take();
+        if let Some(running) = &running {
+            running.cancel.store(true, Ordering::Relaxed);
+        }
+        running.is_some()
+    }
     pub fn poll(&mut self) -> Option<GrepCompletion> {
         let running = self.running.as_ref()?;
         let result = match running.result.try_recv() {

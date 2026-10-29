@@ -169,7 +169,16 @@ hook open .*/Makefile set-local expand-tab false
 
 `pipe CMD` 把当前选区交给 `sh -c CMD` 的标准输入；没有选区时使用整个文档。命令成功退出后，标准输出作为一次可撤销编辑替换原范围。`shell CMD` 只运行命令，标准输入为空，退出状态和输出的第一行显示在消息行。两者都以 Runtime 的文件根目录为工作目录，并提供环境变量 `SODA_FILE`（未命名文档时不设置）、`SODA_LINE` 和 `SODA_COLUMN`（从 1 开始）。
 
-外部命令在后台线程运行，同一时间只有一个；运行期间编辑照常进行。完成后若文档已经变化，`pipe` 的结果被丢弃并提示。非零退出不修改文档，消息行显示标准错误的第一行。输出限制为 16 MiB，超出时丢弃结果；非 UTF-8 输出同样拒绝。退出编辑器不会等待或终止仍在运行的命令。
+`pipe`/`shell` 在后台线程运行，同一时间只有一个；运行期间编辑照常进行。完成后若文档已经变化，`pipe` 的结果被丢弃并提示。非零退出不修改文档，消息行显示标准错误的第一行。输出限制为 16 MiB，超出时丢弃结果；非 UTF-8 输出同样拒绝。
+
+`run CMD`（别名 `make`）用于构建、测试这类长时间运行的命令：
+- 标准输出和标准错误合并，按行流式写入 scratch 文档 `*run*`。第一行是 `$ CMD`，结束时追加退出状态，消息行显示 `CMD: exited N`。
+- 光标在最后一行的视图跟随新输出；把光标移开后停止跟随。
+- `*run*` 默认显示在底部 12 行的侧边窗口，可用 `display run …` 改变。
+- 同一时间只有一个 `run`，新的 `run` 会先停止上一个。它可以和 `shell`、`grep` 同时运行。
+- 超过 100,000 行的输出被丢弃并注明；非 UTF-8 字节按替换字符显示。
+
+`stop`（Normal 模式 `<c-c>`）停止正在运行的 `run`、`shell`/`pipe` 和项目搜索。每个外部命令在自己的进程组中运行，停止时整个进程组收到 SIGTERM，命令派生的子进程一起结束。被停止的 `shell` 报告 `was stopped`；被停止的 `run` 不再写入输出。没有任务在运行时 `stop` 不显示消息，因为 `<c-c>` 也用来取消待定的按键。退出编辑器不会等待或终止仍在运行的命令。
 
 ### 内置命令
 
@@ -192,7 +201,9 @@ hook open .*/Makefile set-local expand-tab false
 | `half-page-down` / `half-page-up` | | 移动半页并滚动 |
 | `grep PATTERN` | | 在项目文件中按正则表达式搜索，结果写入 `*grep*` |
 | `jump` | | 打开当前行写明的位置；不是位置行时等同 Vim 的回车 |
-| `grep-next` / `grep-previous` | `cn` / `cp` | 打开下一个或上一个搜索结果 |
+| `next-result` / `previous-result` | `cn` / `cp` | 在最近的结果文档（`*grep*` 或 `*run*`）中打开下一个或上一个位置 |
+| `run CMD` | `make` | 后台运行命令，输出流式写入 `*run*` |
+| `stop` | | 停止 `run`、`shell`/`pipe` 和项目搜索 |
 | `display KIND PLACEMENT` | | 设置某种文档的显示位置，见[终端界面](ui.md#窗口) |
 | `set OPTION VALUE` | | 设置全局选项，见[扩展模型](extension.md#选项) |
 | `set-local OPTION VALUE` / `unset-local OPTION` | | 设置或去掉当前文档自己的选项值 |
@@ -343,7 +354,8 @@ Runtime 在更新中观察 SaveId，并将带 Operation 身份的失败交给等
 
 打开结果位置：
 - Normal 模式的回车执行 `jump`：当前行是位置行时打开该位置，否则像 Vim 一样移到下一行首个非空白字符。
-- `]q`/`[q`（`grep-next`/`grep-previous`）移动结果文档的光标并打开对应位置，相当于 Vim 的 `:cnext`/`:cprevious`。
+- `]q`/`[q`（`next-result`/`previous-result`）移动最近一次 `grep` 或 `run` 的结果文档的光标并打开对应位置，相当于 Vim 的 `:cnext`/`:cprevious`。
+- 位置行的格式是 `路径:行:列:` 或 `路径:行:`，后者是编译器常见的格式，列按第一列处理。路径不能含空白，相对路径以文件根目录为基准。
 - 打开位置使用 `OpenAt` 事件：文件还没加载时，行列随打开请求保存，加载完成后再放置光标，所以异步打开不需要另外的跳转步骤。
 
 ## 剪贴板

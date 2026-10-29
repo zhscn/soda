@@ -16,6 +16,8 @@ use std::{
 };
 
 mod grep;
+mod process;
+mod run;
 mod shell;
 
 /// Rounds of hooks firing further hooks before they stop.
@@ -34,6 +36,7 @@ pub struct Runtime {
     files: FileRunner,
     shell: shell::ShellRunner,
     grep: grep::GrepRunner,
+    run: run::RunRunner,
     picker: PickerRunner,
     paths: PathRunner,
     app: Application,
@@ -72,6 +75,7 @@ impl Runtime {
             files: FileRunner::new()?,
             shell: shell::ShellRunner::default(),
             grep: grep::GrepRunner::default(),
+            run: run::RunRunner::default(),
             picker: PickerRunner::new()?,
             paths: PathRunner::new()?,
             app,
@@ -178,6 +182,9 @@ impl Runtime {
     }
     pub fn grep_running(&self) -> bool {
         self.grep.busy()
+    }
+    pub fn run_running(&self) -> bool {
+        self.run.busy()
     }
     pub fn editor_caret(&self) -> Option<usize> {
         self.layers.editor_caret()
@@ -461,8 +468,31 @@ impl Runtime {
         if let Some(request) = response.shell {
             self.message = match self.shell.submit(*request) {
                 Ok(()) => "Running shell command…".into(),
-                Err(error) => error.into(),
+                Err(error) => error,
             };
+        }
+        if response.stop {
+            let stopped = [self.run.stop(), self.shell.stop(), self.grep.stop()];
+            // Quiet otherwise: Ctrl-C also cancels pending keys.
+            if stopped.contains(&true) {
+                self.message = "Stopped".into();
+            }
+        }
+        if let Some(request) = response.run {
+            let header = format!("$ {}", request.command);
+            match self.run.submit(*request) {
+                Ok(()) => {
+                    self.reduce(
+                        Event::Scratch {
+                            name: crate::interaction::grep::RUN.into(),
+                            text: header,
+                        },
+                        time,
+                    );
+                    self.message = "Running…".into();
+                }
+                Err(error) => self.message = error,
+            }
         }
         for effect in response.effects {
             match effect {
@@ -630,8 +660,27 @@ impl Runtime {
         if let Some(completion) = self.grep.poll() {
             self.grep_finished(completion);
         }
+        if let Some(output) = self.run.poll() {
+            self.run_output(output);
+        }
         self.dispatch(Event::PollFiles);
         self.run_hooks(self.epoch.elapsed());
+    }
+    fn run_output(&mut self, output: run::RunOutput) {
+        let mut text = String::new();
+        for line in &output.lines {
+            text.push('\n');
+            text.push_str(line);
+        }
+        if let Some(exit) = &output.exit {
+            text.push_str(&format!("\n\n[{exit}]"));
+            self.message = format!("{}: {exit}", output.command);
+            self.dirty = true;
+        }
+        self.dispatch(Event::AppendScratch {
+            name: crate::interaction::grep::RUN.into(),
+            text,
+        });
     }
     fn grep_finished(&mut self, completion: grep::GrepCompletion) {
         self.dirty = true;

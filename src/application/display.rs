@@ -44,10 +44,10 @@ impl Placement {
 pub(super) struct Rules(BTreeMap<String, Placement>);
 impl Default for Rules {
     fn default() -> Self {
-        Self(BTreeMap::from([(
-            "grep".to_owned(),
-            Placement::Side(Side::Bottom, 12),
-        )]))
+        Self(BTreeMap::from([
+            ("grep".to_owned(), Placement::Side(Side::Bottom, 12)),
+            ("run".to_owned(), Placement::Side(Side::Bottom, 12)),
+        ]))
     }
 }
 impl Rules {

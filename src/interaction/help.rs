@@ -31,6 +31,7 @@ Block Visual, counted inserts and file marks are not implemented.
 Search is literal and case-sensitive. Unicode movement uses editor graphemes.
 File and buffer commands use Soda workflows, not a general Ex interpreter.";
 const NOTES: &str = "Esc / Ctrl-[ / Ctrl-C leave Insert and Visual and cancel pending keys.
+Ctrl-C in Normal also stops run, shell and grep; ]q / [q step through their results.
 Printable characters insert text in Insert and prompts.
 Unbound Normal and Visual keys use the Vim grammar above.
 Command lines read state with %opt{NAME} and %val{file|name|kind|line|column|selection|root|mode}.

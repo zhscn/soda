@@ -136,6 +136,12 @@ pub enum Event {
     /// moves or the context is cleared; hooks run in the document that fired
     /// them.
     SetContext(Option<ViewId>),
+    /// Adds text to the end of a scratch document, if it is still open.
+    /// Views whose caret is on the last line keep to it.
+    AppendScratch {
+        name: String,
+        text: String,
+    },
 }
 /// Identity of an attempted operation, retained when reduction fails.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -655,6 +661,72 @@ impl Application {
         self.focus(Some(view));
         Ok(())
     }
+    fn append_scratch(
+        &mut self,
+        name: &str,
+        text: String,
+        update: &mut Update,
+    ) -> Result<(), Error> {
+        let Some(document) = self.workspace.scratch(name) else {
+            return Ok(());
+        };
+        let snapshot = self
+            .workspace
+            .editor(document)
+            .unwrap()
+            .model()
+            .document()
+            .snapshot()
+            .clone();
+        let (end, last) = (snapshot.len_bytes(), snapshot.line_count() - 1);
+        let views: Vec<_> = self
+            .views
+            .values()
+            .filter(|v| v.document_id == document)
+            .map(|v| v.id)
+            .collect();
+        let following: Vec<_> = views
+            .iter()
+            .copied()
+            .filter(|id| {
+                let view = &self.views[id];
+                let editor = self.workspace.editor(document).unwrap();
+                let head = editor
+                    .model()
+                    .session(view.session_id)
+                    .unwrap()
+                    .selection()
+                    .head;
+                snapshot.line_of(head) == Some(last)
+            })
+            .collect();
+        let view = match views.first() {
+            Some(view) => *view,
+            None => self.add_view(document)?,
+        };
+        let tx = crate::core::Transaction::new(
+            snapshot.version(),
+            vec![crate::core::Change::new(end..end, text)],
+        );
+        self.edit(view, Command::Apply(tx), Duration::ZERO, update)?;
+        let snapshot = self
+            .workspace
+            .editor(document)
+            .unwrap()
+            .model()
+            .document()
+            .snapshot();
+        let start = snapshot.line_start(snapshot.line_count() - 1).unwrap();
+        for view in following {
+            self.edit(
+                view,
+                Command::SetSelection(Selection::caret(start)),
+                Duration::ZERO,
+                update,
+            )?;
+        }
+        Ok(())
+    }
     /// Reduce one event. Effects are returned only after reservations are made.
     /// Closing a view retains its document, including unsaved edits. Closing a
     /// document validates dirty/pending-save constraints before removing views.
@@ -864,6 +936,7 @@ impl Application {
                 self.accept_file(result.file, None, &mut update);
             }
             Event::SetContext(view) => self.context = view,
+            Event::AppendScratch { name, text } => self.append_scratch(&name, text, &mut update)?,
             Event::PollFiles => {
                 update.files = self.workspace.poll_file_results();
                 self.pending_opens
