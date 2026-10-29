@@ -137,7 +137,7 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
     let mut catching_up = false;
     let mut runtime = Runtime::new(std::env::current_dir()?)?;
     runtime.set_system_clipboard(Box::new(clipboard::Clipboard::detect()));
-    runtime.start(path);
+    // Configuration comes first so that its hooks see the first document.
     if let Some(config) = config.then(config_path).flatten() {
         match std::fs::read_to_string(&config) {
             Ok(text) => {
@@ -146,6 +146,11 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => runtime.report(format!("{}: {error}", config.display())),
         }
+    }
+    let message = runtime.message().to_owned();
+    runtime.start(path);
+    if !message.is_empty() {
+        runtime.report(message);
     }
     let mut geometry = None;
     let mut mouse = mouse::Mouse::default();

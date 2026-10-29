@@ -146,7 +146,7 @@ Shift 加方向键、Home 和 End 扩展选区，对应 `extend-` 前缀的同�
 
 ### 配置文件
 
-启动时读取 `$XDG_CONFIG_HOME/soda/init`，未设置时读取 `~/.config/soda/init`；文件不存在时不报错。每行是一条命令行，空行和 `#` 开头的行被忽略。配置文件只接受 `map`、`unmap`、`define-command`、`set` 和 `display`，打开文件、切换模式等操作不能在启动时执行。错误行被跳过并记录行号，其余行照常生效，第一条错误显示在消息行。`--no-config` 跳过配置文件。
+启动时读取 `$XDG_CONFIG_HOME/soda/init`，未设置时读取 `~/.config/soda/init`；文件不存在时不报错。每行是一条命令行，空行和 `#` 开头的行被忽略。配置文件只接受 `map`、`unmap`、`define-command`、`hook`、`unhook`、`set` 和 `display`，打开文件、切换模式等操作不能在启动时执行。错误行被跳过并记录行号，其余行照常生效，第一条错误显示在消息行。配置文件在第一个文档创建之前执行，所以其中的钩子也作用于启动时的文档。`--no-config` 跳过配置文件。
 
 ```
 # ~/.config/soda/init
@@ -159,9 +159,11 @@ define-command grep-word shell grep -rn %arg{1} .
 set line-numbers relative
 set clipboard internal
 display grep right 60
+hook open .*\.py set-local indent-width 4
+hook open .*/Makefile set-local expand-tab false
 ```
 
-`map MODE KEYS COMMAND`、`unmap MODE KEYS` 和 `define-command NAME BODY` 也可以在 `:` 中执行，对当前会话立即生效，不写回配置文件。
+`map MODE KEYS COMMAND`、`unmap MODE KEYS`、`define-command NAME BODY`、`hook` 和 `unhook` 也可以在 `:` 中执行，对当前会话立即生效，不写回配置文件。
 
 ### 外部进程
 
@@ -207,6 +209,7 @@ display grep right 60
 | `indent` / `outdent`、`insert-tab` / `insert-literal-tab`、`newline` | | 缩进、Tab 和语言感知换行 |
 | 行编辑命令 | | 见上表 |
 | `map` / `unmap` / `define-command` | | 键位与命令定义 |
+| `hook EVENT FILTER COMMAND` / `unhook EVENT [FILTER]` | | 添加或去掉钩子，见[扩展模型](extension.md#钩子) |
 | `pipe` / `shell` | | 外部进程 |
 | `nop` | | 不执行任何操作，用于屏蔽默认键 |
 

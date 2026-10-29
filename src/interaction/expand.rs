@@ -70,15 +70,7 @@ fn value(name: &str, state: &State) -> Result<String, String> {
     let app = state.app;
     match name {
         "root" => return Ok(state.root.to_string_lossy().into_owned()),
-        "mode" => {
-            return Ok(match state.mode {
-                EditMode::Normal => "normal",
-                EditMode::Insert => "insert",
-                EditMode::Visual => "visual",
-                EditMode::VisualLine => "visual-line",
-            }
-            .into());
-        }
+        "mode" => return Ok(state.mode.name().into()),
         _ if !VALUES.iter().any(|(value, _)| *value == name) => {
             return Err(format!("%val{{{name}}}: unknown value"));
         }

@@ -44,6 +44,15 @@ pub enum Command {
         name: String,
         body: String,
     },
+    Hook {
+        event: &'static str,
+        filter: String,
+        command: String,
+    },
+    Unhook {
+        event: &'static str,
+        filter: Option<String>,
+    },
     Pipe(String),
     Shell(String),
     Nop,
@@ -154,7 +163,28 @@ impl Layers {
                 .unbind(context, &keys)
                 .map_err(|e| e.to_string()),
             Command::Define { name, body } => self.registry.define(name, body),
-            _ => Err("only map, unmap, define-command, set and display are allowed here".into()),
+            Command::Hook {
+                event,
+                filter,
+                command,
+            } => {
+                if !self.registry.knows(&command) {
+                    return Err(format!("unknown command: {command}"));
+                }
+                self.hooks
+                    .add(super::hooks::Hook::new(event, &filter, command)?);
+                Ok(())
+            }
+            Command::Unhook { event, filter } => {
+                match self.hooks.remove(event, filter.as_deref()) {
+                    0 => Err(format!("no {event} hook to remove")),
+                    _ => Ok(()),
+                }
+            }
+            _ => Err(
+                "only map, unmap, define-command, hook, unhook, set and display are allowed here"
+                    .into(),
+            ),
         }
     }
     /// Applies configuration text line by line. Failed lines are skipped and
@@ -333,7 +363,11 @@ impl Layers {
             Command::Line { edit, extend } => {
                 return self.execute(edit.command(extend), app, time, file_root);
             }
-            Command::Map { .. } | Command::Unmap { .. } | Command::Define { .. } => {
+            Command::Map { .. }
+            | Command::Unmap { .. }
+            | Command::Define { .. }
+            | Command::Hook { .. }
+            | Command::Unhook { .. } => {
                 if let Err(error) = self.configure(command) {
                     response.message = Message::Set(error);
                 }

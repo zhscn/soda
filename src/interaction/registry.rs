@@ -101,6 +101,23 @@ const DEPARTURE: &[Slot] = &[
     OPTIONAL_PATH,
 ];
 const KEYS: Slot = slot("KEYS", SlotKind::Word);
+const EVENT: Slot = slot(
+    "EVENT",
+    SlotKind::Choice(&[
+        word("open", "A file loaded into a new document; its path"),
+        word(
+            "new",
+            "An untitled or scratch document was created; its kind",
+        ),
+        word("save", "A file was saved; its path"),
+        word("close", "A document closed; its buffer name"),
+        word("mode", "The edit mode changed; the new mode"),
+        word(
+            "focus",
+            "The current window shows another view; its buffer name",
+        ),
+    ]),
+);
 const ARGUMENTS: &[Slot] = &[Slot {
     name: "ARGS",
     kind: SlotKind::Rest,
@@ -176,6 +193,16 @@ fn option(args: &str, local: bool) -> Result<Command, String> {
         name: info.name,
         value: info.parse(value)?,
     })
+}
+fn hook_event(name: &str) -> Result<&'static str, String> {
+    let SlotKind::Choice(events) = EVENT.kind else {
+        unreachable!()
+    };
+    events
+        .iter()
+        .find(|event| event.word == name)
+        .map(|event| event.word)
+        .ok_or_else(|| format!("unknown event {name}"))
 }
 fn required(args: &str) -> Result<String, String> {
     if args.is_empty() {
@@ -539,6 +566,45 @@ pub static BUILTINS: &[Builtin] = &[
         }
     ),
     builtin!(
+        "hook",
+        [
+            EVENT,
+            slot("FILTER", SlotKind::Word),
+            slot("COMMAND", SlotKind::Rest)
+        ],
+        "Run a command when an event's parameter matches FILTER in full",
+        |a| {
+            let (event, rest) = split(a);
+            let (filter, command) = split(rest);
+            let event = hook_event(event)?;
+            let filter = required(filter)?;
+            super::hooks::Hook::new(event, &filter, String::new())?;
+            Ok(Command::Hook {
+                event,
+                filter,
+                command: required(command)?,
+            })
+        }
+    ),
+    builtin!(
+        "unhook",
+        [
+            EVENT,
+            Slot {
+                required: false,
+                ..slot("FILTER", SlotKind::Word)
+            }
+        ],
+        "Remove an event's hooks, or only those with FILTER",
+        |a| {
+            let (event, filter) = split(a);
+            Ok(Command::Unhook {
+                event: hook_event(event)?,
+                filter: (!filter.is_empty()).then(|| filter.to_owned()),
+            })
+        }
+    ),
+    builtin!(
         "set",
         [
             slot("OPTION", SlotKind::Option),
@@ -701,7 +767,7 @@ fn builtin(name: &str) -> Option<&'static Builtin> {
 /// wait until then.
 pub(super) fn holds_commands(line: &str) -> bool {
     let name = split(line.trim()).0;
-    builtin(name).is_some_and(|b| matches!(b.name, "define-command" | "map"))
+    builtin(name).is_some_and(|b| matches!(b.name, "define-command" | "map" | "hook"))
 }
 fn reserved(name: &str) -> bool {
     builtin(name).is_some() || LineEdit::parse(name).is_some()

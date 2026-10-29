@@ -34,7 +34,8 @@ const NOTES: &str = "Esc / Ctrl-[ / Ctrl-C leave Insert and Visual and cancel pe
 Printable characters insert text in Insert and prompts.
 Unbound Normal and Visual keys use the Vim grammar above.
 Command lines read state with %opt{NAME} and %val{file|name|kind|line|column|selection|root|mode}.
-Configuration: ~/.config/soda/init holds map, unmap, define-command, set and display lines.";
+Hooks: hook open|new|save|close|mode|focus FILTER COMMAND runs COMMAND when FILTER matches.
+Configuration: ~/.config/soda/init holds map, unmap, define-command, hook, set and display lines.";
 
 /// Help generated from the effective key tables and command registry.
 pub fn text(keymap: &Keymap, registry: &Registry) -> String {

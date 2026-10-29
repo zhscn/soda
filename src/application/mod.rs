@@ -132,6 +132,10 @@ pub enum Event {
         discard: bool,
     },
     PollFiles,
+    /// Commands act on this view rather than the focused one until focus
+    /// moves or the context is cleared; hooks run in the document that fired
+    /// them.
+    SetContext(Option<ViewId>),
 }
 /// Identity of an attempted operation, retained when reduction fails.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -190,6 +194,16 @@ impl Event {
     }
 }
 pub use crate::files::FileTask as Effect;
+/// Document lifecycle changes that hooks respond to.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Notice {
+    /// A file finished loading into a new document shown in this view.
+    Opened(ViewId),
+    /// An untitled or scratch document was created with this view.
+    Created(ViewId),
+    /// A document closed; its buffer name.
+    Closed(String),
+}
 #[derive(Default)]
 pub struct Update {
     pub effects: Vec<Effect>,
@@ -202,6 +216,7 @@ pub struct Update {
     pub options_changed: bool,
     pub edit: Option<EditorUpdate>,
     pub files: Vec<FileResult>,
+    pub notices: Vec<Notice>,
 }
 #[derive(Debug)]
 pub enum Error {
@@ -268,6 +283,7 @@ pub struct Application {
     recent: Vec<ViewId>,
     rules: display::Rules,
     options: crate::options::Options,
+    context: Option<ViewId>,
 }
 impl Application {
     pub fn new(service: FileService) -> Self {
@@ -287,7 +303,23 @@ impl Application {
         self.views.get(&id)
     }
     pub fn active_view(&self) -> Option<ViewId> {
-        self.active
+        self.context
+            .filter(|view| self.views.contains_key(view))
+            .or(self.active)
+    }
+    /// Buffer names: full paths, scratch names, or `[untitled N]` by
+    /// document number.
+    pub fn document_name(&self, document: DocumentId) -> String {
+        let Some(file) = self.workspace.file(document) else {
+            return String::new();
+        };
+        if let Some(name) = file.scratch() {
+            return name.to_owned();
+        }
+        file.path().map_or_else(
+            || format!("[untitled {}]", document.number()),
+            |path| path.to_string_lossy().into_owned(),
+        )
     }
     pub fn options(&self) -> &crate::options::Options {
         &self.options
@@ -329,6 +361,7 @@ impl Application {
             .focus_revision
             .checked_add(1)
             .expect("focus revisions exhausted");
+        self.context = None;
         if let Some(view) = view {
             if !self.windows.contains(view) {
                 self.display(view);
@@ -588,7 +621,11 @@ impl Application {
             .map(|v| v.id);
         let view = match view {
             Some(view) => view,
-            None => self.add_view(document)?,
+            None => {
+                let view = self.add_view(document)?;
+                update.notices.push(Notice::Created(view));
+                view
+            }
         };
         let snapshot = self
             .workspace
@@ -632,6 +669,7 @@ impl Application {
                 let view = self.add_view(document)?;
                 update.changed_views.push(view);
                 self.focus(Some(view));
+                update.notices.push(Notice::Created(view));
             }
             Event::AddView(document) => {
                 let view = self.add_view(document)?;
@@ -653,6 +691,7 @@ impl Application {
                 self.repair_windows();
             }
             Event::CloseDocument { document, discard } => {
+                let name = self.document_name(document);
                 if discard {
                     self.workspace.discard_document(document)?;
                 } else {
@@ -671,6 +710,7 @@ impl Application {
                 self.repair_windows();
                 update.closed_views = ids;
                 update.closed_documents.push(document);
+                update.notices.push(Notice::Closed(name));
             }
             Event::Split(axis) => {
                 let active = self.active.ok_or(Error::UnknownView)?;
@@ -802,6 +842,7 @@ impl Application {
                         self.place_caret(view, position, &mut update)?;
                     }
                 }
+                update.notices.push(Notice::Opened(view));
             }
             Event::Save { document, target } => {
                 update.effects.push(Effect::Save(Box::new(
@@ -822,6 +863,7 @@ impl Application {
                 self.accept_edit(result.edit, &mut update);
                 self.accept_file(result.file, None, &mut update);
             }
+            Event::SetContext(view) => self.context = view,
             Event::PollFiles => {
                 update.files = self.workspace.poll_file_results();
                 self.pending_opens

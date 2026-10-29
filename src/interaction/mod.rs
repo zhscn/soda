@@ -11,6 +11,7 @@ pub use departure::SaveWait;
 pub mod expand;
 pub mod grep;
 pub mod help;
+pub mod hooks;
 pub use help::HelpSession;
 mod input;
 pub use input::{InputKey, InputMotion, InputUpdate, TextInput};
@@ -41,6 +42,16 @@ pub enum EditMode {
     Normal,
     Visual,
     VisualLine,
+}
+impl EditMode {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::Insert => "insert",
+            Self::Visual => "visual",
+            Self::VisualLine => "visual-line",
+        }
+    }
 }
 use crate::{
     application::{Application, Event, Operation, Update},
@@ -114,6 +125,7 @@ pub struct Layers {
     keymap: Keymap,
     vim: vim::State,
     registry: Registry,
+    hooks: hooks::Hooks,
     page_rows: usize,
     help_rows: usize,
     picker_rows: usize,
@@ -170,6 +182,10 @@ impl Layers {
         self.failed = false;
     }
     /// The register a macro is being recorded into.
+    /// Commands of the hooks for an event whose parameter they match.
+    pub fn hooks(&self, event: &str, parameter: &str) -> Vec<String> {
+        self.hooks.matching(event, parameter)
+    }
     pub fn recording(&self) -> Option<char> {
         self.vim.replay.recording()
     }

@@ -1,7 +1,7 @@
 //! Owner-thread command loop shared by frontends. It owns application and modal
 //! state, reduces every update in order, and executes bounded background tasks.
 use crate::{
-    application::{Application, ClipboardAction, Event, Operation, Update, ViewId},
+    application::{Application, ClipboardAction, Event, Notice, Operation, Update, ViewId},
     core::{ByteOffset, EditError},
     files::{FileCompletion, FileRunner, paths::PathRunner},
     interaction::{
@@ -17,6 +17,9 @@ use std::{
 
 mod grep;
 mod shell;
+
+/// Rounds of hooks firing further hooks before they stop.
+const MAX_HOOK_DEPTH: usize = 16;
 
 /// The system clipboard as a frontend reaches it. Copies are stored after
 /// they happen; pastes load first, and text that differs from the
@@ -45,6 +48,12 @@ pub struct Runtime {
     /// typeahead: a replay started while replaying goes to the front.
     replay: std::collections::VecDeque<UserInput>,
     replaying: bool,
+    /// Hook events waiting to run: the event, its parameter and the view
+    /// its commands act on.
+    notices: Vec<(&'static str, String, Option<ViewId>)>,
+    hooking: bool,
+    /// The mode and focused view hooks last saw.
+    seen: (crate::interaction::EditMode, Option<ViewId>),
     quit: bool,
     dirty: bool,
 }
@@ -74,6 +83,9 @@ impl Runtime {
             epoch: Instant::now(),
             replay: Default::default(),
             replaying: false,
+            notices: vec![],
+            hooking: false,
+            seen: Default::default(),
             quit: false,
             dirty: true,
         })
@@ -232,6 +244,7 @@ impl Runtime {
             .layers
             .route_input(input, &self.app, time, &self.file_root);
         self.input_result(result, time);
+        self.run_hooks(time);
     }
     pub fn command(&mut self, command: Command) {
         self.command_at(command, self.epoch.elapsed());
@@ -241,6 +254,7 @@ impl Runtime {
             .layers
             .execute(command, &self.app, time, &self.file_root);
         self.input_result(result, time);
+        self.run_hooks(time);
     }
     fn input_result(&mut self, result: Result<InputResult, EditError>, time: Duration) {
         match result {
@@ -258,7 +272,53 @@ impl Runtime {
             Event::Edit { time, .. } | Event::Clipboard { time, .. } => *time,
             _ => self.epoch.elapsed(),
         };
-        self.reduce(event, time)
+        let done = self.reduce(event, time);
+        self.run_hooks(time);
+        done
+    }
+    /// Runs the hooks of the notices gathered so far, then of those their
+    /// commands cause, up to a bound. Mode and focus are compared with what
+    /// hooks last saw. A hook's command acts on the view that fired it and
+    /// keeps the message it found unless it sets one.
+    fn run_hooks(&mut self, time: Duration) {
+        if self.hooking {
+            return;
+        }
+        self.hooking = true;
+        for round in 0.. {
+            let now = (self.layers.edit_mode(), self.app.active_view());
+            if now.0 != self.seen.0 {
+                self.notices.push(("mode", now.0.name().into(), None));
+            }
+            if now.1 != self.seen.1
+                && let Some(view) = now.1.and_then(|id| self.app.view(id))
+            {
+                let name = self.app.document_name(view.document_id);
+                self.notices.push(("focus", name, None));
+            }
+            self.seen = now;
+            if self.notices.is_empty() {
+                break;
+            }
+            if round == MAX_HOOK_DEPTH {
+                self.notices.clear();
+                self.message = format!("Hooks stopped after {MAX_HOOK_DEPTH} nested rounds");
+                self.dirty = true;
+                break;
+            }
+            for (event, parameter, view) in std::mem::take(&mut self.notices) {
+                for line in self.layers.hooks(event, &parameter) {
+                    let _ = self.app.dispatch(Event::SetContext(view));
+                    let message = std::mem::take(&mut self.message);
+                    self.command_at(Command::Named(line), time);
+                    let _ = self.app.dispatch(Event::SetContext(None));
+                    if self.message.is_empty() {
+                        self.message = message;
+                    }
+                }
+            }
+        }
+        self.hooking = false;
     }
     fn reduce(&mut self, event: Event, time: Duration) -> bool {
         let operation = event.operation();
@@ -301,6 +361,23 @@ impl Runtime {
     }
     fn accept(&mut self, update: Update, time: Duration) -> bool {
         let response = self.layers.observe(&self.app, &update, time);
+        for notice in &update.notices {
+            let notice = match notice {
+                Notice::Opened(view) => self.app.view(*view).map(|state| {
+                    (
+                        "open",
+                        self.app.document_name(state.document_id),
+                        Some(*view),
+                    )
+                }),
+                Notice::Created(view) => self.app.view(*view).map(|state| {
+                    let kind = self.app.document_kind(state.document_id).to_owned();
+                    ("new", kind, Some(*view))
+                }),
+                Notice::Closed(name) => Some(("close", name.clone(), None)),
+            };
+            self.notices.extend(notice);
+        }
         self.dirty |= update.active_changed
             || update.windows_changed
             || update.options_changed
@@ -314,6 +391,20 @@ impl Runtime {
             .and_then(|edit| edit.document.as_ref())
             .is_some_and(|document| document.origin == crate::editor::EditOrigin::Reload);
         for result in update.files {
+            if let (Ok(file), false) = (&result.result, reloaded) {
+                let view = self
+                    .app
+                    .active_view()
+                    .filter(|id| self.app.view(*id).unwrap().document_id == file.document_id)
+                    .or_else(|| {
+                        let mut views = self.app.views();
+                        views
+                            .find(|view| view.document_id == file.document_id)
+                            .map(|view| view.id)
+                    });
+                let path = file.path.to_string_lossy().into_owned();
+                self.notices.push(("save", path, view));
+            }
             self.message = match result.result {
                 Ok(file) => format!(
                     "{} {}{}",
@@ -540,6 +631,7 @@ impl Runtime {
             self.grep_finished(completion);
         }
         self.dispatch(Event::PollFiles);
+        self.run_hooks(self.epoch.elapsed());
     }
     fn grep_finished(&mut self, completion: grep::GrepCompletion) {
         self.dirty = true;
