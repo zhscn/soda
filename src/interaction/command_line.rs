@@ -139,7 +139,11 @@ fn split_path(text: &str) -> (&str, &str) {
 }
 /// Buffer names: full paths, or `[untitled N]` by document number.
 pub(super) fn buffer_name(app: &Application, document: crate::editor::DocumentId) -> String {
-    app.workspace().file(document).unwrap().path().map_or_else(
+    let file = app.workspace().file(document).unwrap();
+    if let Some(name) = file.scratch() {
+        return name.to_owned();
+    }
+    file.path().map_or_else(
         || format!("[untitled {}]", document.number()),
         |path| path.to_string_lossy().into_owned(),
     )

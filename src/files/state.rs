@@ -25,8 +25,13 @@ pub struct FileState {
     pub(crate) saved: Option<DiskImage>,
     pub(crate) saved_revision: Option<u64>,
     pub(crate) configuration: Option<ResolvedConfig>,
+    /// The name of a scratch document, which has no file and is never dirty.
+    pub(crate) scratch: Option<String>,
 }
 impl FileState {
+    pub fn scratch(&self) -> Option<&str> {
+        self.scratch.as_deref()
+    }
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
     }
@@ -40,6 +45,9 @@ impl FileState {
         self.configuration.as_ref()
     }
     pub(crate) fn is_dirty(&self, current: &Snapshot) -> bool {
+        if self.scratch.is_some() {
+            return false;
+        }
         match &self.saved {
             Some(saved) => saved.bom != self.bom || !saved.snapshot.content_eq(current),
             None => self.path.is_some() || !current.is_empty() || self.bom,

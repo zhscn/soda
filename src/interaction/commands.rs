@@ -67,6 +67,20 @@ pub enum Command {
     Quit(Option<Departure>),
     NextView,
     Window(WindowCommand),
+    /// Searches the project; results go to the `*grep*` document.
+    Grep(String),
+    /// Opens the location on the caret line, or moves to the next line's
+    /// first non-blank as Vim's Enter does.
+    Jump,
+    /// Opens the next or previous search result.
+    GrepStep {
+        backward: bool,
+    },
+    /// Sets where documents of a kind are shown.
+    Display {
+        kind: String,
+        placement: crate::application::Placement,
+    },
     Search,
     Replace,
 }
@@ -464,6 +478,27 @@ impl Layers {
                 } else {
                     response.quit = true;
                 }
+            }
+            Command::Grep(pattern) => {
+                response.grep = Some(Box::new(super::grep::GrepRequest {
+                    pattern,
+                    root: file_root.to_owned(),
+                }));
+            }
+            Command::Jump => {
+                if !super::grep::jump(app, file_root, &mut response) {
+                    use super::vim::{Motion, VimCommand};
+                    response.commands.extend([
+                        Command::Vim(VimCommand::Move(Motion::Down, 1)),
+                        Command::Vim(VimCommand::Move(Motion::First, 1)),
+                    ]);
+                }
+            }
+            Command::GrepStep { backward } => {
+                super::grep::step(app, file_root, backward, time, &mut response)
+            }
+            Command::Display { kind, placement } => {
+                response.events.push(Event::SetDisplay { kind, placement })
             }
             Command::Window(command) => {
                 let Some(active) = app.active_view() else {

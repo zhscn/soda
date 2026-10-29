@@ -15,6 +15,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod grep;
 mod shell;
 
 /// The system clipboard as a frontend reaches it. Copies are stored after
@@ -29,6 +30,7 @@ pub struct Runtime {
     // Workers drop before the application so in-progress file writes can finish.
     files: FileRunner,
     shell: shell::ShellRunner,
+    grep: grep::GrepRunner,
     picker: PickerRunner,
     paths: PathRunner,
     app: Application,
@@ -60,6 +62,7 @@ impl Runtime {
         Ok(Self {
             files: FileRunner::new()?,
             shell: shell::ShellRunner::default(),
+            grep: grep::GrepRunner::default(),
             picker: PickerRunner::new()?,
             paths: PathRunner::new()?,
             app,
@@ -149,6 +152,9 @@ impl Runtime {
     }
     pub fn shell_running(&self) -> bool {
         self.shell.busy()
+    }
+    pub fn grep_running(&self) -> bool {
+        self.grep.busy()
     }
     pub fn editor_caret(&self) -> Option<usize> {
         self.layers.editor_caret()
@@ -343,6 +349,12 @@ impl Runtime {
         for request in response.path_requests {
             self.paths.submit(request);
         }
+        if let Some(request) = response.grep {
+            self.message = match self.grep.submit(*request) {
+                Ok(()) => "Searching…".into(),
+                Err(error) => error,
+            };
+        }
         if let Some(request) = response.shell {
             self.message = match self.shell.submit(*request) {
                 Ok(()) => "Running shell command…".into(),
@@ -499,7 +511,30 @@ impl Runtime {
         if let Some(completion) = self.shell.poll() {
             self.shell_finished(completion);
         }
+        if let Some(completion) = self.grep.poll() {
+            self.grep_finished(completion);
+        }
         self.dispatch(Event::PollFiles);
+    }
+    fn grep_finished(&mut self, completion: grep::GrepCompletion) {
+        self.dirty = true;
+        let pattern = completion.pattern;
+        match completion.result {
+            Ok((_, 0, _)) => self.message = format!("No matches for {pattern}"),
+            Ok((text, count, truncated)) => {
+                let shown = self.dispatch(Event::Scratch {
+                    name: crate::interaction::grep::SCRATCH.into(),
+                    text,
+                });
+                if shown {
+                    self.message = format!(
+                        "{count} matches for {pattern}{}",
+                        if truncated { " (stopped there)" } else { "" }
+                    );
+                }
+            }
+            Err(error) => self.message = error,
+        }
     }
     fn shell_finished(&mut self, completion: shell::ShellCompletion) {
         let name = completion.command;

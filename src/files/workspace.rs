@@ -129,6 +129,20 @@ impl Workspace {
     pub fn new_document(&mut self, language: impl Into<Language>) -> DocumentId {
         self.insert(Editor::new("", language), FileState::default())
     }
+    /// The scratch document with this name, such as `*grep*`.
+    pub fn scratch(&self, name: &str) -> Option<DocumentId> {
+        self.files
+            .iter()
+            .find(|(_, file)| file.scratch.as_deref() == Some(name))
+            .map(|(id, _)| *id)
+    }
+    pub fn new_scratch(&mut self, name: &str) -> DocumentId {
+        let file = FileState {
+            scratch: Some(name.to_owned()),
+            ..FileState::default()
+        };
+        self.insert(Editor::new("", Language::PlainText), file)
+    }
     pub fn open(&mut self, path: &Path) -> Result<DocumentId, FileError> {
         match self.prepare_open(path)? {
             OpenPreparation::Existing(id) => Ok(id),
@@ -234,6 +248,7 @@ impl Workspace {
                 }),
                 saved_revision: Some(revision),
                 configuration: loaded.configuration,
+                scratch: None,
             },
         );
         self.paths.remove(&path);
@@ -321,6 +336,7 @@ impl Workspace {
             }),
             saved_revision: Some(0),
             configuration: loaded.configuration,
+            scratch: None,
         };
         Ok(self.insert(editor, file))
     }

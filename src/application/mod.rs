@@ -16,8 +16,10 @@
 //! Path/configuration preflight and explicit Reload currently run synchronously.
 mod clipboard;
 pub use clipboard::ClipboardAction;
+mod display;
 mod windows;
-pub use windows::{Area, Axis, Direction, Node, Windows};
+pub use display::Placement;
+pub use windows::{Area, Axis, Direction, Node, Side, Windows};
 
 use crate::{
     core::{Association, ByteOffset, EditError, Selection},
@@ -90,6 +92,23 @@ pub enum Event {
         horizontal_column: usize,
     },
     Open(PathBuf),
+    /// Opens a file with the caret on a zero-based line and byte column.
+    OpenAt {
+        path: PathBuf,
+        line: usize,
+        column: usize,
+    },
+    /// Replaces the text of a scratch document, creating it if needed,
+    /// and shows it.
+    Scratch {
+        name: String,
+        text: String,
+    },
+    /// Sets where documents of a kind are shown.
+    SetDisplay {
+        kind: String,
+        placement: Placement,
+    },
     CancelOpen(OpenId),
     OpenFinished(OpenCompletion),
     Save {
@@ -176,6 +195,7 @@ pub struct Update {
 pub enum Error {
     UnknownView,
     LastWindow,
+    SideWindow,
     Edit(EditError),
     File(FileError),
 }
@@ -194,6 +214,7 @@ impl fmt::Display for Error {
         match self {
             Self::UnknownView => f.write_str("unknown view"),
             Self::LastWindow => f.write_str("cannot close the last window"),
+            Self::SideWindow => f.write_str("side windows cannot be split"),
             Self::Edit(e) => e.fmt(f),
             Self::File(e) => e.fmt(f),
         }
@@ -204,7 +225,7 @@ impl std::error::Error for Error {
         match self {
             Self::Edit(e) => Some(e),
             Self::File(e) => Some(e),
-            Self::UnknownView | Self::LastWindow => None,
+            Self::UnknownView | Self::LastWindow | Self::SideWindow => None,
         }
     }
 }
@@ -213,6 +234,7 @@ impl std::error::Error for Error {
 struct OpenIntent {
     focus_revision: u64,
     open_revision: u64,
+    position: Option<(usize, usize)>,
 }
 #[derive(Default)]
 pub struct Application {
@@ -232,6 +254,7 @@ pub struct Application {
     windows: Windows,
     /// Views by when they were last focused, most recent last.
     recent: Vec<ViewId>,
+    rules: display::Rules,
 }
 impl Application {
     pub fn new(service: FileService) -> Self {
@@ -268,7 +291,7 @@ impl Application {
             .expect("focus revisions exhausted");
         if let Some(view) = view {
             if !self.windows.contains(view) {
-                self.windows.replace(self.active, view);
+                self.display(view);
             }
             self.recent.retain(|id| *id != view);
             self.recent.push(view);
@@ -284,13 +307,17 @@ impl Application {
             if self.views.contains_key(&window) {
                 continue;
             }
+            if self.windows.side(window).is_some() {
+                self.windows.remove(window);
+                continue;
+            }
             let hidden = self
                 .recent
                 .iter()
                 .rev()
                 .chain(self.views.keys())
                 .copied()
-                .find(|id| !self.windows.contains(*id));
+                .find(|id| !self.windows.contains(*id) && !self.sided(*id));
             match hidden {
                 Some(hidden) => {
                     self.windows.replace(Some(window), hidden);
@@ -423,6 +450,126 @@ impl Application {
         self.accept_edit(edit, update);
         Ok(())
     }
+    fn open(
+        &mut self,
+        path: PathBuf,
+        position: Option<(usize, usize)>,
+        update: &mut Update,
+    ) -> Result<(), Error> {
+        let next = self
+            .open_revision
+            .checked_add(1)
+            .ok_or(EditError::VersionExhausted)?;
+        let preparation = self.workspace.prepare_open(&path)?;
+        self.open_revision = next;
+        match preparation {
+            OpenPreparation::Existing(document) => {
+                // A view on screen is reused before a hidden one.
+                let view = self
+                    .views
+                    .values()
+                    .filter(|v| v.document_id == document)
+                    .max_by_key(|v| self.windows.contains(v.id))
+                    .map(|v| v.id);
+                let view = match view {
+                    Some(view) => view,
+                    None => {
+                        let id = self.add_view(document)?;
+                        update.changed_views.push(id);
+                        id
+                    }
+                };
+                self.focus(Some(view));
+                if let Some(position) = position {
+                    self.place_caret(view, position, update)?;
+                }
+            }
+            OpenPreparation::Request(request) => {
+                self.pending_opens.insert(
+                    request.id(),
+                    OpenIntent {
+                        focus_revision: self.focus_revision,
+                        open_revision: self.open_revision,
+                        position,
+                    },
+                );
+                update.effects.push(Effect::Open(request));
+            }
+        }
+        Ok(())
+    }
+    /// Moves a view's caret to a line and byte column, within the text.
+    fn place_caret(
+        &mut self,
+        view: ViewId,
+        (line, column): (usize, usize),
+        update: &mut Update,
+    ) -> Result<(), Error> {
+        let state = self.views.get(&view).ok_or(Error::UnknownView)?;
+        let snapshot = self
+            .workspace
+            .editor(state.document_id)
+            .unwrap()
+            .model()
+            .document()
+            .snapshot();
+        let line = line.min(snapshot.line_count() - 1);
+        let range = snapshot.line_content_range(line).unwrap();
+        let offset = crate::core::clip_grapheme_offset(
+            snapshot,
+            ByteOffset((range.start + column).min(range.end)),
+            Association::Before,
+        )?;
+        self.edit(
+            view,
+            Command::SetSelection(Selection::caret(offset.0)),
+            Duration::ZERO,
+            update,
+        )
+    }
+    fn scratch(&mut self, name: &str, text: String, update: &mut Update) -> Result<(), Error> {
+        let document = match self.workspace.scratch(name) {
+            Some(document) => document,
+            None => self.workspace.new_scratch(name),
+        };
+        let view = self
+            .views
+            .values()
+            .filter(|v| v.document_id == document)
+            .max_by_key(|v| self.windows.contains(v.id))
+            .map(|v| v.id);
+        let view = match view {
+            Some(view) => view,
+            None => self.add_view(document)?,
+        };
+        let snapshot = self
+            .workspace
+            .editor(document)
+            .unwrap()
+            .model()
+            .document()
+            .snapshot();
+        let mut tx = crate::core::Transaction::new(
+            snapshot.version(),
+            vec![crate::core::Change::new(0..snapshot.len_bytes(), text)],
+        );
+        tx.selection = Some(Selection::caret(0));
+        self.edit(view, Command::Apply(tx), Duration::ZERO, update)?;
+        let start = self
+            .workspace
+            .editor(document)
+            .unwrap()
+            .model()
+            .document()
+            .position(ByteOffset(0), Association::Before)?;
+        self.views.get_mut(&view).unwrap().viewport = Viewport {
+            anchor: start,
+            horizontal_column: 0,
+        };
+        update.changed_views.push(view);
+        self.focus(Some(view));
+        Ok(())
+    }
     /// Reduce one event. Effects are returned only after reservations are made.
     /// Closing a view retains its document, including unsaved edits. Closing a
     /// document validates dirty/pending-save constraints before removing views.
@@ -477,6 +624,9 @@ impl Application {
             }
             Event::Split(axis) => {
                 let active = self.active.ok_or(Error::UnknownView)?;
+                if self.windows.side(active).is_some() {
+                    return Err(Error::SideWindow);
+                }
                 let view = self.copy_view(active)?;
                 update.changed_views.push(view);
                 self.windows.split(active, view, axis);
@@ -553,37 +703,12 @@ impl Application {
                 };
                 update.changed_views.push(view);
             }
-            Event::Open(path) => {
-                let next = self
-                    .open_revision
-                    .checked_add(1)
-                    .ok_or(EditError::VersionExhausted)?;
-                let preparation = self.workspace.prepare_open(&path)?;
-                self.open_revision = next;
-                match preparation {
-                    OpenPreparation::Existing(document) => {
-                        let view = match self.views.values().find(|v| v.document_id == document) {
-                            Some(view) => view.id,
-                            None => {
-                                let id = self.add_view(document)?;
-                                update.changed_views.push(id);
-                                id
-                            }
-                        };
-                        self.focus(Some(view));
-                    }
-                    OpenPreparation::Request(request) => {
-                        self.pending_opens.insert(
-                            request.id(),
-                            OpenIntent {
-                                focus_revision: self.focus_revision,
-                                open_revision: self.open_revision,
-                            },
-                        );
-                        update.effects.push(Effect::Open(request));
-                    }
-                }
+            Event::Open(path) => self.open(path, None, &mut update)?,
+            Event::OpenAt { path, line, column } => {
+                self.open(path, Some((line, column)), &mut update)?
             }
+            Event::Scratch { name, text } => self.scratch(&name, text, &mut update)?,
+            Event::SetDisplay { kind, placement } => self.rules.set(kind, placement),
             Event::CancelOpen(id) => {
                 self.workspace.cancel_open(id)?;
                 self.pending_opens.remove(&id);
@@ -593,11 +718,14 @@ impl Application {
                 let document = self.workspace.finish_open(completion)?;
                 let view = self.add_view(document)?;
                 update.changed_views.push(view);
-                if revision.is_some_and(|intent| {
+                if let Some(intent) = revision.filter(|intent| {
                     intent.focus_revision == self.focus_revision
                         && intent.open_revision == self.open_revision
                 }) {
                     self.focus(Some(view));
+                    if let Some(position) = intent.position {
+                        self.place_caret(view, position, &mut update)?;
+                    }
                 }
             }
             Event::Save { document, target } => {

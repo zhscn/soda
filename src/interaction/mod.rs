@@ -8,6 +8,7 @@ pub mod vim;
 pub use commands::{Command, Departure, WindowCommand};
 mod departure;
 pub use departure::SaveWait;
+pub mod grep;
 pub mod help;
 pub use help::HelpSession;
 mod input;
@@ -87,6 +88,7 @@ pub struct Response {
     pub effects: Vec<PickerEffect>,
     pub path_requests: Vec<path::PathRequest>,
     pub shell: Option<Box<shell::ShellRequest>>,
+    pub grep: Option<Box<grep::GrepRequest>>,
     /// Input to route again, after the rest of the response, for `.` and
     /// macros.
     pub replay: Vec<UserInput>,

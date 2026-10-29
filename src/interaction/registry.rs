@@ -520,6 +520,44 @@ pub static BUILTINS: &[Builtin] = &[
         }
     ),
     builtin!(
+        "grep",
+        [slot("PATTERN", SlotKind::Rest)],
+        "Search project files for a regular expression; lowercase ignores case",
+        |a| Ok(Command::Grep(required(a)?))
+    ),
+    builtin!(
+        "jump",
+        "Open the location on the caret line, as in search results",
+        Command::Jump
+    ),
+    builtin!(
+        "grep-next" | "cn" | "cnext",
+        "Open the next search result",
+        Command::GrepStep { backward: false }
+    ),
+    builtin!(
+        "grep-previous" | "cp" | "cprevious",
+        "Open the previous search result",
+        Command::GrepStep { backward: true }
+    ),
+    builtin!(
+        "display",
+        [
+            slot("KIND", SlotKind::Word),
+            slot("PLACEMENT", SlotKind::Rest)
+        ],
+        "Show documents of a kind (file, grep) in the same, other, bottom [ROWS] or right [COLUMNS] window",
+        |a| {
+            let (kind, placement) = a
+                .split_once(' ')
+                .ok_or("display needs KIND and PLACEMENT")?;
+            Ok(Command::Display {
+                kind: kind.to_owned(),
+                placement: crate::application::Placement::parse(placement)?,
+            })
+        }
+    ),
+    builtin!(
         "pipe",
         [slot("SHELL-COMMAND", SlotKind::Rest)],
         "Replace the selection or document with command output",

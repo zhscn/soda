@@ -133,3 +133,70 @@ fn page_rows_follow_the_active_window() {
         .to_owned();
     assert_eq!(&text[caret(&r)..caret(&r) + 2], "4\n");
 }
+fn settle(r: &mut Runtime, done: impl Fn(&Runtime) -> bool) {
+    for _ in 0..500 {
+        r.poll();
+        if done(r) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    panic!("timed out: {:?} in {}", r.message(), active_name(r));
+}
+fn active_name(r: &Runtime) -> String {
+    let view = r.app().view(r.app().active_view().unwrap()).unwrap();
+    let file = r.app().workspace().file(view.document_id).unwrap();
+    file.scratch()
+        .map(str::to_owned)
+        .or_else(|| {
+            file.path()
+                .map(|p| p.file_name().unwrap().to_string_lossy().into())
+        })
+        .unwrap_or_default()
+}
+#[test]
+fn grep_results_show_below_and_open_locations_in_the_other_window() {
+    use soda::application::Side;
+    let root = tempfile::tempdir().unwrap();
+    std::fs::write(root.path().join("a.txt"), "one\n  needle here\n").unwrap();
+    std::fs::write(root.path().join("b.txt"), "needle\n").unwrap();
+    let mut r = Runtime::new(root.path().to_owned()).unwrap();
+    r.start(None);
+    let main = r.app().active_view().unwrap();
+    r.command(Command::Grep("needle".into()));
+    settle(&mut r, |r| active_name(r) == "*grep*");
+    assert!(r.message().starts_with("2 matches"), "{}", r.message());
+    let results = r.app().active_view().unwrap();
+    assert_eq!(r.app().windows().side(results), Some(Side::Bottom));
+    assert_eq!(r.app().windows().views(), [main, results]);
+    // Enter on the first result opens it in the split window, not here.
+    keys(&mut r, "<ret>");
+    settle(&mut r, |r| active_name(r) == "a.txt");
+    let file = r.app().active_view().unwrap();
+    assert_eq!(r.app().windows().views(), [file, results]);
+    assert_eq!(caret(&r), "one\n  ".len());
+    // Stepping moves the results caret and opens the next file in place.
+    keys(&mut r, "]q");
+    settle(&mut r, |r| active_name(r) == "b.txt");
+    assert_eq!(r.app().windows().views().len(), 2);
+    keys(&mut r, "]q");
+    assert_eq!(r.message(), "At the last result");
+    // A new search reuses the document and its side window.
+    r.command(Command::Grep("ONE".into()));
+    settle(&mut r, |r| {
+        active_name(r) == "*grep*" || r.message().starts_with("No")
+    });
+    assert_eq!(r.message(), "No matches for ONE");
+    r.command(Command::Grep("one".into()));
+    settle(&mut r, |r| active_name(r) == "*grep*");
+    assert_eq!(r.app().active_view(), Some(results));
+    // Side windows close like others and cannot be split.
+    keys(&mut r, "<c-w>s");
+    assert!(r.message().contains("side windows"), "{}", r.message());
+    keys(&mut r, "<c-w>c");
+    assert_eq!(r.app().windows().views().len(), 1);
+    // Rules move a kind elsewhere; a hidden results view comes back there.
+    r.command(Command::Named("display grep right 30".into()));
+    r.command(Command::Named("buffer *grep*".into()));
+    assert_eq!(r.app().windows().side(results), Some(Side::Right));
+}

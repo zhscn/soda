@@ -311,6 +311,13 @@ fn splash(buf: &mut Buffer, area: Rect, theme: &Theme) {
 
 fn file_label(runtime: &Runtime, document: crate::editor::DocumentId, full: bool) -> String {
     let app = runtime.app();
+    if let Some(name) = app
+        .workspace()
+        .file(document)
+        .and_then(|file| file.scratch())
+    {
+        return name.to_owned();
+    }
     match app.workspace().file(document).and_then(|file| file.path()) {
         Some(path) if full => path
             .strip_prefix(runtime.file_root())
@@ -429,6 +436,9 @@ fn status(
     }
     if let Some(pending) = runtime.pending_keys() {
         right.push(Text::styled(format!("{pending}  "), theme.key));
+    }
+    if runtime.grep_running() {
+        right.push(Text::raw("searching…  "));
     }
     if runtime.shell_running() {
         right.push(Text::raw("running…  "));
