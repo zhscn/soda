@@ -314,9 +314,7 @@ impl Layers {
                 Input::Candidate {
                     motion: motion @ (ListMotion::Previous | ListMotion::Next),
                     ..
-                } if *kind == history::SEARCH => {
-                    Some(matches!(motion, ListMotion::Previous))
-                }
+                } if *kind == history::SEARCH => Some(matches!(motion, ListMotion::Previous)),
                 _ => None,
             };
             if let Some(entry) = backward.and_then(|backward| lines.recall(text, backward)) {

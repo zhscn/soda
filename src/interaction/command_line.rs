@@ -524,6 +524,13 @@ impl CommandLine {
     pub(super) fn picker_failed(&mut self, error: String) {
         self.error = Some(error);
     }
+    /// Whether the text being completed has candidates to choose from;
+    /// free text such as keys or a shell command has none.
+    pub fn completes(&self) -> bool {
+        self.query
+            .as_ref()
+            .is_some_and(|q| !matches!(q.target, Target::Slot(SlotKind::Word | SlotKind::Rest)))
+    }
     pub fn loading(&self) -> bool {
         let target = self.query.as_ref().map(|q| q.target);
         (target == Some(Target::Slot(SlotKind::Path))

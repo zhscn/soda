@@ -117,9 +117,10 @@ impl Areas {
             .iter()
             .find(|window| window.area.contains(Position::new(x, y)))
     }
-    /// Rows the command line may use for candidates.
+    /// Rows the command line may use for candidates, keeping a line of
+    /// text above the status line it pushes up.
     pub fn list_rows(&self) -> usize {
-        usize::from(self.editor.height.saturating_sub(4)).min(10)
+        usize::from(self.editor.height.saturating_sub(2)).min(10)
     }
 }
 
@@ -166,13 +167,33 @@ pub(super) fn render(
         .zip(texts)
         .find(|(window, _)| Some(window.view) == active)
         .and_then(|(_, text)| text.as_ref());
+    // The command line grows the rows below the status line upward, over
+    // the editing area, so its candidates sit under its input.
+    let below = match runtime.layer() {
+        Some(Layer::CommandLine(line)) if line.completes() => areas.list_rows() as u16,
+        _ => 0,
+    };
     if let Some(area) = areas.status {
-        status(buf, area, runtime, theme, text);
+        status(
+            buf,
+            Rect {
+                y: area.y - below,
+                ..area
+            },
+            runtime,
+            theme,
+            text,
+        );
     }
     let prompt = message(buf, areas.message, runtime, theme);
     match runtime.layer() {
         Some(Layer::CommandLine(line)) => {
-            cursor = command_line(buf, areas, line, theme);
+            let area = Rect {
+                y: areas.message.y - below,
+                height: below + 1,
+                ..areas.message
+            };
+            cursor = command_line(buf, area, line, theme);
         }
         Some(Layer::Help(session)) => {
             cursor = None;
@@ -601,49 +622,52 @@ fn popup(buf: &mut Buffer, area: Rect, title: &str, theme: &Theme) {
 /// candidates of the slot under the cursor.
 fn command_line(
     buf: &mut Buffer,
-    areas: &Areas,
+    area: Rect,
     line: &CommandLine,
     theme: &Theme,
 ) -> Option<Position> {
     let rows = line.rows();
     let list = line.list();
-    // A fixed height keeps the panel from jumping as candidates come and
-    // go; unused candidate rows stay blank.
-    let shown = areas.list_rows();
-    let height = if shown > 0 { 4 + shown as u16 } else { 3 };
-    let bottom = areas.editor.bottom();
-    let height = height.min(areas.editor.height);
-    if height < 3 || areas.editor.width < 8 {
-        return None;
-    }
-    let area = Rect::new(areas.editor.x, bottom - height, areas.editor.width, height);
-    let mut title = vec![Text::styled(
-        format!(" {} ", line.heading().unwrap_or_else(|| "command".into())),
-        theme.title,
-    )];
-    if let Some(note) = line.note() {
-        title.push(Text::styled(format!("· {note} "), theme.modified));
-    }
-    let mut block = Block::bordered()
-        .border_type(BorderType::Rounded)
-        .border_style(theme.border)
-        .style(theme.panel)
-        .title(Line::from(title));
+    Clear.render(area, buf);
+    buf.set_style(area, theme.text);
+    // What the line is for, right of the input: an error, else the
+    // command's slots and any question, then progress and the count. The
+    // slots go first when it does not fit in half the row.
+    let mut info = vec![];
     if let Some(error) = line.error() {
-        block = block.title_bottom(Text::styled(format!(" {error} "), theme.error));
-    } else if line.loading() {
-        block = block.title_bottom(Text::styled(" loading… ", theme.dim));
+        info.push(Text::styled(error.to_owned(), theme.error));
+    } else if let Some(note) = line.note() {
+        info.push(Text::styled(note.to_owned(), theme.modified));
+    }
+    if line.loading() {
+        info.push(Text::styled("loading…", theme.dim));
     }
     if let Some(index) = list.index(rows) {
-        block = block.title_bottom(
-            Line::styled(format!(" {}/{} ", index + 1, rows.len()), theme.dim).right_aligned(),
-        );
+        info.push(Text::styled(
+            format!("{}/{}", index + 1, rows.len()),
+            theme.dim,
+        ));
     }
-    Clear.render(area, buf);
-    block.render(area, buf);
-    let inner = inset(area);
-    // One column of padding on each side of the input.
-    let field = Rect::new(inner.x + 1, inner.y, inner.width.saturating_sub(2), 1);
+    if line.error().is_none() {
+        let heading = line.heading().unwrap_or_else(|| "command".into());
+        let width: usize = info.iter().map(|t| t.width() + 3).sum::<usize>() + heading.len();
+        if width < usize::from(area.width / 2) {
+            info.insert(0, Text::styled(heading, theme.dim));
+        }
+    }
+    let info: Vec<_> = info
+        .into_iter()
+        .enumerate()
+        .flat_map(|(i, text)| {
+            (i > 0)
+                .then(|| Text::styled(" · ", theme.dim))
+                .into_iter()
+                .chain([text])
+        })
+        .collect();
+    let info = Line::from(info);
+    let info_width = (info.width() as u16 + 1).min(area.width / 2);
+    let field = Rect::new(area.x, area.y, area.width - info_width, 1);
     let (input, column) = layout::prompt_row(&line.field(), usize::from(field.width));
     spans(
         buf,
@@ -651,45 +675,31 @@ fn command_line(
         field.y,
         field.width,
         &input,
-        theme.panel,
+        theme.text,
         theme,
     );
-    if shown > 0 && inner.height >= 2 {
-        let y = inner.y + 1;
-        buf[(area.x, y)].set_symbol("├");
-        for x in inner.x..inner.right() {
-            buf[(x, y)].set_symbol("─");
-        }
-        buf[(area.right() - 1, y)].set_symbol("┤");
-        let selected = list.selected();
-        for offset in 0..shown {
-            let y = inner.y + 2 + offset as u16;
-            if y >= inner.bottom() {
-                break;
-            }
-            let Some(row) = rows.get(list.first_visible() + offset) else {
-                break;
-            };
-            let base = if selected == Some(row.candidate.key) {
-                buf.set_style(
-                    Rect::new(inner.x, y, inner.width, 1),
-                    theme.candidate_selected,
-                );
-                buf.set_string(
-                    inner.x,
-                    y,
-                    "▌",
-                    theme.marker.patch(theme.candidate_selected),
-                );
-                theme.panel.patch(theme.candidate_selected)
-            } else {
-                theme.panel
-            };
-            let width = inner.width.saturating_sub(3);
-            let label =
-                layout::candidate_row(row, None, row.candidate.payload.detail, usize::from(width));
-            spans(buf, inner.x + 2, y, width, &label, base, theme);
-        }
+    info.right_aligned().render(
+        Rect::new(field.right(), area.y, info_width.saturating_sub(1), 1),
+        buf,
+    );
+    let selected = list.selected();
+    for offset in 0..usize::from(area.height - 1) {
+        let y = area.y + 1 + offset as u16;
+        let Some(row) = rows.get(list.first_visible() + offset) else {
+            break;
+        };
+        let base = if selected == Some(row.candidate.key) {
+            let band = Rect::new(area.x, y, area.width, 1);
+            buf.set_style(band, theme.candidate_selected);
+            buf.set_string(area.x, y, "▌", theme.marker.patch(theme.candidate_selected));
+            theme.text.patch(theme.candidate_selected)
+        } else {
+            theme.text
+        };
+        let width = area.width.saturating_sub(2);
+        let label =
+            layout::candidate_row(row, None, row.candidate.payload.detail, usize::from(width));
+        spans(buf, area.x + 2, y, width, &label, base, theme);
     }
     column.map(|x| {
         Position::new(
@@ -807,32 +817,34 @@ mod tests {
         assert!(rows[12].starts_with(" NORMAL  [untitled "));
         assert!(rows[12].contains("] [+]"));
         assert!(rows[12].trim_end().ends_with("3:1  100%"));
-        assert_eq!(rows[13].trim(), "", "the message row is empty without a message");
+        assert_eq!(
+            rows[13].trim(),
+            "",
+            "the message row is empty without a message"
+        );
         keys(&mut r, "<space>");
         assert!(screen(&mut r, 60, 14).contains("f  Open a project file"));
         keys(&mut r, "<esc>");
         r.command(Command::Close(None));
         let text = screen(&mut r, 60, 14);
         let rows: Vec<_> = text.lines().collect();
-        assert!(
-            rows.iter()
-                .any(|row| row.starts_with("╭ close [DECISION] [PATH] · unsaved"))
-        );
-        assert!(rows.iter().any(|row| row.starts_with("│ :close ")));
-        assert!(
-            rows.iter()
-                .any(|row| row.starts_with("│▌ save         [s]"))
-        );
-        assert!(rows[12].starts_with(" COMMAND "));
-        // With two candidates the panel still takes its full height: an
-        // 11-row editing area leaves 7 candidate rows, 11 rows in all.
-        let top = rows
-            .iter()
-            .position(|row| row.starts_with("╭ close"))
-            .unwrap();
-        assert_eq!(top, 1);
-        assert!(rows[13].trim().is_empty());
-        // The terminal cursor sits in the panel input after `:close `.
+        // The input sits under the status line it pushed up, the question
+        // and count to its right, and candidates below; the 12-row editing
+        // area keeps 10 candidate rows whether or not they are used.
+        assert!(rows[3].starts_with(" COMMAND "), "{text}");
+        assert!(rows[4].starts_with(":close "));
+        assert!(rows[4].contains("unsaved [untitled ") && rows[4].trim_end().ends_with("· 1/2"));
+        assert!(rows[5].starts_with("▌ save         [s]"));
+        assert!(rows[6].starts_with("  discard      [d]"));
+        keys(&mut r, "<esc>:");
+        r.input(UserInput::Paste("map normal ".into()));
+        let text = screen(&mut r, 60, 14);
+        let rows: Vec<_> = text.lines().collect();
+        // Free text has no candidates, so the line stays at the bottom with
+        // the command's slots beside it.
+        assert!(rows[12].starts_with(" COMMAND "), "{text}");
+        assert!(rows[13].starts_with(":map normal "));
+        assert!(rows[13].trim_end().ends_with("map MODE KEYS COMMAND"));
         keys(&mut r, "<esc>");
         r.command(Command::Help);
         let text = screen(&mut r, 60, 14);
