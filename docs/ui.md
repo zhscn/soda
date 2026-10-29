@@ -81,6 +81,12 @@ i Insert  / Search  : Commands  F1 Help                        消息行
 
 没有打开的文档时，编辑区居中显示常用入口。
 
+## 空白与列宽
+
+- `show-whitespace`（默认关）：制表符的第一格显示 `»`，行尾的空格显示 `·`，都用暗色；行内的空格保持空白。tab 与空格混排的缩进因此一眼可见。
+- `ruler`（默认 0，即不显示）：给第 `ruler` 列之后的第一列加底色，与 Emacs 的 `display-fill-column-indicator` 相同。只在有文本的行上绘制，水平滚动后列不在窗口内时不显示。
+- clang-format 的 `ColumnLimit` 通过 `%val{column-limit}` 读取，例如 `hook open .*\.(cpp|h) set-local ruler %val{column-limit}`；没有配置时为 0。
+
 ## 键盘
 
 启动时查询终端是否支持 kitty 键盘协议；支持时开启 disambiguate 模式，退出（包括 panic）时恢复。这样 Ctrl-Enter、Ctrl-Backspace、Ctrl-I 与 Tab、Ctrl-[ 与 Esc 都能区分，`<c-ret>` 这类绑定才会生效。不支持的终端保持传统编码，这些组合键收不到或与基本键合并。协议用小写字母加 Shift 报告大写字母，前端把它规范成大写字母，与传统编码一致。

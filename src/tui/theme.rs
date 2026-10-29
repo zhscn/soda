@@ -28,6 +28,9 @@ pub(super) struct Theme {
     pub marker: Style,
     pub matched: Style,
     pub detail: Style,
+    /// Tab and trailing space marks.
+    pub whitespace: Style,
+    pub ruler: Style,
     syntax: [Style; CATEGORIES],
     pub key: Style,
 }
@@ -131,6 +134,9 @@ impl Theme {
             marker: Style::new().fg(c(p.blue)),
             matched: Style::new().fg(c(p.orange)).add_modifier(Modifier::BOLD),
             detail: Style::new().fg(c(p.comment)),
+            whitespace: Style::new().fg(c(p.gutter)),
+            // Darker than the text and the caret line, so it shows on both.
+            ruler: Style::new().bg(c(p.bg_dark)),
             syntax: {
                 let fg = |rgb: u32| Style::new().fg(c(rgb));
                 let italic = Modifier::ITALIC;

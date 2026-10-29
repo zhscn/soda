@@ -90,6 +90,18 @@ pub const OPTIONS: &[OptionInfo] = &[
         doc: "Line numbers in the gutter: absolute, relative to the caret line, or none",
     },
     OptionInfo {
+        name: "show-whitespace",
+        kind: Kind::Bool,
+        default: Value::Bool(false),
+        doc: "Mark tabs with » and trailing spaces with ·",
+    },
+    OptionInfo {
+        name: "ruler",
+        kind: Kind::Int { min: 0, max: 1000 },
+        default: Value::Int(0),
+        doc: "Shade the column past this many; 0 for none, %val{column-limit} for clang-format's",
+    },
+    OptionInfo {
         name: "scroll-lines",
         kind: Kind::Int { min: 1, max: 100 },
         default: Value::Int(3),

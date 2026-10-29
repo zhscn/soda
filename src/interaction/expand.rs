@@ -17,6 +17,10 @@ pub const VALUES: &[(&str, &str)] = &[
     ),
     ("selection", "Selected text"),
     ("root", "Project root"),
+    (
+        "column-limit",
+        "clang-format's ColumnLimit for the file, 0 without one",
+    ),
     ("mode", "normal, insert, visual or visual-line"),
 ];
 
@@ -89,6 +93,13 @@ fn value(name: &str, state: &State) -> Result<String, String> {
             .map_or_else(String::new, |path| path.to_string_lossy().into_owned()),
         "name" => buffer_name(app, document),
         "kind" => app.document_kind(document).to_owned(),
+        "column-limit" => app
+            .workspace()
+            .file(document)
+            .and_then(|file| file.configuration())
+            .and_then(|resolved| resolved.config.values.get("ColumnLimit")?.as_u64())
+            .unwrap_or(0)
+            .to_string(),
         _ => {
             let editor = app.workspace().editor(document).unwrap();
             let snapshot = editor.model().document().snapshot();

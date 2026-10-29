@@ -38,6 +38,8 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `tab-width` | 1–16 | 4 | 制表位间隔 |
 | `expand-tab` | true/false | true | 用空格缩进；false 时缩进用制表符 |
 | `line-numbers` | absolute/relative/off | absolute | 行号栏；relative 时光标行显示自身行号，其他行显示距离 |
+| `show-whitespace` | true/false | false | 用 `»` 标出制表符，用 `·` 标出行尾空格 |
+| `ruler` | 0–1000 | 0 | 在这一列之后画竖线；0 不画 |
 | `scroll-lines` | 1–100 | 3 | 鼠标滚轮每格滚动的行数 |
 | `mouse` | true/false | true | 关闭后终端恢复自己的文本选择 |
 | `trim-trailing-whitespace` | true/false | true | 保存时去掉上次加载或保存以来编辑过的行的行尾空白 |
@@ -53,7 +55,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 
 命令行在执行时展开，而不是在定义时展开：
 - `%opt{NAME}`：选项在当前文档的值。
-- `%val{NAME}`：编辑器状态：`file`、`name`、`kind`、`line`、`column`、`selection`、`root`、`mode`。
+- `%val{NAME}`：编辑器状态：`file`、`name`、`kind`、`line`、`column`、`selection`、`root`、`mode`、`column-limit`。
 - `%arg{N}`、`%arg{@}`：用户命令的参数（已有）。
 
 用户命令按 `;` 分成语句，每条语句在轮到它执行时才展开 `%opt` 和 `%val`。这样 `goto 10; shell echo %val{line}` 读到的是跳转后的行号。命令名和不读状态的语句仍在执行前检查，读取状态的语句在展开后检查参数，失败时停止后续语句。展开结果按原文替换，不再拆分；包含空格的值只适合放在最后一个参数位。`map`、`define-command`（以及以后的 `hook`）的参数是延后执行的命令行，其中的展开保留到执行时。

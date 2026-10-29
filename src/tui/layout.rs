@@ -17,6 +17,8 @@ pub(super) struct Span {
     /// Secondary text, such as a candidate's description.
     pub detail: bool,
     pub category: Option<Category>,
+    /// A visible tab or trailing space mark.
+    pub whitespace: bool,
 }
 /// One visible document line: its zero-based number and clipped text.
 pub(super) struct Row {
@@ -32,6 +34,8 @@ pub(super) struct Frame {
     pub line_count: usize,
     /// The highlighting language's display name.
     pub language: String,
+    /// The column of the ruler on screen, when it is in view.
+    pub ruler: Option<u16>,
 }
 
 /// Clip by terminal cells. Partially visible tabs/wide graphemes become spaces;
@@ -49,6 +53,7 @@ pub(super) fn row(
         matches: &[],
         detail: text.len(),
         categories: &[],
+        whitespace: false,
     };
     styled_row(text, byte_start, marks, left, width, tab)
 }
@@ -60,6 +65,8 @@ struct Marks<'a> {
     matches: &'a [std::ops::Range<usize>],
     detail: usize,
     categories: &'a [(std::ops::Range<usize>, Category)],
+    /// Mark tabs and trailing spaces.
+    whitespace: bool,
 }
 fn styled_row(
     text: &str,
@@ -74,7 +81,11 @@ fn styled_row(
         matches,
         detail,
         categories,
+        whitespace,
     } = marks;
+    // Spaces and tabs from here to the end of the line trail.
+    let trailing = text.trim_end_matches(['\n', '\r']);
+    let trailing = trailing.trim_end_matches([' ', '\t']).len();
     let mut spans = Vec::<Span>::new();
     let mut next_category = 0;
     let mut column = 0;
@@ -87,7 +98,11 @@ fn styled_row(
         }
         if end > left && cells > 0 {
             let visible = end.min(right).saturating_sub(column.max(left));
-            let rendered = if cluster == "\t" || column < left || end > right {
+            let marked = whitespace && (cluster == "\t" || (cluster == " " && offset >= trailing));
+            let rendered = if marked && column >= left {
+                let mark = if cluster == "\t" { "»" } else { "·" };
+                format!("{mark}{}", " ".repeat(visible - 1))
+            } else if cluster == "\t" || column < left || end > right {
                 " ".repeat(visible)
             } else if cluster.chars().any(char::is_control) {
                 "�".into()
@@ -116,6 +131,7 @@ fn styled_row(
                     && last.matched == matched
                     && last.detail == secondary
                     && last.category == category
+                    && last.whitespace == marked
             }) {
                 last.text.push_str(&rendered);
             } else {
@@ -125,6 +141,7 @@ fn styled_row(
                     matched,
                     detail: secondary,
                     category,
+                    whitespace: marked,
                 });
             }
         }
@@ -151,6 +168,7 @@ pub(super) fn candidate_row<T>(
         matches: &row.highlights,
         detail: detail.unwrap_or(text.len()),
         categories: &[],
+        whitespace: false,
     };
     styled_row(text, 0, marks, 0, width, NonZeroUsize::new(4).unwrap())
 }
@@ -311,6 +329,16 @@ pub(super) fn frame(
     let mut output = Vec::new();
     let bottom = top.saturating_add(rows).min(snapshot.line_count());
     let highlights = highlighter.lines(app, view.document_id, top..bottom);
+    let options = app.options();
+    let show_whitespace = options.bool(Some(view.document_id), "show-whitespace");
+    // The ruler marks the first column past the limit, as Vim's colorcolumn.
+    let ruler = match options.int(Some(view.document_id), "ruler") as usize {
+        0 => None,
+        limit => limit
+            .checked_sub(left)
+            .filter(|column| *column < usize::from(width))
+            .map(|column| column as u16),
+    };
     for number in top..bottom {
         let text = snapshot.line(number).unwrap();
         let marks = Marks {
@@ -318,6 +346,7 @@ pub(super) fn frame(
             matches: &[],
             detail: text.len(),
             categories: highlights.get(number - top).map_or(&[], Vec::as_slice),
+            whitespace: show_whitespace,
         };
         output.push(Row {
             line: number,
@@ -351,6 +380,7 @@ pub(super) fn frame(
             .language(view.document_id)
             .unwrap_or("text")
             .to_owned(),
+        ruler,
     }))
 }
 
@@ -434,6 +464,41 @@ mod tests {
     }
     fn joined(spans: Vec<Span>) -> String {
         spans.into_iter().map(|span| span.text).collect()
+    }
+    #[test]
+    fn whitespace_marks_and_the_ruler_follow_their_options() {
+        let mut app = app("a\tb c  \nx", Language::PlainText);
+        let set = |app: &mut Application, name, value| {
+            app.dispatch(Event::SetOption {
+                scope: crate::options::Scope::Global,
+                name,
+                value,
+            })
+            .unwrap();
+        };
+        let first = |frame: &mut Frame| std::mem::take(&mut frame.rows[0].spans);
+        let mut plain = frame(&mut app, 20, 3).unwrap();
+        assert_eq!(joined(first(&mut plain)), "a   b c  ");
+        assert_eq!(plain.ruler, None);
+        set(
+            &mut app,
+            "show-whitespace",
+            crate::options::Value::Bool(true),
+        );
+        set(&mut app, "ruler", crate::options::Value::Int(6));
+        let mut marked = frame(&mut app, 20, 3).unwrap();
+        let spans = first(&mut marked);
+        // Inner spaces stay plain; tabs and trailing spaces are marked.
+        let marks: Vec<_> = spans
+            .iter()
+            .filter(|span| span.whitespace)
+            .map(|span| span.text.as_str())
+            .collect();
+        assert_eq!(marks, ["»  ", "··"]);
+        assert_eq!(joined(spans), "a»  b c··");
+        assert_eq!(marked.ruler, Some(6));
+        // A window narrower than the ruler does not show it.
+        assert!(frame(&mut app, 4, 3).unwrap().ruler.is_none());
     }
     #[test]
     fn clipping_expands_tabs_and_preserves_wide_grapheme_boundaries() {

@@ -212,6 +212,9 @@ fn spans(buf: &mut Buffer, x: u16, y: u16, width: u16, spans: &[Span], base: Sty
         if span.matched {
             style = style.patch(theme.matched);
         }
+        if span.whitespace {
+            style = style.patch(theme.whitespace);
+        }
         if x >= right {
             break;
         }
@@ -296,6 +299,10 @@ fn editor(
             buf.set_stringn(left, y, &number, window.gutter.into(), style);
         }
         spans(buf, area.x, y, area.width, &row.spans, base, theme);
+        if let Some(column) = text.ruler {
+            let cell = &mut buf[(area.x + column, y)];
+            cell.set_style(cell.style().patch(theme.ruler));
+        }
     }
     text.cursor
         .map(|(x, y)| Position::new(area.x + x, area.y + y))
