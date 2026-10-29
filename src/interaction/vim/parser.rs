@@ -8,7 +8,7 @@ pub(in crate::interaction) struct State {
     pub(super) operator: Option<(Operator, usize, bool)>,
     pub(super) g: bool,
     pub(super) goal: Option<crate::core::LogicalColumn>,
-    pub(super) visual: Option<(usize, usize)>,
+    pub(in crate::interaction) visual: Option<(usize, usize)>,
     pub search_backward: bool,
     pub last_search: Option<crate::editor::search::SearchQuery>,
     pub insert_view: Option<crate::application::ViewId>,

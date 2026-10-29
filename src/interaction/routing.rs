@@ -161,6 +161,7 @@ pub fn key_notation(keys: &[KeyStroke]) -> String {
 pub enum UserInput {
     Key(KeyStroke),
     Paste(String),
+    Pointer(super::Pointer),
     Unrecognized,
     FocusLost,
 }
@@ -183,6 +184,9 @@ impl Layers {
         time: Duration,
         file_root: &Path,
     ) -> Result<InputResult, EditError> {
+        if let UserInput::Pointer(pointer) = input {
+            return Ok(self.pointer(pointer, app, time));
+        }
         if matches!(input, UserInput::FocusLost) {
             if !self.sequence.active() && !self.vim.active() {
                 return Ok(InputResult::Blocked);
@@ -198,7 +202,9 @@ impl Layers {
             let input = match input {
                 UserInput::Key(key) => self.keymap.input(key),
                 UserInput::Paste(text) => Input::Paste(text),
-                UserInput::Unrecognized | UserInput::FocusLost => Input::Unrecognized,
+                UserInput::Unrecognized | UserInput::FocusLost | UserInput::Pointer(_) => {
+                    Input::Unrecognized
+                }
             };
             return self.handle(input, app, time);
         }

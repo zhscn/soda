@@ -235,17 +235,7 @@ impl Layers {
                     .documents()
                     .find(|id| super::command_line::buffer_name(app, *id) == name)
                 {
-                    Some(document) => {
-                        let active = app
-                            .active_view()
-                            .and_then(|id| app.view(id))
-                            .filter(|v| v.document_id == document);
-                        let view =
-                            active.or_else(|| app.views().find(|v| v.document_id == document));
-                        response
-                            .events
-                            .push(view.map_or(Event::AddView(document), |v| Event::Focus(v.id)));
-                    }
+                    Some(document) => response.events.push(show(app, document)),
                     None => response.message = Message::Set(format!("No buffer named {name}")),
                 }
             }
@@ -584,4 +574,15 @@ impl Layers {
         }
         Ok(super::InputResult::Handled(response))
     }
+}
+
+/// Shows a document in the active view's place: focuses a view of it, or
+/// adds one.
+pub(super) fn show(app: &Application, document: crate::editor::DocumentId) -> Event {
+    let active = app
+        .active_view()
+        .and_then(|id| app.view(id))
+        .filter(|v| v.document_id == document);
+    let view = active.or_else(|| app.views().find(|v| v.document_id == document));
+    view.map_or(Event::AddView(document), |v| Event::Focus(v.id))
 }

@@ -526,7 +526,7 @@ impl Layers {
         response
     }
 }
-fn visual_selection(
+pub(in crate::interaction) fn visual_selection(
     text: &crate::core::Snapshot,
     anchor: usize,
     head: usize,

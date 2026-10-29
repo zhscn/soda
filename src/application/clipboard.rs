@@ -33,6 +33,14 @@ impl Application {
     pub fn clipboard(&self) -> &str {
         &self.clipboard
     }
+    pub fn clipboard_revision(&self) -> u64 {
+        self.clipboard_revision
+    }
+    pub(super) fn set_clipboard(&mut self, text: String, linewise: bool) {
+        self.clipboard = text;
+        self.clipboard_linewise = linewise;
+        self.clipboard_revision += 1;
+    }
 
     pub(super) fn clipboard_action(
         &mut self,
@@ -77,8 +85,7 @@ impl Application {
                     .unwrap()
                     .checkpoint_history();
             }
-            self.clipboard = value;
-            self.clipboard_linewise = linewise;
+            self.set_clipboard(value, linewise);
             return Ok(());
         }
         if let ClipboardAction::Put { before, count } = action {
@@ -186,8 +193,7 @@ impl Application {
             .editor_mut(document)
             .unwrap()
             .checkpoint_history();
-        self.clipboard = text;
-        self.clipboard_linewise = false;
+        self.set_clipboard(text, false);
         Ok(())
     }
 }

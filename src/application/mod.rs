@@ -51,6 +51,11 @@ pub enum Event {
         action: ClipboardAction,
         time: Duration,
     },
+    /// Replaces the clipboard, as when the system clipboard changed.
+    SetClipboard {
+        text: String,
+        linewise: bool,
+    },
     NewDocument(Language),
     AddView(DocumentId),
     Focus(ViewId),
@@ -201,6 +206,8 @@ pub struct Application {
     pending_opens: BTreeMap<OpenId, OpenIntent>,
     clipboard: String,
     clipboard_linewise: bool,
+    /// Counts clipboard replacements, so frontends can mirror them.
+    clipboard_revision: u64,
 }
 impl Application {
     pub fn new(service: FileService) -> Self {
@@ -385,6 +392,7 @@ impl Application {
             Event::Clipboard { view, action, time } => {
                 self.clipboard_action(view, action, time, &mut update)?;
             }
+            Event::SetClipboard { text, linewise } => self.set_clipboard(text, linewise),
             Event::SetViewport {
                 view,
                 anchor,

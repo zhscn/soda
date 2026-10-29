@@ -221,8 +221,12 @@ fn file_label(runtime: &Runtime, document: crate::editor::DocumentId, full: bool
     }
 }
 
-fn tabs(buf: &mut Buffer, area: Rect, runtime: &Runtime, theme: &Theme) {
-    buf.set_style(area, theme.tabs);
+/// Tabs that fit in `width` cells, with their documents, starting columns
+/// and labels; tabs drop from the left until the active one fits.
+pub(super) fn tab_items(
+    runtime: &Runtime,
+    width: u16,
+) -> Vec<(crate::editor::DocumentId, u16, String)> {
     let app = runtime.app();
     let active = app
         .active_view()
@@ -238,40 +242,54 @@ fn tabs(buf: &mut Buffer, area: Rect, runtime: &Runtime, theme: &Theme) {
                 ""
             };
             let label = format!(" {}{dirty} ", file_label(runtime, id, false));
-            (id, layout::plain(&label, 0, usize::from(area.width)))
+            (id, layout::plain(&label, 0, usize::from(width)))
         })
         .collect();
     let widths: Vec<u16> = items
         .iter()
         .map(|(_, label)| Line::raw(label.as_str()).width() as u16)
         .collect();
-    // Drop tabs from the left until the active one fits.
     let index = items
         .iter()
         .position(|(id, _)| Some(*id) == active)
         .unwrap_or(0);
     let mut first = 0;
-    while first < index && widths[first..=index].iter().sum::<u16>() > area.width {
+    while first < index && widths[first..=index].iter().sum::<u16>() > width {
         first += 1;
     }
-    let mut x = area.x;
-    for ((id, label), width) in items.iter().zip(&widths).skip(first) {
-        if x >= area.right() {
+    let mut x = 0u16;
+    let mut out = vec![];
+    for ((id, label), item_width) in items.into_iter().zip(widths).skip(first) {
+        if x >= width {
             break;
         }
-        let style = if Some(*id) == active {
+        out.push((id, x, label));
+        x = x.saturating_add(item_width);
+    }
+    out
+}
+
+fn tabs(buf: &mut Buffer, area: Rect, runtime: &Runtime, theme: &Theme) {
+    buf.set_style(area, theme.tabs);
+    let app = runtime.app();
+    let active = app
+        .active_view()
+        .and_then(|id| app.view(id))
+        .map(|view| view.document_id);
+    for (id, offset, label) in tab_items(runtime, area.width) {
+        let x = area.x + offset;
+        let style = if Some(id) == active {
             theme.tab_active
         } else {
             theme.tabs
         };
-        buf.set_stringn(x, area.y, label, usize::from(area.right() - x), style);
-        if app.workspace().is_dirty(*id) {
-            let dot = x + width - 2;
+        buf.set_stringn(x, area.y, &label, usize::from(area.right() - x), style);
+        if app.workspace().is_dirty(id) {
+            let dot = x + Line::raw(label.as_str()).width() as u16 - 2;
             if dot < area.right() {
                 buf[(dot, area.y)].set_style(theme.modified);
             }
         }
-        x += width;
     }
 }
 

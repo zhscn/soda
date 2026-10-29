@@ -293,3 +293,78 @@ fn new_help_session_inherits_geometry_before_first_render() {
     // The help popup's border takes two of the rows.
     assert_eq!(session.lines().count(), 3);
 }
+fn selection(host: &Runtime) -> crate::core::Selection {
+    let view = host.app.view(host.app.active_view().unwrap()).unwrap();
+    host.app
+        .workspace()
+        .editor(view.document_id)
+        .unwrap()
+        .model()
+        .session(view.session_id)
+        .unwrap()
+        .selection()
+}
+fn document_text(host: &Runtime) -> String {
+    let view = host.app.view(host.app.active_view().unwrap()).unwrap();
+    host.app
+        .workspace()
+        .editor(view.document_id)
+        .unwrap()
+        .state()
+        .snapshot()
+        .text()
+        .to_owned()
+}
+#[derive(Clone, Default)]
+struct FakeClipboard(std::rc::Rc<std::cell::RefCell<(Vec<String>, Option<String>)>>);
+impl SystemClipboard for FakeClipboard {
+    fn store(&mut self, text: &str) {
+        self.0.borrow_mut().0.push(text.into());
+    }
+    fn load(&mut self) -> Option<String> {
+        self.0.borrow().1.clone()
+    }
+}
+#[test]
+fn copies_reach_the_system_clipboard_and_pastes_read_it() {
+    let mut host = host();
+    let system = FakeClipboard::default();
+    host.set_system_clipboard(Box::new(system.clone()));
+    host.input(TerminalEvent::Paste("one\ntwo".into()));
+    host.input(key(KeyCode::Esc));
+    for ch in "ggyy".chars() {
+        host.input(key(KeyCode::Char(ch)));
+    }
+    assert_eq!(system.0.borrow().0, ["one\n"]);
+    // The system clipboard still holds the same text: the yank stays linewise.
+    system.0.borrow_mut().1 = Some("one\n".into());
+    host.input(key(KeyCode::Char('p')));
+    assert_eq!(document_text(&host), "one\none\ntwo");
+    // Text copied elsewhere replaces it, by character unless it ends a line.
+    system.0.borrow_mut().1 = Some("X".into());
+    host.input(key(KeyCode::Char('P')));
+    assert_eq!(document_text(&host), "one\nXone\ntwo");
+    // Loading does not echo the text back.
+    assert_eq!(system.0.borrow().0, ["one\n"]);
+}
+#[test]
+fn pointer_clicks_place_the_caret_and_drags_select_in_visual_mode() {
+    use crate::interaction::{EditMode, Pointer};
+    let mut host = host();
+    host.input(TerminalEvent::Paste("one\ntwo\nthree".into()));
+    host.input(TerminalEvent::Pointer(Pointer::Drag { anchor: 1, head: 5 }));
+    assert_eq!(host.edit_mode(), EditMode::Visual);
+    assert_eq!(selection(&host).range(), 1..6);
+    host.input(TerminalEvent::Pointer(Pointer::Reveal(9)));
+    assert_eq!(selection(&host).range(), 1..10);
+    host.input(TerminalEvent::Pointer(Pointer::Click(5)));
+    assert_eq!(host.edit_mode(), EditMode::Normal);
+    assert_eq!(selection(&host), crate::core::Selection::caret(5));
+    // Normal mode keeps the caret on a character.
+    host.input(TerminalEvent::Pointer(Pointer::Click(3)));
+    assert_eq!(selection(&host), crate::core::Selection::caret(2));
+    // Modal layers keep the pointer away from the text.
+    host.command(Action::Save { choose_path: true });
+    host.input(TerminalEvent::Pointer(Pointer::Click(8)));
+    assert_eq!(selection(&host), crate::core::Selection::caret(2));
+}

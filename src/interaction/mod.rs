@@ -18,6 +18,8 @@ pub mod picker;
 pub mod shell;
 use picker::{ListMotion, PickerCompletion, PickerEffect};
 pub mod path;
+mod pointer;
+pub use pointer::Pointer;
 mod replace;
 pub use replace::{ReplacePhase, ReplaceSession};
 mod routing;

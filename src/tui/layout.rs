@@ -1,6 +1,9 @@
 use crate::{
     application::Application,
-    core::{ByteOffset, column_width, logical_column_at, step_grapheme},
+    core::{
+        ByteOffset, LogicalColumn, column_width, logical_column_at, offset_at_logical_column,
+        step_grapheme,
+    },
     syntax::{Category, Highlighter},
 };
 use std::num::NonZeroUsize;
@@ -222,6 +225,59 @@ pub(super) fn follow_caret(
                 horizontal_column: left,
             }),
     )
+}
+
+/// The byte offset under a cell of the active view's text area. Rows past
+/// either edge resolve to the lines beyond it, within the document.
+pub(super) fn offset_at(app: &Application, row: isize, column: usize) -> Option<usize> {
+    let view = app.view(app.active_view()?)?;
+    let document = app.workspace().editor(view.document_id)?.model().document();
+    let snapshot = document.snapshot();
+    let top = snapshot.line_of(view.viewport.anchor.offset.0)?;
+    let line = top
+        .saturating_add_signed(row)
+        .min(snapshot.line_count() - 1);
+    let column = LogicalColumn(view.viewport.horizontal_column + column);
+    offset_at_logical_column(snapshot, line, column, document.whitespace().tab_width)
+        .ok()
+        .map(|offset| offset.0)
+}
+/// Scrolls the active view by `lines`, keeping the last line reachable at
+/// the top. When the caret leaves the text area, the second value is where
+/// it comes back: the nearest visible line, at the same column.
+pub(super) fn scroll(
+    app: &Application,
+    lines: isize,
+    rows: u16,
+    caret: Option<usize>,
+) -> Option<(ViewportAdjustment, Option<usize>)> {
+    let id = app.active_view()?;
+    let view = app.view(id)?;
+    let editor = app.workspace().editor(view.document_id)?;
+    let document = editor.model().document();
+    let snapshot = document.snapshot();
+    let tab = document.whitespace().tab_width;
+    let top = snapshot.line_of(view.viewport.anchor.offset.0)?;
+    let top = top
+        .saturating_add_signed(lines)
+        .min(snapshot.line_count() - 1);
+    let head = caret.unwrap_or(editor.model().session(view.session_id)?.selection().head);
+    let line = snapshot.line_of(head)?;
+    let bottom = top + usize::from(rows.max(1)) - 1;
+    let reveal = (line < top || line > bottom).then(|| {
+        let column = logical_column_at(snapshot, ByteOffset(head), tab).unwrap();
+        offset_at_logical_column(snapshot, line.clamp(top, bottom), column, tab)
+            .unwrap()
+            .0
+    });
+    Some((
+        ViewportAdjustment {
+            view: id,
+            anchor: ByteOffset(snapshot.line_start(top)?),
+            horizontal_column: view.viewport.horizontal_column,
+        },
+        reveal,
+    ))
 }
 
 pub(super) struct ViewportAdjustment {
@@ -549,5 +605,30 @@ mod tests {
         assert_eq!(app.view(view).unwrap().viewport, before);
         assert!(projected.cursor.is_none());
         assert!(super::follow_caret(&app, 10, 4, None).unwrap().is_some());
+    }
+    #[test]
+    fn pointer_cells_resolve_to_offsets_and_scrolling_keeps_the_caret_visible() {
+        let mut app = app("a\tb\nl1\nl2\nl3\nl4", Language::PlainText);
+        let view = app.active_view().unwrap();
+        app.dispatch(Event::Edit {
+            view,
+            command: Command::SetSelection(Selection::caret(0)),
+            time: Duration::ZERO,
+        })
+        .unwrap();
+        frame(&mut app, 10, 2).unwrap();
+        // Columns inside a tab resolve to the tab; past the end, to the end.
+        assert_eq!(super::offset_at(&app, 0, 3), Some(1));
+        assert_eq!(super::offset_at(&app, 0, 40), Some(3));
+        assert_eq!(super::offset_at(&app, 1, 1), Some(5));
+        assert_eq!(super::offset_at(&app, -1, 0), Some(0));
+        assert_eq!(super::offset_at(&app, 9, 0), Some(13));
+        let (viewport, reveal) = super::scroll(&app, 3, 2, None).unwrap();
+        assert_eq!(viewport.anchor, ByteOffset(10));
+        assert_eq!(reveal, Some(10));
+        // The last line can scroll to the top and no further.
+        let (viewport, _) = super::scroll(&app, 30, 2, None).unwrap();
+        assert_eq!(viewport.anchor, ByteOffset(13));
+        assert_eq!(super::scroll(&app, -1, 2, None).unwrap().1, None);
     }
 }

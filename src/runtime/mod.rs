@@ -1,7 +1,7 @@
 //! Owner-thread command loop shared by frontends. It owns application and modal
 //! state, reduces every update in order, and executes bounded background tasks.
 use crate::{
-    application::{Application, Event, Operation, Update, ViewId},
+    application::{Application, ClipboardAction, Event, Operation, Update, ViewId},
     core::{ByteOffset, EditError},
     files::{FileCompletion, FileRunner, paths::PathRunner},
     interaction::{
@@ -17,6 +17,14 @@ use std::{
 
 mod shell;
 
+/// The system clipboard as a frontend reaches it. Copies are stored after
+/// they happen; pastes load first, and text that differs from the
+/// application clipboard replaces it.
+pub trait SystemClipboard {
+    fn store(&mut self, text: &str);
+    fn load(&mut self) -> Option<String>;
+}
+
 pub struct Runtime {
     // Workers drop before the application so in-progress file writes can finish.
     files: FileRunner,
@@ -25,6 +33,9 @@ pub struct Runtime {
     paths: PathRunner,
     app: Application,
     layers: Layers,
+    clipboard: Option<Box<dyn SystemClipboard>>,
+    /// The application clipboard revision last stored or loaded.
+    clipboard_revision: u64,
     file_root: PathBuf,
     message: String,
     epoch: Instant,
@@ -49,6 +60,8 @@ impl Runtime {
             paths: PathRunner::new()?,
             app,
             layers: Layers::default(),
+            clipboard: None,
+            clipboard_revision: 0,
             file_root,
             message: String::new(),
             epoch: Instant::now(),
@@ -64,6 +77,10 @@ impl Runtime {
             }
             None => self.command(Command::New),
         }
+    }
+    pub fn set_system_clipboard(&mut self, clipboard: Box<dyn SystemClipboard>) {
+        self.clipboard = Some(clipboard);
+        self.clipboard_revision = self.app.clipboard_revision();
     }
     pub fn app(&self) -> &Application {
         &self.app
@@ -213,8 +230,18 @@ impl Runtime {
     }
     fn reduce(&mut self, event: Event, time: Duration) -> bool {
         let operation = event.operation();
+        if let Event::Clipboard {
+            action: ClipboardAction::Put { .. } | ClipboardAction::Paste,
+            ..
+        } = &event
+        {
+            self.load_clipboard();
+        }
         match self.app.dispatch(event) {
-            Ok(update) => self.accept(update, time),
+            Ok(update) => {
+                self.store_clipboard();
+                self.accept(update, time)
+            }
             Err(error) => {
                 if !matches!(
                     (&operation, &error),
@@ -335,6 +362,33 @@ impl Runtime {
         }
         self.quit |= response.quit;
         true
+    }
+    fn load_clipboard(&mut self) {
+        let Some(text) = self.clipboard.as_mut().and_then(|system| system.load()) else {
+            return;
+        };
+        if text.is_empty() || text == self.app.clipboard() {
+            return;
+        }
+        // Text copied elsewhere pastes by line when it ends a line, as in Vim.
+        let linewise = text.ends_with('\n');
+        if self
+            .app
+            .dispatch(Event::SetClipboard { text, linewise })
+            .is_ok()
+        {
+            self.clipboard_revision = self.app.clipboard_revision();
+        }
+    }
+    fn store_clipboard(&mut self) {
+        let revision = self.app.clipboard_revision();
+        if revision == self.clipboard_revision {
+            return;
+        }
+        self.clipboard_revision = revision;
+        if let Some(system) = &mut self.clipboard {
+            system.store(self.app.clipboard());
+        }
     }
     fn interaction_failed(&mut self, error: EditError, time: Duration) {
         if let Ok(response) = self.layers.close(&self.app, time) {

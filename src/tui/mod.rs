@@ -1,14 +1,17 @@
 //! Terminal input adapter and renderer. Runtime owns command execution,
 //! interaction state and task scheduling; layout reads immutable application state.
+mod clipboard;
 mod input;
 mod layout;
+mod mouse;
 mod theme;
 mod view;
 use crate::{interaction::EditMode, runtime::Runtime, syntax::Highlighter};
 use crossterm::{
     cursor::{Hide, SetCursorStyle, Show},
     event::{
-        self, DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange,
+        self, DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
+        EnableFocusChange, EnableMouseCapture,
     },
     execute,
     style::{Attribute, SetAttribute},
@@ -29,6 +32,7 @@ impl Terminal {
             EnterAlternateScreen,
             EnableBracketedPaste,
             EnableFocusChange,
+            EnableMouseCapture,
             Hide
         )?;
         Ok(guard)
@@ -41,6 +45,7 @@ impl Drop for Terminal {
             SetAttribute(Attribute::Reset),
             DisableBracketedPaste,
             DisableFocusChange,
+            DisableMouseCapture,
             Show,
             SetCursorStyle::DefaultUserShape,
             LeaveAlternateScreen
@@ -96,6 +101,7 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
     let mut highlighter = Highlighter::with_budget(Duration::from_millis(12));
     let mut catching_up = false;
     let mut runtime = Runtime::new(std::env::current_dir()?)?;
+    runtime.set_system_clipboard(Box::new(clipboard::Clipboard::detect()));
     runtime.start(path);
     if let Some(config) = config.then(config_path).flatten() {
         match std::fs::read_to_string(&config) {
@@ -107,6 +113,7 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
         }
     }
     let mut geometry = None;
+    let mut mouse = mouse::Mouse::default();
     while !runtime.quit_requested() {
         runtime.poll();
         let (width, height) = terminal::size()?;
@@ -138,7 +145,13 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
         // While highlighting catches up, check for input without waiting.
         let wait = Duration::from_millis(if catching_up { 0 } else { 30 });
         if !runtime.quit_requested() && event::poll(wait)? {
-            runtime.input(input::normalize(event::read()?));
+            match event::read()? {
+                event::Event::Mouse(event) => {
+                    let areas = view::Areas::new(&runtime, width, height);
+                    mouse.handle(event, &mut runtime, &areas);
+                }
+                event => runtime.input(input::normalize(event)),
+            }
         }
     }
     Ok(())

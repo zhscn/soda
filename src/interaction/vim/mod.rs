@@ -2,6 +2,7 @@
 mod execute;
 mod motion;
 mod parser;
+pub(super) use execute::visual_selection;
 pub use motion::Motion;
 pub(super) use parser::State;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
