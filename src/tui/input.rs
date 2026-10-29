@@ -4,6 +4,11 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 fn normalize_key(key: KeyEvent) -> KeyStroke {
     let code = match key.code {
+        // The kitty protocol reports Shift with the unshifted letter; legacy
+        // encodings send the shifted one.
+        KeyCode::Char(ch) if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            Key::Char(ch.to_ascii_uppercase())
+        }
         KeyCode::Char(ch) => Key::Char(ch),
         KeyCode::Enter => Key::Enter,
         KeyCode::Esc => Key::Esc,
@@ -62,6 +67,22 @@ mod tests {
         assert!(normalize_key(key).alt);
         key.modifiers |= KeyModifiers::SUPER;
         assert!(normalize_key(key).unsupported_modifiers);
+    }
+    #[test]
+    fn shifted_letters_read_the_same_in_both_encodings() {
+        let kitty = normalize_key(KeyEvent::new(
+            KeyCode::Char('a'),
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        ));
+        let legacy = normalize_key(KeyEvent::new(
+            KeyCode::Char('A'),
+            KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+        ));
+        assert_eq!(kitty, legacy);
+        assert_eq!(kitty.code, Key::Char('A'));
+        let enter = normalize_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL));
+        assert_eq!(enter.code, Key::Enter);
+        assert!(enter.control);
     }
     #[test]
     fn adapter_preserves_paste_and_does_not_assign_focus_behavior() {

@@ -11,7 +11,8 @@ use crossterm::{
     cursor::{Hide, SetCursorStyle, Show},
     event::{
         self, DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
-        EnableFocusChange, EnableMouseCapture,
+        EnableFocusChange, EnableMouseCapture, KeyboardEnhancementFlags,
+        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
     style::{Attribute, SetAttribute},
@@ -22,11 +23,26 @@ use std::{
     path::PathBuf,
     time::Duration,
 };
-struct Terminal;
+/// Restores the terminal when dropped, also while a panic unwinds.
+struct Terminal {
+    /// Whether the terminal took the kitty keyboard protocol.
+    enhanced: bool,
+}
 impl Terminal {
     fn enter() -> io::Result<Self> {
         terminal::enable_raw_mode()?;
-        let guard = Self;
+        let mut guard = Self { enhanced: false };
+        // The kitty keyboard protocol tells apart keys that legacy encodings
+        // merge, such as Ctrl-Enter from Enter and Ctrl-Backspace from
+        // Backspace. Terminals that do not answer the query keep the legacy
+        // encoding.
+        if terminal::supports_keyboard_enhancement().unwrap_or(false) {
+            execute!(
+                io::stdout(),
+                PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+            )?;
+            guard.enhanced = true;
+        }
         execute!(
             io::stdout(),
             EnterAlternateScreen,
@@ -40,6 +56,9 @@ impl Terminal {
 }
 impl Drop for Terminal {
     fn drop(&mut self) {
+        if self.enhanced {
+            let _ = execute!(io::stdout(), PopKeyboardEnhancementFlags);
+        }
         let _ = execute!(
             io::stdout(),
             SetAttribute(Attribute::Reset),

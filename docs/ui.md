@@ -81,6 +81,10 @@ i Insert  / Search  : Commands  F1 Help                        消息行
 
 没有打开的文档时，编辑区居中显示常用入口。
 
+## 键盘
+
+启动时查询终端是否支持 kitty 键盘协议；支持时开启 disambiguate 模式，退出（包括 panic）时恢复。这样 Ctrl-Enter、Ctrl-Backspace、Ctrl-I 与 Tab、Ctrl-[ 与 Esc 都能区分，`<c-ret>` 这类绑定才会生效。不支持的终端保持传统编码，这些组合键收不到或与基本键合并。协议用小写字母加 Shift 报告大写字母，前端把它规范成大写字母，与传统编码一致。
+
 ## 鼠标
 
 启用鼠标捕获。`mouse` 模块用当帧的区域划分解析事件：标签栏中的点击按标签位置找到文档；编辑区中的点击和拖动由 `layout::offset_at` 按视口顶行和水平滚动列换算成字节偏移，点在行号栏时取行首；滚轮由 `layout::scroll` 计算新的视口，必要时给出光标回到可见区的位置。行为见[交互层](interaction.md#鼠标)。
