@@ -17,7 +17,9 @@
 mod clipboard;
 pub use clipboard::ClipboardAction;
 mod display;
+mod highlights;
 mod tidy;
+pub use highlights::{Face, Highlight, MARKS};
 mod windows;
 pub use display::Placement;
 pub use windows::{Area, Axis, Direction, Node, Side, Windows};
@@ -143,6 +145,19 @@ pub enum Event {
         name: String,
         text: String,
     },
+    /// Highlights a pattern in one document, or everywhere. Without a face,
+    /// a mark takes the next colour.
+    Highlight {
+        document: Option<DocumentId>,
+        face: Option<Face>,
+        pattern: regex::Regex,
+    },
+    /// Removes the highlights of a pattern, or all, from a document and
+    /// everywhere.
+    Unhighlight {
+        document: Option<DocumentId>,
+        pattern: Option<String>,
+    },
 }
 /// Identity of an attempted operation, retained when reduction fails.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -230,6 +245,7 @@ pub enum Error {
     UnknownView,
     LastWindow,
     SideWindow,
+    NoHighlight,
     Edit(EditError),
     File(FileError),
 }
@@ -249,6 +265,7 @@ impl fmt::Display for Error {
             Self::UnknownView => f.write_str("unknown view"),
             Self::LastWindow => f.write_str("cannot close the last window"),
             Self::SideWindow => f.write_str("side windows cannot be split"),
+            Self::NoHighlight => f.write_str("no such highlight"),
             Self::Edit(e) => e.fmt(f),
             Self::File(e) => e.fmt(f),
         }
@@ -259,7 +276,7 @@ impl std::error::Error for Error {
         match self {
             Self::Edit(e) => Some(e),
             Self::File(e) => Some(e),
-            Self::UnknownView | Self::LastWindow | Self::SideWindow => None,
+            Self::UnknownView | Self::LastWindow | Self::SideWindow | Self::NoHighlight => None,
         }
     }
 }
@@ -293,6 +310,7 @@ pub struct Application {
     context: Option<ViewId>,
     /// What was edited since each file was loaded or saved.
     touched: tidy::Touched,
+    highlights: highlights::Highlights,
 }
 impl Application {
     pub fn new(service: FileService) -> Self {
@@ -332,6 +350,10 @@ impl Application {
     }
     pub fn options(&self) -> &crate::options::Options {
         &self.options
+    }
+    /// The highlights shown in a document, global ones first.
+    pub fn highlights(&self, document: DocumentId) -> impl Iterator<Item = &Highlight> {
+        self.highlights.of(document)
     }
     /// Gives a document the whitespace its options choose; only plain text
     /// takes them.
@@ -848,6 +870,7 @@ impl Application {
                 }
                 self.options.forget(document);
                 self.touched.forget(document);
+                self.highlights.forget(document);
                 self.repair_windows();
                 update.closed_views = ids;
                 update.closed_documents.push(document);
@@ -1008,6 +1031,20 @@ impl Application {
                 self.accept_file(result.file, None, &mut update);
             }
             Event::SetContext(view) => self.context = view,
+            Event::Highlight {
+                document,
+                face,
+                pattern,
+            } => {
+                self.highlights.add(document, face, pattern);
+                update.options_changed = true;
+            }
+            Event::Unhighlight { document, pattern } => {
+                if self.highlights.remove(document, pattern.as_deref()) == 0 {
+                    return Err(Error::NoHighlight);
+                }
+                update.options_changed = true;
+            }
             Event::AppendScratch { name, text } => self.append_scratch(&name, text, &mut update)?,
             Event::PollFiles => {
                 update.files = self.workspace.poll_file_results();

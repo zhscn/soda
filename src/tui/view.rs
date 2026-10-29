@@ -246,6 +246,9 @@ fn spans(buf: &mut Buffer, x: u16, y: u16, width: u16, spans: &[Span], base: Sty
         if span.whitespace {
             style = style.patch(theme.whitespace);
         }
+        if let Some(face) = span.face {
+            style = style.patch(theme.face(face));
+        }
         if x >= right {
             break;
         }

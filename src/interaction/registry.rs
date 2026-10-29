@@ -104,6 +104,28 @@ const DEPARTURE: &[Slot] = &[
     OPTIONAL_PATH,
 ];
 const KEYS: Slot = slot("KEYS", SlotKind::Word);
+const FACE: Slot = slot(
+    "FACE",
+    SlotKind::Choice(&[
+        word("todo", "Bold yellow, for markers such as TODO"),
+        word("error", "Red"),
+        word("mark", "The next of the mark backgrounds"),
+        word("mark1", "First mark background"),
+        word("mark2", "Second mark background"),
+        word("mark3", "Third mark background"),
+        word("mark4", "Fourth mark background"),
+    ]),
+);
+fn highlight(args: &str, local: bool) -> Result<Command, String> {
+    let (face, pattern) = split(args);
+    let face = crate::application::Face::parse(face)?;
+    let pattern = regex::Regex::new(&required(pattern)?).map_err(|e| e.to_string())?;
+    Ok(Command::Highlight {
+        local,
+        face,
+        pattern,
+    })
+}
 const EVENT: Slot = slot(
     "EVENT",
     SlotKind::Choice(&[
@@ -675,6 +697,27 @@ pub static BUILTINS: &[Builtin] = &[
         }],
         "Show TEXT in the message line",
         |a| Ok(Command::Echo(a.to_owned()))
+    ),
+    builtin!(
+        "highlight",
+        [FACE, slot("PATTERN", SlotKind::Rest)],
+        "Highlight a regular expression in every document",
+        |a| highlight(a, false)
+    ),
+    builtin!(
+        "highlight-local",
+        [FACE, slot("PATTERN", SlotKind::Rest)],
+        "Highlight a regular expression in the current document",
+        |a| highlight(a, true)
+    ),
+    builtin!(
+        "unhighlight",
+        [Slot {
+            required: false,
+            ..slot("PATTERN", SlotKind::Rest)
+        }],
+        "Remove the highlights of PATTERN, or all, here and everywhere",
+        |a| Ok(Command::Unhighlight((!a.is_empty()).then(|| a.to_owned())))
     ),
     builtin!(
         "jump-to",

@@ -56,7 +56,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 
 命令行在执行时展开，而不是在定义时展开：
 - `%opt{NAME}`：选项在当前文档的值。
-- `%val{NAME}`：编辑器状态：`file`、`name`、`kind`、`line`、`column`、`selection`、`root`、`mode`、`column-limit`。
+- `%val{NAME}`：编辑器状态：`file`、`name`、`kind`、`line`、`column`、`selection`、`word`、`root`、`mode`、`column-limit`。
 - `%arg{N}`、`%arg{@}`：用户命令的参数（已有）。
 
 用户命令按 `;` 分成语句，每条语句在轮到它执行时才展开 `%opt` 和 `%val`。这样 `goto 10; shell echo %val{line}` 读到的是跳转后的行号。命令名和不读状态的语句仍在执行前检查，读取状态的语句在展开后检查参数，失败时停止后续语句。展开结果按原文替换，不再拆分；包含空格的值只适合放在最后一个参数位。`map`、`define-command`（以及以后的 `hook`）的参数是延后执行的命令行，其中的展开保留到执行时。

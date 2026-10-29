@@ -35,9 +35,9 @@ Ctrl-C in Normal also stops run, shell and grep; ]q / [q step through their resu
 Space j jumps to two typed characters by label; Space w picks a window by label.
 Printable characters insert text in Insert and prompts.
 Unbound Normal and Visual keys use the Vim grammar above.
-Command lines read state with %opt{NAME} and %val{file|name|kind|line|column|selection|root|mode|column-limit}.
+Command lines read state with %opt{NAME} and %val{file|name|kind|line|column|selection|word|root|mode|column-limit}.
 Hooks: hook open|new|save|close|mode|focus FILTER COMMAND runs COMMAND when FILTER matches.
-Configuration: ~/.config/soda/init holds map, unmap, define-command, hook, set and display lines.";
+Configuration: ~/.config/soda/init holds map, unmap, define-command, hook, set, display and highlight lines.";
 
 /// Help generated from the effective key tables and command registry.
 pub fn text(keymap: &Keymap, registry: &Registry) -> String {

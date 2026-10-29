@@ -97,6 +97,14 @@ pub enum Command {
     Echo(String),
     /// Moves to one of the places two typed characters occur on screen.
     JumpTo,
+    /// Highlights a pattern everywhere, or in the current document.
+    Highlight {
+        local: bool,
+        face: Option<crate::application::Face>,
+        pattern: regex::Regex,
+    },
+    /// Removes the highlights of a pattern, or all of them.
+    Unhighlight(Option<String>),
     /// Focuses a window chosen by its label.
     WindowPick,
     /// Shows recent messages in `*messages*`.
@@ -232,7 +240,7 @@ impl Layers {
                 }
             }
             _ => Err(
-                "only map, unmap, define-command, hook, unhook, set and display are allowed here"
+                "only map, unmap, define-command, hook, unhook, set, display and highlight are allowed here"
                     .into(),
             ),
         }
@@ -253,7 +261,9 @@ impl Layers {
                 .registry
                 .parse_builtin(line)
                 .and_then(|command| match command {
-                    Command::SetOption { local: false, .. } | Command::Display { .. } => {
+                    Command::SetOption { local: false, .. }
+                    | Command::Display { .. }
+                    | Command::Highlight { local: false, .. } => {
                         settings.push((index + 1, command));
                         Ok(())
                     }
@@ -634,6 +644,34 @@ impl Layers {
             Command::Stop => response.stop = true,
             Command::Messages => response.messages = true,
             Command::Echo(text) => response.message = Message::Set(text),
+            Command::Highlight {
+                local,
+                face,
+                pattern,
+            } => {
+                let document = app
+                    .active_view()
+                    .and_then(|id| app.view(id))
+                    .map(|view| view.document_id);
+                if local && document.is_none() {
+                    response.message = Message::Set("No document to highlight in".into());
+                } else {
+                    response.events.push(Event::Highlight {
+                        document: document.filter(|_| local),
+                        face,
+                        pattern,
+                    });
+                }
+            }
+            Command::Unhighlight(pattern) => {
+                let document = app
+                    .active_view()
+                    .and_then(|id| app.view(id))
+                    .map(|view| view.document_id);
+                response
+                    .events
+                    .push(Event::Unhighlight { document, pattern });
+            }
             Command::JumpTo => {
                 if let Some(view) = app.active_view() {
                     let session = super::labels::LabelSession::jump(view, self.page_rows);

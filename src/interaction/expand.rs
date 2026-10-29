@@ -16,6 +16,7 @@ pub const VALUES: &[(&str, &str)] = &[
         "One-based caret column, counting tabs to their stop",
     ),
     ("selection", "Selected text"),
+    ("word", "The word at the caret: letters, digits and _"),
     ("root", "Project root"),
     (
         "column-limit",
@@ -108,6 +109,22 @@ fn value(name: &str, state: &State) -> Result<String, String> {
             let line = snapshot.line_of(head).unwrap();
             match name {
                 "line" => (line + 1).to_string(),
+                "word" => {
+                    let start = snapshot.line_start(line).unwrap();
+                    let end = snapshot.line_content_range(line).unwrap().end;
+                    let text = snapshot.byte_slice(start..end).unwrap().to_string();
+                    let at = head - start;
+                    let part = |c: char| c.is_alphanumeric() || c == '_';
+                    let from = text[..at]
+                        .char_indices()
+                        .rfind(|(_, c)| !part(*c))
+                        .map_or(0, |(i, c)| i + c.len_utf8());
+                    let to = text[at..].find(|c| !part(c)).map_or(text.len(), |i| at + i);
+                    if from == to {
+                        return Err("%val{word}: no word at the caret".into());
+                    }
+                    text[from..to].to_owned()
+                }
                 "column" => {
                     let tab = editor.model().document().whitespace().tab_width;
                     let column = crate::core::logical_column_at(

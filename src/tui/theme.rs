@@ -35,6 +35,8 @@ pub(super) struct Theme {
     pub key: Style,
     /// Jump labels over the text.
     pub label: Style,
+    pub todo: Style,
+    pub marks: [Style; crate::application::MARKS as usize],
 }
 
 struct Palette {
@@ -168,11 +170,21 @@ impl Theme {
             },
             key: Style::new().fg(c(p.magenta)).add_modifier(Modifier::BOLD),
             label: badge(p.magenta),
+            todo: Style::new().fg(c(p.yellow)).add_modifier(Modifier::BOLD),
+            marks: [p.yellow, p.green, p.blue, p.magenta]
+                .map(|bg| Style::new().fg(c(p.bg)).bg(c(bg))),
         }
     }
 }
 
 impl Theme {
+    pub fn face(&self, face: crate::application::Face) -> Style {
+        match face {
+            crate::application::Face::Todo => self.todo,
+            crate::application::Face::Error => self.error,
+            crate::application::Face::Mark(n) => self.marks[usize::from(n)],
+        }
+    }
     pub fn category(&self, category: Category) -> Style {
         self.syntax[CATEGORY_ORDER.iter().position(|c| *c == category).unwrap()]
     }

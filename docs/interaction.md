@@ -104,7 +104,7 @@ BeginUndoGroup 保存操作开始前的选区，EndUndoGroup 保存结束时的�
 
 用户定义命令的命令体用 `;` 分隔多条命令行，`\;` 表示字面分号。`%arg{1}` 到 `%arg{9}` 替换为按空白拆分的调用参数，`%arg{@}` 替换为完整参数。展开在执行时进行，嵌套用户命令最多展开 16 层，超过时整条命令失败且不执行任何部分；未知命令名和参数错误同样在执行前报告。展开得到的命令依次执行，与 `Response.commands` 一样在第一次失败时停止；某条命令打开交互组件后，后续命令被阻止。Rust 处理函数在轮到它时才读取 Application，返回 `Named` 会被拒绝，避免处理函数之间的递归分发。
 
-`%opt{NAME}` 替换为选项在当前文档的值，`%val{NAME}` 替换为编辑器状态：`file`、`name`、`kind`、`line`、`column`（一起始，制表符按制表位计）、`selection`、`root`、`mode`、`column-limit`（clang-format 的 `ColumnLimit`，没有时为 0）。它们在语句执行时才展开：`:` 中的一行在执行前展开；用户命令的每条语句在轮到它时展开，所以 `goto 10; shell echo %val{line}` 读到跳转后的行号。读取状态的语句在执行前只检查命令名，参数在展开后检查；展开失败或参数不合法时，这条语句和其后的语句都不执行。命令名本身不能来自展开。`map` 和 `define-command` 的参数是以后才执行的命令行，其中的展开保留原样。展开结果按原文替换，不再拆分。
+`%opt{NAME}` 替换为选项在当前文档的值，`%val{NAME}` 替换为编辑器状态：`file`、`name`、`kind`、`line`、`column`（一起始，制表符按制表位计）、`selection`、`word`、`root`、`mode`、`column-limit`（clang-format 的 `ColumnLimit`，没有时为 0）。它们在语句执行时才展开：`:` 中的一行在执行前展开；用户命令的每条语句在轮到它时展开，所以 `goto 10; shell echo %val{line}` 读到跳转后的行号。读取状态的语句在执行前只检查命令名，参数在展开后检查；展开失败或参数不合法时，这条语句和其后的语句都不执行。命令名本身不能来自展开。`map` 和 `define-command` 的参数是以后才执行的命令行，其中的展开保留原样。展开结果按原文替换，不再拆分。
 
 ### 键位上下文
 
@@ -156,7 +156,7 @@ Shift 加方向键、Home 和 End 扩展选区，对应 `extend-` 前缀的同�
 
 ### 配置文件
 
-启动时读取 `$XDG_CONFIG_HOME/soda/init`，未设置时读取 `~/.config/soda/init`；文件不存在时不报错。每行是一条命令行，空行和 `#` 开头的行被忽略。配置文件只接受 `map`、`unmap`、`define-command`、`hook`、`unhook`、`set` 和 `display`，打开文件、切换模式等操作不能在启动时执行。错误行被跳过并记录行号，其余行照常生效，第一条错误显示在消息行。配置文件在第一个文档创建之前执行，所以其中的钩子也作用于启动时的文档。`--no-config` 跳过配置文件。
+启动时读取 `$XDG_CONFIG_HOME/soda/init`，未设置时读取 `~/.config/soda/init`；文件不存在时不报错。每行是一条命令行，空行和 `#` 开头的行被忽略。配置文件只接受 `map`、`unmap`、`define-command`、`hook`、`unhook`、`set`、`display` 和 `highlight`，打开文件、切换模式等操作不能在启动时执行。错误行被跳过并记录行号，其余行照常生效，第一条错误显示在消息行。配置文件在第一个文档创建之前执行，所以其中的钩子也作用于启动时的文档。`--no-config` 跳过配置文件。
 
 ```
 # ~/.config/soda/init
@@ -219,6 +219,8 @@ hook open .*/Makefile set-local expand-tab false
 | `run CMD` | `make` | 后台运行命令，输出流式写入 `*run*` |
 | `stop` | | 停止 `run`、`shell`/`pipe` 和项目搜索 |
 | `messages` | | 在 `*messages*` 中显示最近的消息 |
+| `highlight FACE PATTERN` / `highlight-local FACE PATTERN` | | 在所有文档 / 当前文档中高亮正则表达式 |
+| `unhighlight [PATTERN]` | | 去掉某个模式的高亮，或者全部 |
 | `jump-to` | | 输入两个字符，再按屏幕上的标签跳到那里（`<space>j`） |
 | `window-pick` | | 按标签选择窗口；只有两个窗口时直接切换（`<space>w`） |
 | `echo [TEXT]` | | 在消息行显示文字，常与 `%val{}` 一起用 |
@@ -433,6 +435,23 @@ Application 拥有一个跨文档共享的剪贴板。ClipboardAction 提供复�
 - 打开交互层（命令行、搜索、帮助等）时，编辑区不响应鼠标。
 
 启用鼠标捕获后，终端自身的文本选择通常要按住 Shift 才能使用。
+
+## 高亮模式
+
+`highlight FACE PATTERN` 在所有文档中高亮正则表达式的每处匹配，`highlight-local` 只作用于当前文档，与 kakoune 的 regex highlighter 相同。高亮只在前端绘制可见行时匹配，不改变文本或语法分类，叠加在语法颜色之上，重叠时后开始的匹配优先。
+
+- **外观**：`todo`（加粗黄色）、`error`（红色）、`mark1` 到 `mark4`（四种背景色）；`mark` 依次取下一种背景色，用于逐个标记符号。
+- **替换与删除**：同一模式再次添加时替换原来的外观。`unhighlight PATTERN` 从当前文档和全局中去掉这个模式，不带参数时去掉全部；没有可去掉的高亮时报错。文档关闭时它的高亮一并删除。
+- **配置**：配置文件可以使用 `highlight`；`highlight-local` 需要文档，只能在命令行、键位或钩子中使用。
+
+TODO 高亮和 symbol-overlay 都由这个原语加 `%val{word}`（光标处由字母、数字和 `_` 组成的词）在配置中组合：
+
+```
+highlight todo \b(TODO|FIXME|XXX)\b
+define-command mark-word highlight-local mark \b%val{word}\b
+map normal <space>i mark-word
+map normal <space>I unhighlight
+```
 
 ## 屏幕标签跳转
 

@@ -19,6 +19,7 @@ pub(super) struct Span {
     pub category: Option<Category>,
     /// A visible tab or trailing space mark.
     pub whitespace: bool,
+    pub face: Option<crate::application::Face>,
 }
 /// One visible document line: its zero-based number and clipped text.
 pub(super) struct Row {
@@ -54,6 +55,7 @@ pub(super) fn row(
         detail: text.len(),
         categories: &[],
         whitespace: false,
+        faces: &[],
     };
     styled_row(text, byte_start, marks, left, width, tab)
 }
@@ -67,6 +69,8 @@ struct Marks<'a> {
     categories: &'a [(std::ops::Range<usize>, Category)],
     /// Mark tabs and trailing spaces.
     whitespace: bool,
+    /// Highlighted ranges in the row, ordered by start.
+    faces: &'a [(std::ops::Range<usize>, crate::application::Face)],
 }
 fn styled_row(
     text: &str,
@@ -82,6 +86,7 @@ fn styled_row(
         detail,
         categories,
         whitespace,
+        faces,
     } = marks;
     // Spaces and tabs from here to the end of the line trail.
     let trailing = text.trim_end_matches(['\n', '\r']);
@@ -126,12 +131,19 @@ fn styled_row(
                 .get(next_category)
                 .filter(|(range, _)| range.start <= offset)
                 .map(|(_, category)| *category);
+            // The last highlight to start wins where they overlap.
+            let face = faces
+                .iter()
+                .rev()
+                .find(|(range, _)| range.start <= offset && offset < range.end)
+                .map(|(_, face)| *face);
             if let Some(last) = spans.last_mut().filter(|last| {
                 last.selected == selected
                     && last.matched == matched
                     && last.detail == secondary
                     && last.category == category
                     && last.whitespace == marked
+                    && last.face == face
             }) {
                 last.text.push_str(&rendered);
             } else {
@@ -142,6 +154,7 @@ fn styled_row(
                     detail: secondary,
                     category,
                     whitespace: marked,
+                    face,
                 });
             }
         }
@@ -169,6 +182,7 @@ pub(super) fn candidate_row<T>(
         detail: detail.unwrap_or(text.len()),
         categories: &[],
         whitespace: false,
+        faces: &[],
     };
     styled_row(text, 0, marks, 0, width, NonZeroUsize::new(4).unwrap())
 }
@@ -357,14 +371,26 @@ pub(super) fn frame(
             .filter(|column| *column < usize::from(width))
             .map(|column| column as u16),
     };
+    let patterns: Vec<_> = app.highlights(view.document_id).collect();
     for number in top..bottom {
         let text = snapshot.line(number).unwrap();
+        let mut faces: Vec<_> = patterns
+            .iter()
+            .flat_map(|h| {
+                h.pattern
+                    .find_iter(&text)
+                    .filter(|m| !m.is_empty())
+                    .map(|m| (m.range(), h.face))
+            })
+            .collect();
+        faces.sort_by_key(|(range, _)| range.start);
         let marks = Marks {
             selection: state.selection().range(),
             matches: &[],
             detail: text.len(),
             categories: highlights.get(number - top).map_or(&[], Vec::as_slice),
             whitespace: show_whitespace,
+            faces: &faces,
         };
         output.push(Row {
             line: number,
@@ -482,6 +508,24 @@ mod tests {
     }
     fn joined(spans: Vec<Span>) -> String {
         spans.into_iter().map(|span| span.text).collect()
+    }
+    #[test]
+    fn highlighted_patterns_style_their_spans() {
+        let mut app = app("a TODO b TODO", Language::PlainText);
+        app.dispatch(Event::Highlight {
+            document: None,
+            face: Some(crate::application::Face::Todo),
+            pattern: regex::Regex::new("TODO").unwrap(),
+        })
+        .unwrap();
+        let mut frame = frame(&mut app, 20, 2).unwrap();
+        let spans = std::mem::take(&mut frame.rows[0].spans);
+        let faced: Vec<_> = spans
+            .iter()
+            .filter(|span| span.face.is_some())
+            .map(|span| span.text.as_str())
+            .collect();
+        assert_eq!(faced, ["TODO", "TODO"]);
     }
     #[test]
     fn whitespace_marks_and_the_ruler_follow_their_options() {
