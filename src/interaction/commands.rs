@@ -76,6 +76,14 @@ pub enum Command {
     GrepStep {
         backward: bool,
     },
+    /// Sets an option globally, or for the current document.
+    SetOption {
+        local: bool,
+        name: &'static str,
+        value: crate::options::Value,
+    },
+    /// Drops the current document's own value of an option.
+    UnsetOption(&'static str),
     /// Sets where documents of a kind are shown.
     Display {
         kind: String,
@@ -94,6 +102,12 @@ pub enum WindowCommand {
     Cycle {
         backward: bool,
     },
+}
+/// The outcome of configuration text, by one-based line number.
+pub struct Sourced {
+    pub errors: Vec<(usize, String)>,
+    /// Settings the application keeps, to be executed in order.
+    pub settings: Vec<(usize, Command)>,
 }
 /// How `close`, `reload` and `quit` treat a document with unsaved changes.
 /// Without one, they ask through the command line.
@@ -140,13 +154,16 @@ impl Layers {
                 .unbind(context, &keys)
                 .map_err(|e| e.to_string()),
             Command::Define { name, body } => self.registry.define(name, body),
-            _ => Err("only map, unmap and define-command are allowed here".into()),
+            _ => Err("only map, unmap, define-command, set and display are allowed here".into()),
         }
     }
     /// Applies configuration text line by line. Failed lines are skipped and
-    /// reported with their one-based line numbers.
-    pub fn source(&mut self, text: &str) -> Vec<(usize, String)> {
+    /// reported with their one-based line numbers. Settings that live in the
+    /// application (`set`, `display`) come back to be executed, with their
+    /// line numbers.
+    pub fn source(&mut self, text: &str) -> Sourced {
         let mut errors = vec![];
+        let mut settings = vec![];
         for (index, line) in text.lines().enumerate() {
             let line = line.trim();
             if line.is_empty() || line.starts_with('#') {
@@ -155,12 +172,18 @@ impl Layers {
             let result = self
                 .registry
                 .parse_builtin(line)
-                .and_then(|command| self.configure(command));
+                .and_then(|command| match command {
+                    Command::SetOption { local: false, .. } | Command::Display { .. } => {
+                        settings.push((index + 1, command));
+                        Ok(())
+                    }
+                    command => self.configure(command),
+                });
             if let Err(error) = result {
                 errors.push((index + 1, error));
             }
         }
-        errors
+        Sourced { errors, settings }
     }
     pub fn set_page_rows(&mut self, rows: usize) {
         self.page_rows = rows;
@@ -496,6 +519,31 @@ impl Layers {
             }
             Command::GrepStep { backward } => {
                 super::grep::step(app, file_root, backward, time, &mut response)
+            }
+            Command::SetOption { local, name, value } => {
+                let document = app
+                    .active_view()
+                    .and_then(|id| app.view(id))
+                    .map(|view| view.document_id);
+                let scope = match (local, document) {
+                    (false, _) => Some(crate::options::Scope::Global),
+                    (true, Some(document)) => Some(crate::options::Scope::Document(document)),
+                    (true, None) => None,
+                };
+                match scope {
+                    Some(scope) => response
+                        .events
+                        .push(Event::SetOption { scope, name, value }),
+                    None => response.message = Message::Set("No document to set it for".into()),
+                }
+            }
+            Command::UnsetOption(name) => {
+                if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
+                    response.events.push(Event::UnsetOption {
+                        document: view.document_id,
+                        name,
+                    });
+                }
             }
             Command::Display { kind, placement } => {
                 response.events.push(Event::SetDisplay { kind, placement })

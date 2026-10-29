@@ -17,20 +17,36 @@ pub enum Command {
     SetSelection(Selection),
     Apply(Transaction),
     SetLanguage(Language),
+    /// Whitespace settings for plain text; other languages ignore them.
+    SetWhitespace(crate::language::WhitespacePolicy),
     Undo,
     BeginUndoGroup(Selection),
     EndUndoGroup(Selection),
     Redo,
-    Move { motion: Motion, extend: bool },
-    Delete { direction: Direction, smart: bool },
+    Move {
+        motion: Motion,
+        extend: bool,
+    },
+    Delete {
+        direction: Direction,
+        smart: bool,
+    },
     DeleteWord(Direction),
     SelectAll,
-    Goto { line: usize, column: usize },
+    Goto {
+        line: usize,
+        column: usize,
+    },
     InsertTab,
     InsertLiteralTab,
-    IndentSelection { outdent: bool },
+    IndentSelection {
+        outdent: bool,
+    },
     SetSearchQuery(SearchQuery),
-    Find { backward: bool, wrap: bool },
+    Find {
+        backward: bool,
+        wrap: bool,
+    },
     ReplaceCurrent(String),
     ReplaceAll(String),
     ReloadText(String),
@@ -132,6 +148,7 @@ impl Editor {
                 | Command::Redo
                 | Command::EndUndoGroup(_)
                 | Command::SetLanguage(_)
+                | Command::SetWhitespace(_)
                 | Command::ReloadText(_)
         ) {
             history.end();
@@ -251,6 +268,10 @@ impl Editor {
             }
             Command::Undo => Step::Done(document.restore(id, false)?),
             Command::Redo => Step::Done(document.restore(id, true)?),
+            Command::SetWhitespace(policy) => {
+                *language_changed = document.set_whitespace(policy);
+                Step::Done(None)
+            }
             Command::SetLanguage(language) => {
                 *language_changed = document.configure(language)?;
                 if *language_changed {

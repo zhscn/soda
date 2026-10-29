@@ -24,8 +24,17 @@ impl From<&CppRules> for Language {
 
 #[derive(Clone)]
 enum Session {
-    PlainText,
+    /// Plain text keeps whitespace settings that options choose.
+    PlainText(crate::language::WhitespacePolicy),
     Cpp(CppSession),
+}
+/// Plain text indents with four spaces until options say otherwise.
+pub(crate) fn plain_whitespace() -> crate::language::WhitespacePolicy {
+    crate::language::WhitespacePolicy {
+        indent_width: 4,
+        tab_width: std::num::NonZeroUsize::new(4).unwrap(),
+        tabs: crate::language::TabPolicy::Never,
+    }
 }
 #[derive(Clone)]
 pub(super) struct LanguageSession {
@@ -35,36 +44,44 @@ impl LanguageSession {
     pub fn new(language: Language) -> Self {
         Self {
             inner: match language {
-                Language::PlainText => Session::PlainText,
+                Language::PlainText => Session::PlainText(plain_whitespace()),
                 Language::Cpp(rules) => Session::Cpp(CppSession::new(rules)),
             },
         }
     }
     pub fn description(&self) -> Language {
         match &self.inner {
-            Session::PlainText => Language::PlainText,
+            Session::PlainText(_) => Language::PlainText,
             Session::Cpp(session) => Language::Cpp(session.rules().clone()),
         }
     }
     pub fn configure(&mut self, language: Language) {
         match (&mut self.inner, language) {
             (Session::Cpp(session), Language::Cpp(rules)) => session.set_rules(rules),
+            (Session::PlainText(_), Language::PlainText) => {}
             (_, language) => *self = Self::new(language),
+        }
+    }
+    /// Sets plain text whitespace; other languages keep their own rules.
+    /// Returns whether anything changed.
+    pub fn set_whitespace(&mut self, policy: crate::language::WhitespacePolicy) -> bool {
+        match &mut self.inner {
+            Session::PlainText(current) if *current != policy => {
+                *current = policy;
+                true
+            }
+            _ => false,
         }
     }
     pub fn whitespace(&self) -> crate::language::WhitespacePolicy {
         match &self.inner {
             Session::Cpp(session) => session.rules().whitespace().clone(),
-            Session::PlainText => crate::language::WhitespacePolicy {
-                indent_width: 4,
-                tab_width: std::num::NonZeroUsize::new(4).unwrap(),
-                tabs: crate::language::TabPolicy::Never,
-            },
+            Session::PlainText(policy) => policy.clone(),
         }
     }
     pub fn triggers(&self, ch: char) -> bool {
         match &self.inner {
-            Session::PlainText => false,
+            Session::PlainText(_) => false,
             Session::Cpp(session) => session.triggers(ch),
         }
     }
@@ -74,7 +91,7 @@ impl LanguageSession {
         position: usize,
     ) -> Result<EnterAdvice, EditError> {
         match &mut self.inner {
-            Session::PlainText => Ok(EnterAdvice::default()),
+            Session::PlainText(_) => Ok(EnterAdvice::default()),
             Session::Cpp(session) => session.enter_advice(snapshot, position),
         }
     }
@@ -84,7 +101,7 @@ impl LanguageSession {
         request: IndentRequest,
     ) -> Result<IndentAdvice, EditError> {
         match &mut self.inner {
-            Session::PlainText => Ok(IndentAdvice::Unavailable),
+            Session::PlainText(_) => Ok(IndentAdvice::Unavailable),
             Session::Cpp(session) => session.indent(snapshot, request),
         }
     }

@@ -25,12 +25,17 @@ pub enum SlotKind {
     Buffer,
     /// One of fixed words.
     Choice(&'static [Choice]),
+    /// The name of an option.
+    Option,
     Word,
     Rest,
 }
 impl SlotKind {
     pub fn requires_match(self) -> bool {
-        matches!(self, Self::File | Self::Buffer | Self::Choice(_))
+        matches!(
+            self,
+            Self::File | Self::Buffer | Self::Choice(_) | Self::Option
+        )
     }
 }
 /// A word of a `Choice` slot. A key makes the slot's keymap: typed while
@@ -157,6 +162,20 @@ fn path_or(args: &str, path: fn(std::path::PathBuf) -> Command, bare: Command) -
 fn window_split(args: &str, axis: Axis) -> Command {
     let path = (!args.is_empty()).then(|| args.into());
     Command::Window(WindowCommand::Split(axis, path))
+}
+/// `set` and `set-local`: the value is checked here, so a bad one never
+/// reaches the application.
+fn option(args: &str, local: bool) -> Result<Command, String> {
+    let (name, value) = split(args.trim());
+    let info = crate::options::info(name).ok_or_else(|| format!("unknown option {name}"))?;
+    if value.is_empty() {
+        return Err(format!("{name} needs a value: {}", info.values()));
+    }
+    Ok(Command::SetOption {
+        local,
+        name: info.name,
+        value: info.parse(value)?,
+    })
 }
 fn required(args: &str) -> Result<String, String> {
     if args.is_empty() {
@@ -517,6 +536,34 @@ pub static BUILTINS: &[Builtin] = &[
                 name: required(name)?,
                 body: required(body)?,
             })
+        }
+    ),
+    builtin!(
+        "set",
+        [
+            slot("OPTION", SlotKind::Option),
+            slot("VALUE", SlotKind::Rest)
+        ],
+        "Set an option for every document",
+        |a| option(a, false)
+    ),
+    builtin!(
+        "set-local",
+        [
+            slot("OPTION", SlotKind::Option),
+            slot("VALUE", SlotKind::Rest)
+        ],
+        "Set an option for the current document only",
+        |a| option(a, true)
+    ),
+    builtin!(
+        "unset-local",
+        [slot("OPTION", SlotKind::Option)],
+        "Let the current document use the global value of an option again",
+        |a| {
+            let info = crate::options::info(a.trim())
+                .ok_or_else(|| format!("unknown option {}", a.trim()))?;
+            Ok(Command::UnsetOption(info.name))
         }
     ),
     builtin!(

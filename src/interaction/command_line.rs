@@ -302,6 +302,17 @@ impl CommandLine {
                         mark(row, typed.into_iter().collect(), Some(detail))
                     })
                     .collect(),
+                Target::Slot(SlotKind::Option) => crate::options::OPTIONS
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, option)| option.name.starts_with(&query.text))
+                    .map(|(i, option)| {
+                        let label = format!("{:<14} {}", option.name, option.doc);
+                        let typed = (!query.text.is_empty()).then_some(0..query.text.len());
+                        let row = row(i as u64, label, Some(option.name.into()), false);
+                        mark(row, typed.into_iter().collect(), Some(15))
+                    })
+                    .collect(),
                 Target::Slot(SlotKind::Buffer) => buffers(app, &query.text, &mut self.matcher),
                 Target::Slot(SlotKind::Path) => self.paths(&query.text, &mut response),
                 Target::Slot(SlotKind::File) => self.project_files(&query.text, &mut response),

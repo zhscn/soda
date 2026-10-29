@@ -139,7 +139,18 @@ impl Runtime {
     /// Applies configuration text; the first error is also shown as the
     /// status message, prefixed by `origin` and its line number.
     pub fn source(&mut self, origin: &str, text: &str) -> Vec<(usize, String)> {
-        let errors = self.layers.source(text);
+        let crate::interaction::Sourced {
+            mut errors,
+            settings,
+        } = self.layers.source(text);
+        for (line, command) in settings {
+            self.message.clear();
+            self.command(command);
+            if !self.message.is_empty() {
+                errors.push((line, std::mem::take(&mut self.message)));
+            }
+        }
+        errors.sort_by_key(|(line, _)| *line);
         if let Some((line, error)) = errors.first() {
             self.message = format!("{origin}:{line}: {error}");
             self.dirty = true;
@@ -292,6 +303,7 @@ impl Runtime {
         let response = self.layers.observe(&self.app, &update, time);
         self.dirty |= update.active_changed
             || update.windows_changed
+            || update.options_changed
             || !update.changed_views.is_empty()
             || !update.closed_views.is_empty()
             || !update.files.is_empty()
@@ -427,7 +439,14 @@ impl Runtime {
         }
         self.replaying = false;
     }
+    /// Whether copies and pastes go through the system clipboard.
+    fn system_clipboard(&self) -> bool {
+        self.app.options().choice(None, "clipboard") == "system"
+    }
     fn load_clipboard(&mut self) {
+        if !self.system_clipboard() {
+            return;
+        }
         let Some(text) = self.clipboard.as_mut().and_then(|system| system.load()) else {
             return;
         };
@@ -450,6 +469,9 @@ impl Runtime {
             return;
         }
         self.clipboard_revision = revision;
+        if !self.system_clipboard() {
+            return;
+        }
         if let Some(system) = &mut self.clipboard {
             system.store(self.app.clipboard());
         }

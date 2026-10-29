@@ -368,3 +368,18 @@ fn pointer_clicks_place_the_caret_and_drags_select_in_visual_mode() {
     host.input(TerminalEvent::Pointer(Pointer::Click(8)));
     assert_eq!(selection(&host), crate::core::Selection::caret(2));
 }
+#[test]
+fn an_internal_clipboard_leaves_the_system_one_alone() {
+    let mut host = host();
+    let system = FakeClipboard::default();
+    host.set_system_clipboard(Box::new(system.clone()));
+    host.command(Action::Named("set clipboard internal".into()));
+    system.0.borrow_mut().1 = Some("outside".into());
+    host.input(TerminalEvent::Paste("one".into()));
+    host.input(key(KeyCode::Esc));
+    for ch in "yyp".chars() {
+        host.input(key(KeyCode::Char(ch)));
+    }
+    assert!(system.0.borrow().0.is_empty());
+    assert_eq!(document_text(&host), "one\none");
+}

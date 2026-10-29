@@ -21,7 +21,7 @@ map normal <space>= fmt
 - [编辑内核与接口](docs/core.md)、[坐标与逻辑列](docs/coordinates.md)、[边界契约](docs/contracts.md)
 - [编辑命令](docs/commands.md)、[文件服务](docs/files.md)
 - [交互缩进设计与契约](docs/indentation.md)、[clang-format 配置](docs/clang-format.md)
-- [交互层：键位、命令与配置](docs/interaction.md)
+- [交互层：键位、命令与配置](docs/interaction.md)、[扩展模型：选项、展开与钩子](docs/extension.md)
 - [终端界面](docs/ui.md)
 - [语法高亮与导航](docs/syntax.md)
 

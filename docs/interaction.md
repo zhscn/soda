@@ -144,7 +144,7 @@ Shift 加方向键、Home 和 End 扩展选区，对应 `extend-` 前缀的同�
 
 ### 配置文件
 
-启动时读取 `$XDG_CONFIG_HOME/soda/init`，未设置时读取 `~/.config/soda/init`；文件不存在时不报错。每行是一条命令行，空行和 `#` 开头的行被忽略。配置文件只接受 `map`、`unmap` 和 `define-command`，打开文件、切换模式等操作不能在启动时执行。错误行被跳过并记录行号，其余行照常生效，第一条错误显示在消息行。`--no-config` 跳过配置文件。
+启动时读取 `$XDG_CONFIG_HOME/soda/init`，未设置时读取 `~/.config/soda/init`；文件不存在时不报错。每行是一条命令行，空行和 `#` 开头的行被忽略。配置文件只接受 `map`、`unmap`、`define-command`、`set` 和 `display`，打开文件、切换模式等操作不能在启动时执行。错误行被跳过并记录行号，其余行照常生效，第一条错误显示在消息行。`--no-config` 跳过配置文件。
 
 ```
 # ~/.config/soda/init
@@ -154,6 +154,9 @@ map insert <c-s> write
 define-command fmt pipe clang-format --assume-filename="$SODA_FILE"
 map normal <space>= fmt
 define-command grep-word shell grep -rn %arg{1} .
+set line-numbers relative
+set clipboard internal
+display grep right 60
 ```
 
 `map MODE KEYS COMMAND`、`unmap MODE KEYS` 和 `define-command NAME BODY` 也可以在 `:` 中执行，对当前会话立即生效，不写回配置文件。
@@ -187,6 +190,8 @@ define-command grep-word shell grep -rn %arg{1} .
 | `jump` | | 打开当前行写明的位置；不是位置行时等同 Vim 的回车 |
 | `grep-next` / `grep-previous` | `cn` / `cp` | 打开下一个或上一个搜索结果 |
 | `display KIND PLACEMENT` | | 设置某种文档的显示位置，见[终端界面](ui.md#窗口) |
+| `set OPTION VALUE` | | 设置全局选项，见[扩展模型](extension.md#选项) |
+| `set-local OPTION VALUE` / `unset-local OPTION` | | 设置或去掉当前文档自己的选项值 |
 | `new` | `enew` | 新文档 |
 | `project FILE` | | 打开项目中的文件 |
 | `goto LINE[:COLUMN]` | | 跳转到行列，从 1 开始，列为逻辑列 |

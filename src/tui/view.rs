@@ -67,16 +67,21 @@ impl Areas {
                     },
                     None => area,
                 };
-                let lines = app
-                    .view(view)
-                    .and_then(|view| app.workspace().editor(view.document_id))
+                let document = app.view(view).map(|view| view.document_id);
+                let lines = document
+                    .and_then(|document| app.workspace().editor(document))
                     .map_or(1, |editor| {
                         editor.model().document().snapshot().line_count()
                     });
                 let digits = lines.max(1).ilog10() as u16 + 1;
                 // ` 123 │ ` keeps numbers right-aligned with a separator.
                 let gutter = digits.max(3) + 4;
-                let gutter = if body.width >= gutter + 16 { gutter } else { 0 };
+                let numbers = app.options().choice(document, "line-numbers") != "off";
+                let gutter = if numbers && body.width >= gutter + 16 {
+                    gutter
+                } else {
+                    0
+                };
                 Window {
                     view,
                     area,
@@ -144,7 +149,9 @@ pub(super) fn render(
             window_header(buf, header, runtime, window.view, current, theme);
         }
         if let Some(text) = text {
-            let position = editor(buf, window, text, theme, current);
+            let document = runtime.app().view(window.view).map(|view| view.document_id);
+            let relative = runtime.app().options().choice(document, "line-numbers") == "relative";
+            let position = editor(buf, window, text, theme, current, relative);
             if current {
                 cursor = position;
             }
@@ -256,6 +263,7 @@ fn editor(
     text: &layout::Frame,
     theme: &Theme,
     current: bool,
+    relative: bool,
 ) -> Option<Position> {
     let area = window.text;
     let digits = usize::from(window.gutter.saturating_sub(4));
@@ -278,7 +286,13 @@ fn editor(
             } else {
                 theme.gutter
             };
-            let number = format!(" {:>digits$} │ ", row.line + 1);
+            // Relative numbers count from the caret line, which keeps its own.
+            let shown = if relative && row.line != text.caret.0 {
+                row.line.abs_diff(text.caret.0)
+            } else {
+                row.line + 1
+            };
+            let number = format!(" {shown:>digits$} │ ");
             buf.set_stringn(left, y, &number, window.gutter.into(), style);
         }
         spans(buf, area.x, y, area.width, &row.spans, base, theme);
@@ -789,5 +803,26 @@ mod tests {
                 .starts_with("╭ Help · Esc closes")
         );
         assert!(text.lines().nth(2).unwrap().starts_with("│ Vim editing"));
+    }
+    #[test]
+    fn line_numbers_follow_the_option() {
+        let root = tempfile::tempdir().unwrap();
+        let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.start(None);
+        r.command(Command::Edit(crate::editor::Command::InsertText(
+            "a\nb\nc\nd".into(),
+        )));
+        r.command(Command::SetMode(EditMode::Normal));
+        keys(&mut r, "gg");
+        keys(&mut r, "j");
+        r.command(Command::Named("set line-numbers relative".into()));
+        let text = screen(&mut r, 40, 10);
+        let rows: Vec<_> = text.lines().collect();
+        assert!(rows[1].starts_with("   1 │ a"), "{text}");
+        assert!(rows[2].starts_with("   2 │ b"));
+        assert!(rows[4].starts_with("   2 │ d"));
+        r.command(Command::Named("set line-numbers off".into()));
+        let text = screen(&mut r, 40, 10);
+        assert!(text.lines().nth(1).unwrap().starts_with("a "), "{text}");
     }
 }

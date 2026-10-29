@@ -8,9 +8,6 @@ use crate::{
 };
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
-/// Lines per wheel step.
-const SCROLL: isize = 3;
-
 #[derive(Default)]
 pub(super) struct Mouse {
     /// Where the left button went down in the text, while it is held.
@@ -74,10 +71,12 @@ impl Mouse {
                 let Some(window) = window else {
                     return;
                 };
+                let document = runtime.app().view(window.view).map(|view| view.document_id);
+                let step = runtime.app().options().int(document, "scroll-lines") as isize;
                 let lines = if event.kind == MouseEventKind::ScrollUp {
-                    -SCROLL
+                    -step
                 } else {
-                    SCROLL
+                    step
                 };
                 let active = runtime.app().active_view() == Some(window.view);
                 let caret = runtime.editor_caret().filter(|_| active);

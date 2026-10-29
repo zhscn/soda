@@ -149,8 +149,19 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
     }
     let mut geometry = None;
     let mut mouse = mouse::Mouse::default();
+    let mut capturing = true;
     while !runtime.quit_requested() {
         runtime.poll();
+        // The terminal keeps its own selection while the mouse is off.
+        let wanted = runtime.app().options().bool(None, "mouse");
+        if wanted != capturing {
+            capturing = wanted;
+            if wanted {
+                execute!(io::stdout(), EnableMouseCapture)?;
+            } else {
+                execute!(io::stdout(), DisableMouseCapture)?;
+            }
+        }
         let (width, height) = terminal::size()?;
         let areas = view::Areas::new(&runtime, width, height);
         let rows = (

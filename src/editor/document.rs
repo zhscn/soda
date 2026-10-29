@@ -114,6 +114,9 @@ impl Document {
         self.history.break_group();
         Ok(true)
     }
+    pub(super) fn set_whitespace(&mut self, policy: crate::language::WhitespacePolicy) -> bool {
+        self.language.set_whitespace(policy)
+    }
     pub(super) fn set_group_start(&mut self, owner: SessionId, before: Selection) {
         self.history.set_group_start(owner, before);
     }

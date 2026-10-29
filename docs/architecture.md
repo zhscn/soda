@@ -25,7 +25,8 @@ Soda 是以 TUI 交付、以 C++ 交互缩进为核心体验的 Rust 编辑器�
 | `language` | 跨语言共享的空白策略与生成 | [交互缩进](indentation.md) |
 | `files` | 文件 I/O、工作区、打开与保存请求、后台 worker | [文件服务](files.md) |
 | `application` | owner-thread 状态归约：视图、窗口树、文档、剪贴板与寄存器、文件完成 | [边界契约](contracts.md) |
-| `interaction` | 键位、命令表、Vim 语法、输入框、picker、搜索替换等会话 | [交互层](interaction.md) |
+| `interaction` | 键位、命令表、Vim 语法、输入框、picker、搜索替换等会话 | [交互层](interaction.md)、[扩展模型](extension.md) |
+| `options` | 带类型的选项表，全局值与文档覆盖 | [扩展模型](extension.md) |
 | `runtime` | 命令循环：执行响应、观察更新、调度后台任务与外部命令 | [交互层](interaction.md) |
 | `syntax` | 语法高亮：分类、C++ 词法着色、TextMate 引擎与增量行缓存、内置语法 | [语法高亮与导航](syntax.md) |
 | `tui` | crossterm 输入规范化、ratatui 绘制、布局与主题、配置文件加载 | [终端界面](ui.md) |
@@ -40,7 +41,7 @@ Soda 是以 TUI 交付、以 C++ 交互缩进为核心体验的 Rust 编辑器�
 
 **交互模型。** 保留 Vim 的 Normal/Insert/Visual 和 operator 语法，不采用 helix 的选择优先模型。Insert 和所有输入框共享 readline 风格的行编辑键。
 
-**扩展模型。** 按 kakoune 的方式组织：所有操作是命名命令，键位、`:` 命令行、配置文件和帮助都引用命令名；扩展通过 `define-command` 组合命令和 `pipe` / `shell` 调用外部进程。不嵌入脚本语言：Chez 拥有独立的执行环境，与编辑器的命令循环不相容；以后确有需要时候选 Steel，并通过同一张命令表接入。
+**扩展模型。** 按 kakoune 的方式组织：所有操作是命名命令，键位、`:` 命令行、配置文件和帮助都引用命令名；扩展通过 `define-command` 组合命令和 `pipe` / `shell` 调用外部进程。选项、展开和钩子让命令语言能读写状态并响应事件，见[扩展模型](extension.md)。暂不嵌入脚本语言：Chez 拥有独立的执行环境，与编辑器的命令循环不相容；以后确有需要时在 Steel 与 mlua 中选择，并绑定到同一组命令、展开和通知上。
 
 ## 4 质量与性能
 

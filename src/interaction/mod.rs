@@ -5,7 +5,7 @@ mod command_line;
 pub use command_line::{CommandLine, Completion};
 mod commands;
 pub mod vim;
-pub use commands::{Command, Departure, WindowCommand};
+pub use commands::{Command, Departure, Sourced, WindowCommand};
 mod departure;
 pub use departure::SaveWait;
 pub mod grep;

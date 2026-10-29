@@ -109,6 +109,17 @@ pub enum Event {
         kind: String,
         placement: Placement,
     },
+    /// Sets an option globally, or for one document.
+    SetOption {
+        scope: crate::options::Scope,
+        name: &'static str,
+        value: crate::options::Value,
+    },
+    /// Drops a document's own value of an option.
+    UnsetOption {
+        document: DocumentId,
+        name: &'static str,
+    },
     CancelOpen(OpenId),
     OpenFinished(OpenCompletion),
     Save {
@@ -188,6 +199,7 @@ pub struct Update {
     pub active_changed: bool,
     /// The window tree changed shape or shows other views.
     pub windows_changed: bool,
+    pub options_changed: bool,
     pub edit: Option<EditorUpdate>,
     pub files: Vec<FileResult>,
 }
@@ -255,6 +267,7 @@ pub struct Application {
     /// Views by when they were last focused, most recent last.
     recent: Vec<ViewId>,
     rules: display::Rules,
+    options: crate::options::Options,
 }
 impl Application {
     pub fn new(service: FileService) -> Self {
@@ -275,6 +288,33 @@ impl Application {
     }
     pub fn active_view(&self) -> Option<ViewId> {
         self.active
+    }
+    pub fn options(&self) -> &crate::options::Options {
+        &self.options
+    }
+    /// Gives a document the whitespace its options choose; only plain text
+    /// takes them.
+    fn apply_options(&mut self, document: DocumentId, update: &mut Update) {
+        let options = &self.options;
+        let policy = crate::language::WhitespacePolicy {
+            indent_width: options.int(Some(document), "indent-width") as usize,
+            tab_width: std::num::NonZeroUsize::new(
+                options.int(Some(document), "tab-width") as usize
+            )
+            .unwrap(),
+            tabs: if options.bool(Some(document), "expand-tab") {
+                crate::language::TabPolicy::Never
+            } else {
+                crate::language::TabPolicy::ForIndentation
+            },
+        };
+        if let Some(mut editor) = self.workspace.editor_mut(document)
+            && editor
+                .execute(Command::SetWhitespace(policy))
+                .is_ok_and(|edit| edit.language_changed)
+        {
+            self.changed_document(document, update);
+        }
     }
     /// The windows on screen. The active view is always in one of them.
     pub fn windows(&self) -> &Windows {
@@ -404,6 +444,10 @@ impl Application {
         );
     }
     fn accept_edit(&mut self, edit: EditorUpdate, update: &mut Update) {
+        // A language change starts plain text from its defaults again.
+        if edit.language_changed {
+            self.apply_options(edit.document_id, update);
+        }
         if let Some(change) = &edit.document {
             for view in self
                 .views
@@ -530,7 +574,11 @@ impl Application {
     fn scratch(&mut self, name: &str, text: String, update: &mut Update) -> Result<(), Error> {
         let document = match self.workspace.scratch(name) {
             Some(document) => document,
-            None => self.workspace.new_scratch(name),
+            None => {
+                let document = self.workspace.new_scratch(name);
+                self.apply_options(document, update);
+                document
+            }
         };
         let view = self
             .views
@@ -580,6 +628,7 @@ impl Application {
         match event {
             Event::NewDocument(language) => {
                 let document = self.workspace.new_document(language);
+                self.apply_options(document, &mut update);
                 let view = self.add_view(document)?;
                 update.changed_views.push(view);
                 self.focus(Some(view));
@@ -618,6 +667,7 @@ impl Application {
                 for id in &ids {
                     self.views.remove(id);
                 }
+                self.options.forget(document);
                 self.repair_windows();
                 update.closed_views = ids;
                 update.closed_documents.push(document);
@@ -709,6 +759,30 @@ impl Application {
             }
             Event::Scratch { name, text } => self.scratch(&name, text, &mut update)?,
             Event::SetDisplay { kind, placement } => self.rules.set(kind, placement),
+            Event::SetOption { scope, name, value } => {
+                let documents: Vec<_> = match scope {
+                    crate::options::Scope::Global => self.workspace.documents().collect(),
+                    crate::options::Scope::Document(document) => {
+                        self.workspace
+                            .editor(document)
+                            .ok_or(FileError::UnknownDocument)?;
+                        vec![document]
+                    }
+                };
+                self.options.set(scope, name, value);
+                for document in documents {
+                    self.apply_options(document, &mut update);
+                }
+                update.options_changed = true;
+            }
+            Event::UnsetOption { document, name } => {
+                self.workspace
+                    .editor(document)
+                    .ok_or(FileError::UnknownDocument)?;
+                self.options.unset(document, name);
+                self.apply_options(document, &mut update);
+                update.options_changed = true;
+            }
             Event::CancelOpen(id) => {
                 self.workspace.cancel_open(id)?;
                 self.pending_opens.remove(&id);
@@ -716,6 +790,7 @@ impl Application {
             Event::OpenFinished(completion) => {
                 let revision = self.pending_opens.remove(&completion.id());
                 let document = self.workspace.finish_open(completion)?;
+                self.apply_options(document, &mut update);
                 let view = self.add_view(document)?;
                 update.changed_views.push(view);
                 if let Some(intent) = revision.filter(|intent| {
