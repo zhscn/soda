@@ -58,7 +58,7 @@
 | 重复 | `.` 重复上一次修改，带计数时替换原计数；q 加寄存器录制宏，@ 加寄存器重放，`@@` 重放上一个 |
 | 寄存器 | `"a`–`"z` 命名寄存器，`"A`–`"Z` 追加，`"_` 丢弃，`"+`、`"*` 与无名寄存器相同；p/P 支持计数 |
 | 标记 | m 加小写字母设置，`'` 跳到标记行首个非空白，`` ` `` 跳到精确位置 |
-| Visual | v/V，支持的 motion 与文本对象，d/c/y、`>`/`<`、`~`/u/U、J、o 交换两端、p/P 替换选区；Esc 返回 Normal |
+| Visual | v/V，支持的 motion 与文本对象，d/c/y、`>`/`<`、`~`/u/U、J、o 交换两端、p/P 替换选区；`:` 打开命令行并保留 Visual 的行范围（供 `each-line`、`each-match` 使用）；Esc 返回 Normal |
 | 历史 | u、Ctrl-R；Insert 和 change 的修改作为一次撤销单元 |
 | 搜索 | / 和 ? 的字面量增量搜索，n/N 按已确认方向重复或反向；`*`/`#` 按整词搜索光标下的单词 |
 
@@ -221,6 +221,8 @@ hook open .*/Makefile set-local expand-tab false
 | `messages` | | 在 `*messages*` 中显示最近的消息 |
 | `highlight FACE PATTERN` / `highlight-local FACE PATTERN` | | 在所有文档 / 当前文档中高亮正则表达式 |
 | `unhighlight [PATTERN]` | | 去掉某个模式的高亮，或者全部 |
+| `each-line KEYS` | | 在每个选中行的行首以 Normal 模式输入 KEYS，相当于 Vim 的 `:'<,'>normal` |
+| `each-match PATTERN KEYS` | | 在每处匹配以 Normal 模式输入 KEYS；有选区时只在选中的行中 |
 | `jump-to` | | 输入两个字符，再按屏幕上的标签跳到那里（`<space>j`） |
 | `window-pick` | | 按标签选择窗口；只有两个窗口时直接切换（`<space>w`） |
 | `echo [TEXT]` | | 在消息行显示文字，常与 `%val{}` 一起用 |
@@ -452,6 +454,14 @@ define-command mark-word highlight-local mark \b%val{word}\b
 map normal <space>i mark-word
 map normal <space>I unhighlight
 ```
+
+## 对每行或每处匹配输入按键
+
+`each-line KEYS` 和 `each-match PATTERN KEYS` 对应 meow 的 `meow-kmacro-lines`/`meow-kmacro-matches`，也就是 Vim 的 `:'<,'>normal` 和 `:g/PATTERN/normal`。在很多场合它们可以代替多光标。
+- **范围**：在 Visual 中按 `:` 打开命令行时，范围是 Visual 覆盖的行；否则是选区覆盖的行；都没有时，`each-line` 只作用于光标所在行，`each-match` 作用于整个文档。
+- **执行**：KEYS 用按键记法书写，可以包含宏，如 `each-line @q`、`each-match foo ciwbar<esc>`。每个目标先回到 Normal 模式，光标放在行首或匹配开头，再像键入一样回放 KEYS。目标从下往上处理，所以对一行的修改不会移动上方的目标。
+- **撤销**：全部修改合并为一步撤销。
+- **失败**：某个目标上的按键失败时，只放弃这个目标剩下的按键，其余目标照常执行。最多处理 10,000 个目标。
 
 ## 屏幕标签跳转
 

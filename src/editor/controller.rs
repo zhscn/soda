@@ -21,6 +21,8 @@ pub enum Command {
     SetWhitespace(crate::language::WhitespacePolicy),
     /// Whether typed brackets and quotes come in pairs.
     SetAutoPairs(bool),
+    /// Merges the undo steps recorded since this history depth into one.
+    SquashHistory(usize),
     Undo,
     BeginUndoGroup(Selection),
     EndUndoGroup(Selection),
@@ -152,6 +154,7 @@ impl Editor {
                 | Command::SetLanguage(_)
                 | Command::SetWhitespace(_)
                 | Command::SetAutoPairs(_)
+                | Command::SquashHistory(_)
                 | Command::ReloadText(_)
         ) {
             history.end();
@@ -277,6 +280,10 @@ impl Editor {
             }
             Command::SetAutoPairs(on) => {
                 document.auto_pairs = on;
+                Step::Done(None)
+            }
+            Command::SquashHistory(depth) => {
+                document.squash_history(depth)?;
                 Step::Done(None)
             }
             Command::SetLanguage(language) => {

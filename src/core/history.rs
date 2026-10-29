@@ -92,6 +92,35 @@ impl<Owner: Copy + Eq> History<Owner> {
         self.group = group;
         Ok(())
     }
+    /// Undo entries recorded so far.
+    pub fn depth(&self) -> usize {
+        self.undo.len()
+    }
+    /// Merges the entries recorded after `depth` into one, so a run of
+    /// edits undoes in a single step.
+    pub fn squash(&mut self, depth: usize) -> Result<(), EditError> {
+        if self.undo.len() <= depth + 1 {
+            return Ok(());
+        }
+        let mut entries = self.undo.split_off(depth).into_iter();
+        let first = entries.next().unwrap();
+        let mut forward = first.forward;
+        let mut after = first.after;
+        for entry in entries {
+            forward = compose_changes(&first.base, &forward, &entry.forward)?;
+            after = entry.after;
+        }
+        self.undo.push(Entry {
+            inverse: invert_changes(&first.base, &forward),
+            base: first.base,
+            forward,
+            owner: first.owner,
+            before: first.before,
+            after,
+        });
+        self.group = None;
+        Ok(())
+    }
     pub fn restore(
         &mut self,
         snapshot: &Snapshot,

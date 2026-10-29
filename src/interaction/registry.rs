@@ -720,6 +720,27 @@ pub static BUILTINS: &[Builtin] = &[
         |a| Ok(Command::Unhighlight((!a.is_empty()).then(|| a.to_owned())))
     ),
     builtin!(
+        "each-line",
+        [slot("KEYS", SlotKind::Rest)],
+        "Type KEYS in Normal mode at the start of each selected line, as Vim's :normal",
+        |a| Ok(Command::EachLine(keys(&required(a)?)?))
+    ),
+    builtin!(
+        "each-match",
+        [
+            slot("PATTERN", SlotKind::Word),
+            slot("KEYS", SlotKind::Rest)
+        ],
+        "Type KEYS in Normal mode at each match in the selected lines, or everywhere",
+        |a| {
+            let (pattern, rest) = split(a);
+            Ok(Command::EachMatch {
+                pattern: regex::Regex::new(&required(pattern)?).map_err(|e| e.to_string())?,
+                keys: keys(&required(rest)?)?,
+            })
+        }
+    ),
+    builtin!(
         "jump-to",
         "Type two characters, then the label of where on screen to go",
         Command::JumpTo

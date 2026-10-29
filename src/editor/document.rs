@@ -126,6 +126,13 @@ impl Document {
     pub(super) fn finish_group(&mut self, owner: SessionId, after: Selection) {
         self.history.finish_group(owner, after);
     }
+    /// Undo steps recorded so far, for `squash_history`.
+    pub fn history_depth(&self) -> usize {
+        self.history.depth()
+    }
+    pub(super) fn squash_history(&mut self, depth: usize) -> Result<(), crate::core::EditError> {
+        self.history.squash(depth)
+    }
     pub(super) fn break_group(&mut self) {
         self.history.break_group();
     }

@@ -105,6 +105,17 @@ pub enum Command {
     },
     /// Removes the highlights of a pattern, or all of them.
     Unhighlight(Option<String>),
+    /// Replays keys in Normal mode from the start of each selected line,
+    /// or of the caret's line.
+    EachLine(Vec<super::KeyStroke>),
+    /// Replays keys in Normal mode from each match of a pattern in the
+    /// selected lines, or in the whole document.
+    EachMatch {
+        pattern: regex::Regex,
+        keys: Vec<super::KeyStroke>,
+    },
+    /// Routes keys as if typed, for `each-line` and `each-match`.
+    Replay(Vec<super::KeyStroke>),
     /// Focuses a window chosen by its label.
     WindowPick,
     /// Shows recent messages in `*messages*`.
@@ -672,6 +683,14 @@ impl Layers {
                     .events
                     .push(Event::Unhighlight { document, pattern });
             }
+            Command::EachLine(_) | Command::EachMatch { .. } => {
+                if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
+                    response.commands = self.each(app, view, command);
+                }
+            }
+            Command::Replay(keys) => {
+                response.replay = keys.into_iter().map(super::UserInput::Key).collect();
+            }
             Command::JumpTo => {
                 if let Some(view) = app.active_view() {
                     let session = super::labels::LabelSession::jump(view, self.page_rows);
@@ -755,6 +774,69 @@ impl Layers {
     }
 }
 impl Layers {
+    /// The commands that replay keys at each target, bottom first so that
+    /// edits leave the targets above in place, then merge the edits into one
+    /// undo step.
+    fn each(
+        &self,
+        app: &Application,
+        view: &crate::application::View,
+        command: Command,
+    ) -> Vec<Command> {
+        use super::EditMode;
+        let editor = app.workspace().editor(view.document_id).unwrap();
+        let document = editor.model().document();
+        let snapshot = document.snapshot();
+        let selection = editor.model().session(view.session_id).unwrap().selection();
+        // Visual mode covers its lines even when anchor and head meet.
+        let range = match (self.mode, self.vim.visual) {
+            (EditMode::Visual | EditMode::VisualLine, Some((anchor, head))) => {
+                Some(anchor.min(head)..anchor.max(head))
+            }
+            _ => Some(selection.range()).filter(|range| !range.is_empty()),
+        };
+        let lines = range.map(|range| {
+            snapshot.line_of(range.start).unwrap()..=snapshot.line_of(range.end).unwrap()
+        });
+        let (targets, keys): (Vec<usize>, _) = match command {
+            Command::EachLine(keys) => {
+                let caret = snapshot.line_of(selection.head).unwrap();
+                let lines = lines.unwrap_or(caret..=caret);
+                (
+                    lines
+                        .map(|line| snapshot.line_start(line).unwrap())
+                        .collect(),
+                    keys,
+                )
+            }
+            Command::EachMatch { pattern, keys } => {
+                let lines = lines.unwrap_or(0..=snapshot.line_count() - 1);
+                let mut targets = vec![];
+                for line in lines {
+                    let start = snapshot.line_start(line).unwrap();
+                    let text = snapshot.line(line).unwrap_or_default();
+                    targets.extend(pattern.find_iter(&text).map(|m| start + m.start()));
+                }
+                (targets, keys)
+            }
+            _ => unreachable!(),
+        };
+        let mut commands = vec![];
+        for target in targets.into_iter().rev().take(10_000) {
+            commands.extend([
+                Command::SetMode(EditMode::Normal),
+                Command::Edit(EditCommand::SetSelection(crate::core::Selection::caret(
+                    target,
+                ))),
+                Command::Replay(keys.clone()),
+            ]);
+        }
+        commands.extend([
+            Command::SetMode(EditMode::Normal),
+            Command::Edit(EditCommand::SquashHistory(document.history_depth())),
+        ]);
+        commands
+    }
     /// Closes or reloads a document that needs no decision.
     fn leave(&self, document: DocumentId, reload: bool, app: &Application) -> Response {
         let mut response = Response {

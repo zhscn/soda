@@ -261,6 +261,8 @@ impl State {
                     before: ch == 'P',
                     count,
                 }),
+                // The command line keeps the Visual range for each-line.
+                ':' => Ok(Some(Command::Ex(String::new()))),
                 _ => Err("Unsupported Visual command"),
             };
         }
