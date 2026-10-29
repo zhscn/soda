@@ -314,6 +314,7 @@ const NORMAL: &[(&str, &str)] = &[
     ("<space>:", "commands"),
     ("<space>j", "jump-to"),
     ("<space>w", "window-pick"),
+    ("<space>r", "recent"),
 ];
 const VISUAL: &[(&str, &str)] = &[
     ("<c-f>", "page-down"),

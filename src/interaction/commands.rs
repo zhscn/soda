@@ -368,7 +368,8 @@ impl Layers {
                     _ => unreachable!(),
                 };
                 let mut line =
-                    CommandLine::new(&text, self.registry.commands(), file_root.to_owned(), app);
+                    CommandLine::new(&text, self.registry.commands(), file_root.to_owned(), app)
+                        .with_recent(self.recent_files.clone());
                 if let Some(note) = note {
                     line = line.with_note(note);
                 }

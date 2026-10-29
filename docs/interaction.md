@@ -223,6 +223,7 @@ hook open .*/Makefile set-local expand-tab false
 | `unhighlight [PATTERN]` | | 去掉某个模式的高亮，或者全部 |
 | `each-line KEYS` | | 在每个选中行的行首以 Normal 模式输入 KEYS，相当于 Vim 的 `:'<,'>normal` |
 | `each-match PATTERN KEYS` | | 在每处匹配以 Normal 模式输入 KEYS；有选区时只在选中的行中 |
+| `recent FILE` | | 打开最近用过的文件（`<space>r`） |
 | `jump-to` | | 输入两个字符，再按屏幕上的标签跳到那里（`<space>j`） |
 | `window-pick` | | 按标签选择窗口；只有两个窗口时直接切换（`<space>w`） |
 | `echo [TEXT]` | | 在消息行显示文字，常与 `%val{}` 一起用 |
@@ -349,6 +350,10 @@ Enter 依次处理：
 ### 项目文件补全
 
 `File` 参数位使用下面“Picker 接入架构”描述的候选集、模糊匹配、后台任务与身份规则，查询就是参数位文字。候选集在命令行进入该参数位时建立，同一命令行内复用。
+
+### 最近文件补全
+
+`recent` 的 FILE 参数位列出最近用过的文件，最新的在前，路径相对文件根目录显示，模糊匹配与项目文件补全相同。文件在打开和关闭时成为最新的一个；列表就是持久状态中记录光标位置的那 200 个文件，所以跨会话保留（与 Emacs 的 recentf 相同）。
 
 ### 缓冲区补全
 

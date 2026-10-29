@@ -330,6 +330,7 @@ impl Runtime {
             &std::mem::take(&mut state.searches),
         );
         self.state = state;
+        self.layers.set_recent_files(self.state.recent());
     }
     /// What the next session should start from: histories and where the
     /// caret is in every file, the focused one most recent.
@@ -370,6 +371,7 @@ impl Runtime {
         )
         .map_or(0, |column| column.0);
         self.state.remember(path.to_owned(), line, column);
+        self.layers.set_recent_files(self.state.recent());
     }
     /// Ends an operation: runs hooks, then records a new message in the log.
     fn settle(&mut self, time: Duration) {
@@ -531,6 +533,10 @@ impl Runtime {
                         .filter(|_| at_start)
                     {
                         self.restores.push((*view, line, column));
+                    }
+                    if let Some(path) = self.app.workspace().file(document).and_then(|f| f.path()) {
+                        self.state.touch(path);
+                        self.layers.set_recent_files(self.state.recent());
                     }
                     ("open", self.app.document_name(document), Some(*view))
                 }),

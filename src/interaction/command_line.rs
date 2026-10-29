@@ -81,6 +81,8 @@ pub struct CommandLine {
     note: Option<String>,
     error: Option<String>,
     matcher: Matcher,
+    /// Recently used files, newest first.
+    recent: Vec<PathBuf>,
 }
 fn row(
     key: u64,
@@ -164,7 +166,13 @@ impl CommandLine {
             note: None,
             error: None,
             matcher: Matcher::new(Config::DEFAULT),
+            recent: vec![],
         }
+    }
+    /// Recently used files for a `recent` slot, newest first.
+    pub fn with_recent(mut self, recent: Vec<PathBuf>) -> Self {
+        self.recent = recent;
+        self
     }
     /// Shows a note before the input until the line closes.
     pub fn with_note(mut self, note: String) -> Self {
@@ -306,6 +314,9 @@ impl CommandLine {
                     })
                     .collect(),
                 Target::Slot(SlotKind::Buffer) => buffers(app, &query.text, &mut self.matcher),
+                Target::Slot(SlotKind::Recent) => {
+                    recent(&self.recent, &self.root, &query.text, &mut self.matcher)
+                }
                 Target::Slot(SlotKind::Path) => self.paths(&query.text, &mut response),
                 Target::Slot(SlotKind::File) => self.project_files(&query.text, &mut response),
                 Target::Slot(SlotKind::Word | SlotKind::Rest) => vec![],
@@ -740,6 +751,39 @@ impl CommandLine {
 
 /// Buffer names match fuzzily; other buffers rank before the current one
 /// among equal scores.
+/// Recent files, newest first, shown relative to the project root.
+fn recent(
+    paths: &[PathBuf],
+    root: &std::path::Path,
+    query: &str,
+    matcher: &mut Matcher,
+) -> Vec<MatchedCandidate<Completion>> {
+    matcher.config = Config::DEFAULT.match_paths();
+    let mut rows: Vec<_> = paths
+        .iter()
+        .enumerate()
+        .filter_map(|(age, path)| {
+            let shown = printable(&path.strip_prefix(root).unwrap_or(path).to_string_lossy());
+            let (score, highlights) = if query.is_empty() {
+                (0, vec![])
+            } else {
+                fuzzy_match(matcher, query, &shown)?
+            };
+            Some((age, path, shown, score, highlights))
+        })
+        .collect();
+    rows.sort_by_key(|(age, _, _, score, _)| (std::cmp::Reverse(*score), *age));
+    rows.into_iter()
+        .map(|(age, path, shown, _, highlights)| {
+            let replacement = path.to_str().filter(|p| !p.chars().any(char::is_control));
+            mark(
+                row(age as u64, shown, replacement.map(str::to_owned), false),
+                highlights,
+                None,
+            )
+        })
+        .collect()
+}
 fn buffers(
     app: &Application,
     query: &str,

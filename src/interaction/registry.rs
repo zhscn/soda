@@ -27,6 +27,8 @@ pub enum SlotKind {
     Choice(&'static [Choice]),
     /// The name of an option.
     Option,
+    /// A recently used file.
+    Recent,
     Word,
     Rest,
 }
@@ -34,7 +36,7 @@ impl SlotKind {
     pub fn requires_match(self) -> bool {
         matches!(
             self,
-            Self::File | Self::Buffer | Self::Choice(_) | Self::Option
+            Self::File | Self::Buffer | Self::Choice(_) | Self::Option | Self::Recent
         )
     }
 }
@@ -296,6 +298,12 @@ pub static BUILTINS: &[Builtin] = &[
         [PATH],
         "Open a file; a new file is created when saved",
         |a| { Ok(path_or(a, Command::OpenPath, interactive("open"))) }
+    ),
+    builtin!(
+        "recent",
+        [slot("FILE", SlotKind::Recent)],
+        "Open a recently used file",
+        |a| { Ok(path_or(a, Command::OpenPath, interactive("recent"))) }
     ),
     builtin!(
         "write" | "w",

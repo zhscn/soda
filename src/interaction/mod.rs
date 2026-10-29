@@ -145,6 +145,8 @@ pub struct Layers {
     vim: vim::State,
     registry: Registry,
     hooks: hooks::Hooks,
+    /// Recently used files, newest first, for `recent`.
+    recent_files: Vec<std::path::PathBuf>,
     /// Command line and search histories.
     history: [history::History; 2],
     /// The results document `]q` and `[q` step through: the latest filled.
@@ -348,6 +350,10 @@ impl Layers {
         Ok(self
             .transition(transition)
             .map_or(InputResult::Blocked, InputResult::Handled))
+    }
+    /// Recently used files, newest first.
+    pub fn set_recent_files(&mut self, files: Vec<std::path::PathBuf>) {
+        self.recent_files = files;
     }
     /// Takes back histories from an earlier session, oldest first.
     pub fn restore_history(&mut self, commands: &[String], searches: &[String]) {

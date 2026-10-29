@@ -73,6 +73,19 @@ impl State {
         }
         self.positions.push((path, line, column));
     }
+    /// Makes a file the most recent, keeping its caret position.
+    pub fn touch(&mut self, path: &Path) {
+        let (line, column) = self.position(path).unwrap_or((0, 0));
+        self.remember(path.to_owned(), line, column);
+    }
+    /// Remembered files, newest first.
+    pub fn recent(&self) -> Vec<PathBuf> {
+        self.positions
+            .iter()
+            .rev()
+            .map(|(path, ..)| path.clone())
+            .collect()
+    }
     pub fn position(&self, path: &Path) -> Option<(usize, usize)> {
         self.positions
             .iter()
