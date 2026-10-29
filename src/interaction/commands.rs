@@ -90,6 +90,8 @@ pub enum Command {
     Run(String),
     /// Stops background work: the run, the shell command and the search.
     Stop,
+    /// Shows recent messages in `*messages*`.
+    Messages,
     /// Sets an option globally, or for the current document.
     SetOption {
         local: bool,
@@ -587,6 +589,7 @@ impl Layers {
                 response.run = Some(Box::new(super::shell::run(app, view, shell, file_root)));
             }
             Command::Stop => response.stop = true,
+            Command::Messages => response.messages = true,
             Command::SetOption { local, name, value } => {
                 let document = app
                     .active_view()

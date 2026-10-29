@@ -105,6 +105,8 @@ pub struct Response {
     pub run: Option<Box<shell::ShellRequest>>,
     /// Stop background work.
     pub stop: bool,
+    /// Show the message log in `*messages*`.
+    pub messages: bool,
     /// Input to route again, after the rest of the response, for `.` and
     /// macros.
     pub replay: Vec<UserInput>,

@@ -20,6 +20,9 @@ mod process;
 mod run;
 mod shell;
 
+/// Messages the log keeps.
+const MESSAGE_LIMIT: usize = 1000;
+const MESSAGES: &str = "*messages*";
 /// Rounds of hooks firing further hooks before they stop.
 const MAX_HOOK_DEPTH: usize = 16;
 
@@ -55,6 +58,9 @@ pub struct Runtime {
     /// its commands act on.
     notices: Vec<(&'static str, String, Option<ViewId>)>,
     hooking: bool,
+    /// Recent messages, oldest first, and the one last recorded.
+    messages: std::collections::VecDeque<String>,
+    logged: String,
     /// The mode and focused view hooks last saw.
     seen: (crate::interaction::EditMode, Option<ViewId>),
     quit: bool,
@@ -89,6 +95,8 @@ impl Runtime {
             replaying: false,
             notices: vec![],
             hooking: false,
+            messages: Default::default(),
+            logged: String::new(),
             seen: Default::default(),
             quit: false,
             dirty: true,
@@ -167,9 +175,14 @@ impl Runtime {
             }
         }
         errors.sort_by_key(|(line, _)| *line);
+        for (line, error) in &errors {
+            self.log(format!("{origin}:{line}: {error}"));
+        }
         if let Some((line, error)) = errors.first() {
             self.message = format!("{origin}:{line}: {error}");
             self.dirty = true;
+            // Every error is in the log already.
+            self.logged = self.message.clone();
         }
         errors
     }
@@ -251,7 +264,7 @@ impl Runtime {
             .layers
             .route_input(input, &self.app, time, &self.file_root);
         self.input_result(result, time);
-        self.run_hooks(time);
+        self.settle(time);
     }
     pub fn command(&mut self, command: Command) {
         self.command_at(command, self.epoch.elapsed());
@@ -261,7 +274,7 @@ impl Runtime {
             .layers
             .execute(command, &self.app, time, &self.file_root);
         self.input_result(result, time);
-        self.run_hooks(time);
+        self.settle(time);
     }
     fn input_result(&mut self, result: Result<InputResult, EditError>, time: Duration) {
         match result {
@@ -280,8 +293,39 @@ impl Runtime {
             _ => self.epoch.elapsed(),
         };
         let done = self.reduce(event, time);
-        self.run_hooks(time);
+        self.settle(time);
         done
+    }
+    /// Ends an operation: runs hooks, then records a new message in the log.
+    fn settle(&mut self, time: Duration) {
+        if self.hooking {
+            return;
+        }
+        self.run_hooks(time);
+        if self.message != self.logged {
+            self.logged = self.message.clone();
+            if !self.message.is_empty() {
+                self.log(self.message.clone());
+            }
+        }
+    }
+    /// Keeps a message in the log and in `*messages*`, if it is open.
+    fn log(&mut self, message: String) {
+        if self.messages.len() == MESSAGE_LIMIT {
+            self.messages.pop_front();
+        }
+        self.messages.push_back(message.clone());
+        if self.app.workspace().scratch(MESSAGES).is_some() {
+            let _ = self.app.dispatch(Event::AppendScratch {
+                name: MESSAGES.into(),
+                text: format!("\n{message}"),
+            });
+            self.dirty = true;
+        }
+    }
+    /// Messages so far, oldest first.
+    pub fn messages(&self) -> impl Iterator<Item = &str> {
+        self.messages.iter().map(String::as_str)
     }
     /// Runs the hooks of the notices gathered so far, then of those their
     /// commands cause, up to a bound. Mode and focus are compared with what
@@ -470,6 +514,38 @@ impl Runtime {
                 Ok(()) => "Running shell command…".into(),
                 Err(error) => error,
             };
+        }
+        if response.messages {
+            let text = self.messages.iter().cloned().collect::<Vec<_>>().join("\n");
+            if self.reduce(
+                Event::Scratch {
+                    name: MESSAGES.into(),
+                    text,
+                },
+                time,
+            ) && let Some(view) = self.app.active_view()
+            {
+                // Start at the newest message, so that new ones are followed.
+                let snapshot = self
+                    .app
+                    .workspace()
+                    .editor(self.app.view(view).unwrap().document_id)
+                    .unwrap()
+                    .model()
+                    .document()
+                    .snapshot();
+                let last = snapshot.line_start(snapshot.line_count() - 1).unwrap();
+                self.reduce(
+                    Event::Edit {
+                        view,
+                        command: crate::editor::Command::SetSelection(
+                            crate::core::Selection::caret(last),
+                        ),
+                        time,
+                    },
+                    time,
+                );
+            }
         }
         if response.stop {
             let stopped = [self.run.stop(), self.shell.stop(), self.grep.stop()];
@@ -664,7 +740,7 @@ impl Runtime {
             self.run_output(output);
         }
         self.dispatch(Event::PollFiles);
-        self.run_hooks(self.epoch.elapsed());
+        self.settle(self.epoch.elapsed());
     }
     fn run_output(&mut self, output: run::RunOutput) {
         let mut text = String::new();

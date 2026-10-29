@@ -47,6 +47,7 @@ impl Default for Rules {
         Self(BTreeMap::from([
             ("grep".to_owned(), Placement::Side(Side::Bottom, 12)),
             ("run".to_owned(), Placement::Side(Side::Bottom, 12)),
+            ("messages".to_owned(), Placement::Side(Side::Bottom, 12)),
         ]))
     }
 }

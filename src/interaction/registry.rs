@@ -660,6 +660,11 @@ pub static BUILTINS: &[Builtin] = &[
         |a| { Ok(Command::Run(required(a)?)) }
     ),
     builtin!(
+        "messages",
+        "Show recent messages, including every configuration error",
+        Command::Messages
+    ),
+    builtin!(
         "stop",
         "Stop the running run, shell command and search",
         Command::Stop

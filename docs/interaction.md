@@ -180,6 +180,10 @@ hook open .*/Makefile set-local expand-tab false
 
 `stop`（Normal 模式 `<c-c>`）停止正在运行的 `run`、`shell`/`pipe` 和项目搜索。每个外部命令在自己的进程组中运行，停止时整个进程组收到 SIGTERM，命令派生的子进程一起结束。被停止的 `shell` 报告 `was stopped`；被停止的 `run` 不再写入输出。没有任务在运行时 `stop` 不显示消息，因为 `<c-c>` 也用来取消待定的按键。退出编辑器不会等待或终止仍在运行的命令。
 
+### 消息
+
+消息行一次只显示一条消息。Runtime 在每次输入、命令或后台完成之后，把新出现的消息记入日志，连续重复的消息只记一次，最多保留 1,000 条。配置文件的每一条错误都单独记录，消息行只显示第一条。`messages` 把日志显示在 scratch 文档 `*messages*` 中（默认底部 12 行），光标放在最新一条；文档打开期间，新消息追加到末尾。
+
 ### 内置命令
 
 | 命令 | 别名 | 行为 |
@@ -204,6 +208,7 @@ hook open .*/Makefile set-local expand-tab false
 | `next-result` / `previous-result` | `cn` / `cp` | 在最近的结果文档（`*grep*` 或 `*run*`）中打开下一个或上一个位置 |
 | `run CMD` | `make` | 后台运行命令，输出流式写入 `*run*` |
 | `stop` | | 停止 `run`、`shell`/`pipe` 和项目搜索 |
+| `messages` | | 在 `*messages*` 中显示最近的消息 |
 | `display KIND PLACEMENT` | | 设置某种文档的显示位置，见[终端界面](ui.md#窗口) |
 | `set OPTION VALUE` | | 设置全局选项，见[扩展模型](extension.md#选项) |
 | `set-local OPTION VALUE` / `unset-local OPTION` | | 设置或去掉当前文档自己的选项值 |
