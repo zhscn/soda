@@ -62,22 +62,57 @@ fn draw(
     theme: &theme::Theme,
     areas: &view::Areas,
 ) -> io::Result<()> {
-    let text = areas.text();
-    let frame = layout::frame(
-        runtime.app(),
-        highlighter,
-        text.width,
-        text.height,
-        runtime.editor_caret(),
-    )
-    .map_err(io::Error::other)?;
+    let texts = frames(runtime, highlighter, areas).map_err(io::Error::other)?;
     let shape = if runtime.layer().is_none() && runtime.edit_mode() != EditMode::Insert {
         SetCursorStyle::SteadyBlock
     } else {
         SetCursorStyle::SteadyBar
     };
     execute!(io::stdout(), shape)?;
-    terminal.draw(|f| view::render(f, runtime, theme, areas, frame.as_ref()))?;
+    terminal.draw(|f| view::render(f, runtime, theme, areas, &texts))?;
+    Ok(())
+}
+/// The text of every window; only the active one shows the Vim caret.
+fn frames(
+    runtime: &Runtime,
+    highlighter: &mut Highlighter,
+    areas: &view::Areas,
+) -> Result<Vec<Option<layout::Frame>>, crate::application::Error> {
+    let active = runtime.app().active_view();
+    areas
+        .windows
+        .iter()
+        .map(|window| {
+            let caret = runtime
+                .editor_caret()
+                .filter(|_| Some(window.view) == active);
+            layout::frame(
+                runtime.app(),
+                window.view,
+                highlighter,
+                window.text.width,
+                window.text.height,
+                caret,
+            )
+        })
+        .collect()
+}
+/// Scrolls the active window to its caret.
+fn follow(runtime: &mut Runtime, areas: &view::Areas) -> io::Result<()> {
+    let Some(window) = areas.active(runtime) else {
+        return Ok(());
+    };
+    if let Some(viewport) = layout::follow_caret(
+        runtime.app(),
+        window.view,
+        window.text.width,
+        window.text.height,
+        runtime.editor_caret(),
+    )
+    .map_err(io::Error::other)?
+    {
+        runtime.update_viewport(viewport.view, viewport.anchor, viewport.horizontal_column);
+    }
     Ok(())
 }
 
@@ -118,23 +153,18 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
         runtime.poll();
         let (width, height) = terminal::size()?;
         let areas = view::Areas::new(&runtime, width, height);
-        let rows = (areas.editor.height, areas.list_rows());
+        let rows = (
+            areas.editor.height,
+            areas.list_rows(),
+            areas.text(&runtime).height,
+        );
         if geometry != Some(rows) {
             geometry = Some(rows);
             runtime.resize(rows.0.into(), rows.1);
+            runtime.set_page_rows(rows.2.into());
         }
         if runtime.take_redraw() || catching_up {
-            let text = areas.text();
-            if let Some(viewport) = layout::follow_caret(
-                runtime.app(),
-                text.width,
-                text.height,
-                runtime.editor_caret(),
-            )
-            .map_err(io::Error::other)?
-            {
-                runtime.update_viewport(viewport.view, viewport.anchor, viewport.horizontal_column);
-            }
+            follow(&mut runtime, &areas)?;
             // The gutter widens with the line count, so measure again.
             let areas = view::Areas::new(&runtime, width, height);
             highlighter.retain(runtime.app());

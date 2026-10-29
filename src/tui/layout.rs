@@ -1,5 +1,5 @@
 use crate::{
-    application::Application,
+    application::{Application, ViewId},
     core::{
         ByteOffset, LogicalColumn, column_width, logical_column_at, offset_at_logical_column,
         step_grapheme,
@@ -165,13 +165,11 @@ pub(super) fn plain(text: &str, left: usize, width: usize) -> String {
 /// through document updates; this frontend resolves them into logical lines.
 pub(super) fn follow_caret(
     app: &Application,
+    id: ViewId,
     width: u16,
     rows: u16,
     caret: Option<usize>,
 ) -> Result<Option<ViewportAdjustment>, crate::application::Error> {
-    let Some(id) = app.active_view() else {
-        return Ok(None);
-    };
     let view = app.view(id).unwrap();
     let document = app
         .workspace()
@@ -247,11 +245,11 @@ pub(super) fn offset_at(app: &Application, row: isize, column: usize) -> Option<
 /// it comes back: the nearest visible line, at the same column.
 pub(super) fn scroll(
     app: &Application,
+    id: ViewId,
     lines: isize,
     rows: u16,
     caret: Option<usize>,
 ) -> Option<(ViewportAdjustment, Option<usize>)> {
-    let id = app.active_view()?;
     let view = app.view(id)?;
     let editor = app.workspace().editor(view.document_id)?;
     let document = editor.model().document();
@@ -281,7 +279,7 @@ pub(super) fn scroll(
 }
 
 pub(super) struct ViewportAdjustment {
-    pub view: crate::application::ViewId,
+    pub view: ViewId,
     pub anchor: ByteOffset,
     pub horizontal_column: usize,
 }
@@ -290,15 +288,15 @@ pub(super) struct ViewportAdjustment {
 /// area. Viewport decisions are applied by Runtime before this is called.
 pub(super) fn frame(
     app: &Application,
+    id: ViewId,
     highlighter: &mut Highlighter,
     width: u16,
     rows: u16,
     caret: Option<usize>,
 ) -> Result<Option<Frame>, crate::application::Error> {
-    let Some(id) = app.active_view() else {
+    let Some(view) = app.view(id) else {
         return Ok(None);
     };
-    let view = app.view(id).unwrap();
     let editor = app.workspace().editor(view.document_id).unwrap();
     let document = editor.model().document();
     let state = editor.model().session(view.session_id).unwrap().state();
@@ -395,14 +393,24 @@ mod tests {
         width: u16,
         height: u16,
     ) -> Result<Frame, crate::application::Error> {
-        if let Some(viewport) = super::follow_caret(app, width, height, None)? {
+        if let Some(viewport) =
+            super::follow_caret(app, app.active_view().unwrap(), width, height, None)?
+        {
             app.dispatch(Event::SetViewport {
                 view: viewport.view,
                 anchor: viewport.anchor,
                 horizontal_column: viewport.horizontal_column,
             })?;
         }
-        Ok(super::frame(app, &mut Highlighter::default(), width, height, None)?.unwrap())
+        Ok(super::frame(
+            app,
+            app.active_view().unwrap(),
+            &mut Highlighter::default(),
+            width,
+            height,
+            None,
+        )?
+        .unwrap())
     }
 
     use crate::{
@@ -480,9 +488,16 @@ mod tests {
         let frame = frame(&mut app, 6, 3).unwrap();
         assert_eq!(frame.cursor, Some((5, 0)));
         assert_eq!(app.view(view).unwrap().viewport.horizontal_column, 5);
-        let frame = super::frame(&app, &mut Highlighter::default(), 0, 0, None)
-            .unwrap()
-            .unwrap();
+        let frame = super::frame(
+            &app,
+            app.active_view().unwrap(),
+            &mut Highlighter::default(),
+            0,
+            0,
+            None,
+        )
+        .unwrap()
+        .unwrap();
         assert!(frame.rows.is_empty());
         assert!(frame.cursor.is_none());
     }
@@ -599,12 +614,23 @@ mod tests {
         })
         .unwrap();
         let before = app.view(view).unwrap().viewport;
-        let projected = super::frame(&app, &mut Highlighter::default(), 10, 4, None)
-            .unwrap()
-            .unwrap();
+        let projected = super::frame(
+            &app,
+            app.active_view().unwrap(),
+            &mut Highlighter::default(),
+            10,
+            4,
+            None,
+        )
+        .unwrap()
+        .unwrap();
         assert_eq!(app.view(view).unwrap().viewport, before);
         assert!(projected.cursor.is_none());
-        assert!(super::follow_caret(&app, 10, 4, None).unwrap().is_some());
+        assert!(
+            super::follow_caret(&app, app.active_view().unwrap(), 10, 4, None)
+                .unwrap()
+                .is_some()
+        );
     }
     #[test]
     fn pointer_cells_resolve_to_offsets_and_scrolling_keeps_the_caret_visible() {
@@ -623,12 +649,18 @@ mod tests {
         assert_eq!(super::offset_at(&app, 1, 1), Some(5));
         assert_eq!(super::offset_at(&app, -1, 0), Some(0));
         assert_eq!(super::offset_at(&app, 9, 0), Some(13));
-        let (viewport, reveal) = super::scroll(&app, 3, 2, None).unwrap();
+        let (viewport, reveal) =
+            super::scroll(&app, app.active_view().unwrap(), 3, 2, None).unwrap();
         assert_eq!(viewport.anchor, ByteOffset(10));
         assert_eq!(reveal, Some(10));
         // The last line can scroll to the top and no further.
-        let (viewport, _) = super::scroll(&app, 30, 2, None).unwrap();
+        let (viewport, _) = super::scroll(&app, app.active_view().unwrap(), 30, 2, None).unwrap();
         assert_eq!(viewport.anchor, ByteOffset(13));
-        assert_eq!(super::scroll(&app, -1, 2, None).unwrap().1, None);
+        assert_eq!(
+            super::scroll(&app, app.active_view().unwrap(), -1, 2, None)
+                .unwrap()
+                .1,
+            None
+        );
     }
 }

@@ -2,12 +2,12 @@
 //! the command palette. Built-in names are fixed; registered Rust handlers and
 //! user definitions share one replaceable namespace.
 use super::{
-    Command, Departure, EditMode,
+    Command, Departure, EditMode, WindowCommand,
     keymap::{Context, LINE_EDITS, LineEdit, PROMPT_ACTIONS},
     vim::{Insert, VimCommand},
 };
 use crate::{
-    application::{Application, ClipboardAction},
+    application::{Application, Axis, ClipboardAction, Direction},
     core::EditError,
     editor::{Command as Edit, Motion},
 };
@@ -154,6 +154,10 @@ fn path_or(args: &str, path: fn(std::path::PathBuf) -> Command, bare: Command) -
         path(args.into())
     }
 }
+fn window_split(args: &str, axis: Axis) -> Command {
+    let path = (!args.is_empty()).then(|| args.into());
+    Command::Window(WindowCommand::Split(axis, path))
+}
 fn required(args: &str) -> Result<String, String> {
     if args.is_empty() {
         Err("command requires an argument".into())
@@ -274,6 +278,58 @@ pub static BUILTINS: &[Builtin] = &[
         Command::NextView
     ),
     builtin!("new" | "enew", "Create an untitled document", Command::New),
+    builtin!(
+        "split" | "sp",
+        [OPTIONAL_PATH],
+        "Split the window into two above each other; open PATH in the new one",
+        |a| Ok(window_split(a, Axis::Rows))
+    ),
+    builtin!(
+        "vsplit" | "vs",
+        [OPTIONAL_PATH],
+        "Split the window into two side by side; open PATH in the new one",
+        |a| Ok(window_split(a, Axis::Columns))
+    ),
+    builtin!(
+        "close-window" | "clo",
+        "Close the window; its document stays open",
+        Command::Window(WindowCommand::Close)
+    ),
+    builtin!(
+        "only" | "on",
+        "Close every other window",
+        Command::Window(WindowCommand::Only)
+    ),
+    builtin!(
+        "window-left",
+        "Focus the window to the left",
+        Command::Window(WindowCommand::Focus(Direction::Left))
+    ),
+    builtin!(
+        "window-right",
+        "Focus the window to the right",
+        Command::Window(WindowCommand::Focus(Direction::Right))
+    ),
+    builtin!(
+        "window-up",
+        "Focus the window above",
+        Command::Window(WindowCommand::Focus(Direction::Up))
+    ),
+    builtin!(
+        "window-down",
+        "Focus the window below",
+        Command::Window(WindowCommand::Focus(Direction::Down))
+    ),
+    builtin!(
+        "window-next",
+        "Focus the next window",
+        Command::Window(WindowCommand::Cycle { backward: false })
+    ),
+    builtin!(
+        "window-previous",
+        "Focus the previous window",
+        Command::Window(WindowCommand::Cycle { backward: true })
+    ),
     builtin!(
         "project",
         [slot("FILE", SlotKind::File)],

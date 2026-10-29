@@ -5,7 +5,7 @@ use super::{
     SearchSession, TextInput,
 };
 use crate::{
-    application::{Application, ClipboardAction, Event},
+    application::{Application, Axis, ClipboardAction, Direction, Event},
     core::EditError,
     editor::{Command as EditCommand, DocumentId, Language},
 };
@@ -66,8 +66,20 @@ pub enum Command {
     },
     Quit(Option<Departure>),
     NextView,
+    Window(WindowCommand),
     Search,
     Replace,
+}
+#[derive(Clone, Debug)]
+pub enum WindowCommand {
+    /// Splits the active window, then opens a file in the new one if given.
+    Split(Axis, Option<std::path::PathBuf>),
+    Close,
+    Only,
+    Focus(Direction),
+    Cycle {
+        backward: bool,
+    },
 }
 /// How `close`, `reload` and `quit` treat a document with unsaved changes.
 /// Without one, they ask through the command line.
@@ -453,8 +465,28 @@ impl Layers {
                     response.quit = true;
                 }
             }
+            Command::Window(command) => {
+                let Some(active) = app.active_view() else {
+                    return Ok(super::InputResult::Handled(response));
+                };
+                response.events.push(match command {
+                    WindowCommand::Split(axis, path) => {
+                        response.commands.extend(path.map(Command::OpenPath));
+                        Event::Split(axis)
+                    }
+                    WindowCommand::Close => Event::CloseWindow(active),
+                    WindowCommand::Only => Event::OnlyWindow(active),
+                    WindowCommand::Focus(direction) => Event::FocusWindow(direction),
+                    WindowCommand::Cycle { backward } => Event::CycleWindow { backward },
+                });
+            }
             Command::NextView => {
-                let ids: Vec<_> = app.views().map(|v| v.id).collect();
+                // Views shown in other windows stay where they are.
+                let ids: Vec<_> = app
+                    .views()
+                    .map(|v| v.id)
+                    .filter(|id| Some(*id) == app.active_view() || !app.windows().contains(*id))
+                    .collect();
                 if let Some(index) = app
                     .active_view()
                     .and_then(|active| ids.iter().position(|id| *id == active))

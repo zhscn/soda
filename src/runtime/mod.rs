@@ -181,6 +181,11 @@ impl Runtime {
     pub fn take_redraw(&mut self) -> bool {
         std::mem::take(&mut self.dirty)
     }
+    /// The active window's text rows, for paging, when windows split the
+    /// editing area; `resize` sets them to the whole area.
+    pub fn set_page_rows(&mut self, rows: usize) {
+        self.layers.set_page_rows(rows);
+    }
     pub fn resize(&mut self, editor_rows: usize, picker_rows: usize) {
         self.layers.set_page_rows(editor_rows);
         // Help draws inside a bordered popup over the editing area.
@@ -280,6 +285,7 @@ impl Runtime {
     fn accept(&mut self, update: Update, time: Duration) -> bool {
         let response = self.layers.observe(&self.app, &update, time);
         self.dirty |= update.active_changed
+            || update.windows_changed
             || !update.changed_views.is_empty()
             || !update.closed_views.is_empty()
             || !update.files.is_empty()

@@ -3,7 +3,7 @@
 //! the caret and leaves Visual mode, a drag selects in Visual mode.
 use super::{EditMode, InputResult, Layers, Message, Response, vim::visual_selection};
 use crate::{
-    application::{Application, Event},
+    application::{Application, Event, ViewId},
     core::Selection,
     editor::{Command as Edit, DocumentId},
 };
@@ -19,6 +19,8 @@ pub enum Pointer {
     Reveal(usize),
     /// Shows a document, as `buffer` does.
     Document(DocumentId),
+    /// Focuses the window showing a view.
+    Window(ViewId),
 }
 
 impl Layers {
@@ -53,6 +55,10 @@ impl Layers {
         let selection = match pointer {
             Pointer::Document(document) => {
                 response.events.push(super::commands::show(app, document));
+                return InputResult::Handled(response);
+            }
+            Pointer::Window(view) => {
+                response.events.push(Event::Focus(view));
                 return InputResult::Handled(response);
             }
             Pointer::Click(offset) => {

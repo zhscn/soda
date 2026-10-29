@@ -177,7 +177,12 @@ define-command grep-word shell grep -rn %arg{1} .
 | `close [DECISION] [PATH]` | `bd`、`bdelete` | 关闭当前文档 |
 | `reload [DECISION] [PATH]` | | 从磁盘重新加载当前文件 |
 | `buffer NAME` | `b`、`buffers`、`ls`、`files` | 切换到已打开的文档 |
-| `next-view` | `bn`、`bnext` | 下一个视图 |
+| `next-view` | `bn`、`bnext` | 在当前窗口显示下一个视图；其他窗口中的视图跳过 |
+| `split [PATH]` / `vsplit [PATH]` | `sp` / `vs` | 上下或左右分屏，新窗口复制当前视图；给出路径时在新窗口打开 |
+| `close-window` | `clo` | 关闭当前窗口，视图保留为隐藏 |
+| `only` | `on` | 只保留当前窗口 |
+| `window-left` / `-right` / `-up` / `-down`、`window-next` / `window-previous` | | 切换窗口 |
+| `half-page-down` / `half-page-up` | | 移动半页并滚动 |
 | `new` | `enew` | 新文档 |
 | `project FILE` | | 打开项目中的文件 |
 | `goto LINE[:COLUMN]` | | 跳转到行列，从 1 开始，列为逻辑列 |
@@ -194,7 +199,7 @@ define-command grep-word shell grep -rn %arg{1} .
 | `pipe` / `shell` | | 外部进程 |
 | `nop` | | 不执行任何操作，用于屏蔽默认键 |
 
-打开、保存和离开文档沿用 Soda 的异步任务、冲突检测与保存/丢弃/取消流程，不模拟 Vim 的窗口和 Ex 执行环境。`write-quit` 只自动保存当前文档，其他未保存文档仍需明确处理。相对路径以 Runtime 的文件根目录解析，支持 `~/`。
+打开、保存和离开文档沿用 Soda 的异步任务、冲突检测与保存/丢弃/取消流程，不模拟 Vim 的 Ex 执行环境。窗口键沿用 Vim 的 `Ctrl-W` 前缀：`s`/`v` 分屏，`c`/`q` 关闭，`o` 只留当前，`h`/`j`/`k`/`l` 和方向键按方向切换，`w`/`Ctrl-W`/`W` 按顺序切换。`write-quit` 只自动保存当前文档，其他未保存文档仍需明确处理。相对路径以 Runtime 的文件根目录解析，支持 `~/`。
 
 ### 帮助
 

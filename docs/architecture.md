@@ -24,7 +24,7 @@ Soda 是以 TUI 交付、以 C++ 交互缩进为核心体验的 Rust 编辑器�
 | `config` | clang-format 配置解析、预设、目录继承，编译为缩进规则 | [clang-format 配置](clang-format.md) |
 | `language` | 跨语言共享的空白策略与生成 | [交互缩进](indentation.md) |
 | `files` | 文件 I/O、工作区、打开与保存请求、后台 worker | [文件服务](files.md) |
-| `application` | owner-thread 状态归约：视图、文档、剪贴板、文件完成 | [边界契约](contracts.md) |
+| `application` | owner-thread 状态归约：视图、窗口树、文档、剪贴板与寄存器、文件完成 | [边界契约](contracts.md) |
 | `interaction` | 键位、命令表、Vim 语法、输入框、picker、搜索替换等会话 | [交互层](interaction.md) |
 | `runtime` | 命令循环：执行响应、观察更新、调度后台任务与外部命令 | [交互层](interaction.md) |
 | `syntax` | 语法高亮：分类、C++ 词法着色、TextMate 引擎与增量行缓存、内置语法 | [语法高亮与导航](syntax.md) |
@@ -54,13 +54,13 @@ Soda 是以 TUI 交付、以 C++ 交互缩进为核心体验的 Rust 编辑器�
 
 ## 5 当前范围与后续工作
 
-已完成：编辑内核与历史、文件生命周期、C++ 增量分析与缩进、clang-format 配置、TUI、Vim 子集、搜索替换、文件与缓冲区 picker、命令表、键位配置、命令面板和外部命令。
+已完成：编辑内核与历史、文件生命周期、C++ 增量分析与缩进、clang-format 配置、TUI、语法高亮、Vim 子集（含文本对象、dot repeat、宏、寄存器、标记）、搜索替换、文件与缓冲区 picker、命令表、键位配置、命令面板、外部命令、系统剪贴板、鼠标和分屏。
 
 待定事项，开始前需要确认方向：
 
 - C++：三元表达式续行、宏内容、尾随注释对齐；CST 相对位置改写。
 - 语言服务：clangd/LSP 接入（补全、诊断、跳转）与语法高亮的取舍。
-- 交互：多选区、文本对象、dot repeat、Visual block、分屏。
+- 交互：多选区、Visual block、按缓冲区种类决定显示位置的规则（见[终端界面](ui.md#窗口)）。
 - 前端：GUI 与远程会话，在本地会话模型稳定后再设计。
 
 ## 6 设计参考

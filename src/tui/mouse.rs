@@ -1,6 +1,6 @@
 //! Resolves mouse events against the current screen areas: the tab row
-//! switches documents, the text area places and drags the caret, and the
-//! wheel scrolls the active view.
+//! switches documents, a click in a window focuses it and places the
+//! caret, a drag selects, and the wheel scrolls the window under it.
 use super::{layout, view};
 use crate::{
     interaction::{Pointer, UserInput},
@@ -18,16 +18,18 @@ pub(super) struct Mouse {
 }
 impl Mouse {
     pub fn handle(&mut self, event: MouseEvent, runtime: &mut Runtime, areas: &view::Areas) {
-        let text = areas.text();
         let inside = |area: ratatui::layout::Rect| {
             area.contains(ratatui::layout::Position::new(event.column, event.row))
         };
-        // Cells left of the text, in the gutter, select from the line start.
+        // Offsets in the active window; cells left of the text, in the
+        // gutter, select from the line start.
         let offset = |runtime: &Runtime| {
+            let text = areas.text(runtime);
             let row = event.row as isize - text.y as isize;
             let column = event.column.saturating_sub(text.x);
             layout::offset_at(runtime.app(), row, column.into())
         };
+        let window = areas.window_at(event.column, event.row);
         match event.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.press = None;
@@ -39,10 +41,18 @@ impl Mouse {
                     if let Some((document, _, _)) = tab {
                         runtime.input(UserInput::Pointer(Pointer::Document(document)));
                     }
-                } else if inside(areas.editor)
-                    && runtime.layer().is_none()
-                    && let Some(offset) = offset(runtime)
-                {
+                    return;
+                }
+                let Some(window) = window.filter(|_| runtime.layer().is_none()) else {
+                    return;
+                };
+                if runtime.app().active_view() != Some(window.view) {
+                    runtime.input(UserInput::Pointer(Pointer::Window(window.view)));
+                }
+                if window.header.is_some_and(inside) {
+                    return;
+                }
+                if let Some(offset) = offset(runtime) {
                     self.press = Some(offset);
                     runtime.input(UserInput::Pointer(Pointer::Click(offset)));
                 }
@@ -60,21 +70,26 @@ impl Mouse {
                 }
             }
             MouseEventKind::Up(_) => self.press = None,
-            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
-                if inside(areas.editor) && runtime.layer().is_none() =>
-            {
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown if runtime.layer().is_none() => {
+                let Some(window) = window else {
+                    return;
+                };
                 let lines = if event.kind == MouseEventKind::ScrollUp {
                     -SCROLL
                 } else {
                     SCROLL
                 };
+                let active = runtime.app().active_view() == Some(window.view);
+                let caret = runtime.editor_caret().filter(|_| active);
                 let Some((viewport, reveal)) =
-                    layout::scroll(runtime.app(), lines, text.height, runtime.editor_caret())
+                    layout::scroll(runtime.app(), window.view, lines, window.text.height, caret)
                 else {
                     return;
                 };
                 runtime.update_viewport(viewport.view, viewport.anchor, viewport.horizontal_column);
-                if let Some(offset) = reveal {
+                // Other windows keep their carets; focusing one later
+                // scrolls back to its caret.
+                if let Some(offset) = reveal.filter(|_| active) {
                     runtime.input(UserInput::Pointer(Pointer::Reveal(offset)));
                 }
             }

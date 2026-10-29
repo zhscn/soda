@@ -7,6 +7,7 @@ use super::{
     theme::Theme,
 };
 use crate::{
+    application::{Area, ViewId},
     interaction::{CommandLine, EditMode, Layer, help::HINT},
     runtime::Runtime,
 };
@@ -19,12 +20,21 @@ use ratatui::{
     widgets::{Block, BorderType, Clear, Widget},
 };
 
+/// One window: an optional title row when several are shown, then the
+/// line number gutter and the text.
+pub(super) struct Window {
+    pub view: ViewId,
+    pub area: Rect,
+    pub header: Option<Rect>,
+    pub gutter: u16,
+    pub text: Rect,
+}
 /// Screen regions for one terminal size.
 pub(super) struct Areas {
     pub tabs: Option<Rect>,
-    /// Gutter and text together.
+    /// Every window together.
     pub editor: Rect,
-    pub gutter: u16,
+    pub windows: Vec<Window>,
     pub status: Option<Rect>,
     pub message: Rect,
 }
@@ -36,39 +46,76 @@ impl Areas {
         let top = u16::from(tabs.is_some());
         let bottom = height.saturating_sub(if status.is_some() { 2 } else { 1 });
         let editor = Rect::new(0, top, width, bottom.saturating_sub(top));
-        let lines = active_line_count(runtime);
-        let digits = lines.max(1).ilog10() as u16 + 1;
-        // ` 123 │ ` keeps numbers right-aligned with a separator.
-        let gutter = digits.max(3) + 4;
-        let gutter = if width >= gutter + 16 { gutter } else { 0 };
+        let app = runtime.app();
+        let layout = app.windows().layout(Area {
+            x: editor.x,
+            y: editor.y,
+            width: editor.width,
+            height: editor.height,
+        });
+        let several = layout.len() > 1;
+        let windows = layout
+            .into_iter()
+            .map(|(view, area)| {
+                let area = Rect::new(area.x, area.y, area.width, area.height);
+                let header = (several && area.height >= 2).then_some(Rect { height: 1, ..area });
+                let body = match header {
+                    Some(_) => Rect {
+                        y: area.y + 1,
+                        height: area.height - 1,
+                        ..area
+                    },
+                    None => area,
+                };
+                let lines = app
+                    .view(view)
+                    .and_then(|view| app.workspace().editor(view.document_id))
+                    .map_or(1, |editor| {
+                        editor.model().document().snapshot().line_count()
+                    });
+                let digits = lines.max(1).ilog10() as u16 + 1;
+                // ` 123 │ ` keeps numbers right-aligned with a separator.
+                let gutter = digits.max(3) + 4;
+                let gutter = if body.width >= gutter + 16 { gutter } else { 0 };
+                Window {
+                    view,
+                    area,
+                    header,
+                    gutter,
+                    text: Rect {
+                        x: body.x + gutter,
+                        width: body.width - gutter,
+                        ..body
+                    },
+                }
+            })
+            .collect();
         Self {
             tabs,
             editor,
-            gutter,
+            windows,
             status,
             message,
         }
     }
-    pub fn text(&self) -> Rect {
-        Rect {
-            x: self.editor.x + self.gutter,
-            width: self.editor.width - self.gutter,
-            ..self.editor
-        }
+    pub fn active(&self, runtime: &Runtime) -> Option<&Window> {
+        let active = runtime.app().active_view()?;
+        self.windows.iter().find(|window| window.view == active)
+    }
+    /// The active window's text, or the whole editing area without one.
+    pub fn text(&self, runtime: &Runtime) -> Rect {
+        self.active(runtime)
+            .map_or(self.editor, |window| window.text)
+    }
+    pub fn window_at(&self, x: u16, y: u16) -> Option<&Window> {
+        self.windows
+            .iter()
+            .find(|window| window.area.contains(Position::new(x, y)))
     }
     /// Rows the command line may use for candidates.
     pub fn list_rows(&self) -> usize {
         usize::from(self.editor.height.saturating_sub(4)).min(10)
     }
-}
-fn active_line_count(runtime: &Runtime) -> usize {
-    let app = runtime.app();
-    app.active_view()
-        .and_then(|id| app.view(id))
-        .and_then(|view| app.workspace().editor(view.document_id))
-        .map_or(1, |editor| {
-            editor.model().document().snapshot().line_count()
-        })
 }
 
 pub(super) fn render(
@@ -76,7 +123,7 @@ pub(super) fn render(
     runtime: &Runtime,
     theme: &Theme,
     areas: &Areas,
-    text: Option<&layout::Frame>,
+    texts: &[Option<layout::Frame>],
 ) {
     let screen = frame.area();
     let buf = frame.buffer_mut();
@@ -84,13 +131,31 @@ pub(super) fn render(
     if let Some(area) = areas.tabs {
         tabs(buf, area, runtime, theme);
     }
-    let mut cursor = match text {
-        Some(text) => editor(buf, areas, text, theme),
-        None => {
-            splash(buf, areas.editor, theme);
-            None
+    let active = runtime.app().active_view();
+    let mut cursor = None;
+    if areas.windows.is_empty() {
+        splash(buf, areas.editor, theme);
+    } else {
+        separators(buf, areas, theme);
+    }
+    for (window, text) in areas.windows.iter().zip(texts) {
+        let current = Some(window.view) == active;
+        if let Some(header) = window.header {
+            window_header(buf, header, runtime, window.view, current, theme);
         }
-    };
+        if let Some(text) = text {
+            let position = editor(buf, window, text, theme, current);
+            if current {
+                cursor = position;
+            }
+        }
+    }
+    let text = areas
+        .windows
+        .iter()
+        .zip(texts)
+        .find(|(window, _)| Some(window.view) == active)
+        .and_then(|(_, text)| text.as_ref());
     if let Some(area) = areas.status {
         status(buf, area, runtime, theme, text);
     }
@@ -149,33 +214,72 @@ fn spans(buf: &mut Buffer, x: u16, y: u16, width: u16, spans: &[Span], base: Sty
     }
 }
 
+/// Side-by-side windows leave a column between them.
+fn separators(buf: &mut Buffer, areas: &Areas, theme: &Theme) {
+    for y in areas.editor.top()..areas.editor.bottom() {
+        for x in areas.editor.left()..areas.editor.right() {
+            if areas.window_at(x, y).is_none() {
+                buf[(x, y)].set_symbol("│").set_style(theme.gutter);
+            }
+        }
+    }
+}
+fn window_header(
+    buf: &mut Buffer,
+    area: Rect,
+    runtime: &Runtime,
+    view: ViewId,
+    current: bool,
+    theme: &Theme,
+) {
+    buf.set_style(area, theme.tabs);
+    let Some(document) = runtime.app().view(view).map(|view| view.document_id) else {
+        return;
+    };
+    let dirty = runtime.app().workspace().is_dirty(document);
+    let label = format!(
+        " {}{} ",
+        file_label(runtime, document, true),
+        if dirty { " ●" } else { "" }
+    );
+    let label = tail(&label, area.width.into());
+    let style = if current {
+        theme.tab_active
+    } else {
+        theme.tabs
+    };
+    buf.set_stringn(area.x, area.y, label, area.width.into(), style);
+}
 fn editor(
     buf: &mut Buffer,
-    areas: &Areas,
+    window: &Window,
     text: &layout::Frame,
     theme: &Theme,
+    current: bool,
 ) -> Option<Position> {
-    let area = areas.text();
-    let digits = usize::from(areas.gutter.saturating_sub(4));
+    let area = window.text;
+    let digits = usize::from(window.gutter.saturating_sub(4));
+    let left = area.x - window.gutter;
     for (index, row) in text.rows.iter().enumerate() {
         let y = area.y + index as u16;
-        let current = row.line == text.caret.0;
-        let base = if current {
+        // Only the focused window marks the caret line.
+        let caret_line = current && row.line == text.caret.0;
+        let base = if caret_line {
             theme.text.patch(theme.cursor_line)
         } else {
             theme.text
         };
-        if current {
-            buf.set_style(Rect::new(areas.editor.x, y, areas.editor.width, 1), base);
+        if caret_line {
+            buf.set_style(Rect::new(left, y, area.width + window.gutter, 1), base);
         }
-        if areas.gutter > 0 {
-            let style = if current {
+        if window.gutter > 0 {
+            let style = if caret_line {
                 theme.gutter_current
             } else {
                 theme.gutter
             };
             let number = format!(" {:>digits$} │ ", row.line + 1);
-            buf.set_stringn(areas.editor.x, y, &number, areas.gutter.into(), style);
+            buf.set_stringn(left, y, &number, window.gutter.into(), style);
         }
         spans(buf, area.x, y, area.width, &row.spans, base, theme);
     }
@@ -318,7 +422,10 @@ fn status(
     let view = app.active_view().and_then(|id| app.view(id));
     let mut right = vec![];
     if let Some(register) = runtime.recording() {
-        right.push(Text::styled(format!("recording @{register}  "), theme.modified));
+        right.push(Text::styled(
+            format!("recording @{register}  "),
+            theme.modified,
+        ));
     }
     if let Some(pending) = runtime.pending_keys() {
         right.push(Text::styled(format!("{pending}  "), theme.key));
@@ -591,29 +698,15 @@ mod tests {
         let theme = Theme::detect();
         let areas = Areas::new(runtime, width, height);
         runtime.resize(areas.editor.height.into(), areas.list_rows());
-        let text = areas.text();
-        if let Some(v) = layout::follow_caret(
-            runtime.app(),
-            text.width,
-            text.height,
-            runtime.editor_caret(),
-        )
-        .unwrap()
-        {
-            runtime.update_viewport(v.view, v.anchor, v.horizontal_column);
-        }
+        runtime.set_page_rows(areas.text(runtime).height.into());
+        super::super::follow(runtime, &areas).unwrap();
         let areas = Areas::new(runtime, width, height);
-        let frame = layout::frame(
-            runtime.app(),
-            &mut crate::syntax::Highlighter::default(),
-            text.width,
-            text.height,
-            runtime.editor_caret(),
-        )
-        .unwrap();
+        let texts =
+            super::super::frames(runtime, &mut crate::syntax::Highlighter::default(), &areas)
+                .unwrap();
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         terminal
-            .draw(|f| render(f, runtime, &theme, &areas, frame.as_ref()))
+            .draw(|f| render(f, runtime, &theme, &areas, &texts))
             .unwrap();
         let buffer = terminal.backend().buffer();
         let mut out = String::new();

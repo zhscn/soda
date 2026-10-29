@@ -16,6 +16,8 @@
 //! Path/configuration preflight and explicit Reload currently run synchronously.
 mod clipboard;
 pub use clipboard::ClipboardAction;
+mod windows;
+pub use windows::{Area, Axis, Direction, Node, Windows};
 
 use crate::{
     core::{Association, ByteOffset, EditError, Selection},
@@ -60,6 +62,19 @@ pub enum Event {
     AddView(DocumentId),
     Focus(ViewId),
     CloseView(ViewId),
+    /// Splits the active window; the new window shows a copy of its view
+    /// and takes focus.
+    Split(Axis),
+    /// Closes a window; its view stays open, hidden.
+    CloseWindow(ViewId),
+    /// Closes every window but the one of this view.
+    OnlyWindow(ViewId),
+    /// Focuses the window next to the active one.
+    FocusWindow(Direction),
+    /// Focuses the next window, or the previous one, in reading order.
+    CycleWindow {
+        backward: bool,
+    },
     CloseDocument {
         document: DocumentId,
         discard: bool,
@@ -152,12 +167,15 @@ pub struct Update {
     pub closed_views: Vec<ViewId>,
     pub closed_documents: Vec<DocumentId>,
     pub active_changed: bool,
+    /// The window tree changed shape or shows other views.
+    pub windows_changed: bool,
     pub edit: Option<EditorUpdate>,
     pub files: Vec<FileResult>,
 }
 #[derive(Debug)]
 pub enum Error {
     UnknownView,
+    LastWindow,
     Edit(EditError),
     File(FileError),
 }
@@ -175,6 +193,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnknownView => f.write_str("unknown view"),
+            Self::LastWindow => f.write_str("cannot close the last window"),
             Self::Edit(e) => e.fmt(f),
             Self::File(e) => e.fmt(f),
         }
@@ -185,7 +204,7 @@ impl std::error::Error for Error {
         match self {
             Self::Edit(e) => Some(e),
             Self::File(e) => Some(e),
-            Self::UnknownView => None,
+            Self::UnknownView | Self::LastWindow => None,
         }
     }
 }
@@ -210,6 +229,9 @@ pub struct Application {
     clipboard_revision: u64,
     /// Named Vim registers and whether each holds whole lines.
     registers: BTreeMap<char, (String, bool)>,
+    windows: Windows,
+    /// Views by when they were last focused, most recent last.
+    recent: Vec<ViewId>,
 }
 impl Application {
     pub fn new(service: FileService) -> Self {
@@ -231,14 +253,86 @@ impl Application {
     pub fn active_view(&self) -> Option<ViewId> {
         self.active
     }
+    /// The windows on screen. The active view is always in one of them.
+    pub fn windows(&self) -> &Windows {
+        &self.windows
+    }
 
+    /// Focusing a view shown in a window moves to that window; a hidden
+    /// view takes the place of the active one.
     fn focus(&mut self, view: Option<ViewId>) {
         // Focus revisions distinguish switching away and back while a read runs.
         self.focus_revision = self
             .focus_revision
             .checked_add(1)
             .expect("focus revisions exhausted");
+        if let Some(view) = view {
+            if !self.windows.contains(view) {
+                self.windows.replace(self.active, view);
+            }
+            self.recent.retain(|id| *id != view);
+            self.recent.push(view);
+        }
         self.active = view;
+    }
+    /// After views close, their windows show the most recent hidden views
+    /// instead, or close when none is left.
+    fn repair_windows(&mut self) {
+        self.recent.retain(|id| self.views.contains_key(id));
+        let mut active = self.active.filter(|id| self.views.contains_key(id));
+        for window in self.windows.views() {
+            if self.views.contains_key(&window) {
+                continue;
+            }
+            let hidden = self
+                .recent
+                .iter()
+                .rev()
+                .chain(self.views.keys())
+                .copied()
+                .find(|id| !self.windows.contains(*id));
+            match hidden {
+                Some(hidden) => {
+                    self.windows.replace(Some(window), hidden);
+                    if self.active == Some(window) {
+                        active = Some(hidden);
+                    }
+                }
+                None => self.windows.remove(window),
+            }
+        }
+        let active = active.or_else(|| {
+            self.recent
+                .iter()
+                .rev()
+                .copied()
+                .find(|id| self.windows.contains(*id))
+                .or_else(|| self.windows.views().first().copied())
+        });
+        if active != self.active {
+            self.focus(active);
+        }
+    }
+    /// A new view of the same document, selection and scroll position.
+    fn copy_view(&mut self, view: ViewId) -> Result<ViewId, Error> {
+        let state = self.views.get(&view).ok_or(Error::UnknownView)?.clone();
+        let selection = self
+            .workspace
+            .editor(state.document_id)
+            .unwrap()
+            .model()
+            .session(state.session_id)
+            .unwrap()
+            .selection();
+        let id = self.add_view(state.document_id)?;
+        let copy = self.views.get_mut(&id).unwrap();
+        copy.viewport = state.viewport;
+        let session = copy.session_id;
+        self.workspace
+            .editor_mut(state.document_id)
+            .unwrap()
+            .execute_at(session, Command::SetSelection(selection), Duration::ZERO)?;
+        Ok(id)
     }
     fn add_view(&mut self, document: DocumentId) -> Result<ViewId, Error> {
         let next = self
@@ -334,6 +428,7 @@ impl Application {
     /// document validates dirty/pending-save constraints before removing views.
     pub fn dispatch(&mut self, event: Event) -> Result<Update, Error> {
         let before = self.active;
+        let windows = self.windows.root().cloned();
         let mut update = Update::default();
         match event {
             Event::NewDocument(language) => {
@@ -359,9 +454,7 @@ impl Application {
                     .close_session(state.session_id)?;
                 self.views.remove(&view);
                 update.closed_views.push(view);
-                if self.active == Some(view) {
-                    self.focus(self.views.keys().next().copied());
-                }
+                self.repair_windows();
             }
             Event::CloseDocument { document, discard } => {
                 if discard {
@@ -378,11 +471,58 @@ impl Application {
                 for id in &ids {
                     self.views.remove(id);
                 }
-                if self.active.is_some_and(|id| ids.contains(&id)) {
-                    self.focus(self.views.keys().next().copied());
-                }
+                self.repair_windows();
                 update.closed_views = ids;
                 update.closed_documents.push(document);
+            }
+            Event::Split(axis) => {
+                let active = self.active.ok_or(Error::UnknownView)?;
+                let view = self.copy_view(active)?;
+                update.changed_views.push(view);
+                self.windows.split(active, view, axis);
+                self.focus(Some(view));
+            }
+            Event::CloseWindow(view) => {
+                self.views.get(&view).ok_or(Error::UnknownView)?;
+                if !self.windows.contains(view) {
+                    return Err(Error::UnknownView);
+                }
+                if self.windows.len() == 1 {
+                    return Err(Error::LastWindow);
+                }
+                self.windows.remove(view);
+                if self.active == Some(view) {
+                    self.active = None;
+                    self.repair_windows();
+                }
+            }
+            Event::OnlyWindow(view) => {
+                self.views.get(&view).ok_or(Error::UnknownView)?;
+                self.windows.only(view);
+                if self.active != Some(view) {
+                    self.focus(Some(view));
+                }
+            }
+            Event::FocusWindow(direction) => {
+                if let Some(next) = self
+                    .active
+                    .and_then(|active| self.windows.neighbor(active, direction))
+                {
+                    self.focus(Some(next));
+                }
+            }
+            Event::CycleWindow { backward } => {
+                let windows = self.windows.views();
+                if let Some(index) = self
+                    .active
+                    .and_then(|active| windows.iter().position(|id| *id == active))
+                {
+                    let n = windows.len();
+                    let next = if backward { index + n - 1 } else { index + 1 } % n;
+                    if next != index {
+                        self.focus(Some(windows[next]));
+                    }
+                }
             }
             Event::Edit {
                 view,
@@ -490,6 +630,7 @@ impl Application {
             }
         }
         update.active_changed = before != self.active;
+        update.windows_changed = windows.as_ref() != self.windows.root();
         update.changed_views.sort_unstable();
         update.changed_views.dedup();
         Ok(update)
