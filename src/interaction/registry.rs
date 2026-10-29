@@ -660,6 +660,20 @@ pub static BUILTINS: &[Builtin] = &[
         |a| { Ok(Command::Run(required(a)?)) }
     ),
     builtin!(
+        "check-files" | "checktime",
+        "Reload files changed on disk without unsaved edits; report the others",
+        Command::CheckFiles
+    ),
+    builtin!(
+        "echo",
+        [Slot {
+            required: false,
+            ..slot("TEXT", SlotKind::Rest)
+        }],
+        "Show TEXT in the message line",
+        |a| Ok(Command::Echo(a.to_owned()))
+    ),
+    builtin!(
         "messages",
         "Show recent messages, including every configuration error",
         Command::Messages

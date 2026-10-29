@@ -40,6 +40,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `line-numbers` | absolute/relative/off | absolute | 行号栏；relative 时光标行显示自身行号，其他行显示距离 |
 | `scroll-lines` | 1–100 | 3 | 鼠标滚轮每格滚动的行数 |
 | `mouse` | true/false | true | 关闭后终端恢复自己的文本选择 |
+| `auto-reload` | true/false | true | 磁盘上变化了的文件没有未保存编辑时自动重新加载 |
 | `clipboard` | system/internal | system | internal 时复制和粘贴不经过系统剪贴板 |
 
 `set` 在解析命令行时就按类型检查取值，所以错误在命令执行前报告，Application 收到的永远是合法值。布尔值也接受 yes/no、on/off。`set` 和 `set-local` 的选项名可以在命令行中补全，候选附带说明。

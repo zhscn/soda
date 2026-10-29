@@ -102,6 +102,12 @@ pub const OPTIONS: &[OptionInfo] = &[
         doc: "Take mouse input; turn off to use the terminal's own selection",
     },
     OptionInfo {
+        name: "auto-reload",
+        kind: Kind::Bool,
+        default: Value::Bool(true),
+        doc: "Reload files changed on disk that have no unsaved edits",
+    },
+    OptionInfo {
         name: "clipboard",
         kind: Kind::Choice(&["system", "internal"]),
         default: Value::Choice("system"),

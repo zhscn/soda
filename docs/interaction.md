@@ -209,6 +209,8 @@ hook open .*/Makefile set-local expand-tab false
 | `run CMD` | `make` | 后台运行命令，输出流式写入 `*run*` |
 | `stop` | | 停止 `run`、`shell`/`pipe` 和项目搜索 |
 | `messages` | | 在 `*messages*` 中显示最近的消息 |
+| `echo [TEXT]` | | 在消息行显示文字，常与 `%val{}` 一起用 |
+| `check-files` | `checktime` | 重新加载磁盘上变化了的干净文件，报告其余的 |
 | `display KIND PLACEMENT` | | 设置某种文档的显示位置，见[终端界面](ui.md#窗口) |
 | `set OPTION VALUE` | | 设置全局选项，见[扩展模型](extension.md#选项) |
 | `set-local OPTION VALUE` / `unset-local OPTION` | | 设置或去掉当前文档自己的选项值 |
@@ -347,6 +349,14 @@ Enter 依次处理：
 Runtime 在更新中观察 SaveId，并将带 Operation 身份的失败交给等待层；无关的失败和同一文档后来的另一次保存不会被等待层采用。等待期间 Esc 只取消离开流程，已经提交的保存继续完成。活动视图变化时等待层与命令行一样结束。已有保存任务时不启动新的关闭、重新加载或退出流程；未命名文档不能重新加载。
 
 `quit` 每次询问一个未保存的文档：当前文档未保存时先问它，否则问第一个未保存的文档，包括没有视图的文档。`quit discard` 丢弃并关闭该文档后再次执行 `quit`；`quit save` 保存成功后再次执行 `quit`。没有未保存文档且没有待处理保存时才输出退出请求。中途取消时，已经丢弃关闭的文档不会恢复，之前成功的保存仍然有效。`write-quit` 在当前文档未保存时等同 `quit save`，其他未保存文档仍逐个询问。
+
+### 磁盘上的变化
+
+终端重新获得焦点时（以及执行 `check-files`，别名 `checktime`），逐个比较打开的文件与加载或保存时的磁盘内容：
+- 内容变了、文档没有未保存的编辑、选项 `auto-reload` 为 true（默认）时，直接重新加载，光标和撤销历史保留。
+- 文档有未保存的编辑，或者 `auto-reload` 为 false 时，只在消息行报告 `PATH changed on disk`；之后可以 `reload discard` 采用磁盘内容，或者保存（保存会因内容冲突而失败，需要先决定）。
+- 文件被删除时报告 `PATH was deleted`，文档保持不变。
+- 没有变化时不改变消息行。比较读取整个文件，只在这些时机进行，不监视文件系统。正在保存的文档跳过。
 
 ## 项目搜索
 

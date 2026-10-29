@@ -90,6 +90,11 @@ pub enum Command {
     Run(String),
     /// Stops background work: the run, the shell command and the search.
     Stop,
+    /// Looks for open files changed on disk: reloads those without unsaved
+    /// edits and reports the rest.
+    CheckFiles,
+    /// Shows a message.
+    Echo(String),
     /// Shows recent messages in `*messages*`.
     Messages,
     /// Sets an option globally, or for the current document.
@@ -133,6 +138,40 @@ pub enum Departure {
     Discard,
 }
 
+fn check_files(app: &Application, file_root: &Path, response: &mut Response) {
+    // Focus comes back often; the message stays unless something changed.
+    response.message = Message::Keep;
+    response.redraw = false;
+    let workspace = app.workspace();
+    let mut changed = vec![];
+    for document in workspace.documents() {
+        if workspace.is_saving(document)
+            || !workspace.externally_modified(document).unwrap_or(false)
+        {
+            continue;
+        }
+        let path = workspace.file(document).unwrap().path().unwrap();
+        let name = path.strip_prefix(file_root).unwrap_or(path).display();
+        let view = app.views().find(|view| view.document_id == document);
+        if !path.exists() {
+            changed.push(format!("{name} was deleted"));
+        } else if let Some(view) = view.filter(|_| {
+            !workspace.is_dirty(document) && app.options().bool(Some(document), "auto-reload")
+        }) {
+            response.events.push(Event::Reload {
+                view: view.id,
+                discard: false,
+            });
+        } else {
+            changed.push(format!("{name} changed on disk"));
+        }
+    }
+    // After the reloads, whose own messages it would otherwise lose to.
+    if !changed.is_empty() {
+        response.commands.push(Command::Echo(changed.join("; ")));
+        response.redraw = true;
+    }
+}
 impl Layers {
     /// Applies a configuration command: `map`, `unmap` or `define-command`.
     pub fn configure(&mut self, command: Command) -> Result<(), String> {
@@ -590,6 +629,12 @@ impl Layers {
             }
             Command::Stop => response.stop = true,
             Command::Messages => response.messages = true,
+            Command::Echo(text) => response.message = Message::Set(text),
+            Command::CheckFiles => {
+                // Unlike other commands, an empty check keeps the message.
+                check_files(app, file_root, &mut response);
+                return Ok(super::InputResult::Handled(response));
+            }
             Command::SetOption { local, name, value } => {
                 let document = app
                     .active_view()

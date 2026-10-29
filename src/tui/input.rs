@@ -38,6 +38,7 @@ pub(super) fn normalize(event: Event) -> UserInput {
     match event {
         Event::Key(key) => UserInput::Key(normalize_key(key)),
         Event::FocusLost => UserInput::FocusLost,
+        Event::FocusGained => UserInput::FocusGained,
         Event::Paste(text) => UserInput::Paste(text),
         _ => UserInput::Unrecognized,
     }

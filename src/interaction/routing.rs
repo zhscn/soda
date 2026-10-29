@@ -165,6 +165,8 @@ pub enum UserInput {
     Pointer(super::Pointer),
     Unrecognized,
     FocusLost,
+    /// The terminal has focus again; files may have changed meanwhile.
+    FocusGained,
 }
 
 fn pending(message: Message) -> InputResult {
@@ -215,7 +217,10 @@ impl Layers {
         let typed = match &input {
             UserInput::Key(key) => !key.release,
             UserInput::Paste(_) => true,
-            UserInput::Pointer(_) | UserInput::Unrecognized | UserInput::FocusLost => false,
+            UserInput::Pointer(_)
+            | UserInput::Unrecognized
+            | UserInput::FocusLost
+            | UserInput::FocusGained => false,
         };
         if typed {
             let idle = self.idle();
@@ -238,6 +243,12 @@ impl Layers {
         if let UserInput::Pointer(pointer) = input {
             return Ok(self.pointer(pointer, app, time));
         }
+        if matches!(input, UserInput::FocusGained) {
+            if self.active().is_some() {
+                return Ok(InputResult::Blocked);
+            }
+            return self.execute(super::Command::CheckFiles, app, time, file_root);
+        }
         if matches!(input, UserInput::FocusLost) {
             if !self.sequence.active() && !self.vim.active() {
                 return Ok(InputResult::Blocked);
@@ -253,9 +264,10 @@ impl Layers {
             let input = match input {
                 UserInput::Key(key) => self.keymap.input(key),
                 UserInput::Paste(text) => Input::Paste(text),
-                UserInput::Unrecognized | UserInput::FocusLost | UserInput::Pointer(_) => {
-                    Input::Unrecognized
-                }
+                UserInput::Unrecognized
+                | UserInput::FocusLost
+                | UserInput::FocusGained
+                | UserInput::Pointer(_) => Input::Unrecognized,
             };
             return self.handle(input, app, time);
         }
