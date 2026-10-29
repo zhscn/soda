@@ -677,6 +677,16 @@ pub static BUILTINS: &[Builtin] = &[
         |a| Ok(Command::Echo(a.to_owned()))
     ),
     builtin!(
+        "jump-to",
+        "Type two characters, then the label of where on screen to go",
+        Command::JumpTo
+    ),
+    builtin!(
+        "window-pick",
+        "Focus a window by its label; with two windows, the other one",
+        Command::WindowPick
+    ),
+    builtin!(
         "messages",
         "Show recent messages, including every configuration error",
         Command::Messages

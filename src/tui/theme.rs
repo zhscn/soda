@@ -33,6 +33,8 @@ pub(super) struct Theme {
     pub ruler: Style,
     syntax: [Style; CATEGORIES],
     pub key: Style,
+    /// Jump labels over the text.
+    pub label: Style,
 }
 
 struct Palette {
@@ -165,6 +167,7 @@ impl Theme {
                 })
             },
             key: Style::new().fg(c(p.magenta)).add_modifier(Modifier::BOLD),
+            label: badge(p.magenta),
         }
     }
 }

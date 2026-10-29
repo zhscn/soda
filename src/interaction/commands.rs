@@ -95,6 +95,10 @@ pub enum Command {
     CheckFiles,
     /// Shows a message.
     Echo(String),
+    /// Moves to one of the places two typed characters occur on screen.
+    JumpTo,
+    /// Focuses a window chosen by its label.
+    WindowPick,
     /// Shows recent messages in `*messages*`.
     Messages,
     /// Sets an option globally, or for the current document.
@@ -630,6 +634,17 @@ impl Layers {
             Command::Stop => response.stop = true,
             Command::Messages => response.messages = true,
             Command::Echo(text) => response.message = Message::Set(text),
+            Command::JumpTo => {
+                if let Some(view) = app.active_view() {
+                    let session = super::labels::LabelSession::jump(view, self.page_rows);
+                    response = self.enter(Layer::Labels(session), app, time)?;
+                }
+            }
+            Command::WindowPick => match super::labels::LabelSession::windows(app) {
+                Ok(session) => response = self.enter(Layer::Labels(session), app, time)?,
+                Err(Some(other)) => response.events.push(Event::Focus(other)),
+                Err(None) => {}
+            },
             Command::CheckFiles => {
                 // Unlike other commands, an empty check keeps the message.
                 check_files(app, file_root, &mut response);

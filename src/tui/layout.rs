@@ -245,6 +245,24 @@ pub(super) fn follow_caret(
 
 /// The byte offset under a cell of the active view's text area. Rows past
 /// either edge resolve to the lines beyond it, within the document.
+/// The row and column, within a view's text area, that shows `offset`;
+/// none when it is scrolled out above, below or to the left.
+pub(super) fn cell_of(app: &Application, view: ViewId, offset: usize) -> Option<(usize, usize)> {
+    let view = app.view(view)?;
+    let document = app.workspace().editor(view.document_id)?.model().document();
+    let snapshot = document.snapshot();
+    let top = snapshot.line_of(view.viewport.anchor.offset.0)?;
+    let row = snapshot.line_of(offset)?.checked_sub(top)?;
+    let column = logical_column_at(
+        snapshot,
+        ByteOffset(offset),
+        document.whitespace().tab_width,
+    )
+    .ok()?
+    .0
+    .checked_sub(view.viewport.horizontal_column)?;
+    Some((row, column))
+}
 pub(super) fn offset_at(app: &Application, row: isize, column: usize) -> Option<usize> {
     let view = app.view(app.active_view()?)?;
     let document = app.workspace().editor(view.document_id)?.model().document();

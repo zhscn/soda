@@ -13,6 +13,7 @@ pub mod grep;
 pub mod help;
 pub mod history;
 pub mod hooks;
+pub mod labels;
 pub use help::HelpSession;
 mod input;
 pub use input::{InputKey, InputMotion, InputUpdate, TextInput};

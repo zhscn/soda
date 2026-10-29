@@ -157,6 +157,9 @@ pub(super) fn render(
             }
         }
     }
+    if let Some(Layer::Labels(session)) = runtime.layer() {
+        labels(buf, areas, runtime, session, theme);
+    }
     let text = areas
         .windows
         .iter()
@@ -195,6 +198,34 @@ pub(super) fn render(
     }
 }
 
+/// Draws the labels still possible over the text, or over each window.
+fn labels(
+    buf: &mut Buffer,
+    areas: &Areas,
+    runtime: &Runtime,
+    session: &crate::interaction::labels::LabelSession,
+    theme: &Theme,
+) {
+    for (target, rest) in session.targets() {
+        let Some(window) = areas.windows.iter().find(|w| w.view == target.view) else {
+            continue;
+        };
+        let text = window.text;
+        let (row, column, label) = match target.offset {
+            Some(offset) => match layout::cell_of(runtime.app(), target.view, offset) {
+                Some((row, column)) => (row, column, rest.to_owned()),
+                None => continue,
+            },
+            None => (0, 0, format!(" {rest} ")),
+        };
+        if row >= usize::from(text.height) || column >= usize::from(text.width) {
+            continue;
+        }
+        let x = text.x + column as u16;
+        let width = usize::from(text.right() - x);
+        buf.set_stringn(x, text.y + row as u16, label, width, theme.label);
+    }
+}
 fn spans(buf: &mut Buffer, x: u16, y: u16, width: u16, spans: &[Span], base: Style, theme: &Theme) {
     let mut x = x;
     let right = x.saturating_add(width);
@@ -439,6 +470,7 @@ fn status(
         Some(Layer::Replace(_)) => ("REPLACE", theme.mode_prompt),
         Some(Layer::Saving(_)) => ("SAVING", theme.mode_prompt),
         Some(Layer::Help(_)) => ("HELP", theme.mode_prompt),
+        Some(Layer::Labels(_)) => ("JUMP", theme.mode_prompt),
         None => match runtime.edit_mode() {
             EditMode::Normal => ("NORMAL", theme.mode_normal),
             EditMode::Insert => ("INSERT", theme.mode_insert),
@@ -530,7 +562,7 @@ fn tail(text: &str, width: usize) -> String {
 fn message(buf: &mut Buffer, area: Rect, runtime: &Runtime, theme: &Theme) -> Option<Position> {
     let width = usize::from(area.width);
     match runtime.layer() {
-        Some(Layer::Search { .. } | Layer::Replace(_) | Layer::Saving(_)) => {
+        Some(Layer::Search { .. } | Layer::Replace(_) | Layer::Saving(_) | Layer::Labels(_)) => {
             let presentation = runtime.layer().unwrap().presentation();
             let (row, cursor) = layout::prompt_row(&presentation, width);
             spans(buf, area.x, area.y, area.width, &row, theme.text, theme);

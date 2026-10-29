@@ -2,7 +2,7 @@
 //! behavior; the layer manager owns installation, removal and geometry.
 use super::{
     CommandLine, HelpSession, Input, Presentation, ReplaceSession, Response, SaveWait,
-    SearchSession, TextInput, session::Transition,
+    SearchSession, TextInput, labels::LabelSession, session::Transition,
 };
 use crate::{
     application::{Application, Update},
@@ -19,6 +19,7 @@ pub enum Layer {
         input: TextInput,
         session: SearchSession,
     },
+    Labels(LabelSession),
 }
 impl Layer {
     pub(super) fn handle(
@@ -31,6 +32,7 @@ impl Layer {
             Self::CommandLine(session) => session.handle(input, app),
             Self::Saving(wait) => wait.handle(input),
             Self::Help(session) => session.handle(input),
+            Self::Labels(session) => session.handle(input, app, time),
             Self::Replace(session) => session.handle(input, app, time)?,
             Self::Search {
                 input: field,
@@ -50,6 +52,7 @@ impl Layer {
             Self::Replace(session) => session.observe(app, update, time)?,
             Self::Search { session, .. } => session.observe_transition(app, update, time)?,
             Self::Help(_) => Transition::active(Response::default()),
+            Self::Labels(session) => session.observe(update),
         })
     }
     /// The history a prompt uses and its text, for prompts that have one.
@@ -89,6 +92,7 @@ impl Layer {
             Self::Help(session) => session.presentation(),
             Self::Replace(session) => session.presentation(),
             Self::Search { input, session } => session.presentation(input),
+            Self::Labels(session) => session.presentation(),
         }
     }
 }

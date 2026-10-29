@@ -219,6 +219,8 @@ hook open .*/Makefile set-local expand-tab false
 | `run CMD` | `make` | 后台运行命令，输出流式写入 `*run*` |
 | `stop` | | 停止 `run`、`shell`/`pipe` 和项目搜索 |
 | `messages` | | 在 `*messages*` 中显示最近的消息 |
+| `jump-to` | | 输入两个字符，再按屏幕上的标签跳到那里（`<space>j`） |
+| `window-pick` | | 按标签选择窗口；只有两个窗口时直接切换（`<space>w`） |
 | `echo [TEXT]` | | 在消息行显示文字，常与 `%val{}` 一起用 |
 | `check-files` | `checktime` | 重新加载磁盘上变化了的干净文件，报告其余的 |
 | `display KIND PLACEMENT` | | 设置某种文档的显示位置，见[终端界面](ui.md#窗口) |
@@ -431,6 +433,18 @@ Application 拥有一个跨文档共享的剪贴板。ClipboardAction 提供复�
 - 打开交互层（命令行、搜索、帮助等）时，编辑区不响应鼠标。
 
 启用鼠标捕获后，终端自身的文本选择通常要按住 Shift 才能使用。
+
+## 屏幕标签跳转
+
+`jump-to`（`<space>j`）对应 avy 的 `avy-goto-char-2`：先输入两个字符，当前窗口显示的行中每处出现的位置都标上标签，再输入标签移动光标。
+- 查询全是小写时不区分大小写，含大写时精确匹配。
+- 标签按 `asdfghjkl` 主行优先；超过 26 处时全部用两个字母，标签之间没有前缀关系。只有一处时直接跳过去，没有时提示 `No XX on screen`。
+- 已输入的标签字母可以退格；Esc 取消；文本、窗口或焦点变化时标签失效并关闭。
+- 只看当前窗口可见的行；水平滚出窗口的位置也会分到标签，但不显示。
+
+`window-pick`（`<space>w`）对应 ace-window：每个窗口的左上角显示一个标签，输入后聚焦那个窗口。只有两个窗口时直接切到另一个，只有一个时什么也不做。
+
+标签由交互层的 `Layer::Labels` 持有，前端用 `cell_of` 把文档位置换算成窗口内的格子再绘制。
 
 ## 导航与选择
 
