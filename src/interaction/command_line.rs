@@ -561,7 +561,13 @@ impl CommandLine {
             .clone()
             .ok_or_else(|| "this name cannot be written into the command line".to_owned())?;
         let after = &self.input.text()[location.range.end..];
-        if !directory && location.more && !after.starts_with(char::is_whitespace) {
+        // A name is followed by its arguments when the chosen command has
+        // some, whatever the typed prefix names.
+        let more = match location.target {
+            Some(Target::Name) => self.info(&text).is_some_and(|i| !i.slots.is_empty()),
+            _ => location.more,
+        };
+        if !directory && more && !after.starts_with(char::is_whitespace) {
             text.push(' ');
         }
         self.input.replace_range(location.range.clone(), &text);

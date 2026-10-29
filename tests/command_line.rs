@@ -59,6 +59,16 @@ fn choosing_a_command_continues_with_its_arguments() {
     assert!(rows(&r).len() > 20, "the empty command line lists commands");
     r.input(UserInput::Paste("op".into()));
     assert!(rows(&r)[0].starts_with("open PATH"));
+    // Tab writes the space a command with arguments needs; one without
+    // gets none.
+    keys(&mut r, "<tab>");
+    assert_eq!(text(&r), "open ");
+    keys(&mut r, "<c-u>");
+    r.input(UserInput::Paste("messag".into()));
+    keys(&mut r, "<tab>");
+    assert_eq!(text(&r), "messages");
+    keys(&mut r, "<c-u>");
+    r.input(UserInput::Paste("op".into()));
     keys(&mut r, "<ret>");
     assert_eq!(text(&r), "open ");
     wait(&mut r, |r| rows(r).contains(&"src/".to_owned()));
