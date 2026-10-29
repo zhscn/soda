@@ -10,6 +10,8 @@ pub(super) struct Span {
     pub text: String,
     pub selected: bool,
     pub matched: bool,
+    /// Secondary text, such as a candidate's description.
+    pub detail: bool,
 }
 /// One visible document line: its zero-based number and clipped text.
 pub(super) struct Row {
@@ -35,17 +37,33 @@ pub(super) fn row(
     width: usize,
     tab: NonZeroUsize,
 ) -> Vec<Span> {
-    styled_row(text, byte_start, selection, &[], left, width, tab)
+    let marks = Marks {
+        selection,
+        matches: &[],
+        detail: text.len(),
+    };
+    styled_row(text, byte_start, marks, left, width, tab)
+}
+/// Byte ranges styled within a row: the selection is document-relative,
+/// matches and the detail offset are relative to the row text.
+struct Marks<'a> {
+    selection: std::ops::Range<usize>,
+    matches: &'a [std::ops::Range<usize>],
+    detail: usize,
 }
 fn styled_row(
     text: &str,
     byte_start: usize,
-    selection: std::ops::Range<usize>,
-    matches: &[std::ops::Range<usize>],
+    marks: Marks,
     left: usize,
     width: usize,
     tab: NonZeroUsize,
 ) -> Vec<Span> {
+    let Marks {
+        selection,
+        matches,
+        detail,
+    } = marks;
     let mut spans = Vec::<Span>::new();
     let mut column = 0;
     let right = left.saturating_add(width);
@@ -70,16 +88,17 @@ fn styled_row(
             let matched = matches
                 .iter()
                 .any(|range| offset < range.end && offset + cluster.len() > range.start);
-            if let Some(last) = spans
-                .last_mut()
-                .filter(|last| last.selected == selected && last.matched == matched)
-            {
+            let secondary = offset >= detail;
+            if let Some(last) = spans.last_mut().filter(|last| {
+                last.selected == selected && last.matched == matched && last.detail == secondary
+            }) {
                 last.text.push_str(&rendered);
             } else {
                 spans.push(Span {
                     text: rendered,
                     selected,
                     matched,
+                    detail: secondary,
                 });
             }
         }
@@ -87,9 +106,12 @@ fn styled_row(
     }
     spans
 }
+/// A candidate label with its matched ranges; text from `detail` on is
+/// secondary.
 pub(super) fn candidate_row<T>(
     row: &crate::interaction::picker::MatchedCandidate<T>,
     selected: Option<crate::interaction::picker::CandidateKey>,
+    detail: Option<usize>,
     width: usize,
 ) -> Vec<Span> {
     let text = &row.candidate.label;
@@ -98,15 +120,12 @@ pub(super) fn candidate_row<T>(
     } else {
         0..0
     };
-    styled_row(
-        text,
-        0,
+    let marks = Marks {
         selection,
-        &row.highlights,
-        0,
-        width,
-        NonZeroUsize::new(4).unwrap(),
-    )
+        matches: &row.highlights,
+        detail: detail.unwrap_or(text.len()),
+    };
+    styled_row(text, 0, marks, 0, width, NonZeroUsize::new(4).unwrap())
 }
 pub(super) fn plain(text: &str, left: usize, width: usize) -> String {
     row(text, 0, 0..0, left, width, NonZeroUsize::new(4).unwrap())
@@ -455,7 +474,7 @@ mod tests {
             score: 1,
             highlights: vec![1..4, 4..7],
         };
-        let spans = candidate_row(&row, Some(CandidateKey(1)), 4);
+        let spans = candidate_row(&row, Some(CandidateKey(1)), None, 4);
         assert!(spans.iter().all(|span| span.selected));
         assert_eq!(
             spans
@@ -467,7 +486,7 @@ mod tests {
         );
         assert_eq!(joined(spans), "a中e\u{301}");
         assert!(
-            candidate_row(&row, None, 4)
+            candidate_row(&row, None, Some(1), 4)
                 .iter()
                 .all(|span| !span.selected)
         );

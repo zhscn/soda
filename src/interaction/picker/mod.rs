@@ -2,6 +2,7 @@
 //! editors; completions are accepted only by their live request identity.
 mod list;
 mod matching;
+pub(crate) use matching::fuzzy_match;
 mod source;
 mod worker;
 use super::TextInput;

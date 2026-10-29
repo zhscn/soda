@@ -182,3 +182,46 @@ fn save_as_prefills_the_current_path() {
     r.command(Command::Named("saveas".into()));
     assert_eq!(text(&r), "saveas src/main.cpp");
 }
+
+#[test]
+fn candidates_carry_matched_ranges_and_description_offsets() {
+    let root = tree();
+    let mut r = runtime(root.path());
+    let first = |r: &Runtime| match r.layer() {
+        Some(Layer::CommandLine(line)) => {
+            let row = &line.rows()[0];
+            let label = row.candidate.label.clone();
+            let marked: String = row
+                .highlights
+                .iter()
+                .map(|range| &label[range.clone()])
+                .collect();
+            (label, marked, row.candidate.payload.detail)
+        }
+        _ => panic!("command line is not open"),
+    };
+    // Fuzzy name match: letters in order, not necessarily adjacent.
+    keys(&mut r, ":");
+    r.input(UserInput::Paste("svas".into()));
+    let (label, marked, detail) = first(&r);
+    assert!(label.starts_with("saveas PATH"));
+    assert_eq!(marked, "svas");
+    assert_eq!(&label[detail.unwrap()..], "Save to another path");
+    // An alias ranks first even though it is not in the label.
+    keys(&mut r, "<c-u>");
+    r.input(UserInput::Paste("bd".into()));
+    assert!(first(&r).0.starts_with("close "));
+    // Descriptions match as substrings when no name does.
+    keys(&mut r, "<c-u>");
+    r.input(UserInput::Paste("logical".into()));
+    let (label, marked, detail) = first(&r);
+    assert!(label.starts_with("goto "));
+    assert_eq!(marked, "logical");
+    assert!(label.find("logical").unwrap() >= detail.unwrap());
+    // Directory entries mark the typed prefix.
+    keys(&mut r, "<esc>");
+    r.command(Command::Named("open".into()));
+    r.input(UserInput::Paste("sr".into()));
+    wait(&mut r, |r| rows(r) == ["src/"]);
+    assert_eq!(first(&r).1, "sr");
+}

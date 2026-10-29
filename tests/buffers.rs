@@ -70,7 +70,8 @@ fn filtering_no_matches_and_external_document_changes_are_safe() {
     key(&mut r, Key::Enter);
     assert!(r.layer().is_some());
     key(&mut r, Key::Esc);
-    r.command(Command::Ex("buffer UNTITLED".into()));
+    // Fuzzy, smart-case matching: lowercase letters in order.
+    r.command(Command::Ex("buffer untld".into()));
     assert!(matches!(r.layer(), Some(Layer::CommandLine(s)) if s.rows().len() == 2));
     r.dispatch(Event::CloseDocument {
         document,

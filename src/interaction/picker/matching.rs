@@ -33,6 +33,40 @@ impl Ord for Ranked {
             .then_with(|| self.candidate.key.cmp(&other.candidate.key))
     }
 }
+/// Fuzzy-matches one short text, returning the score and the UTF-8 ranges
+/// of the matched graphemes. Used for in-memory candidate lists.
+pub(crate) fn fuzzy_match(
+    matcher: &mut Matcher,
+    query: &str,
+    text: &str,
+) -> Option<(u16, Vec<std::ops::Range<usize>>)> {
+    let atom = Atom::new(
+        query,
+        CaseMatching::Smart,
+        Normalization::Smart,
+        AtomKind::Fuzzy,
+        false,
+    );
+    let ranges: Vec<_> = text
+        .grapheme_indices(true)
+        .map(|(start, g)| start..start + g.len())
+        .collect();
+    let symbols: Vec<char> = ranges
+        .iter()
+        .map(|range| text[range.clone()].chars().next().unwrap())
+        .collect();
+    let mut indices = Vec::new();
+    let score = atom.indices(Utf32Str::Unicode(&symbols), matcher, &mut indices)?;
+    indices.sort_unstable();
+    indices.dedup();
+    Some((
+        score,
+        indices
+            .iter()
+            .filter_map(|index| ranges.get(*index as usize).cloned())
+            .collect(),
+    ))
+}
 pub(super) fn filter(
     catalog: &Catalog,
     task: &PickerTask,

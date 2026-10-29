@@ -132,6 +132,9 @@ fn spans(buf: &mut Buffer, x: u16, y: u16, width: u16, spans: &[Span], base: Sty
         if span.selected {
             style = style.patch(theme.selection);
         }
+        if span.detail {
+            style = style.patch(theme.detail);
+        }
         if span.matched {
             style = style.patch(theme.matched);
         }
@@ -470,7 +473,8 @@ fn command_line(
                 theme.panel
             };
             let width = inner.width.saturating_sub(3);
-            let label = layout::candidate_row(row, None, usize::from(width));
+            let label =
+                layout::candidate_row(row, None, row.candidate.payload.detail, usize::from(width));
             spans(buf, inner.x + 2, y, width, &label, base, theme);
         }
     }

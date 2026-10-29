@@ -26,6 +26,7 @@ pub(super) struct Theme {
     pub candidate_selected: Style,
     pub marker: Style,
     pub matched: Style,
+    pub detail: Style,
     pub key: Style,
 }
 
@@ -121,6 +122,7 @@ impl Theme {
             candidate_selected: Style::new().bg(c(p.bg_highlight)),
             marker: Style::new().fg(c(p.blue)),
             matched: Style::new().fg(c(p.orange)).add_modifier(Modifier::BOLD),
+            detail: Style::new().fg(c(p.comment)),
             key: Style::new().fg(c(p.magenta)).add_modifier(Modifier::BOLD),
         }
     }

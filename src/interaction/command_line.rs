@@ -6,7 +6,7 @@ use super::{
     path::resolve_path,
     picker::{
         Candidate, CandidateKey, CandidateListState, ListMotion, MatchedCandidate,
-        PickerCompletion, PickerEffect, PickerLimits, PickerSession, PickerStatus,
+        PickerCompletion, PickerEffect, PickerLimits, PickerSession, PickerStatus, fuzzy_match,
     },
     registry::{self, CommandInfo, SlotKind},
     session::{Transition, edit_field, field_presentation},
@@ -15,6 +15,7 @@ use crate::{
     application::{Application, ViewId},
     files::paths::{DirectoryEntry, PathCompletion, PathRequest},
 };
+use nucleo_matcher::{Config, Matcher};
 use std::{
     ops::Range,
     path::PathBuf,
@@ -29,6 +30,9 @@ use std::{
 pub struct Completion {
     pub replacement: Option<String>,
     pub directory: bool,
+    /// Byte offset in the label where secondary text, such as a command's
+    /// description, begins.
+    pub detail: Option<usize>,
 }
 
 /// What the cursor is completing: the command name or one of its slots.
@@ -76,6 +80,7 @@ pub struct CommandLine {
     /// What the line asks about, such as the document a departure concerns.
     note: Option<String>,
     error: Option<String>,
+    matcher: Matcher,
 }
 fn row(
     key: u64,
@@ -90,11 +95,28 @@ fn row(
             payload: Completion {
                 replacement,
                 directory,
+                detail: None,
             },
         }),
         score: 0,
         highlights: vec![],
     }
+}
+/// A single matched range.
+fn one(range: Range<usize>) -> Vec<Range<usize>> {
+    std::iter::once(range).collect()
+}
+/// Marks matched label ranges and where the label's secondary text begins.
+fn mark(
+    mut row: MatchedCandidate<Completion>,
+    highlights: Vec<Range<usize>>,
+    detail: Option<usize>,
+) -> MatchedCandidate<Completion> {
+    row.highlights = highlights;
+    if detail.is_some() {
+        Arc::get_mut(&mut row.candidate).unwrap().payload.detail = detail;
+    }
+    row
 }
 fn word_end(text: &str, from: usize) -> usize {
     text[from..]
@@ -145,6 +167,7 @@ impl CommandLine {
             files: None,
             note: None,
             error: None,
+            matcher: Matcher::new(Config::DEFAULT),
         }
     }
     /// Shows a note before the input until the line closes.
@@ -269,10 +292,13 @@ impl CommandLine {
                     .map(|(i, choice)| {
                         let key = choice.key.map_or_else(String::new, |k| format!("[{k}] "));
                         let label = format!("{:<12} {key}{}", choice.word, choice.doc);
-                        row(i as u64, label, Some(choice.word.into()), false)
+                        let detail = label.len() - key.len() - choice.doc.len();
+                        let typed = (!query.text.is_empty()).then_some(0..query.text.len());
+                        let row = row(i as u64, label, Some(choice.word.into()), false);
+                        mark(row, typed.into_iter().collect(), Some(detail))
                     })
                     .collect(),
-                Target::Slot(SlotKind::Buffer) => buffers(app, &query.text),
+                Target::Slot(SlotKind::Buffer) => buffers(app, &query.text, &mut self.matcher),
                 Target::Slot(SlotKind::Path) => self.paths(&query.text, &mut response),
                 Target::Slot(SlotKind::File) => self.project_files(&query.text, &mut response),
                 Target::Slot(SlotKind::Word | SlotKind::Rest) => vec![],
@@ -293,29 +319,36 @@ impl CommandLine {
         self.query = query;
         response
     }
-    fn names(&self, query: &str) -> Vec<MatchedCandidate<Completion>> {
-        let query = query.to_lowercase();
-        let mut rows: Vec<_> = self
-            .catalog
-            .iter()
-            .enumerate()
-            .filter(|(_, info)| {
-                info.name.contains(&query) || info.doc.to_lowercase().contains(&query)
-            })
-            .collect();
-        // Names starting with the query come first, in catalog order.
-        rows.sort_by_key(|(_, info)| !info.name.starts_with(&query));
-        rows.into_iter()
-            .map(|(index, info)| {
-                let name = format!("{} {}", info.name, info.synopsis());
-                row(
-                    index as u64,
-                    format!("{:<32} {}", name.trim_end(), info.doc),
-                    Some(info.name.clone()),
-                    false,
-                )
-            })
-            .collect()
+    /// Command names match fuzzily; an exact name or alias comes first.
+    /// Descriptions match as substrings, after every name match.
+    fn names(&mut self, query: &str) -> Vec<MatchedCandidate<Completion>> {
+        self.matcher.config = Config::DEFAULT;
+        let lower = query.to_ascii_lowercase();
+        let mut ranked = vec![];
+        for (index, info) in self.catalog.iter().enumerate() {
+            let name = format!("{} {}", info.name, info.synopsis());
+            let label = format!("{:<32} {}", name.trim_end(), info.doc);
+            let detail = label.len() - info.doc.len();
+            let (rank, highlights) = if query.is_empty() {
+                (0, vec![])
+            } else if info.named(query) {
+                let exact = info.name == query;
+                (u32::MAX, if exact { one(0..query.len()) } else { vec![] })
+            } else if let Some((score, highlights)) =
+                fuzzy_match(&mut self.matcher, query, &info.name)
+            {
+                (u32::from(score) + 1, highlights)
+            } else if let Some(start) = info.doc.to_ascii_lowercase().find(&lower) {
+                (0, one(detail + start..detail + start + query.len()))
+            } else {
+                continue;
+            };
+            let row = row(index as u64, label, Some(info.name.clone()), false);
+            ranked.push((rank, mark(row, highlights, Some(detail))));
+        }
+        // Stable: equal ranks keep catalog order.
+        ranked.sort_by_key(|(rank, _)| std::cmp::Reverse(*rank));
+        ranked.into_iter().map(|(_, row)| row).collect()
     }
     fn paths(&mut self, text: &str, response: &mut Response) -> Vec<MatchedCandidate<Completion>> {
         let (parent, prefix) = split_path(text);
@@ -366,7 +399,11 @@ impl CommandLine {
                     .filter(|name| !name.chars().any(char::is_control))
                     .map(|name| format!("{parent}{name}{slash}"));
                 let label = format!("{}{slash}", printable(&entry.name.to_string_lossy()));
-                row(index as u64, label, replacement, entry.directory)
+                // Names filter by prefix, so the prefix is what matched.
+                let typed =
+                    (!prefix.is_empty() && label.starts_with(prefix)).then_some(0..prefix.len());
+                let row = row(index as u64, label, replacement, entry.directory);
+                mark(row, typed.into_iter().collect(), None)
             })
             .collect()
     }
@@ -413,6 +450,7 @@ impl CommandLine {
                                 .filter(|p| !p.chars().any(char::is_control))
                                 .map(str::to_owned),
                             directory: false,
+                            detail: None,
                         },
                     }),
                     score: matched.score,
@@ -675,34 +713,52 @@ impl CommandLine {
     }
 }
 
-fn buffers(app: &Application, query: &str) -> Vec<MatchedCandidate<Completion>> {
+/// Buffer names match fuzzily; other buffers rank before the current one
+/// among equal scores.
+fn buffers(
+    app: &Application,
+    query: &str,
+    matcher: &mut Matcher,
+) -> Vec<MatchedCandidate<Completion>> {
+    matcher.config = Config::DEFAULT.match_paths();
     let active = app
         .active_view()
         .and_then(|view| app.view(view))
         .map(|v| v.document_id);
-    let query = query.to_lowercase();
     let mut rows: Vec<_> = app
         .workspace()
         .documents()
-        .map(|id| (id, buffer_name(app, id)))
-        .filter(|(_, name)| name.to_lowercase().contains(&query))
+        .filter_map(|id| {
+            let name = buffer_name(app, id);
+            let shown = printable(&name);
+            let (score, highlights) = if query.is_empty() {
+                (0, vec![])
+            } else {
+                fuzzy_match(matcher, query, &shown)?
+            };
+            Some((id, name, shown, score, highlights))
+        })
         .collect();
-    // Offer another buffer first while preserving document order within groups.
-    rows.sort_by_key(|(id, _)| active == Some(*id));
+    rows.sort_by_key(|(id, _, _, score, _)| (std::cmp::Reverse(*score), active == Some(*id)));
     rows.into_iter()
-        .map(|(id, name)| {
-            let label = format!(
-                "{}{}{}",
-                if active == Some(id) { "* " } else { "  " },
-                printable(&name),
-                if app.workspace().is_dirty(id) {
-                    " [+]"
-                } else {
-                    ""
-                }
-            );
+        .map(|(id, name, shown, _, highlights)| {
+            let marker = if active == Some(id) { "* " } else { "  " };
+            let dirty = if app.workspace().is_dirty(id) {
+                " [+]"
+            } else {
+                ""
+            };
+            let label = format!("{marker}{shown}{dirty}");
+            let highlights = highlights
+                .into_iter()
+                .map(|r| r.start + marker.len()..r.end + marker.len())
+                .collect();
             let replacement = (!name.chars().any(char::is_control)).then_some(name);
-            row(id.number(), label, replacement, false)
+            mark(
+                row(id.number(), label, replacement, false),
+                highlights,
+                None,
+            )
         })
         .collect()
 }
