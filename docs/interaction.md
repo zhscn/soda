@@ -297,8 +297,8 @@ hook open .*/Makefile set-local expand-tab false
 | 输入 | 行为 |
 | --- | --- |
 | 输入文字、粘贴、删除 | 编辑输入并刷新当前参数位的候选 |
-| 上下键、Ctrl-P / Ctrl-N、PageUp / PageDown、Ctrl-Up / Ctrl-Down | 移动选中项，不改写输入；输入为空或正显示历史行时，上下键和 Ctrl-P / Ctrl-N 改为翻历史 |
-| Alt-P / Alt-N | `history-previous` / `history-next`：任何时候都翻历史 |
+| 上下键、Ctrl-P / Ctrl-N、PageUp / PageDown、Ctrl-Up / Ctrl-Down | 移动选中项，不改写输入 |
+| Alt-P / Alt-N | `history-previous` / `history-next`：翻历史。搜索没有候选，上下键在搜索里也翻历史 |
 | Tab | 用选中项替换当前参数位；目录候选留在该参数位并列出下一层，其他候选在后面还有参数位时追加空格 |
 | Shift-Tab | 向前选择 |
 | Enter | 见下文 |

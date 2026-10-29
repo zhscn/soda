@@ -33,12 +33,6 @@ impl History {
     pub fn reset(&mut self) {
         self.recalled = None;
     }
-    /// Whether `text` is what the last recall put in the prompt.
-    pub fn showing(&self, text: &str) -> bool {
-        self.recalled
-            .as_ref()
-            .is_some_and(|(index, _)| self.entries[*index] == text)
-    }
     /// The text to show after moving back to older entries or forward to
     /// newer ones; past the newest is the text from before recalling.
     pub fn recall(&mut self, text: &str, backward: bool) -> Option<String> {
@@ -77,12 +71,10 @@ mod tests {
         assert_eq!(history.entries(), ["b", "a"]);
         assert_eq!(history.recall("dr", false), None);
         assert_eq!(history.recall("dr", true).as_deref(), Some("a"));
-        assert!(history.showing("a"));
         assert_eq!(history.recall("a", true).as_deref(), Some("b"));
         assert_eq!(history.recall("b", true), None);
         assert_eq!(history.recall("b", false).as_deref(), Some("a"));
         assert_eq!(history.recall("a", false).as_deref(), Some("dr"));
-        assert!(!history.showing("dr"));
         // Editing a recalled entry makes it the new draft.
         assert_eq!(history.recall("dr", true).as_deref(), Some("a"));
         assert_eq!(history.recall("ax", true).as_deref(), Some("a"));

@@ -316,15 +316,14 @@ impl Layers {
         let field = layer.history().map(|(kind, text)| (kind, text.to_owned()));
         if let Some((kind, text)) = &field {
             let lines = &mut self.history[*kind];
-            // Up and Down recall in search, and at the command line while it
-            // is empty or shows a recalled line; elsewhere they move through
-            // candidates.
+            // Search has no candidates, so Up and Down recall there; the
+            // command line keeps them for its candidates.
             let backward = match input {
                 Input::History { backward } => Some(backward),
                 Input::Candidate {
                     motion: motion @ (ListMotion::Previous | ListMotion::Next),
                     ..
-                } if *kind == history::SEARCH || text.is_empty() || lines.showing(text) => {
+                } if *kind == history::SEARCH => {
                     Some(matches!(motion, ListMotion::Previous))
                 }
                 _ => None,
