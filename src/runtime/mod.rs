@@ -205,6 +205,12 @@ impl Runtime {
     pub fn edit_mode(&self) -> crate::interaction::EditMode {
         self.layers.edit_mode()
     }
+    pub fn command_history(&self) -> &[String] {
+        self.layers.command_history()
+    }
+    pub fn search_history(&self) -> &[String] {
+        self.layers.search_history()
+    }
     pub fn input_hint(&self) -> String {
         self.layers.input_hint()
     }

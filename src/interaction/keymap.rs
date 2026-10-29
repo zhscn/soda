@@ -199,6 +199,16 @@ pub(super) const PROMPT_ACTIONS: &[(&str, Input, &str)] = &[
         "Select the previous candidate",
     ),
     (
+        "history-previous",
+        Input::History { backward: true },
+        "Recall the previous line from history",
+    ),
+    (
+        "history-next",
+        Input::History { backward: false },
+        "Recall the next line from history",
+    ),
+    (
         "candidate-first",
         candidate(ListMotion::First),
         "Select the first candidate",
@@ -335,6 +345,8 @@ const PROMPT: &[(&str, &str)] = &[
     ("<down>", "candidate-next"),
     ("<c-p>", "candidate-previous"),
     ("<c-n>", "candidate-next"),
+    ("<a-p>", "history-previous"),
+    ("<a-n>", "history-next"),
     ("<c-up>", "candidate-first"),
     ("<c-down>", "candidate-last"),
     ("<pageup>", "page-previous"),

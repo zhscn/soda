@@ -251,6 +251,23 @@ impl SearchSession {
             ..super::Response::default()
         })
     }
+    pub(super) fn recall(
+        &mut self,
+        field: &mut super::TextInput,
+        text: &str,
+        app: &Application,
+        time: Duration,
+    ) -> Result<super::session::Transition, EditError> {
+        let end = field.text().len();
+        field.replace_range(0..end, text);
+        self.set_query(text);
+        Ok(super::session::Transition::active(self.preview_response(
+            app,
+            self.backward,
+            false,
+            time,
+        )?))
+    }
     pub(super) fn handle(
         &mut self,
         field: &mut super::TextInput,

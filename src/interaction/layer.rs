@@ -52,6 +52,29 @@ impl Layer {
             Self::Help(_) => Transition::active(Response::default()),
         })
     }
+    /// The history a prompt uses and its text, for prompts that have one.
+    pub(super) fn history(&self) -> Option<(usize, &str)> {
+        match self {
+            Self::CommandLine(session) if !session.asking() => {
+                Some((super::history::COMMAND, session.text()))
+            }
+            Self::Search { input, .. } => Some((super::history::SEARCH, input.text())),
+            _ => None,
+        }
+    }
+    /// Replaces the prompt's text with a recalled line.
+    pub(super) fn recall(
+        &mut self,
+        text: &str,
+        app: &Application,
+        time: Duration,
+    ) -> Result<Transition, EditError> {
+        Ok(match self {
+            Self::CommandLine(session) => session.recall(text, app),
+            Self::Search { input, session } => session.recall(input, text, app, time)?,
+            _ => Transition::Blocked,
+        })
+    }
     pub(super) fn resize(&mut self, help_rows: usize, picker_rows: usize) {
         match self {
             Self::Help(session) => session.resize(help_rows),

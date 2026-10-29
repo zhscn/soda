@@ -556,6 +556,19 @@ impl CommandLine {
         self.input.replace_range(location.range.clone(), &text);
         Ok(directory)
     }
+    pub(super) fn text(&self) -> &str {
+        self.input.text()
+    }
+    /// Whether the line answers a question, such as a save decision, rather
+    /// than being typed; those stay out of the history.
+    pub(super) fn asking(&self) -> bool {
+        self.note.is_some()
+    }
+    pub(super) fn recall(&mut self, text: &str, app: &Application) -> Transition {
+        let end = self.input.text().len();
+        self.input.replace_range(0..end, text);
+        self.edited(app)
+    }
     fn edited(&mut self, app: &Application) -> Transition {
         self.error = None;
         let mut response = self.refresh(app, false);

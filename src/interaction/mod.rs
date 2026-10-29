@@ -11,6 +11,7 @@ pub use departure::SaveWait;
 pub mod expand;
 pub mod grep;
 pub mod help;
+pub mod history;
 pub mod hooks;
 pub use help::HelpSession;
 mod input;
@@ -67,10 +68,21 @@ pub enum Input {
     Paste(String),
     Confirm,
     ReplaceAll,
-    Complete { backward: bool },
+    Complete {
+        backward: bool,
+    },
     Cancel,
-    Navigate { backward: bool },
-    Candidate { motion: ListMotion, wrap: bool },
+    Navigate {
+        backward: bool,
+    },
+    Candidate {
+        motion: ListMotion,
+        wrap: bool,
+    },
+    /// Recall an older or newer line from the prompt's history.
+    History {
+        backward: bool,
+    },
     Unrecognized,
 }
 pub enum InputResult {
@@ -132,6 +144,8 @@ pub struct Layers {
     vim: vim::State,
     registry: Registry,
     hooks: hooks::Hooks,
+    /// Command line and search histories.
+    history: [history::History; 2],
     /// The results document `]q` and `[q` step through: the latest filled.
     results: &'static str,
     page_rows: usize,
@@ -252,6 +266,7 @@ impl Layers {
         let mut response = self.close(app, time)?;
         response.events.extend(self.end_insert_group(app, time));
         layer.resize(self.help_rows, self.picker_rows);
+        self.history.iter_mut().for_each(history::History::reset);
         self.active = Some(layer);
         response.redraw = true;
         Ok(response)
@@ -295,10 +310,51 @@ impl Layers {
         let Some(layer) = &mut self.active else {
             return Ok(InputResult::Pass);
         };
+        let field = layer.history().map(|(kind, text)| (kind, text.to_owned()));
+        if let Some((kind, text)) = &field {
+            let lines = &mut self.history[*kind];
+            // Up and Down recall in search, and at the command line while it
+            // is empty or shows a recalled line; elsewhere they move through
+            // candidates.
+            let backward = match input {
+                Input::History { backward } => Some(backward),
+                Input::Candidate {
+                    motion: motion @ (ListMotion::Previous | ListMotion::Next),
+                    ..
+                } if *kind == history::SEARCH || text.is_empty() || lines.showing(text) => {
+                    Some(matches!(motion, ListMotion::Previous))
+                }
+                _ => None,
+            };
+            if let Some(entry) = backward.and_then(|backward| lines.recall(text, backward)) {
+                let transition = layer.recall(&entry, app, time)?;
+                return Ok(self
+                    .transition(transition)
+                    .map_or(InputResult::Blocked, InputResult::Handled));
+            }
+            if matches!(input, Input::History { .. }) {
+                return Ok(InputResult::Blocked);
+            }
+        }
+        let confirm = matches!(input, Input::Confirm);
         let transition = layer.handle(input, app, time)?;
+        if confirm
+            && matches!(transition, Transition::Closed(_))
+            && let Some((kind, text)) = field
+        {
+            self.history[kind].record(&text);
+        }
         Ok(self
             .transition(transition)
             .map_or(InputResult::Blocked, InputResult::Handled))
+    }
+    /// Lines entered at the command line, oldest first.
+    pub fn command_history(&self) -> &[String] {
+        self.history[history::COMMAND].entries()
+    }
+    /// Searches entered, oldest first.
+    pub fn search_history(&self) -> &[String] {
+        self.history[history::SEARCH].entries()
     }
     /// Observe every successful application update, including other views.
     pub fn observe(
