@@ -679,6 +679,8 @@ pub fn check(catalog: &[CommandInfo], line: &str) -> Result<(), CheckError> {
         rest = tail;
     }
     match info.builtin {
+        // Arguments that read state are checked once they are expanded.
+        Some(_) if super::expand::has_expansions(args) && !holds_commands(line) => Ok(()),
         Some(builtin) => (builtin.build)(args)
             .map(|_| ())
             .map_err(CheckError::Invalid),
@@ -694,6 +696,12 @@ fn builtin(name: &str) -> Option<&'static Builtin> {
     BUILTINS
         .iter()
         .find(|b| b.name == name || b.aliases.contains(&name))
+}
+/// Commands whose arguments are command lines run later; expansions in them
+/// wait until then.
+pub(super) fn holds_commands(line: &str) -> bool {
+    let name = split(line.trim()).0;
+    builtin(name).is_some_and(|b| matches!(b.name, "define-command" | "map"))
 }
 fn reserved(name: &str) -> bool {
     builtin(name).is_some() || LineEdit::parse(name).is_some()
@@ -761,8 +769,9 @@ impl Registry {
         reserved(name) || self.entries.contains_key(name)
     }
     /// Expands a command line into commands executed in order. User
-    /// definitions expand eagerly so that errors stop the line before any
-    /// part runs; registered handlers stay named and run when reached.
+    /// definitions expand eagerly so that unknown commands and bad arguments
+    /// stop the line before any part runs; statements reading `%opt` or
+    /// `%val`, and registered handlers, stay named and run when reached.
     pub(super) fn expand(&self, line: &str) -> Result<Vec<Command>, String> {
         let mut out = vec![];
         self.expand_into(line, 0, &mut out)?;
@@ -791,6 +800,13 @@ impl Registry {
             }
             Some(Entry::Native(_)) if args.is_empty() => out.push(Command::Named(name.into())),
             Some(Entry::Native(_)) => return Err(format!("{name} takes no argument")),
+            // A statement reading state is expanded when its turn comes.
+            None if depth > 0 && super::expand::has_expansions(line) && !holds_commands(line) => {
+                if !self.knows(name) {
+                    return Err(format!("unknown command: {name}"));
+                }
+                out.push(Command::Named(line.into()));
+            }
             None => out.push(
                 self.parse_builtin(line)
                     .map_err(|e| format!("{name}: {e}"))?,

@@ -1,0 +1,124 @@
+//! `%opt{NAME}` and `%val{NAME}` in command lines. A statement is expanded
+//! when it runs, so it reads the state that the statements before it left.
+//! Values replace the expansion as they are; they are not split again.
+use super::EditMode;
+use crate::{application::Application, interaction::command_line::buffer_name};
+use std::path::Path;
+
+/// The state `%val{NAME}` reads, for help.
+pub const VALUES: &[(&str, &str)] = &[
+    ("file", "Path of the current file, empty when it has none"),
+    ("name", "Buffer name of the current document"),
+    ("kind", "file, or a scratch document's name such as grep"),
+    ("line", "One-based caret line"),
+    (
+        "column",
+        "One-based caret column, counting tabs to their stop",
+    ),
+    ("selection", "Selected text"),
+    ("root", "Project root"),
+    ("mode", "normal, insert, visual or visual-line"),
+];
+
+/// Whether a line reads state when it runs.
+pub(super) fn has_expansions(line: &str) -> bool {
+    line.contains("%opt{") || line.contains("%val{")
+}
+
+pub(super) struct State<'a> {
+    pub app: &'a Application,
+    pub mode: EditMode,
+    /// The Vim caret when it differs from the selection head.
+    pub caret: Option<usize>,
+    pub root: &'a Path,
+}
+
+pub(super) fn expand(line: &str, state: &State) -> Result<String, String> {
+    let mut out = String::new();
+    let mut rest = line;
+    while let Some(start) = [rest.find("%opt{"), rest.find("%val{")]
+        .into_iter()
+        .flatten()
+        .min()
+    {
+        out.push_str(&rest[..start]);
+        let kind = &rest[start + 1..start + 4];
+        let body = &rest[start + 5..];
+        let end = body
+            .find('}')
+            .ok_or_else(|| format!("%{kind}{{ is not closed"))?;
+        let name = &body[..end];
+        out.push_str(&match kind {
+            "opt" => option(name, state)?,
+            _ => value(name, state)?,
+        });
+        rest = &body[end + 1..];
+    }
+    out.push_str(rest);
+    Ok(out)
+}
+
+fn document(state: &State) -> Option<crate::editor::DocumentId> {
+    let view = state.app.view(state.app.active_view()?)?;
+    Some(view.document_id)
+}
+fn option(name: &str, state: &State) -> Result<String, String> {
+    crate::options::info(name).ok_or_else(|| format!("%opt{{{name}}}: unknown option"))?;
+    Ok(state.app.options().get(document(state), name).to_string())
+}
+fn value(name: &str, state: &State) -> Result<String, String> {
+    let app = state.app;
+    match name {
+        "root" => return Ok(state.root.to_string_lossy().into_owned()),
+        "mode" => {
+            return Ok(match state.mode {
+                EditMode::Normal => "normal",
+                EditMode::Insert => "insert",
+                EditMode::Visual => "visual",
+                EditMode::VisualLine => "visual-line",
+            }
+            .into());
+        }
+        _ if !VALUES.iter().any(|(value, _)| *value == name) => {
+            return Err(format!("%val{{{name}}}: unknown value"));
+        }
+        _ => {}
+    }
+    let view = app
+        .active_view()
+        .and_then(|id| app.view(id))
+        .ok_or_else(|| format!("%val{{{name}}}: no document"))?;
+    let document = view.document_id;
+    Ok(match name {
+        "file" => app
+            .workspace()
+            .file(document)
+            .and_then(|file| file.path())
+            .map_or_else(String::new, |path| path.to_string_lossy().into_owned()),
+        "name" => buffer_name(app, document),
+        "kind" => app.document_kind(document).to_owned(),
+        _ => {
+            let editor = app.workspace().editor(document).unwrap();
+            let snapshot = editor.model().document().snapshot();
+            let selection = editor.model().session(view.session_id).unwrap().selection();
+            let head = state.caret.unwrap_or(selection.head);
+            let line = snapshot.line_of(head).unwrap();
+            match name {
+                "line" => (line + 1).to_string(),
+                "column" => {
+                    let tab = editor.model().document().whitespace().tab_width;
+                    let column = crate::core::logical_column_at(
+                        snapshot,
+                        crate::core::ByteOffset(head),
+                        tab,
+                    )
+                    .map_err(|e| e.to_string())?;
+                    (column.0 + 1).to_string()
+                }
+                _ => snapshot
+                    .byte_slice(selection.range())
+                    .map_or_else(String::new, |text| text.to_string()),
+            }
+        }
+    })
+}

@@ -2,7 +2,7 @@
 //! thread and return ordered application events and platform effects.
 use super::{
     CommandLine, HelpSession, Layer, Layers, Message, ReplaceSession, Response, SaveWait,
-    SearchSession, TextInput,
+    SearchSession, TextInput, expand, registry::holds_commands,
 };
 use crate::{
     application::{Application, Axis, ClipboardAction, Direction, Event},
@@ -290,6 +290,24 @@ impl Layers {
                 }
             }
             Command::Named(line) => {
+                let line = if holds_commands(&line) || !expand::has_expansions(&line) {
+                    line
+                } else {
+                    let state = expand::State {
+                        app,
+                        mode: self.mode,
+                        caret: self.vim.caret(),
+                        root: file_root,
+                    };
+                    match expand::expand(&line, &state) {
+                        Ok(line) => line,
+                        Err(error) => {
+                            response.message = Message::Set(error);
+                            response.failed = true;
+                            return Ok(super::InputResult::Handled(response));
+                        }
+                    }
+                };
                 if let Some(handler) = self.registry.handler(line.trim()) {
                     let command = handler(app)?;
                     if matches!(command, Command::Named(_)) {
@@ -305,7 +323,10 @@ impl Layers {
                             return self.execute(commands.pop().unwrap(), app, time, file_root);
                         }
                         Ok(commands) => response.commands = commands,
-                        Err(error) => response.message = Message::Set(error),
+                        Err(error) => {
+                            response.message = Message::Set(error);
+                            response.failed = true;
+                        }
                     }
                 }
             }

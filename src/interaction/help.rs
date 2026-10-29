@@ -33,7 +33,8 @@ File and buffer commands use Soda workflows, not a general Ex interpreter.";
 const NOTES: &str = "Esc / Ctrl-[ / Ctrl-C leave Insert and Visual and cancel pending keys.
 Printable characters insert text in Insert and prompts.
 Unbound Normal and Visual keys use the Vim grammar above.
-Configuration: ~/.config/soda/init holds map, unmap and define-command lines.";
+Command lines read state with %opt{NAME} and %val{file|name|kind|line|column|selection|root|mode}.
+Configuration: ~/.config/soda/init holds map, unmap, define-command, set and display lines.";
 
 /// Help generated from the effective key tables and command registry.
 pub fn text(keymap: &Keymap, registry: &Registry) -> String {

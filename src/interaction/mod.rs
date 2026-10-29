@@ -8,6 +8,7 @@ pub mod vim;
 pub use commands::{Command, Departure, Sourced, WindowCommand};
 mod departure;
 pub use departure::SaveWait;
+pub mod expand;
 pub mod grep;
 pub mod help;
 pub use help::HelpSession;
@@ -94,6 +95,8 @@ pub struct Response {
     pub replay: Vec<UserInput>,
     pub quit: bool,
     pub redraw: bool,
+    /// A named command failed; the statements queued after it are dropped.
+    pub failed: bool,
 }
 
 /// Owns editing input state and one modal layer. Read-only access keeps transitions inside

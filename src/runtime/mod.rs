@@ -389,6 +389,9 @@ impl Runtime {
                 return false;
             }
         }
+        if response.failed {
+            return false;
+        }
         for command in response.commands {
             match self
                 .layers
