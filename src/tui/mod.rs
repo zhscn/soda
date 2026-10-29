@@ -4,7 +4,7 @@ mod input;
 mod layout;
 mod theme;
 mod view;
-use crate::{interaction::EditMode, runtime::Runtime};
+use crate::{interaction::EditMode, runtime::Runtime, syntax::Highlighter};
 use crossterm::{
     cursor::{Hide, SetCursorStyle, Show},
     event::{
@@ -53,12 +53,14 @@ impl Drop for Terminal {
 fn draw(
     terminal: &mut ratatui::DefaultTerminal,
     runtime: &Runtime,
+    highlighter: &mut Highlighter,
     theme: &theme::Theme,
     areas: &view::Areas,
 ) -> io::Result<()> {
     let text = areas.text();
     let frame = layout::frame(
         runtime.app(),
+        highlighter,
         text.width,
         text.height,
         runtime.editor_caret(),
@@ -91,6 +93,8 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
     let mut terminal =
         ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(io::stdout()))?;
     let theme = theme::Theme::detect();
+    let mut highlighter = Highlighter::with_budget(Duration::from_millis(12));
+    let mut catching_up = false;
     let mut runtime = Runtime::new(std::env::current_dir()?)?;
     runtime.start(path);
     if let Some(config) = config.then(config_path).flatten() {
@@ -112,7 +116,7 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
             geometry = Some(rows);
             runtime.resize(rows.0.into(), rows.1);
         }
-        if runtime.take_redraw() {
+        if runtime.take_redraw() || catching_up {
             let text = areas.text();
             if let Some(viewport) = layout::follow_caret(
                 runtime.app(),
@@ -126,10 +130,14 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
             }
             // The gutter widens with the line count, so measure again.
             let areas = view::Areas::new(&runtime, width, height);
-            draw(&mut terminal, &runtime, &theme, &areas)?;
+            highlighter.retain(runtime.app());
+            draw(&mut terminal, &runtime, &mut highlighter, &theme, &areas)?;
             runtime.take_redraw();
+            catching_up = highlighter.take_pending();
         }
-        if !runtime.quit_requested() && event::poll(Duration::from_millis(30))? {
+        // While highlighting catches up, check for input without waiting.
+        let wait = Duration::from_millis(if catching_up { 0 } else { 30 });
+        if !runtime.quit_requested() && event::poll(wait)? {
             runtime.input(input::normalize(event::read()?));
         }
     }

@@ -1,0 +1,23 @@
+{
+ "grammars": [
+  {
+   "language": "lua",
+   "path": "./syntaxes/lua.tmLanguage.json",
+   "scopeName": "source.lua"
+  }
+ ],
+ "languages": [
+  {
+   "aliases": [
+    "Lua",
+    "lua"
+   ],
+   "configuration": "./language-configuration.json",
+   "extensions": [
+    ".lua"
+   ],
+   "id": "lua"
+  }
+ ],
+ "name": "lua"
+}

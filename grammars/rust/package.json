@@ -1,0 +1,23 @@
+{
+ "grammars": [
+  {
+   "language": "rust",
+   "path": "./syntaxes/rust.tmLanguage.json",
+   "scopeName": "source.rust"
+  }
+ ],
+ "languages": [
+  {
+   "aliases": [
+    "Rust",
+    "rust"
+   ],
+   "configuration": "./language-configuration.json",
+   "extensions": [
+    ".rs"
+   ],
+   "id": "rust"
+  }
+ ],
+ "name": "rust"
+}

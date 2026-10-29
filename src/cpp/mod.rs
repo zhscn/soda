@@ -12,6 +12,7 @@ mod syntax;
 
 pub use crate::{core::column_width, language::materialize};
 pub use indent::{IndentDecision, IndentRole, compute_indent};
+pub(crate) use lexer::relex;
 pub use lexer::{Token, TokenKind, lex};
 pub use parser::{AnalysisFallback, AnalysisWork, ParseStrategy};
 pub use parser::{parse, parse_snapshot, parse_snapshot_with_options, parse_with_options};

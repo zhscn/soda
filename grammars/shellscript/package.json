@@ -1,0 +1,69 @@
+{
+ "grammars": [
+  {
+   "language": "shellscript",
+   "path": "./syntaxes/shell-unix-bash.tmLanguage.json",
+   "scopeName": "source.shell"
+  }
+ ],
+ "languages": [
+  {
+   "aliases": [
+    "Shell Script",
+    "shellscript",
+    "bash",
+    "fish",
+    "sh",
+    "zsh",
+    "ksh",
+    "csh"
+   ],
+   "configuration": "./language-configuration.json",
+   "extensions": [
+    ".sh",
+    ".bash",
+    ".bashrc",
+    ".bash_aliases",
+    ".bash_profile",
+    ".bash_login",
+    ".ebuild",
+    ".eclass",
+    ".profile",
+    ".bash_logout",
+    ".xprofile",
+    ".xsession",
+    ".xsessionrc",
+    ".Xsession",
+    ".zsh",
+    ".zshrc",
+    ".zprofile",
+    ".zlogin",
+    ".zlogout",
+    ".zshenv",
+    ".zsh-theme",
+    ".fish",
+    ".ksh",
+    ".csh",
+    ".cshrc",
+    ".tcshrc",
+    ".yashrc",
+    ".yash_profile"
+   ],
+   "filenames": [
+    "APKBUILD",
+    "PKGBUILD",
+    ".envrc",
+    ".hushlogin",
+    "zshrc",
+    "zshenv",
+    "zlogin",
+    "zprofile",
+    "zlogout",
+    "bashrc_Apple_Terminal",
+    "zshrc_Apple_Terminal"
+   ],
+   "id": "shellscript"
+  }
+ ],
+ "name": "shellscript"
+}

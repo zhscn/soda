@@ -1,0 +1,25 @@
+{
+ "grammars": [
+  {
+   "language": "diff",
+   "path": "./syntaxes/diff.tmLanguage.json",
+   "scopeName": "source.diff"
+  }
+ ],
+ "languages": [
+  {
+   "aliases": [
+    "Diff",
+    "diff"
+   ],
+   "configuration": "./language-configuration.json",
+   "extensions": [
+    ".diff",
+    ".patch",
+    ".rej"
+   ],
+   "id": "diff"
+  }
+ ],
+ "name": "diff"
+}

@@ -1,0 +1,22 @@
+{
+ "grammars": [
+  {
+   "language": "go",
+   "path": "./syntaxes/go.tmLanguage.json",
+   "scopeName": "source.go"
+  }
+ ],
+ "languages": [
+  {
+   "aliases": [
+    "Go"
+   ],
+   "configuration": "./language-configuration.json",
+   "extensions": [
+    ".go"
+   ],
+   "id": "go"
+  }
+ ],
+ "name": "go"
+}

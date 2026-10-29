@@ -18,3 +18,4 @@ pub mod tui;
 pub mod interaction;
 
 pub mod runtime;
+pub mod syntax;

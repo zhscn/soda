@@ -1,0 +1,57 @@
+{
+ "grammars": [
+  {
+   "language": "typescript",
+   "path": "./syntaxes/TypeScript.tmLanguage.json",
+   "scopeName": "source.ts"
+  },
+  {
+   "embeddedLanguages": {
+    "meta.embedded.expression.tsx": "typescriptreact",
+    "meta.tag.attributes.tsx": "typescriptreact",
+    "meta.tag.tsx": "jsx-tags",
+    "meta.tag.without-attributes.tsx": "jsx-tags"
+   },
+   "language": "typescriptreact",
+   "path": "./syntaxes/TypeScriptReact.tmLanguage.json",
+   "scopeName": "source.tsx"
+  },
+  {
+   "path": "./syntaxes/jsdoc.ts.injection.tmLanguage.json",
+   "scopeName": "documentation.injection.ts"
+  },
+  {
+   "path": "./syntaxes/jsdoc.js.injection.tmLanguage.json",
+   "scopeName": "documentation.injection.js.jsx"
+  }
+ ],
+ "languages": [
+  {
+   "aliases": [
+    "TypeScript",
+    "ts",
+    "typescript"
+   ],
+   "configuration": "./language-configuration.json",
+   "extensions": [
+    ".ts",
+    ".cts",
+    ".mts"
+   ],
+   "id": "typescript"
+  },
+  {
+   "aliases": [
+    "TypeScript JSX",
+    "TypeScript React",
+    "tsx"
+   ],
+   "configuration": "./language-configuration.json",
+   "extensions": [
+    ".tsx"
+   ],
+   "id": "typescriptreact"
+  }
+ ],
+ "name": "typescript"
+}

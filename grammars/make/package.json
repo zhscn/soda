@@ -1,0 +1,30 @@
+{
+ "grammars": [
+  {
+   "language": "makefile",
+   "path": "./syntaxes/make.tmLanguage.json",
+   "scopeName": "source.makefile"
+  }
+ ],
+ "languages": [
+  {
+   "aliases": [
+    "Makefile",
+    "makefile"
+   ],
+   "configuration": "./language-configuration.json",
+   "extensions": [
+    ".mak",
+    ".mk"
+   ],
+   "filenames": [
+    "Makefile",
+    "makefile",
+    "GNUmakefile",
+    "OCamlMakefile"
+   ],
+   "id": "makefile"
+  }
+ ],
+ "name": "make"
+}

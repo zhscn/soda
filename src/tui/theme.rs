@@ -1,6 +1,7 @@
 //! The built-in color theme. Colors are 24-bit; terminals that do not
 //! announce truecolor get the nearest xterm 256-color index instead. A light
 //! variant is chosen when `COLORFGBG` reports a light background.
+use crate::syntax::Category;
 use ratatui::style::{Color, Modifier, Style};
 
 pub(super) struct Theme {
@@ -27,6 +28,7 @@ pub(super) struct Theme {
     pub marker: Style,
     pub matched: Style,
     pub detail: Style,
+    syntax: [Style; CATEGORIES],
     pub key: Style,
 }
 
@@ -46,6 +48,8 @@ struct Palette {
     orange: u32,
     yellow: u32,
     red: u32,
+    cyan: u32,
+    teal: u32,
     on_accent: u32,
 }
 const DARK: Palette = Palette {
@@ -64,6 +68,8 @@ const DARK: Palette = Palette {
     orange: 0xff9e64,
     yellow: 0xe0af68,
     red: 0xf7768e,
+    cyan: 0x7dcfff,
+    teal: 0x73daca,
     on_accent: 0x15161e,
 };
 const LIGHT: Palette = Palette {
@@ -82,6 +88,8 @@ const LIGHT: Palette = Palette {
     orange: 0xb15c00,
     yellow: 0x8c6c3e,
     red: 0xf52a65,
+    cyan: 0x007197,
+    teal: 0x387068,
     on_accent: 0xe1e2e7,
 };
 
@@ -123,10 +131,68 @@ impl Theme {
             marker: Style::new().fg(c(p.blue)),
             matched: Style::new().fg(c(p.orange)).add_modifier(Modifier::BOLD),
             detail: Style::new().fg(c(p.comment)),
+            syntax: {
+                let fg = |rgb: u32| Style::new().fg(c(rgb));
+                let italic = Modifier::ITALIC;
+                CATEGORY_ORDER.map(|category| match category {
+                    Category::Comment => fg(p.comment).add_modifier(italic),
+                    Category::String => fg(p.green),
+                    Category::Escape => fg(p.magenta),
+                    Category::Number | Category::Constant => fg(p.orange),
+                    Category::Keyword => fg(p.magenta),
+                    Category::Operator => fg(p.cyan),
+                    Category::Type => fg(p.teal),
+                    Category::Function => fg(p.blue),
+                    Category::Parameter => fg(p.yellow),
+                    Category::Namespace => fg(p.cyan),
+                    Category::Macro => fg(p.cyan),
+                    Category::Tag => fg(p.red),
+                    Category::Attribute => fg(p.yellow),
+                    Category::Heading => fg(p.blue).add_modifier(Modifier::BOLD),
+                    Category::Emphasis => Style::new().add_modifier(italic),
+                    Category::Strong => Style::new().add_modifier(Modifier::BOLD),
+                    Category::Link => fg(p.cyan).add_modifier(Modifier::UNDERLINED),
+                    Category::Inserted => fg(p.green),
+                    Category::Deleted => fg(p.red),
+                    Category::Changed => fg(p.yellow),
+                    Category::Invalid => fg(p.red).add_modifier(Modifier::UNDERLINED),
+                })
+            },
             key: Style::new().fg(c(p.magenta)).add_modifier(Modifier::BOLD),
         }
     }
 }
+
+impl Theme {
+    pub fn category(&self, category: Category) -> Style {
+        self.syntax[CATEGORY_ORDER.iter().position(|c| *c == category).unwrap()]
+    }
+}
+const CATEGORIES: usize = 22;
+const CATEGORY_ORDER: [Category; CATEGORIES] = [
+    Category::Comment,
+    Category::String,
+    Category::Escape,
+    Category::Number,
+    Category::Constant,
+    Category::Keyword,
+    Category::Operator,
+    Category::Type,
+    Category::Function,
+    Category::Parameter,
+    Category::Namespace,
+    Category::Macro,
+    Category::Tag,
+    Category::Attribute,
+    Category::Heading,
+    Category::Emphasis,
+    Category::Strong,
+    Category::Link,
+    Category::Inserted,
+    Category::Deleted,
+    Category::Changed,
+    Category::Invalid,
+];
 
 fn color(rgb: u32, truecolor: bool) -> Color {
     let (r, g, b) = ((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8);

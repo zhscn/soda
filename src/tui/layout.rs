@@ -1,6 +1,7 @@
 use crate::{
     application::Application,
     core::{ByteOffset, column_width, logical_column_at, step_grapheme},
+    syntax::{Category, Highlighter},
 };
 use std::num::NonZeroUsize;
 use unicode_segmentation::UnicodeSegmentation;
@@ -12,6 +13,7 @@ pub(super) struct Span {
     pub matched: bool,
     /// Secondary text, such as a candidate's description.
     pub detail: bool,
+    pub category: Option<Category>,
 }
 /// One visible document line: its zero-based number and clipped text.
 pub(super) struct Row {
@@ -25,6 +27,8 @@ pub(super) struct Frame {
     /// Zero-based line and logical column of the caret.
     pub caret: (usize, usize),
     pub line_count: usize,
+    /// The highlighting language's display name.
+    pub language: String,
 }
 
 /// Clip by terminal cells. Partially visible tabs/wide graphemes become spaces;
@@ -41,15 +45,18 @@ pub(super) fn row(
         selection,
         matches: &[],
         detail: text.len(),
+        categories: &[],
     };
     styled_row(text, byte_start, marks, left, width, tab)
 }
-/// Byte ranges styled within a row: the selection is document-relative,
-/// matches and the detail offset are relative to the row text.
+/// Byte ranges styled within a row: the selection is document-relative;
+/// matches, the detail offset and highlight categories are relative to the
+/// row text, categories ordered and disjoint.
 struct Marks<'a> {
     selection: std::ops::Range<usize>,
     matches: &'a [std::ops::Range<usize>],
     detail: usize,
+    categories: &'a [(std::ops::Range<usize>, Category)],
 }
 fn styled_row(
     text: &str,
@@ -63,8 +70,10 @@ fn styled_row(
         selection,
         matches,
         detail,
+        categories,
     } = marks;
     let mut spans = Vec::<Span>::new();
+    let mut next_category = 0;
     let mut column = 0;
     let right = left.saturating_add(width);
     for (offset, cluster) in text.grapheme_indices(true) {
@@ -89,8 +98,21 @@ fn styled_row(
                 .iter()
                 .any(|range| offset < range.end && offset + cluster.len() > range.start);
             let secondary = offset >= detail;
+            while categories
+                .get(next_category)
+                .is_some_and(|(range, _)| range.end <= offset)
+            {
+                next_category += 1;
+            }
+            let category = categories
+                .get(next_category)
+                .filter(|(range, _)| range.start <= offset)
+                .map(|(_, category)| *category);
             if let Some(last) = spans.last_mut().filter(|last| {
-                last.selected == selected && last.matched == matched && last.detail == secondary
+                last.selected == selected
+                    && last.matched == matched
+                    && last.detail == secondary
+                    && last.category == category
             }) {
                 last.text.push_str(&rendered);
             } else {
@@ -99,6 +121,7 @@ fn styled_row(
                     selected,
                     matched,
                     detail: secondary,
+                    category,
                 });
             }
         }
@@ -124,6 +147,7 @@ pub(super) fn candidate_row<T>(
         selection,
         matches: &row.highlights,
         detail: detail.unwrap_or(text.len()),
+        categories: &[],
     };
     styled_row(text, 0, marks, 0, width, NonZeroUsize::new(4).unwrap())
 }
@@ -210,6 +234,7 @@ pub(super) struct ViewportAdjustment {
 /// area. Viewport decisions are applied by Runtime before this is called.
 pub(super) fn frame(
     app: &Application,
+    highlighter: &mut Highlighter,
     width: u16,
     rows: u16,
     caret: Option<usize>,
@@ -230,14 +255,22 @@ pub(super) fn frame(
     let top = snapshot.line_of(view.viewport.anchor.offset.0).unwrap();
     let left = view.viewport.horizontal_column;
     let mut output = Vec::new();
-    for number in top..top.saturating_add(rows).min(snapshot.line_count()) {
+    let bottom = top.saturating_add(rows).min(snapshot.line_count());
+    let highlights = highlighter.lines(app, view.document_id, top..bottom);
+    for number in top..bottom {
         let text = snapshot.line(number).unwrap();
+        let marks = Marks {
+            selection: state.selection().range(),
+            matches: &[],
+            detail: text.len(),
+            categories: highlights.get(number - top).map_or(&[], Vec::as_slice),
+        };
         output.push(Row {
             line: number,
-            spans: row(
+            spans: styled_row(
                 &text,
                 snapshot.line_start(number).unwrap(),
-                state.selection().range(),
+                marks,
                 left,
                 usize::from(width),
                 tab,
@@ -260,6 +293,10 @@ pub(super) fn frame(
         cursor,
         caret: (line, column),
         line_count: snapshot.line_count(),
+        language: highlighter
+            .language(view.document_id)
+            .unwrap_or("text")
+            .to_owned(),
     }))
 }
 
@@ -309,7 +346,7 @@ mod tests {
                 horizontal_column: viewport.horizontal_column,
             })?;
         }
-        Ok(super::frame(app, width, height, None)?.unwrap())
+        Ok(super::frame(app, &mut Highlighter::default(), width, height, None)?.unwrap())
     }
 
     use crate::{
@@ -387,7 +424,9 @@ mod tests {
         let frame = frame(&mut app, 6, 3).unwrap();
         assert_eq!(frame.cursor, Some((5, 0)));
         assert_eq!(app.view(view).unwrap().viewport.horizontal_column, 5);
-        let frame = super::frame(&app, 0, 0, None).unwrap().unwrap();
+        let frame = super::frame(&app, &mut Highlighter::default(), 0, 0, None)
+            .unwrap()
+            .unwrap();
         assert!(frame.rows.is_empty());
         assert!(frame.cursor.is_none());
     }
@@ -504,7 +543,9 @@ mod tests {
         })
         .unwrap();
         let before = app.view(view).unwrap().viewport;
-        let projected = super::frame(&app, 10, 4, None).unwrap().unwrap();
+        let projected = super::frame(&app, &mut Highlighter::default(), 10, 4, None)
+            .unwrap()
+            .unwrap();
         assert_eq!(app.view(view).unwrap().viewport, before);
         assert!(projected.cursor.is_none());
         assert!(super::follow_caret(&app, 10, 4, None).unwrap().is_some());

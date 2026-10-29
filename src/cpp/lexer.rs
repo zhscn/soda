@@ -448,7 +448,7 @@ impl Iterator for Scanner<'_> {
     }
 }
 
-pub(super) struct Relexed {
+pub(crate) struct Relexed {
     pub tokens: Vec<Token>,
     pub scanned: Range<usize>,
     pub unchanged_prefix: usize,
@@ -457,7 +457,7 @@ pub(super) struct Relexed {
 
 /// The common unchanged suffix and equal neutral lexer states establish
 /// convergence. No checkpoint inside a multiline token or line splice is used.
-pub(super) fn relex(old: &str, tokens: &[Token], source: &str) -> Relexed {
+pub(crate) fn relex(old: &str, tokens: &[Token], source: &str) -> Relexed {
     let prefix = old
         .bytes()
         .zip(source.bytes())

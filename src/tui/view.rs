@@ -7,7 +7,6 @@ use super::{
     theme::Theme,
 };
 use crate::{
-    editor::Language,
     interaction::{CommandLine, EditMode, Layer, help::HINT},
     runtime::Runtime,
 };
@@ -131,6 +130,9 @@ fn spans(buf: &mut Buffer, x: u16, y: u16, width: u16, spans: &[Span], base: Sty
         let mut style = base;
         if span.selected {
             style = style.patch(theme.selection);
+        }
+        if let Some(category) = span.category {
+            style = style.patch(theme.category(category));
         }
         if span.detail {
             style = style.patch(theme.detail);
@@ -296,7 +298,6 @@ fn status(
     };
     let app = runtime.app();
     let view = app.active_view().and_then(|id| app.view(id));
-    let mut left = vec![Text::styled(format!(" {badge} "), style), Text::raw(" ")];
     let mut right = vec![];
     if let Some(pending) = runtime.pending_keys() {
         right.push(Text::styled(format!("{pending}  "), theme.key));
@@ -304,42 +305,62 @@ fn status(
     if runtime.shell_running() {
         right.push(Text::raw("running…  "));
     }
-    if let Some(view) = view {
-        let document = view.document_id;
-        left.push(Text::styled(
-            file_label(runtime, document, true),
+    if let Some(text) = text.filter(|_| view.is_some()) {
+        right.push(Text::raw(format!("{}  ", text.language)));
+        let (line, column) = text.caret;
+        let percent = (line + 1) * 100 / text.line_count.max(1);
+        right.push(Text::styled(
+            format!("{}:{}", line + 1, column + 1),
             theme.status_strong,
         ));
-        if app.workspace().is_dirty(document) {
-            left.push(Text::styled(" [+]", theme.modified));
-        }
-        if app.workspace().is_saving(document) {
-            left.push(Text::raw(" saving…"));
-        }
-        let language = match app.workspace().editor(document).unwrap().model().language() {
-            Language::Cpp(_) => "C++",
-            Language::PlainText => "text",
-        };
-        right.push(Text::raw(format!("{language}  ")));
-        if let Some(text) = text {
-            let (line, column) = text.caret;
-            let percent = (line + 1) * 100 / text.line_count.max(1);
-            right.push(Text::styled(
-                format!("{}:{}", line + 1, column + 1),
-                theme.status_strong,
-            ));
-            right.push(Text::raw(format!("  {percent:>3}% ")));
-        }
+        right.push(Text::raw(format!("  {percent:>3}% ")));
     }
     let right = Line::from(right);
-    let width = (right.width() as u16).min(area.width);
+    let right_width = (right.width() as u16).min(area.width);
+    let mut left = vec![Text::styled(format!(" {badge} "), style), Text::raw(" ")];
+    if let Some(view) = view {
+        let document = view.document_id;
+        let mut marks = vec![];
+        if app.workspace().is_dirty(document) {
+            marks.push(Text::styled(" [+]", theme.modified));
+        }
+        if app.workspace().is_saving(document) {
+            marks.push(Text::raw(" saving…"));
+        }
+        // Long paths keep their file name and lose leading directories.
+        let used = Line::from(left.clone()).width() + Line::from(marks.clone()).width();
+        let room = usize::from(area.width).saturating_sub(usize::from(right_width) + used + 2);
+        let path = file_label(runtime, document, true);
+        left.push(Text::styled(tail(&path, room), theme.status_strong));
+        left.extend(marks);
+    }
     buf.set_line(
         area.x,
         area.y,
         &Line::from(left),
-        area.width.saturating_sub(width),
+        area.width.saturating_sub(right_width + 1),
     );
-    buf.set_line(area.right() - width, area.y, &right, width);
+    buf.set_line(area.right() - right_width, area.y, &right, right_width);
+}
+
+/// The end of `text` within `width` cells, marked with `…` when cut.
+fn tail(text: &str, width: usize) -> String {
+    use unicode_width::UnicodeWidthChar;
+    let total: usize = text.chars().map(|c| c.width().unwrap_or(0)).sum();
+    if total <= width {
+        return text.to_owned();
+    }
+    let mut kept = vec![];
+    let mut used = 1;
+    for ch in text.chars().rev() {
+        let w = ch.width().unwrap_or(0);
+        if used + w > width {
+            break;
+        }
+        used += w;
+        kept.push(ch);
+    }
+    std::iter::once('…').chain(kept.into_iter().rev()).collect()
 }
 
 /// The bottom row shows messages, or a prompt layer's input. Returns the
@@ -563,6 +584,7 @@ mod tests {
         let areas = Areas::new(runtime, width, height);
         let frame = layout::frame(
             runtime.app(),
+            &mut crate::syntax::Highlighter::default(),
             text.width,
             text.height,
             runtime.editor_caret(),

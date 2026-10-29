@@ -1,0 +1,51 @@
+{
+ "grammars": [
+  {
+   "path": "./syntaxes/yaml-1.3.tmLanguage.json",
+   "scopeName": "source.yaml.1.3"
+  },
+  {
+   "path": "./syntaxes/yaml-1.2.tmLanguage.json",
+   "scopeName": "source.yaml.1.2"
+  },
+  {
+   "path": "./syntaxes/yaml-1.1.tmLanguage.json",
+   "scopeName": "source.yaml.1.1"
+  },
+  {
+   "path": "./syntaxes/yaml-1.0.tmLanguage.json",
+   "scopeName": "source.yaml.1.0"
+  },
+  {
+   "path": "./syntaxes/yaml-embedded.tmLanguage.json",
+   "scopeName": "source.yaml.embedded"
+  },
+  {
+   "language": "yaml",
+   "path": "./syntaxes/yaml.tmLanguage.json",
+   "scopeName": "source.yaml"
+  }
+ ],
+ "languages": [
+  {
+   "aliases": [
+    "YAML",
+    "yaml"
+   ],
+   "configuration": "./language-configuration.json",
+   "extensions": [
+    ".yaml",
+    ".yml",
+    ".eyaml",
+    ".eyml",
+    ".cff",
+    ".yaml-tmlanguage",
+    ".yaml-tmpreferences",
+    ".yaml-tmtheme",
+    ".winget"
+   ],
+   "id": "yaml"
+  }
+ ],
+ "name": "yaml"
+}
