@@ -769,6 +769,11 @@ pub static BUILTINS: &[Builtin] = &[
         Command::Stop
     ),
     builtin!(
+        "suspend",
+        "Return to the shell; resume the editor with fg",
+        Command::Suspend
+    ),
+    builtin!(
         "display",
         [
             slot("KIND", SlotKind::Word),

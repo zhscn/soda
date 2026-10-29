@@ -177,3 +177,15 @@ fn departure_asks_for_a_path_through_the_command_line() {
         "content\n"
     );
 }
+#[test]
+fn suspend_is_handed_to_the_frontend_once() {
+    let mut runtime = Runtime::new(std::path::PathBuf::from("/")).unwrap();
+    runtime.start(None);
+    assert!(!runtime.take_suspend());
+    runtime.input(soda::interaction::UserInput::Key(
+        soda::interaction::KeyStroke::parse_sequence("<c-z>").unwrap()[0],
+    ));
+    assert!(runtime.take_suspend());
+    assert!(!runtime.take_suspend());
+    assert!(!runtime.quit_requested());
+}

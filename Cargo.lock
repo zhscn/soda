@@ -944,6 +944,7 @@ dependencies = [
  "ropey",
  "serde-saphyr",
  "serde_json",
+ "signal-hook",
  "tempfile",
  "unicode-segmentation",
  "unicode-width",

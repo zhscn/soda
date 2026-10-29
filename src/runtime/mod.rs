@@ -69,6 +69,7 @@ pub struct Runtime {
     /// The mode and focused view hooks last saw.
     seen: (crate::interaction::EditMode, Option<ViewId>),
     quit: bool,
+    suspend: bool,
     dirty: bool,
 }
 impl Runtime {
@@ -106,6 +107,7 @@ impl Runtime {
             restores: vec![],
             seen: Default::default(),
             quit: false,
+            suspend: false,
             dirty: true,
         })
     }
@@ -236,6 +238,11 @@ impl Runtime {
     }
     pub fn quit_requested(&self) -> bool {
         self.quit
+    }
+    /// Whether `suspend` ran since the last call; the frontend stops the
+    /// process and redraws when it continues.
+    pub fn take_suspend(&mut self) -> bool {
+        std::mem::take(&mut self.suspend)
     }
     pub fn take_redraw(&mut self) -> bool {
         std::mem::take(&mut self.dirty)
@@ -723,6 +730,7 @@ impl Runtime {
             }
         }
         self.quit |= response.quit;
+        self.suspend |= response.suspend;
         for input in response.replay.into_iter().rev() {
             self.replay.push_front(input);
         }

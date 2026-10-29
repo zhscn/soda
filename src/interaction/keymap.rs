@@ -308,6 +308,7 @@ const NORMAL: &[(&str, &str)] = &[
     ("]q", "next-result"),
     ("[q", "previous-result"),
     ("<c-c>", "stop"),
+    ("<c-z>", "suspend"),
     ("<f1>", "help"),
     ("<space>f", "project"),
     ("<space>b", "buffers"),

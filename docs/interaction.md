@@ -118,7 +118,7 @@ BeginUndoGroup 保存操作开始前的选区，EndUndoGroup 保存结束时的�
 
 `prompt` 上下文的目标是输入动作，不是应用命令：`confirm`、`cancel`、`complete`、`complete-backward`、`candidate-next`、`candidate-previous`、`candidate-first`、`candidate-last`、`page-next`、`page-previous`、`match-next`、`match-previous`、`replace-all`、`help`、`select-all`、`nop`，以及下面的行编辑名。prompt 绑定只接受单个按键。输入组件因此不会执行文档命令或切换编辑模式。
 
-Normal 的默认绑定除 Vim 语法外还有 `<c-r>` 重做、`<c-f>` / `<c-b>` 翻页、`<f1>` 帮助，以及 helix 式的空格菜单：`<space>f` 项目文件、`<space>b` 缓冲区、`<space>:` 命令面板。Insert 中方向键、Enter、Tab 和 Shift-Tab 分别绑定 `move-up`/`move-down`、`newline`、`insert-tab` 和 `outdent`。
+Normal 的默认绑定除 Vim 语法外还有 `<c-r>` 重做、`<c-f>` / `<c-b>` 翻页、`<c-z>` 挂起、`<f1>` 帮助，以及 helix 式的空格菜单：`<space>f` 项目文件、`<space>b` 缓冲区、`<space>:` 命令面板。Insert 中方向键、Enter、Tab 和 Shift-Tab 分别绑定 `move-up`/`move-down`、`newline`、`insert-tab` 和 `outdent`。
 
 ### 括号配对
 
@@ -218,6 +218,7 @@ hook open .*/Makefile set-local expand-tab false
 | `next-result` / `previous-result` | `cn` / `cp` | 在最近的结果文档（`*grep*` 或 `*run*`）中打开下一个或上一个位置 |
 | `run CMD` | `make` | 后台运行命令，输出流式写入 `*run*` |
 | `stop` | | 停止 `run`、`shell`/`pipe` 和项目搜索 |
+| `suspend` | | 挂起编辑器回到 shell，用 `fg` 继续 |
 | `messages` | | 在 `*messages*` 中显示最近的消息 |
 | `highlight FACE PATTERN` / `highlight-local FACE PATTERN` | | 在所有文档 / 当前文档中高亮正则表达式 |
 | `unhighlight [PATTERN]` | | 去掉某个模式的高亮，或者全部 |
@@ -325,7 +326,9 @@ Enter 依次处理：
 
 ### 异常退出
 
-正常退出会逐个询问未保存的文档，所以退出时还有未保存的文档，说明主循环提前结束了：发生了 panic，或者终端读写出错。这时前端先把每个未保存文档的文本写入状态目录下的 `recovery/`（无法确定状态目录时用系统临时目录），文件名是 `时间戳-缓冲区名`，`/` 和空白换成 `%`；再恢复终端，在标准错误中给出目录。panic 的报告和回溯也在终端恢复之后输出，不会丢在备用屏幕上。panic 之后不写状态文件，保留上一次的。被信号直接杀死（如 SIGKILL、关闭终端时的 SIGHUP）时没有机会做这些。
+正常退出会逐个询问未保存的文档，所以退出时还有未保存的文档，说明主循环提前结束了：发生了 panic、终端读写出错，或者收到了 SIGHUP（关闭终端窗口）或 SIGTERM。这时前端先把每个未保存文档的文本写入状态目录下的 `recovery/`（无法确定状态目录时用系统临时目录），文件名是 `时间戳-缓冲区名`，`/` 和空白换成 `%`；再恢复终端，在标准错误中给出目录。panic 的报告和回溯也在终端恢复之后输出，不会丢在备用屏幕上。panic 之后不写状态文件，保留上一次的。SIGHUP 之后终端已经不在，错误输出可能无人读取，写入失败也不影响恢复。SIGKILL 无法捕获，没有机会做这些。
+
+`suspend`（Normal 模式 `<c-z>`）像 shell 作业那样挂起编辑器：先把终端恢复成 shell 的状态，再向自己发送 SIGTSTP；用 `fg` 继续后重新接管终端并重画整个屏幕。
 
 ### 缺参数的命令
 

@@ -90,6 +90,8 @@ pub enum Command {
     Run(String),
     /// Stops background work: the run, the shell command and the search.
     Stop,
+    /// Hands the terminal back to the shell until the editor is resumed.
+    Suspend,
     /// Looks for open files changed on disk: reloads those without unsaved
     /// edits and reports the rest.
     CheckFiles,
@@ -654,6 +656,7 @@ impl Layers {
                 response.run = Some(Box::new(super::shell::run(app, view, shell, file_root)));
             }
             Command::Stop => response.stop = true,
+            Command::Suspend => response.suspend = true,
             Command::Messages => response.messages = true,
             Command::Echo(text) => response.message = Message::Set(text),
             Command::Highlight {

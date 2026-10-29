@@ -27,11 +27,16 @@ use std::{
 struct Terminal {
     /// Whether the terminal took the kitty keyboard protocol.
     enhanced: bool,
+    /// Whether the terminal is set up for the editor, not yet restored.
+    active: bool,
 }
 impl Terminal {
     fn enter() -> io::Result<Self> {
         terminal::enable_raw_mode()?;
-        let mut guard = Self { enhanced: false };
+        let mut guard = Self {
+            enhanced: false,
+            active: true,
+        };
         // The kitty keyboard protocol tells apart keys that legacy encodings
         // merge, such as Ctrl-Enter from Enter and Ctrl-Backspace from
         // Backspace. Terminals that do not answer the query keep the legacy
@@ -56,6 +61,23 @@ impl Terminal {
 }
 impl Drop for Terminal {
     fn drop(&mut self) {
+        self.restore();
+    }
+}
+impl Terminal {
+    /// Stops the process as a shell job does on Ctrl-Z, with the terminal
+    /// as the shell left it, and takes the terminal again once continued.
+    fn suspend(&mut self) -> io::Result<()> {
+        self.restore();
+        #[cfg(unix)]
+        signal_hook::low_level::raise(signal_hook::consts::SIGTSTP)?;
+        *self = Self::enter()?;
+        Ok(())
+    }
+    fn restore(&mut self) {
+        if !std::mem::take(&mut self.active) {
+            return;
+        }
         if self.enhanced {
             let _ = execute!(io::stdout(), PopKeyboardEnhancementFlags);
         }
@@ -168,7 +190,14 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err(io::Error::other("interactive editing requires a terminal"));
     }
-    let _terminal = Terminal::enter()?;
+    let mut screen = Terminal::enter()?;
+    // Hangup and termination end the loop like a terminal error, so unsaved
+    // documents go to recovery instead of being lost.
+    let ended = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    #[cfg(unix)]
+    for signal in [signal_hook::consts::SIGHUP, signal_hook::consts::SIGTERM] {
+        signal_hook::flag::register(signal, ended.clone())?;
+    }
     let mut terminal =
         ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(io::stdout()))?;
     let theme = theme::Theme::detect();
@@ -211,7 +240,8 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
         *slot.lock().unwrap() = Some(format!("{info}\n{backtrace}"));
     }));
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> io::Result<()> {
-        while !runtime.quit_requested() {
+        let mut resumed = false;
+        while !runtime.quit_requested() && !ended.load(std::sync::atomic::Ordering::Relaxed) {
             runtime.poll();
             // The terminal keeps its own selection while the mouse is off.
             let wanted = runtime.app().options().bool(None, "mouse");
@@ -235,7 +265,7 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
                 runtime.resize(rows.0.into(), rows.1);
                 runtime.set_page_rows(rows.2.into());
             }
-            if runtime.take_redraw() || catching_up {
+            if runtime.take_redraw() || catching_up || std::mem::take(&mut resumed) {
                 follow(&mut runtime, &areas)?;
                 // The gutter widens with the line count, so measure again.
                 let areas = view::Areas::new(&runtime, width, height);
@@ -255,12 +285,18 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
                     event => runtime.input(input::normalize(event)),
                 }
             }
+            if runtime.take_suspend() {
+                screen.suspend()?;
+                // The shell drew over the screen; paint all of it again.
+                terminal.clear()?;
+                resumed = true;
+            }
         }
         Ok(())
     }));
     std::panic::set_hook(previous);
     // Quitting asks about every unsaved document, so any left mean the loop
-    // ended early: a panic or a terminal error.
+    // ended early: a panic, a terminal error, a hangup or termination.
     let unsaved = runtime.unsaved();
     let recovered = (!unsaved.is_empty()).then(|| {
         let directory = state_path()
@@ -268,20 +304,28 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
             .unwrap_or_else(std::env::temp_dir);
         recover(&unsaved, &directory).map(|()| directory)
     });
-    drop(_terminal);
+    drop(screen);
+    // After a hangup nobody reads stderr, and writing may fail.
+    use io::Write;
+    let mut stderr = io::stderr();
     match recovered {
-        Some(Ok(directory)) => eprintln!(
-            "soda: unsaved changes were written to {}",
-            directory.display()
-        ),
-        Some(Err(error)) => eprintln!("soda: unsaved changes were lost: {error}"),
+        Some(Ok(directory)) => {
+            let _ = writeln!(
+                stderr,
+                "soda: unsaved changes were written to {}",
+                directory.display()
+            );
+        }
+        Some(Err(error)) => {
+            let _ = writeln!(stderr, "soda: unsaved changes were lost: {error}");
+        }
         None => {}
     }
     // State after a panic may be inconsistent; the previous file stays.
     if let (Some(path), Ok(_)) = (state, &outcome) {
         let text = runtime.persist();
         if let Err(error) = save_state(&path, &text) {
-            eprintln!("soda: cannot save {}: {error}", path.display());
+            let _ = writeln!(stderr, "soda: cannot save {}: {error}", path.display());
         }
     }
     match outcome {
