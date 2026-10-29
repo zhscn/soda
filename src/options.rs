@@ -96,6 +96,12 @@ pub const OPTIONS: &[OptionInfo] = &[
         doc: "Line numbers in the gutter: absolute, relative to the caret line, or none",
     },
     OptionInfo {
+        name: "wrap",
+        kind: Kind::Bool,
+        default: Value::Bool(false),
+        doc: "Wrap long lines onto further rows, after a space where one fits",
+    },
+    OptionInfo {
         name: "show-whitespace",
         kind: Kind::Bool,
         default: Value::Bool(false),

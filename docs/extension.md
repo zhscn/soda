@@ -39,6 +39,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `expand-tab` | true/false | true | 用空格缩进；false 时缩进用制表符 |
 | `auto-pairs` | true/false | true | 成对输入括号（C++ 中还有引号），退格删除空的一对 |
 | `line-numbers` | absolute/relative/off | absolute | 行号栏；relative 时光标行显示自身行号，其他行显示距离 |
+| `wrap` | true/false | false | 长行折到下一屏幕行，能在空格后断开时在空格后断开 |
 | `show-whitespace` | true/false | false | 用 `»` 标出制表符，用 `·` 标出行尾空格 |
 | `ruler` | 0–1000 | 0 | 在这一列之后画竖线；0 不画 |
 | `scroll-lines` | 1–100 | 3 | 鼠标滚轮每格滚动的行数 |

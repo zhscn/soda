@@ -233,10 +233,12 @@ fn labels(
         };
         let text = window.text;
         let (row, column, label) = match target.offset {
-            Some(offset) => match layout::cell_of(runtime.app(), target.view, offset) {
-                Some((row, column)) => (row, column, rest.to_owned()),
-                None => continue,
-            },
+            Some(offset) => {
+                match layout::cell_of(runtime.app(), target.view, text.width, text.height, offset) {
+                    Some((row, column)) => (row, column, rest.to_owned()),
+                    None => continue,
+                }
+            }
             None => (0, 0, format!(" {rest} ")),
         };
         if row >= usize::from(text.height) || column >= usize::from(text.width) {
@@ -350,7 +352,11 @@ fn editor(
             } else {
                 row.line + 1
             };
-            let number = format!(" {shown:>digits$} │ ");
+            let number = if row.continued {
+                format!(" {:>digits$} │ ", "")
+            } else {
+                format!(" {shown:>digits$} │ ")
+            };
             buf.set_stringn(left, y, &number, window.gutter.into(), style);
         }
         spans(buf, area.x, y, area.width, &row.spans, base, theme);

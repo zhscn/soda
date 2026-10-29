@@ -21,9 +21,11 @@ pub(super) struct Span {
     pub whitespace: bool,
     pub face: Option<crate::application::Face>,
 }
-/// One visible document line: its zero-based number and clipped text.
+/// One screen row: the zero-based line it shows and its clipped text.
 pub(super) struct Row {
     pub line: usize,
+    /// A later row of a wrapped line, which has no number.
+    pub continued: bool,
     pub spans: Vec<Span>,
 }
 /// The text area of the active view, positioned relative to its top left.
@@ -193,8 +195,157 @@ pub(super) fn plain(text: &str, left: usize, width: usize) -> String {
         .collect()
 }
 
+/// The part of a line one screen row shows: where it starts in the line's
+/// text and the logical columns it covers.
+#[derive(Clone, Debug, PartialEq)]
+struct Segment {
+    start: usize,
+    columns: std::ops::Range<usize>,
+}
+/// Splits a line into screen rows `width` cells wide, breaking after the
+/// last space that fits and inside a word only when none does. Without a
+/// width the line is one row, cut at the edge and scrolled sideways.
+fn segments(text: &str, width: Option<usize>, tab: NonZeroUsize) -> Vec<Segment> {
+    let Some(width) = width.map(|w| w.max(1)) else {
+        return vec![Segment {
+            start: 0,
+            columns: 0..usize::MAX,
+        }];
+    };
+    let mut out = vec![];
+    let (mut start, mut first) = (0, 0);
+    let mut space = None;
+    let mut column = 0;
+    for (offset, cluster) in text.grapheme_indices(true) {
+        let end = column_width(cluster, column, tab);
+        while end - first > width && column > first {
+            let (at, at_column) = space.take().unwrap_or((offset, column));
+            out.push(Segment {
+                start,
+                columns: first..at_column,
+            });
+            (start, first) = (at, at_column);
+        }
+        if cluster == " " || cluster == "\t" {
+            space = Some((offset + cluster.len(), end));
+        }
+        column = end;
+    }
+    out.push(Segment {
+        start,
+        columns: first..column.max(first),
+    });
+    out
+}
+/// A screen row: a line and which of its segments.
+type Place = (usize, usize);
+/// How one view's lines meet its text area.
+struct Rows<'a> {
+    snapshot: &'a crate::core::Snapshot,
+    tab: NonZeroUsize,
+    wrap: Option<usize>,
+    /// Lines shown, the empty one after a final newline only with the
+    /// caret on it.
+    lines: usize,
+}
+impl<'a> Rows<'a> {
+    fn new(
+        app: &'a Application,
+        view: &crate::application::View,
+        width: u16,
+        caret: usize,
+    ) -> Option<Self> {
+        let document = app.workspace().editor(view.document_id)?.model().document();
+        let snapshot = document.snapshot();
+        let wrap = app
+            .options()
+            .bool(Some(view.document_id), "wrap")
+            .then_some(usize::from(width));
+        let caret_line = snapshot.line_of(caret.min(snapshot.len_bytes()))?;
+        Some(Self {
+            snapshot,
+            tab: document.whitespace().tab_width,
+            wrap,
+            lines: snapshot.text_lines().max(caret_line + 1),
+        })
+    }
+    fn segments(&self, line: usize) -> Vec<Segment> {
+        if self.wrap.is_none() {
+            return segments("", None, self.tab);
+        }
+        segments(
+            &self.snapshot.line(line).unwrap_or_default(),
+            self.wrap,
+            self.tab,
+        )
+    }
+    /// The row showing `offset` and the logical column there.
+    fn place(&self, offset: usize) -> (Place, usize) {
+        let offset = offset.min(self.snapshot.len_bytes());
+        let line = self.snapshot.line_of(offset).unwrap().min(self.lines - 1);
+        let column =
+            logical_column_at(self.snapshot, ByteOffset(offset), self.tab).map_or(0, |c| c.0);
+        let within = offset - self.snapshot.line_start(line).unwrap();
+        let row = self
+            .segments(line)
+            .iter()
+            .rposition(|segment| segment.start <= within)
+            .unwrap_or(0);
+        ((line, row), column)
+    }
+    /// The offset where a row starts.
+    fn start(&self, (line, row): Place) -> usize {
+        let segments = self.segments(line);
+        self.snapshot.line_start(line).unwrap() + segments[row.min(segments.len() - 1)].start
+    }
+    /// The row `count` rows on, stopping at the first and the last.
+    fn step(&self, (mut line, mut row): Place, count: isize) -> Place {
+        let mut rows = self.segments(line).len();
+        for _ in 0..count.unsigned_abs() {
+            if count > 0 {
+                if row + 1 < rows {
+                    row += 1;
+                } else if line + 1 < self.lines {
+                    line += 1;
+                    row = 0;
+                    rows = self.segments(line).len();
+                } else {
+                    break;
+                }
+            } else if row > 0 {
+                row -= 1;
+            } else if line > 0 {
+                line -= 1;
+                rows = self.segments(line).len();
+                row = rows - 1;
+            } else {
+                break;
+            }
+        }
+        (line, row)
+    }
+    /// Rows from `from` to `to`, at most `limit`; none when `to` is above.
+    fn distance(&self, from: Place, to: Place, limit: usize) -> Option<usize> {
+        if to < from {
+            return None;
+        }
+        let mut place = from;
+        for count in 0..limit {
+            if place == to {
+                return Some(count);
+            }
+            let next = self.step(place, 1);
+            if next == place {
+                return None;
+            }
+            place = next;
+        }
+        (place == to).then_some(limit)
+    }
+}
+
 /// Scroll only the active view. Byte anchors remain application-owned and map
-/// through document updates; this frontend resolves them into logical lines.
+/// through document updates; this frontend resolves them into screen rows.
 pub(super) fn follow_caret(
     app: &Application,
     id: ViewId,
@@ -203,36 +354,26 @@ pub(super) fn follow_caret(
     caret: Option<usize>,
 ) -> Result<Option<ViewportAdjustment>, crate::application::Error> {
     let view = app.view(id).unwrap();
-    let document = app
-        .workspace()
-        .editor(view.document_id)
-        .unwrap()
-        .model()
-        .document();
-    let state = app
-        .workspace()
-        .editor(view.document_id)
-        .unwrap()
-        .model()
-        .session(view.session_id)
-        .unwrap()
-        .state();
-    let snapshot = document.snapshot();
-    let tab = document.whitespace().tab_width;
+    let editor = app.workspace().editor(view.document_id).unwrap();
+    let state = editor.model().session(view.session_id).unwrap().state();
+    let snapshot = editor.model().document().snapshot();
     let head = caret.unwrap_or(state.selection().head);
-    let line = snapshot.line_of(head).unwrap();
-    let column = logical_column_at(snapshot, ByteOffset(head), tab)?.0;
+    let layout = Rows::new(app, view, width, head).unwrap();
+    let tab = layout.tab;
+    let (place, column) = layout.place(head);
     let rows = usize::from(rows);
-    let mut top = snapshot.line_of(view.viewport.anchor.offset.0).unwrap();
-    let mut left = view.viewport.horizontal_column;
+    let (mut top, _) = layout.place(view.viewport.anchor.offset.0);
     if rows > 0 {
-        if line < top {
-            top = line;
-        } else if line >= top.saturating_add(rows) {
-            top = line + 1 - rows;
+        if place < top {
+            top = place;
+        } else if layout.distance(top, place, rows).is_none_or(|d| d >= rows) {
+            top = layout.step(place, 1 - rows as isize);
         }
     }
-    if width > 0 {
+    let mut left = view.viewport.horizontal_column;
+    if layout.wrap.is_some() {
+        left = 0;
+    } else if width > 0 {
         if column < left {
             left = column;
         }
@@ -246,7 +387,7 @@ pub(super) fn follow_caret(
             left = caret_end - usize::from(width);
         }
     }
-    let anchor = ByteOffset(snapshot.line_start(top).unwrap());
+    let anchor = ByteOffset(layout.start(top));
     Ok(
         (anchor != view.viewport.anchor.offset || left != view.viewport.horizontal_column)
             .then_some(ViewportAdjustment {
@@ -257,71 +398,97 @@ pub(super) fn follow_caret(
     )
 }
 
+/// The row and column, within a view's text area `width` cells wide, that
+/// shows `offset`; none when it is scrolled out above or to the left, or
+/// more than `rows` rows down.
+pub(super) fn cell_of(
+    app: &Application,
+    view: ViewId,
+    width: u16,
+    rows: u16,
+    offset: usize,
+) -> Option<(usize, usize)> {
+    let view = app.view(view)?;
+    let layout = Rows::new(app, view, width, offset)?;
+    let (top, _) = layout.place(view.viewport.anchor.offset.0);
+    let (place, column) = layout.place(offset);
+    let row = layout.distance(top, place, rows.into())?;
+    let first = if layout.wrap.is_some() {
+        layout.segments(place.0)[place.1].columns.start
+    } else {
+        view.viewport.horizontal_column
+    };
+    Some((row, column.checked_sub(first)?))
+}
 /// The byte offset under a cell of the active view's text area. Rows past
 /// either edge resolve to the lines beyond it, within the document.
-/// The row and column, within a view's text area, that shows `offset`;
-/// none when it is scrolled out above, below or to the left.
-pub(super) fn cell_of(app: &Application, view: ViewId, offset: usize) -> Option<(usize, usize)> {
-    let view = app.view(view)?;
-    let document = app.workspace().editor(view.document_id)?.model().document();
-    let snapshot = document.snapshot();
-    let top = snapshot.line_of(view.viewport.anchor.offset.0)?;
-    let row = snapshot.line_of(offset)?.checked_sub(top)?;
-    let column = logical_column_at(
-        snapshot,
-        ByteOffset(offset),
-        document.whitespace().tab_width,
-    )
-    .ok()?
-    .0
-    .checked_sub(view.viewport.horizontal_column)?;
-    Some((row, column))
-}
-pub(super) fn offset_at(app: &Application, row: isize, column: usize) -> Option<usize> {
+pub(super) fn offset_at(app: &Application, width: u16, row: isize, column: usize) -> Option<usize> {
     let view = app.view(app.active_view()?)?;
-    let document = app.workspace().editor(view.document_id)?.model().document();
-    let snapshot = document.snapshot();
-    let top = snapshot.line_of(view.viewport.anchor.offset.0)?;
-    let line = top
-        .saturating_add_signed(row)
-        .min(snapshot.text_lines() - 1);
-    let column = LogicalColumn(view.viewport.horizontal_column + column);
-    offset_at_logical_column(snapshot, line, column, document.whitespace().tab_width)
+    let caret = app
+        .workspace()
+        .editor(view.document_id)?
+        .model()
+        .session(view.session_id)?
+        .selection()
+        .head;
+    let layout = Rows::new(app, view, width, caret)?;
+    let (top, _) = layout.place(view.viewport.anchor.offset.0);
+    let (line, index) = layout.step(top, row);
+    let line = line.min(layout.snapshot.text_lines() - 1);
+    let column = if layout.wrap.is_some() {
+        let segments = layout.segments(line);
+        let segment = &segments[index.min(segments.len() - 1)];
+        // Past the end of a row that continues, stay on its last cell.
+        let last = index + 1 < segments.len();
+        let room = segment.columns.len().saturating_sub(usize::from(last));
+        segment.columns.start + column.min(room)
+    } else {
+        view.viewport.horizontal_column + column
+    };
+    offset_at_logical_column(layout.snapshot, line, LogicalColumn(column), layout.tab)
         .ok()
         .map(|offset| offset.0)
 }
-/// Scrolls the active view by `lines`, keeping the last line reachable at
-/// the top. When the caret leaves the text area, the second value is where
-/// it comes back: the nearest visible line, at the same column.
+/// Scrolls the active view by `lines` screen rows, keeping the last line
+/// reachable at the top. When the caret leaves the text area, the second
+/// value is where it comes back: the nearest visible row, at the same column.
 pub(super) fn scroll(
     app: &Application,
     id: ViewId,
     lines: isize,
+    width: u16,
     rows: u16,
     caret: Option<usize>,
 ) -> Option<(ViewportAdjustment, Option<usize>)> {
     let view = app.view(id)?;
     let editor = app.workspace().editor(view.document_id)?;
-    let document = editor.model().document();
-    let snapshot = document.snapshot();
-    let tab = document.whitespace().tab_width;
-    let top = snapshot.line_of(view.viewport.anchor.offset.0)?;
-    let top = top
-        .saturating_add_signed(lines)
-        .min(snapshot.text_lines() - 1);
     let head = caret.unwrap_or(editor.model().session(view.session_id)?.selection().head);
-    let line = snapshot.line_of(head)?;
-    let bottom = top + usize::from(rows.max(1)) - 1;
-    let reveal = (line < top || line > bottom).then(|| {
-        let column = logical_column_at(snapshot, ByteOffset(head), tab).unwrap();
-        offset_at_logical_column(snapshot, line.clamp(top, bottom), column, tab)
+    let layout = Rows::new(app, view, width, head)?;
+    let (top, _) = layout.place(view.viewport.anchor.offset.0);
+    let top = layout.step(top, lines);
+    let top = (top.0.min(layout.snapshot.text_lines() - 1), top.1);
+    let (place, column) = layout.place(head);
+    let rows = usize::from(rows.max(1));
+    let bottom = layout.step(top, rows as isize - 1);
+    let reveal = (place < top || place > bottom).then(|| {
+        let (line, row) = if place < top { top } else { bottom };
+        let column = match layout.wrap {
+            Some(_) => {
+                let within = layout.segments(place.0)[place.1].columns.start;
+                let segments = layout.segments(line);
+                let segment = &segments[row.min(segments.len() - 1)];
+                (segment.columns.start + (column - within)).min(segment.columns.end)
+            }
+            None => column,
+        };
+        offset_at_logical_column(layout.snapshot, line, LogicalColumn(column), layout.tab)
             .unwrap()
             .0
     });
     Some((
         ViewportAdjustment {
             view: id,
-            anchor: ByteOffset(snapshot.line_start(top)?),
+            anchor: ByteOffset(layout.start(top)),
             horizontal_column: view.viewport.horizontal_column,
         },
         reveal,
@@ -355,14 +522,28 @@ pub(super) fn frame(
     let line = snapshot.line_of(head).unwrap();
     let tab = document.whitespace().tab_width;
     let column = logical_column_at(snapshot, ByteOffset(head), tab)?.0;
-    let rows = usize::from(rows);
-    let top = snapshot.line_of(view.viewport.anchor.offset.0).unwrap();
+    let layout = Rows::new(app, view, width, head).unwrap();
+    let lines = layout.lines;
     let left = view.viewport.horizontal_column;
     let mut output = Vec::new();
-    // The empty line after a final newline shows only while the caret is
-    // on it, as when Insert's Enter has just opened it.
-    let lines = snapshot.text_lines().max(line + 1);
-    let bottom = top.saturating_add(rows).min(lines);
+    // The rows shown, each with its line's segment.
+    let (mut place, _) = layout.place(view.viewport.anchor.offset.0);
+    let mut shown: Vec<(Place, Segment)> = vec![];
+    let mut segments = layout.segments(place.0);
+    while shown.len() < usize::from(rows) {
+        shown.push((place, segments[place.1].clone()));
+        let next = layout.step(place, 1);
+        if next == place {
+            break;
+        }
+        if next.0 != place.0 {
+            segments = layout.segments(next.0);
+        }
+        place = next;
+    }
+    let rows = usize::from(rows);
+    let top = shown.first().map_or(0, |((line, _), _)| *line);
+    let bottom = shown.last().map_or(top, |((line, _), _)| line + 1);
     let highlights = highlighter.lines(app, view.document_id, top..bottom);
     let options = app.options();
     let show_whitespace = options.bool(Some(view.document_id), "show-whitespace");
@@ -375,8 +556,12 @@ pub(super) fn frame(
             .map(|column| column as u16),
     };
     let patterns: Vec<_> = app.highlights(view.document_id).collect();
-    for number in top..bottom {
-        let text = snapshot.line(number).unwrap();
+    let mut text = std::borrow::Cow::Borrowed("");
+    for ((number, row), segment) in &shown {
+        let number = *number;
+        if *row == 0 || output.is_empty() {
+            text = snapshot.line(number).unwrap();
+        }
         let mut faces: Vec<_> = patterns
             .iter()
             .flat_map(|h| {
@@ -395,29 +580,42 @@ pub(super) fn frame(
             whitespace: show_whitespace,
             faces: &faces,
         };
+        let (first, cells) = match layout.wrap {
+            Some(_) => (segment.columns.start, segment.columns.len()),
+            None => (left, usize::from(width)),
+        };
         output.push(Row {
             line: number,
+            continued: *row > 0,
             spans: styled_row(
                 &text,
                 snapshot.line_start(number).unwrap(),
                 marks,
-                left,
-                usize::from(width),
+                first,
+                cells,
                 tab,
             ),
         });
     }
-    let cursor = if rows > 0
-        && width > 0
-        && line >= top
-        && line - top < rows
-        && column >= left
-        && column - left < usize::from(width)
-    {
-        Some(((column - left) as u16, (line - top) as u16))
-    } else {
-        None
-    };
+    let (caret_place, _) = layout.place(head);
+    let cursor = shown
+        .iter()
+        .position(|(place, _)| *place == caret_place)
+        .filter(|_| rows > 0 && width > 0)
+        .and_then(|y| {
+            let first = match layout.wrap {
+                Some(_) => shown[y].1.columns.start,
+                None => left,
+            };
+            // A caret at the end of a full row stays on its last cell.
+            let x = column.checked_sub(first)?;
+            let x = if layout.wrap.is_some() {
+                x.min(usize::from(width) - 1)
+            } else {
+                x
+            };
+            (x < usize::from(width)).then_some((x as u16, y as u16))
+        });
     Ok(Some(Frame {
         rows: output,
         cursor,
@@ -508,6 +706,9 @@ mod tests {
         })
         .unwrap();
         app
+    }
+    fn joined_row(row: &super::Row) -> String {
+        row.spans.iter().map(|span| span.text.as_str()).collect()
     }
     fn joined(spans: Vec<Span>) -> String {
         spans.into_iter().map(|span| span.text).collect()
@@ -763,6 +964,79 @@ mod tests {
         );
     }
     #[test]
+    fn wrapped_lines_break_after_spaces_and_inside_long_words() {
+        let tab = NonZeroUsize::new(4).unwrap();
+        let rows = |text: &str, width| -> Vec<_> {
+            super::segments(text, Some(width), tab)
+                .into_iter()
+                .map(|s| (s.start, s.columns))
+                .collect()
+        };
+        // Words move to the next row whole; the space stays behind.
+        assert_eq!(rows("aaa bbb ccc", 8), [(0, 0..8), (8, 8..11)]);
+        assert_eq!(rows("aaa bbb ccc", 6), [(0, 0..4), (4, 4..8), (8, 8..11)]);
+        // A word longer than the row breaks where the row ends.
+        assert_eq!(rows("abcdefgh", 3), [(0, 0..3), (3, 3..6), (6, 6..8)]);
+        // Wide characters do not straddle rows.
+        assert_eq!(rows("界界界", 5), [(0, 0..4), (6, 4..6)]);
+        assert_eq!(rows("", 5), [(0, 0..0)]);
+        assert_eq!(rows("abc", 3), [(0, 0..3)]);
+    }
+    #[test]
+    fn wrapping_shows_long_lines_on_several_rows() {
+        let mut app = app("one two three four\nshort\nlast", Language::PlainText);
+        let view = app.active_view().unwrap();
+        app.dispatch(Event::SetOption {
+            scope: crate::options::Scope::Global,
+            name: "wrap",
+            value: crate::options::Value::Bool(true),
+        })
+        .unwrap();
+        // The caret at `four` sits on the second row of the first line.
+        app.dispatch(Event::Edit {
+            view,
+            command: Command::SetSelection(Selection::caret(14)),
+            time: Duration::ZERO,
+        })
+        .unwrap();
+        let shown = frame(&mut app, 10, 5).unwrap();
+        let rows: Vec<_> = shown
+            .rows
+            .iter()
+            .map(|row| (row.line, row.continued, joined_row(row)))
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                (0, false, "one two ".to_owned()),
+                (0, true, "three four".to_owned()),
+                (1, false, "short".to_owned()),
+                (2, false, "last".to_owned()),
+            ]
+        );
+        assert_eq!(shown.cursor, Some((6, 1)));
+        // A click on the second row lands on it; past its end, on its end.
+        assert_eq!(super::offset_at(&app, 10, 1, 0), Some(8));
+        assert_eq!(super::offset_at(&app, 10, 0, 9), Some(7));
+        assert_eq!(super::offset_at(&app, 10, 2, 2), Some(21));
+        assert_eq!(super::cell_of(&app, view, 10, 5, 21), Some((2, 2)));
+        // In two rows the caret's row stays in view: the view starts on the
+        // first line's second row and scrolls by rows.
+        app.dispatch(Event::Edit {
+            view,
+            command: Command::SetSelection(Selection::caret(20)),
+            time: Duration::ZERO,
+        })
+        .unwrap();
+        let shown = frame(&mut app, 10, 2).unwrap();
+        assert_eq!(joined_row(&shown.rows[0]), "three four");
+        assert_eq!(shown.cursor, Some((1, 1)));
+        let (viewport, reveal) = super::scroll(&app, view, -1, 10, 2, None).unwrap();
+        assert_eq!(viewport.anchor, ByteOffset(0));
+        // The caret comes back to the bottom row, at its column in the row.
+        assert_eq!(reveal, Some(9));
+    }
+    #[test]
     fn pointer_cells_resolve_to_offsets_and_scrolling_keeps_the_caret_visible() {
         let mut app = app("a\tb\nl1\nl2\nl3\nl4", Language::PlainText);
         let view = app.active_view().unwrap();
@@ -774,20 +1048,21 @@ mod tests {
         .unwrap();
         frame(&mut app, 10, 2).unwrap();
         // Columns inside a tab resolve to the tab; past the end, to the end.
-        assert_eq!(super::offset_at(&app, 0, 3), Some(1));
-        assert_eq!(super::offset_at(&app, 0, 40), Some(3));
-        assert_eq!(super::offset_at(&app, 1, 1), Some(5));
-        assert_eq!(super::offset_at(&app, -1, 0), Some(0));
-        assert_eq!(super::offset_at(&app, 9, 0), Some(13));
+        assert_eq!(super::offset_at(&app, 80, 0, 3), Some(1));
+        assert_eq!(super::offset_at(&app, 80, 0, 40), Some(3));
+        assert_eq!(super::offset_at(&app, 80, 1, 1), Some(5));
+        assert_eq!(super::offset_at(&app, 80, -1, 0), Some(0));
+        assert_eq!(super::offset_at(&app, 80, 9, 0), Some(13));
         let (viewport, reveal) =
-            super::scroll(&app, app.active_view().unwrap(), 3, 2, None).unwrap();
+            super::scroll(&app, app.active_view().unwrap(), 3, 80, 2, None).unwrap();
         assert_eq!(viewport.anchor, ByteOffset(10));
         assert_eq!(reveal, Some(10));
         // The last line can scroll to the top and no further.
-        let (viewport, _) = super::scroll(&app, app.active_view().unwrap(), 30, 2, None).unwrap();
+        let (viewport, _) =
+            super::scroll(&app, app.active_view().unwrap(), 30, 80, 2, None).unwrap();
         assert_eq!(viewport.anchor, ByteOffset(13));
         assert_eq!(
-            super::scroll(&app, app.active_view().unwrap(), -1, 2, None)
+            super::scroll(&app, app.active_view().unwrap(), -1, 80, 2, None)
                 .unwrap()
                 .1,
             None

@@ -24,7 +24,7 @@ impl Mouse {
             let text = areas.text(runtime);
             let row = event.row as isize - text.y as isize;
             let column = event.column.saturating_sub(text.x);
-            layout::offset_at(runtime.app(), row, column.into())
+            layout::offset_at(runtime.app(), text.width, row, column.into())
         };
         let window = areas.window_at(event.column, event.row);
         match event.kind {
@@ -80,9 +80,14 @@ impl Mouse {
                 };
                 let active = runtime.app().active_view() == Some(window.view);
                 let caret = runtime.editor_caret().filter(|_| active);
-                let Some((viewport, reveal)) =
-                    layout::scroll(runtime.app(), window.view, lines, window.text.height, caret)
-                else {
+                let Some((viewport, reveal)) = layout::scroll(
+                    runtime.app(),
+                    window.view,
+                    lines,
+                    window.text.width,
+                    window.text.height,
+                    caret,
+                ) else {
                     return;
                 };
                 runtime.update_viewport(viewport.view, viewport.anchor, viewport.horizontal_column);
