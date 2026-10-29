@@ -124,6 +124,26 @@ pub fn config_path() -> Option<PathBuf> {
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
     Some(base.join("soda").join("init"))
 }
+/// Histories and caret positions kept between sessions.
+pub fn state_path() -> Option<PathBuf> {
+    let base = std::env::var_os("XDG_STATE_HOME")
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local").join("state"))
+        })?;
+    Some(base.join("soda").join("state"))
+}
+/// Writes the state through a temporary file, so a failed write leaves the
+/// previous state whole.
+fn save_state(path: &std::path::Path, text: &str) -> io::Result<()> {
+    let directory = path.parent().unwrap();
+    std::fs::create_dir_all(directory)?;
+    let file = tempfile::NamedTempFile::new_in(directory)?;
+    std::fs::write(file.path(), text)?;
+    file.persist(path).map_err(|error| error.error)?;
+    Ok(())
+}
 /// Run the terminal frontend using the shared owner-thread runtime.
 pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
@@ -146,6 +166,13 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => runtime.report(format!("{}: {error}", config.display())),
         }
+    }
+    let state = state_path();
+    if let Some(text) = state
+        .as_ref()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+    {
+        runtime.restore(&text);
     }
     let message = runtime.message().to_owned();
     runtime.start(path);
@@ -198,6 +225,13 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
                 }
                 event => runtime.input(input::normalize(event)),
             }
+        }
+    }
+    if let Some(path) = state {
+        let text = runtime.persist();
+        if let Err(error) = save_state(&path, &text) {
+            drop(_terminal);
+            eprintln!("soda: cannot save {}: {error}", path.display());
         }
     }
     Ok(())

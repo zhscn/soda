@@ -348,6 +348,12 @@ impl Layers {
             .transition(transition)
             .map_or(InputResult::Blocked, InputResult::Handled))
     }
+    /// Takes back histories from an earlier session, oldest first.
+    pub fn restore_history(&mut self, commands: &[String], searches: &[String]) {
+        for (history, entries) in self.history.iter_mut().zip([commands, searches]) {
+            entries.iter().for_each(|entry| history.record(entry));
+        }
+    }
     /// Lines entered at the command line, oldest first.
     pub fn command_history(&self) -> &[String] {
         self.history[history::COMMAND].entries()

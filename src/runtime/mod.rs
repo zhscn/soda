@@ -19,6 +19,7 @@ mod grep;
 mod process;
 mod run;
 mod shell;
+mod state;
 
 /// Messages the log keeps.
 const MESSAGE_LIMIT: usize = 1000;
@@ -61,6 +62,10 @@ pub struct Runtime {
     /// Recent messages, oldest first, and the one last recorded.
     messages: std::collections::VecDeque<String>,
     logged: String,
+    /// Caret positions of files closed earlier, and of files just opened
+    /// that should go back to them.
+    state: state::State,
+    restores: Vec<(ViewId, usize, usize)>,
     /// The mode and focused view hooks last saw.
     seen: (crate::interaction::EditMode, Option<ViewId>),
     quit: bool,
@@ -97,6 +102,8 @@ impl Runtime {
             hooking: false,
             messages: Default::default(),
             logged: String::new(),
+            state: Default::default(),
+            restores: vec![],
             seen: Default::default(),
             quit: false,
             dirty: true,
@@ -302,10 +309,69 @@ impl Runtime {
         self.settle(time);
         done
     }
+    /// Takes back what an earlier session left with `persist`.
+    pub fn restore(&mut self, text: &str) {
+        let mut state = state::State::parse(text);
+        self.layers.restore_history(
+            &std::mem::take(&mut state.commands),
+            &std::mem::take(&mut state.searches),
+        );
+        self.state = state;
+    }
+    /// What the next session should start from: histories and where the
+    /// caret is in every file, the focused one most recent.
+    pub fn persist(&mut self) -> String {
+        let mut views: Vec<_> = self.app.views().map(|view| view.id).collect();
+        let active = self.app.active_view();
+        views.sort_by_key(|view| Some(*view) == active);
+        for view in views {
+            self.remember(view);
+        }
+        self.state.commands = self.layers.command_history().to_vec();
+        self.state.searches = self.layers.search_history().to_vec();
+        self.state.text()
+    }
+    /// Notes where a view of a file has its caret.
+    fn remember(&mut self, view: ViewId) {
+        let Some(view) = self.app.view(view) else {
+            return;
+        };
+        let workspace = self.app.workspace();
+        let Some(path) = workspace.file(view.document_id).and_then(|f| f.path()) else {
+            return;
+        };
+        let editor = workspace.editor(view.document_id).unwrap();
+        let document = editor.model().document();
+        let head = editor
+            .model()
+            .session(view.session_id)
+            .unwrap()
+            .selection()
+            .head;
+        let snapshot = document.snapshot();
+        let line = snapshot.line_of(head).unwrap();
+        let column = crate::core::logical_column_at(
+            snapshot,
+            ByteOffset(head),
+            document.whitespace().tab_width,
+        )
+        .map_or(0, |column| column.0);
+        self.state.remember(path.to_owned(), line, column);
+    }
     /// Ends an operation: runs hooks, then records a new message in the log.
     fn settle(&mut self, time: Duration) {
         if self.hooking {
             return;
+        }
+        for (view, line, column) in std::mem::take(&mut self.restores) {
+            self.reduce(
+                Event::Edit {
+                    view,
+                    command: crate::editor::Command::Goto { line, column },
+                    time,
+                },
+                time,
+            );
         }
         self.run_hooks(time);
         if self.message != self.logged {
@@ -379,6 +445,20 @@ impl Runtime {
     }
     fn reduce(&mut self, event: Event, time: Duration) -> bool {
         let operation = event.operation();
+        // Closing loses the caret; keep where it was for the next open.
+        match &event {
+            Event::CloseView(view) => self.remember(*view),
+            Event::CloseDocument { document, .. } => {
+                let views: Vec<_> = self
+                    .app
+                    .views()
+                    .filter(|view| view.document_id == *document)
+                    .map(|view| view.id)
+                    .collect();
+                views.into_iter().for_each(|view| self.remember(view));
+            }
+            _ => {}
+        }
         // Named registers stay inside the editor.
         if let Event::Clipboard {
             action:
@@ -421,11 +501,25 @@ impl Runtime {
         for notice in &update.notices {
             let notice = match notice {
                 Notice::Opened(view) => self.app.view(*view).map(|state| {
-                    (
-                        "open",
-                        self.app.document_name(state.document_id),
-                        Some(*view),
-                    )
+                    let document = state.document_id;
+                    let editor = self.app.workspace().editor(document).unwrap();
+                    let at_start = editor
+                        .model()
+                        .session(state.session_id)
+                        .is_some_and(|session| session.selection().head == 0);
+                    // A file opened at no particular place goes back to
+                    // where its caret was.
+                    if let Some((line, column)) = self
+                        .app
+                        .workspace()
+                        .file(document)
+                        .and_then(|file| file.path())
+                        .and_then(|path| self.state.position(path))
+                        .filter(|_| at_start)
+                    {
+                        self.restores.push((*view, line, column));
+                    }
+                    ("open", self.app.document_name(document), Some(*view))
                 }),
                 Notice::Created(view) => self.app.view(*view).map(|state| {
                     let kind = self.app.document_kind(state.document_id).to_owned();
