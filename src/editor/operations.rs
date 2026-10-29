@@ -192,6 +192,26 @@ pub(super) fn prepare_enter(
     // meaningless; clear it rather than leave trailing whitespace behind.
     let structural = matches!(indent, IndentAdvice::Set { .. });
     let mut corrections = advice_changes(snapshot, line, indent, true)?;
+    // A continued comment's marker follows the indentation the line gets as
+    // code, and takes the place of the spaces the split left at its start.
+    if !advice.continuation.is_empty() {
+        let start = snapshot.line_start(line).unwrap();
+        let indent = start + snapshot.leading_whitespace(line).unwrap().len_bytes();
+        match corrections.iter_mut().find(|c| c.range.start == start) {
+            Some(change) if change.range.end == indent => {
+                change.insert.push_str(advice.continuation)
+            }
+            Some(_) => {}
+            None => corrections.push(Change::new(
+                start..indent,
+                format!(
+                    "{}{}",
+                    snapshot.byte_slice(start..indent).unwrap(),
+                    advice.continuation
+                ),
+            )),
+        }
+    }
     if structural
         && let Some(left) = line.checked_sub(1)
         && let Some(blank) = snapshot.line_content_range(left)

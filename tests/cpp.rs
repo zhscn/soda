@@ -333,9 +333,10 @@ fn enter_at_unterminated_protected_eof_preserves_content() {
         enter_at("auto s = R\"(abc^", &CppStyle::default()),
         "auto s = R\"(abc\n^"
     );
+    // The comment continues with its stars under the opening `/*`.
     assert_eq!(
         enter_at("    /* abc^", &CppStyle::default()),
-        "    /* abc\n    ^"
+        "    /* abc\n     * ^"
     );
 }
 

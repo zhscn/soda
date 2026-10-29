@@ -35,4 +35,7 @@ pub enum IndentAdvice {
 pub struct EnterAdvice {
     pub expand_pair: bool,
     pub verbatim: bool,
+    /// Text that starts the new line after its indentation, such as `// `
+    /// inside a line comment.
+    pub continuation: &'static str,
 }

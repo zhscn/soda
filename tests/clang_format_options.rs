@@ -138,6 +138,21 @@ fn reference_layouts_restore_indentation_for_each_rule_profile() {
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
 
+fn drop_continuation(editor: &mut soda::editor::Editor) {
+    let state = editor.state();
+    let snapshot = state.snapshot();
+    let head = state.selection().head;
+    let line = snapshot.line_of(head).unwrap();
+    let start =
+        snapshot.line_start(line).unwrap() + snapshot.leading_whitespace(line).unwrap().len_bytes();
+    if start < head {
+        let tx = soda::core::Transaction::new(
+            snapshot.version(),
+            vec![soda::core::Change::new(start..head, "")],
+        );
+        editor.execute(soda::editor::Command::Apply(tx)).unwrap();
+    }
+}
 #[test]
 fn reference_layouts_survive_typing_from_scratch() {
     let fixture: Value =
@@ -168,7 +183,13 @@ fn reference_layouts_survive_typing_from_scratch() {
                 } else {
                     soda::editor::Command::TypeChar(ch)
                 };
+                let enter = matches!(command, soda::editor::Command::Enter);
                 editor.execute(command).unwrap();
+                // The replay types comment markers itself, so it takes back
+                // the marker Enter continues a comment with.
+                if enter {
+                    drop_continuation(&mut editor);
+                }
             }
         }
         if editor.state().snapshot().text() != expected {
