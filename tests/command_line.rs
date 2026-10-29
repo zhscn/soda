@@ -225,3 +225,32 @@ fn candidates_carry_matched_ranges_and_description_offsets() {
     wait(&mut r, |r| rows(r) == ["src/"]);
     assert_eq!(first(&r).1, "sr");
 }
+#[test]
+fn a_typed_decision_leaves_room_for_its_path_and_a_question_takes_one_key() {
+    let root = tempfile::tempdir().unwrap();
+    let file = root.path().join("a.txt");
+    std::fs::write(&file, "a").unwrap();
+    let mut r = runtime(root.path());
+    r.command(Command::Named(format!("edit {}", file.display())));
+    wait(&mut r, |r| r.app().workspace().documents().count() == 2);
+    keys(&mut r, "ix<esc>");
+    // Typed, `s` is text: the line can go on to name another path.
+    keys(&mut r, ":quit s");
+    assert_eq!(text(&r), "quit s");
+    r.input(UserInput::Paste("ave copy.txt".into()));
+    keys(&mut r, "<ret>");
+    wait(&mut r, |r| {
+        root.path().join("copy.txt").exists() && r.quit_requested()
+    });
+    assert_eq!(
+        std::fs::read_to_string(root.path().join("copy.txt")).unwrap(),
+        "xa"
+    );
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "a");
+    // Asked about an unsaved document, one key answers.
+    let mut r = runtime(root.path());
+    keys(&mut r, "iy<esc>:quit<ret>");
+    assert!(text(&r).starts_with("quit"));
+    keys(&mut r, "d");
+    assert!(r.quit_requested(), "{}", r.message());
+}

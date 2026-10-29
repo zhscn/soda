@@ -89,7 +89,10 @@ const DEPARTURE: &[Slot] = &[
         kind: SlotKind::Choice(&[
             Choice {
                 key: Some('s'),
-                ..word("save", "Save first, then continue")
+                ..word(
+                    "save",
+                    "Save first, then continue; Tab, then PATH, saves elsewhere",
+                )
             },
             Choice {
                 key: Some('d'),

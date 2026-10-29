@@ -651,7 +651,12 @@ impl CommandLine {
         true
     }
     /// The slot keymap: a key of an empty `Choice` slot chooses its word.
+    /// Only a line that asks a question answers with one key; a typed line
+    /// takes the key as text, so later slots stay reachable.
     fn choice_key(&mut self, key: char) -> bool {
+        if !self.asking() {
+            return false;
+        }
         let location = self.locate();
         let Some(Target::Slot(SlotKind::Choice(choices))) = location.target else {
             return false;

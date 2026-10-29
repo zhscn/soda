@@ -260,7 +260,7 @@ hook open .*/Makefile set-local expand-tab false
 | `Choice` | 命令声明的固定词及说明，可带单键 | 是 | `map`、`unmap` 的 MODE；`close`、`reload`、`quit` 的 DECISION |
 | `Word`、`Rest` | 无 | 否 | 其余参数 |
 
-`Choice` 的词可以声明一个键，构成该参数位的键位表：参数位为空时按下这个键，直接选中对应的词并按回车处理；不在表里的键照常输入文字。键位表只在参数位为空时生效，所以已经开始输入的词不受影响。MODE 不声明键，DECISION 声明 `s`（save）和 `d`（discard）。
+`Choice` 的词可以声明一个键，构成该参数位的键位表：参数位为空时按下这个键，直接选中对应的词并按回车处理；不在表里的键照常输入文字。键位表只在参数位为空、且命令行是编辑器发出的提问（带 `[unsaved …]` 这类提示）时生效。自己输入的 `:quit s` 中 `s` 只是文字，所以可以继续写成 `quit save PATH`；已经开始输入的词也不受影响。MODE 不声明键，DECISION 声明 `s`（save）和 `d`（discard）。
 
 每种类型由一个补全器提供候选。候选包含展示文字、替换文字、匹配到的字符范围，以及说明文字的起点；面板高亮匹配字符，说明文字用暗色。
 
@@ -341,18 +341,19 @@ Enter 依次处理：
 
 ## 关闭、退出与重新加载
 
-`:bd`（`close`）关闭当前文档，`:q`（`quit`）退出应用，`:e` 或 `reload` 从磁盘重新加载。三者都带可选参数 `DECISION [PATH]`，`DECISION` 为 `save` 或 `discard`，`PATH` 只跟在 `save` 后面，作为未命名文档的保存路径。干净文档直接执行，`DECISION` 被忽略；未保存文档按决定执行，没有决定时打开命令行询问：
+`:bd`（`close`）关闭当前文档，`:q`（`quit`）退出应用，`:e` 或 `reload` 从磁盘重新加载。三者都带可选参数 `DECISION [PATH]`，`DECISION` 为 `save` 或 `discard`，`PATH` 只跟在 `save` 后面：未命名文档保存到这里，有路径的文档改存到这里。干净文档直接执行，`DECISION` 被忽略；未保存文档按决定执行，没有决定时打开命令行询问：
 
 ```
 [unsaved src/a.cpp] :close 
-  save         [s] Save first, then continue
+  save         [s] Save first, then continue; Tab, then PATH, saves elsewhere
   discard      [d] Discard the unsaved changes
 ```
 
 每一步都是一条命令：
 
 1. 按 `d`（或输入 `discard` 回车）得到 `close discard`，立即丢弃并关闭；`reload discard` 明确授权用磁盘内容替换本地内容。
-2. 按 `s` 或空输入回车得到 `close save`。未命名文档没有路径时继续打开 `[... needs a PATH] :close save `，在 PATH 参数位按目录补全。
+2. 按 `s` 或空输入回车得到 `close save`。未命名文档没有路径时继续打开 `[... needs a PATH] :close save `，在 PATH 参数位按目录补全。想存到别的路径时按 Tab（或用上下键选中 `save` 再按 Tab），得到 `close save ` 并停在 PATH 参数位。
+   单键只在这种编辑器提问的命令行里有效；自己输入的 `:close s` 中 `s` 是普通文字，可以直接写完 `close save PATH`。
 3. 有路径时请求保存并进入等待层（“Saving …; Esc cancels close”）。保存成功后再执行一次 `close`：文档已经干净则关闭；保存期间出现了新编辑则再次询问。
 4. 保存失败（写入失败、磁盘内容已变化、路径预检失败、请求被取消）时打开 `[save failed: …] :close save PATH`，可以修改后重试或 Esc 放弃。
 
