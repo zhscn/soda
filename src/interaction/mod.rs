@@ -87,6 +87,9 @@ pub struct Response {
     pub effects: Vec<PickerEffect>,
     pub path_requests: Vec<path::PathRequest>,
     pub shell: Option<Box<shell::ShellRequest>>,
+    /// Input to route again, after the rest of the response, for `.` and
+    /// macros.
+    pub replay: Vec<UserInput>,
     pub quit: bool,
     pub redraw: bool,
 }
@@ -109,6 +112,8 @@ pub struct Layers {
     page_rows: usize,
     help_rows: usize,
     picker_rows: usize,
+    /// A Vim command failed since this was last taken; replays stop.
+    failed: bool,
 }
 impl Layers {
     pub fn bind(
@@ -151,6 +156,17 @@ impl Layers {
     }
     pub fn registry(&self) -> &Registry {
         &self.registry
+    }
+    /// Whether a Vim command failed since `clear_failed`.
+    pub fn failed(&self) -> bool {
+        self.failed
+    }
+    pub fn clear_failed(&mut self) {
+        self.failed = false;
+    }
+    /// The register a macro is being recorded into.
+    pub fn recording(&self) -> Option<char> {
+        self.vim.replay.recording()
     }
     pub fn editor_caret(&self) -> Option<usize> {
         self.vim.caret()
@@ -262,6 +278,7 @@ impl Layers {
         update: &Update,
         time: Duration,
     ) -> Result<Response, EditError> {
+        self.vim.marks.observe(update);
         let group_end = if update.active_changed {
             self.end_insert_group(app, time)
         } else {

@@ -315,6 +315,22 @@ pub static BUILTINS: &[Builtin] = &[
         })
     ),
     builtin!(
+        "half-page-down",
+        "Move down half a page and scroll with it",
+        Command::Vim(VimCommand::HalfPage {
+            down: true,
+            count: 0
+        })
+    ),
+    builtin!(
+        "half-page-up",
+        "Move up half a page and scroll with it",
+        Command::Vim(VimCommand::HalfPage {
+            down: false,
+            count: 0
+        })
+    ),
+    builtin!(
         "copy",
         "Copy the selection or line",
         Command::Clipboard(ClipboardAction::Copy)

@@ -317,6 +317,9 @@ fn status(
     let app = runtime.app();
     let view = app.active_view().and_then(|id| app.view(id));
     let mut right = vec![];
+    if let Some(register) = runtime.recording() {
+        right.push(Text::styled(format!("recording @{register}  "), theme.modified));
+    }
     if let Some(pending) = runtime.pending_keys() {
         right.push(Text::styled(format!("{pending}  "), theme.key));
     }

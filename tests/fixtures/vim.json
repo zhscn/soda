@@ -814,5 +814,857 @@
     "keys": "/one<CR>2n",
     "cursor": 0,
     "after": "one two one three one"
+  },
+  {
+    "before": "one two three",
+    "keys": "fo",
+    "cursor": 6,
+    "after": "one two three"
+  },
+  {
+    "before": "one two three",
+    "keys": "2fe",
+    "cursor": 11,
+    "after": "one two three"
+  },
+  {
+    "before": "one two three",
+    "keys": "te",
+    "cursor": 1,
+    "after": "one two three"
+  },
+  {
+    "before": "one two three",
+    "keys": "tw;",
+    "cursor": 4,
+    "after": "one two three"
+  },
+  {
+    "before": "one two three",
+    "keys": "fe;",
+    "cursor": 11,
+    "after": "one two three"
+  },
+  {
+    "before": "one two three",
+    "keys": "fe;,",
+    "cursor": 2,
+    "after": "one two three"
+  },
+  {
+    "before": "one two three",
+    "keys": "$Fo",
+    "cursor": 6,
+    "after": "one two three"
+  },
+  {
+    "before": "one two three",
+    "keys": "$To",
+    "cursor": 7,
+    "after": "one two three"
+  },
+  {
+    "before": "one two three",
+    "keys": "$To;",
+    "cursor": 1,
+    "after": "one two three"
+  },
+  {
+    "before": "one two three",
+    "keys": "dfw",
+    "cursor": 0,
+    "after": "o three"
+  },
+  {
+    "before": "one two three",
+    "keys": "dtw",
+    "cursor": 0,
+    "after": "wo three"
+  },
+  {
+    "before": "one two three",
+    "keys": "$dFo",
+    "cursor": 6,
+    "after": "one twe"
+  },
+  {
+    "before": "one two three",
+    "keys": "$dTo",
+    "cursor": 7,
+    "after": "one twoe"
+  },
+  {
+    "before": "one two three",
+    "keys": "cfwX<Esc>",
+    "cursor": 0,
+    "after": "Xo three"
+  },
+  {
+    "before": "one two three",
+    "keys": "fz",
+    "cursor": 0,
+    "after": "one two three"
+  },
+  {
+    "before": "one two three",
+    "keys": "dfz",
+    "cursor": 0,
+    "after": "one two three"
+  },
+  {
+    "before": "ab ab ab",
+    "keys": "tb;;",
+    "cursor": 6,
+    "after": "ab ab ab"
+  },
+  {
+    "before": "if (a(b)) x",
+    "keys": "%",
+    "cursor": 8,
+    "after": "if (a(b)) x"
+  },
+  {
+    "before": "if (a(b)) x",
+    "keys": "f)%",
+    "cursor": 5,
+    "after": "if (a(b)) x"
+  },
+  {
+    "before": "f(\n  x\n)",
+    "keys": "%",
+    "cursor": 7,
+    "after": "f(\n  x\n)"
+  },
+  {
+    "before": "a [b] c",
+    "keys": "d%",
+    "cursor": 0,
+    "after": " c"
+  },
+  {
+    "before": "x = {\n  y\n}",
+    "keys": "$d%",
+    "cursor": 3,
+    "after": "x = "
+  },
+  {
+    "before": "no brackets",
+    "keys": "%",
+    "cursor": 0,
+    "after": "no brackets"
+  },
+  {
+    "before": "a\nb\n\nc\nd",
+    "keys": "}",
+    "cursor": 4,
+    "after": "a\nb\n\nc\nd"
+  },
+  {
+    "before": "a\nb\n\nc\nd",
+    "keys": "}}",
+    "cursor": 7,
+    "after": "a\nb\n\nc\nd"
+  },
+  {
+    "before": "a\nb\n\nc\nd",
+    "keys": "G{",
+    "cursor": 4,
+    "after": "a\nb\n\nc\nd"
+  },
+  {
+    "before": "a\nb\n\nc\nd",
+    "keys": "d}",
+    "cursor": 0,
+    "after": "\nc\nd"
+  },
+  {
+    "before": "ab\nc\n\nd",
+    "keys": "ld}",
+    "cursor": 0,
+    "after": "a\n\nd"
+  },
+  {
+    "before": "a\nb\n\nc\nd",
+    "keys": "jd}",
+    "cursor": 2,
+    "after": "a\n\nc\nd"
+  },
+  {
+    "before": "a\nb\n\nc\nd",
+    "keys": "2}",
+    "cursor": 7,
+    "after": "a\nb\n\nc\nd"
+  },
+  {
+    "before": "a\nb\n\n\nc",
+    "keys": "}d{",
+    "cursor": 0,
+    "after": "\n\nc"
+  },
+  {
+    "before": "one two three",
+    "keys": "wdiw",
+    "cursor": 4,
+    "after": "one  three"
+  },
+  {
+    "before": "one two three",
+    "keys": "wdaw",
+    "cursor": 4,
+    "after": "one three"
+  },
+  {
+    "before": "one two three",
+    "keys": "$daw",
+    "cursor": 6,
+    "after": "one two"
+  },
+  {
+    "before": "one two three",
+    "keys": "wciwX<Esc>",
+    "cursor": 4,
+    "after": "one X three"
+  },
+  {
+    "before": "one  two three",
+    "keys": "ldiw",
+    "cursor": 0,
+    "after": "  two three"
+  },
+  {
+    "before": "one  two three",
+    "keys": "ldaw",
+    "cursor": 0,
+    "after": "two three"
+  },
+  {
+    "before": "one two three",
+    "keys": "wd2aw",
+    "cursor": 2,
+    "after": "one"
+  },
+  {
+    "before": "one two three",
+    "keys": "wd3iw",
+    "cursor": 3,
+    "after": "one "
+  },
+  {
+    "before": "foo.bar baz",
+    "keys": "ldiw",
+    "cursor": 0,
+    "after": ".bar baz"
+  },
+  {
+    "before": "foo.bar baz",
+    "keys": "ldiW",
+    "cursor": 0,
+    "after": " baz"
+  },
+  {
+    "before": "foo.bar baz",
+    "keys": "ldaW",
+    "cursor": 0,
+    "after": "baz"
+  },
+  {
+    "before": "one two three",
+    "keys": "wyiwP",
+    "cursor": 6,
+    "after": "one twotwo three"
+  },
+  {
+    "before": "say \"hi there\" now",
+    "keys": "fhdi\"",
+    "cursor": 5,
+    "after": "say \"\" now"
+  },
+  {
+    "before": "say \"hi there\" now",
+    "keys": "fhda\"",
+    "cursor": 4,
+    "after": "say now"
+  },
+  {
+    "before": "say \"hi there\" now",
+    "keys": "di\"",
+    "cursor": 5,
+    "after": "say \"\" now"
+  },
+  {
+    "before": "say \"a\" x \"b\"",
+    "keys": "fxdi\"",
+    "cursor": 7,
+    "after": "say \"a\"\"b\""
+  },
+  {
+    "before": "x \"a\\\"b\" y",
+    "keys": "fadi\"",
+    "cursor": 3,
+    "after": "x \"\" y"
+  },
+  {
+    "before": "it's 'ok' ok",
+    "keys": "fodi'",
+    "cursor": 6,
+    "after": "it's '' ok"
+  },
+  {
+    "before": "a \"b\"",
+    "keys": "$ci\"X<Esc>",
+    "cursor": 3,
+    "after": "a \"X\""
+  },
+  {
+    "before": "(a b) c",
+    "keys": "ldi(",
+    "cursor": 1,
+    "after": "() c"
+  },
+  {
+    "before": "(a b) c",
+    "keys": "lda(",
+    "cursor": 0,
+    "after": " c"
+  },
+  {
+    "before": "f(a, (b))",
+    "keys": "fbdi(",
+    "cursor": 6,
+    "after": "f(a, ())"
+  },
+  {
+    "before": "f(a, (b))",
+    "keys": "fbd2i(",
+    "cursor": 2,
+    "after": "f()"
+  },
+  {
+    "before": "f(a, (b))",
+    "keys": "fbdib",
+    "cursor": 6,
+    "after": "f(a, ())"
+  },
+  {
+    "before": "x[1] y",
+    "keys": "f1di[",
+    "cursor": 2,
+    "after": "x[] y"
+  },
+  {
+    "before": "if {\n    foo;\n}",
+    "keys": "jdi{",
+    "cursor": 5,
+    "after": "if {\n}"
+  },
+  {
+    "before": "if {\n    foo;\n}",
+    "keys": "jda{",
+    "cursor": 2,
+    "after": "if "
+  },
+  {
+    "before": "foo(\n  x\n)",
+    "keys": "di(",
+    "cursor": 5,
+    "after": "foo(\n)"
+  },
+  {
+    "before": "a <b> c",
+    "keys": "fbdi<",
+    "cursor": 3,
+    "after": "a <> c"
+  },
+  {
+    "before": "(a)",
+    "keys": "di(",
+    "cursor": 1,
+    "after": "()"
+  },
+  {
+    "before": "()x",
+    "keys": "di(",
+    "cursor": 1,
+    "after": "()x"
+  },
+  {
+    "before": "a\nb\n\nc",
+    "keys": "dip",
+    "cursor": 0,
+    "after": "\nc"
+  },
+  {
+    "before": "a\nb\n\nc",
+    "keys": "dap",
+    "cursor": 0,
+    "after": "c"
+  },
+  {
+    "before": "a\nb\n\nc",
+    "keys": "Gdap",
+    "cursor": 2,
+    "after": "a\nb"
+  },
+  {
+    "before": "a\n\nb\n\nc",
+    "keys": "jdip",
+    "cursor": 2,
+    "after": "a\nb\n\nc"
+  },
+  {
+    "before": "a\nb\n\nc\nd",
+    "keys": "yapGp",
+    "cursor": 9,
+    "after": "a\nb\n\nc\nd\na\nb\n"
+  },
+  {
+    "before": "one two three",
+    "keys": "wviwd",
+    "cursor": 4,
+    "after": "one  three"
+  },
+  {
+    "before": "one two three",
+    "keys": "wvawd",
+    "cursor": 4,
+    "after": "one three"
+  },
+  {
+    "before": "(a b) c",
+    "keys": "lvi(d",
+    "cursor": 1,
+    "after": "() c"
+  },
+  {
+    "before": "one two three",
+    "keys": "wviwo<Esc>",
+    "cursor": 4,
+    "after": "one two three"
+  },
+  {
+    "before": "one two three",
+    "keys": "wvlohd",
+    "cursor": 3,
+    "after": "oneo three"
+  },
+  {
+    "before": "a\nb\n\nc",
+    "keys": "vipd",
+    "cursor": 0,
+    "after": "\nc"
+  },
+  {
+    "before": "a\nb",
+    "keys": "J",
+    "cursor": 1,
+    "after": "a b"
+  },
+  {
+    "before": "a\nb\nc",
+    "keys": "3J",
+    "cursor": 3,
+    "after": "a b c"
+  },
+  {
+    "before": "a\nb\nc",
+    "keys": "5J",
+    "cursor": 3,
+    "after": "a b c"
+  },
+  {
+    "before": "a\n  b",
+    "keys": "J",
+    "cursor": 1,
+    "after": "a b"
+  },
+  {
+    "before": "a \nb",
+    "keys": "J",
+    "cursor": 2,
+    "after": "a b"
+  },
+  {
+    "before": "a\n)b",
+    "keys": "J",
+    "cursor": 1,
+    "after": "a)b"
+  },
+  {
+    "before": "a\n\nb",
+    "keys": "J",
+    "cursor": 0,
+    "after": "a\nb"
+  },
+  {
+    "before": "a\nb",
+    "keys": "jJ",
+    "cursor": 2,
+    "after": "a\nb"
+  },
+  {
+    "before": "a\nb\nc",
+    "keys": "VjJ",
+    "cursor": 1,
+    "after": "a b\nc"
+  },
+  {
+    "before": "a\nb\nc",
+    "keys": "Vjj J",
+    "cursor": 3,
+    "after": "a b c"
+  },
+  {
+    "before": "aBc dE",
+    "keys": "~",
+    "cursor": 1,
+    "after": "ABc dE"
+  },
+  {
+    "before": "aBc dE",
+    "keys": "3~",
+    "cursor": 3,
+    "after": "AbC dE"
+  },
+  {
+    "before": "ab",
+    "keys": "l3~",
+    "cursor": 1,
+    "after": "aB"
+  },
+  {
+    "before": "aBc dE",
+    "keys": "g~w",
+    "cursor": 0,
+    "after": "AbC dE"
+  },
+  {
+    "before": "one Two\nthree",
+    "keys": "g~~",
+    "cursor": 0,
+    "after": "ONE tWO\nthree"
+  },
+  {
+    "before": "one Two\nthree",
+    "keys": "guu",
+    "cursor": 0,
+    "after": "one two\nthree"
+  },
+  {
+    "before": "one Two\nthree",
+    "keys": "gUU",
+    "cursor": 0,
+    "after": "ONE TWO\nthree"
+  },
+  {
+    "before": "one Two\nthree",
+    "keys": "gUiw",
+    "cursor": 0,
+    "after": "ONE Two\nthree"
+  },
+  {
+    "before": "one Two\nthree",
+    "keys": "wgu$",
+    "cursor": 4,
+    "after": "one two\nthree"
+  },
+  {
+    "before": "one Two\nthree",
+    "keys": "vlU",
+    "cursor": 0,
+    "after": "ONe Two\nthree"
+  },
+  {
+    "before": "one Two\nthree",
+    "keys": "vlu",
+    "cursor": 0,
+    "after": "one Two\nthree"
+  },
+  {
+    "before": "one Two\nthree",
+    "keys": "vl~",
+    "cursor": 0,
+    "after": "ONe Two\nthree"
+  },
+  {
+    "before": "one Two\nthree",
+    "keys": "g~g~",
+    "cursor": 0,
+    "after": "ONE tWO\nthree"
+  },
+  {
+    "before": "one\ntwo",
+    "keys": "gUj",
+    "cursor": 0,
+    "after": "ONE\nTWO"
+  },
+  {
+    "before": "a b c d",
+    "keys": "x..",
+    "cursor": 0,
+    "after": " c d"
+  },
+  {
+    "before": "one two three four",
+    "keys": "dw.",
+    "cursor": 0,
+    "after": "three four"
+  },
+  {
+    "before": "one two three four",
+    "keys": "dw2.",
+    "cursor": 0,
+    "after": "four"
+  },
+  {
+    "before": "a\nb\nc\nd",
+    "keys": "dd.",
+    "cursor": 0,
+    "after": "c\nd"
+  },
+  {
+    "before": "one two three",
+    "keys": "ciwX<Esc>w.",
+    "cursor": 2,
+    "after": "X X three"
+  },
+  {
+    "before": "one\ntwo",
+    "keys": "AX<Esc>j.",
+    "cursor": 8,
+    "after": "oneX\ntwoX"
+  },
+  {
+    "before": "ab\ncd\nef",
+    "keys": "~j.",
+    "cursor": 4,
+    "after": "Ab\ncD\nef"
+  },
+  {
+    "before": "a b c",
+    "keys": "rxll.",
+    "cursor": 2,
+    "after": "x x c"
+  },
+  {
+    "before": "one\ntwo\nthree",
+    "keys": "yyp.",
+    "cursor": 8,
+    "after": "one\none\none\ntwo\nthree"
+  },
+  {
+    "before": "abc abc",
+    "keys": "fbx;.",
+    "cursor": 4,
+    "after": "ac ac"
+  },
+  {
+    "before": "a\nb\nc\nd",
+    "keys": "3dd.",
+    "cursor": 0,
+    "after": "d"
+  },
+  {
+    "before": "one two",
+    "keys": "ix<Esc>..",
+    "cursor": 0,
+    "after": "xxxone two"
+  },
+  {
+    "before": "one\ntwo",
+    "keys": "oX<Esc>.",
+    "cursor": 6,
+    "after": "one\nX\nX\ntwo"
+  },
+  {
+    "before": "a b c d e f",
+    "keys": "d2w.",
+    "cursor": 0,
+    "after": "e f"
+  },
+  {
+    "before": "a\nb\nc\nd\ne",
+    "keys": "Jj.",
+    "cursor": 5,
+    "after": "a b\nc d\ne"
+  },
+  {
+    "before": "x1 x2 x3",
+    "keys": "vlld.",
+    "cursor": 0,
+    "after": "x3"
+  },
+  {
+    "before": "one two",
+    "keys": "\"ayiwwviw\"ap",
+    "cursor": 6,
+    "after": "one one"
+  },
+  {
+    "before": "one\ntwo",
+    "keys": "\"ayyj\"ap",
+    "cursor": 8,
+    "after": "one\ntwo\none"
+  },
+  {
+    "before": "one\ntwo",
+    "keys": "\"ayyjdd\"aP",
+    "cursor": 0,
+    "after": "one\none"
+  },
+  {
+    "before": "one two three",
+    "keys": "\"adwww\"bdw0\"ap\"bp",
+    "cursor": 5,
+    "after": "tone ewo thre"
+  },
+  {
+    "before": "one\ntwo",
+    "keys": "\"ayy\"Ayyj\"ap",
+    "cursor": 8,
+    "after": "one\ntwo\none\none"
+  },
+  {
+    "before": "one two",
+    "keys": "yiww\"_dwP",
+    "cursor": 5,
+    "after": "oneone "
+  },
+  {
+    "before": "one two",
+    "keys": "yiwdw\"_xP",
+    "cursor": 3,
+    "after": "one wo"
+  },
+  {
+    "before": "one two",
+    "keys": "\"ayiwwp",
+    "cursor": 7,
+    "after": "one tonewo"
+  },
+  {
+    "before": "one\ntwo\nthree",
+    "keys": "jlmaG'a",
+    "cursor": 4,
+    "after": "one\ntwo\nthree"
+  },
+  {
+    "before": "one\ntwo\nthree",
+    "keys": "jlmaG`a",
+    "cursor": 5,
+    "after": "one\ntwo\nthree"
+  },
+  {
+    "before": "one\ntwo\nthree",
+    "keys": "jlmaggOx<Esc>`a",
+    "cursor": 7,
+    "after": "x\none\ntwo\nthree"
+  },
+  {
+    "before": "one\ntwo\nthree",
+    "keys": "jmakdd'a",
+    "cursor": 0,
+    "after": "two\nthree"
+  },
+  {
+    "before": "foo bar foo baz foo",
+    "keys": "*",
+    "cursor": 8,
+    "after": "foo bar foo baz foo"
+  },
+  {
+    "before": "foo bar foo baz foo",
+    "keys": "**",
+    "cursor": 16,
+    "after": "foo bar foo baz foo"
+  },
+  {
+    "before": "foo bar foo baz foo",
+    "keys": "$#",
+    "cursor": 8,
+    "after": "foo bar foo baz foo"
+  },
+  {
+    "before": "foo bar foobar foo",
+    "keys": "*",
+    "cursor": 15,
+    "after": "foo bar foobar foo"
+  },
+  {
+    "before": "foo bar foo",
+    "keys": "*n",
+    "cursor": 0,
+    "after": "foo bar foo"
+  },
+  {
+    "before": "foo bar foo",
+    "keys": "*N",
+    "cursor": 0,
+    "after": "foo bar foo"
+  },
+  {
+    "before": "  foo x foo",
+    "keys": "*",
+    "cursor": 8,
+    "after": "  foo x foo"
+  },
+  {
+    "before": "x.foo foo",
+    "keys": "*",
+    "cursor": 0,
+    "after": "x.foo foo"
+  },
+  {
+    "before": "one two",
+    "keys": "yiwwviwp",
+    "cursor": 6,
+    "after": "one one"
+  },
+  {
+    "before": "one two",
+    "keys": "yiwwviwpP",
+    "cursor": 8,
+    "after": "one ontwoe"
+  },
+  {
+    "before": "one\ntwo",
+    "keys": "yyjVp",
+    "cursor": 4,
+    "after": "one\none"
+  },
+  {
+    "before": "one\ntwo",
+    "keys": "yiwjVp",
+    "cursor": 4,
+    "after": "one\none"
+  },
+  {
+    "before": "(a) (b)",
+    "keys": "di(",
+    "cursor": 1,
+    "after": "() (b)"
+  },
+  {
+    "before": "x (a) (b)",
+    "keys": "ci(Z<Esc>",
+    "cursor": 3,
+    "after": "x (Z) (b)"
+  },
+  {
+    "before": "a\nb\nc\nd",
+    "keys": "j3dd",
+    "cursor": 0,
+    "after": "a"
+  },
+  {
+    "before": "a\nb\nc\nd",
+    "keys": "jj3dd",
+    "cursor": 2,
+    "after": "a\nb"
+  },
+  {
+    "before": "a\nb\nc",
+    "keys": "j5J",
+    "cursor": 3,
+    "after": "a\nb c"
   }
 ]

@@ -208,6 +208,8 @@ pub struct Application {
     clipboard_linewise: bool,
     /// Counts clipboard replacements, so frontends can mirror them.
     clipboard_revision: u64,
+    /// Named Vim registers and whether each holds whole lines.
+    registers: BTreeMap<char, (String, bool)>,
 }
 impl Application {
     pub fn new(service: FileService) -> Self {

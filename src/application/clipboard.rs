@@ -16,10 +16,14 @@ pub enum ClipboardAction {
         linewise: bool,
         edit: Option<Change>,
         selection: Selection,
+        register: Option<char>,
     },
     Put {
         before: bool,
         count: usize,
+        register: Option<char>,
+        /// A Visual selection the text replaces, and whether it is lines.
+        replace: Option<(std::ops::Range<usize>, bool)>,
     },
     Cut,
     Paste,
@@ -35,6 +39,28 @@ impl Application {
     }
     pub fn clipboard_revision(&self) -> u64 {
         self.clipboard_revision
+    }
+    /// Stores text in a Vim register: `a`–`z` also become the clipboard,
+    /// `A`–`Z` append to their lowercase register, `_` discards, and any
+    /// other name is the clipboard itself.
+    fn store(&mut self, register: Option<char>, mut text: String, mut linewise: bool) {
+        match register {
+            Some('_') => return,
+            Some(name) if name.is_ascii_lowercase() => {
+                self.registers.insert(name, (text.clone(), linewise));
+            }
+            Some(name) if name.is_ascii_uppercase() => {
+                let entry = self.registers.entry(name.to_ascii_lowercase()).or_default();
+                if linewise && !entry.0.is_empty() && !entry.0.ends_with('\n') {
+                    entry.0.push('\n');
+                }
+                entry.0.push_str(&text);
+                entry.1 |= linewise;
+                (text, linewise) = entry.clone();
+            }
+            _ => {}
+        }
+        self.set_clipboard(text, linewise);
     }
     pub(super) fn set_clipboard(&mut self, text: String, linewise: bool) {
         self.clipboard = text;
@@ -63,6 +89,7 @@ impl Application {
             linewise,
             ref edit,
             selection: after,
+            register,
         } = action
         {
             let mut value = snapshot
@@ -85,22 +112,66 @@ impl Application {
                     .unwrap()
                     .checkpoint_history();
             }
-            self.set_clipboard(value, linewise);
+            self.store(register, value, linewise);
             return Ok(());
         }
-        if let ClipboardAction::Put { before, count } = action {
-            if self.clipboard.is_empty() {
+        if let ClipboardAction::Put {
+            before,
+            count,
+            register,
+            replace,
+        } = action
+        {
+            let (clipboard, clipboard_linewise) = match register {
+                Some(name) if name.is_ascii_alphabetic() => self
+                    .registers
+                    .get(&name.to_ascii_lowercase())
+                    .cloned()
+                    .unwrap_or_default(),
+                _ => (self.clipboard.clone(), self.clipboard_linewise),
+            };
+            if clipboard.is_empty() {
                 return Ok(());
             }
             if count == 0
                 || count > 10000
-                || self.clipboard.len().saturating_mul(count) > 8 * 1024 * 1024
+                || clipboard.len().saturating_mul(count) > 8 * 1024 * 1024
             {
                 return Err(crate::core::EditError::InvalidRange.into());
             }
+            if let Some((range, lines)) = replace {
+                let deleted = snapshot
+                    .byte_slice(range.clone())
+                    .ok_or(crate::core::EditError::InvalidRange)?
+                    .to_string();
+                let eol = line_ending(snapshot);
+                let mut value = clipboard.repeat(count);
+                let mut prefix = 0;
+                if clipboard_linewise && !lines {
+                    // Lines replacing characters go on lines of their own.
+                    value.insert_str(0, eol);
+                    prefix = eol.len();
+                } else if lines && !clipboard_linewise && deleted.ends_with('\n') {
+                    value.push_str(eol);
+                } else if lines && !deleted.ends_with('\n') {
+                    value.truncate(value.trim_end_matches(['\r', '\n']).len());
+                }
+                let caret = if clipboard_linewise || lines {
+                    let first = value[prefix..].split('\n').next().unwrap_or("");
+                    range.start + prefix + first.len() - first.trim_start_matches([' ', '\t']).len()
+                } else {
+                    range.start + value.len() - value.chars().next_back().map_or(0, char::len_utf8)
+                };
+                let mut tx = Transaction::new(snapshot.version(), vec![Change::new(range, value)]);
+                tx.selection = Some(Selection::caret(caret));
+                self.edit(view, Command::Apply(tx), time, update)?;
+                // The replaced text becomes the clipboard, as in Vim.
+                self.store(None, deleted, lines);
+                return Ok(());
+            }
             let line = snapshot.line_of(selection.head).unwrap();
-            let mut value = self.clipboard.repeat(count);
-            let offset = if self.clipboard_linewise {
+            let mut value = clipboard.repeat(count);
+            let offset = if clipboard_linewise {
                 if before {
                     snapshot.line_start(line).unwrap()
                 } else {
@@ -114,7 +185,7 @@ impl Application {
                     .min(snapshot.line_content_range(line).unwrap().end)
             };
             let mut prefix_len = 0;
-            if self.clipboard_linewise && !before && offset > 0 {
+            if clipboard_linewise && !before && offset > 0 {
                 let previous =
                     crate::core::step_grapheme(snapshot, crate::core::ByteOffset(offset), false)?.0;
                 if !snapshot
@@ -130,7 +201,7 @@ impl Application {
                     value.truncate(value.len() - suffix);
                 }
             }
-            let caret = if self.clipboard_linewise {
+            let caret = if clipboard_linewise {
                 let prefix = prefix_len;
                 let first = value[prefix..].split('\n').next().unwrap_or("");
                 offset + prefix + first.len() - first.trim_start_matches([' ', '\t']).len()

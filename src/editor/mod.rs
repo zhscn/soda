@@ -2,6 +2,7 @@
 mod position;
 pub use position::DocumentPosition;
 mod commands;
+pub(crate) use commands::shift_lines;
 mod history;
 pub mod search;
 pub use commands::{Direction, Motion};

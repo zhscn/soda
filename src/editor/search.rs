@@ -5,13 +5,26 @@ use std::ops::Range;
 #[derive(Clone, Debug)]
 pub struct SearchQuery {
     text: String,
+    /// Matches only where no word character touches either end.
+    whole_word: bool,
     finder: std::sync::Arc<memchr::memmem::Finder<'static>>,
 }
 impl SearchQuery {
     pub fn new(text: impl Into<String>) -> Self {
         let text = text.into();
         let finder = std::sync::Arc::new(memchr::memmem::Finder::new(text.as_bytes()).into_owned());
-        Self { text, finder }
+        Self {
+            text,
+            whole_word: false,
+            finder,
+        }
+    }
+    /// A query for `text` as a whole word, as Vim's `*` searches.
+    pub fn word(text: impl Into<String>) -> Self {
+        Self {
+            whole_word: true,
+            ..Self::new(text)
+        }
     }
     pub fn text(&self) -> &str {
         &self.text
@@ -22,6 +35,7 @@ impl SearchQuery {
     pub fn cursor<'a>(&'a self, snapshot: &'a Snapshot) -> SearchCursor<'a> {
         SearchCursor {
             query: self,
+            snapshot,
             chunks: Box::new(snapshot.chunks()),
             buffer: Vec::new(),
             base: 0,
@@ -31,6 +45,7 @@ impl SearchQuery {
 }
 pub struct SearchCursor<'a> {
     query: &'a SearchQuery,
+    snapshot: &'a Snapshot,
     chunks: Box<dyn Iterator<Item = &'a str> + 'a>,
     buffer: Vec<u8>,
     base: usize,
@@ -39,6 +54,32 @@ pub struct SearchCursor<'a> {
 impl Iterator for SearchCursor<'_> {
     type Item = Range<usize>;
     fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let found = self.next_literal()?;
+            if !self.query.whole_word || self.is_word_boundary(&found) {
+                return Some(found);
+            }
+        }
+    }
+}
+impl SearchCursor<'_> {
+    fn is_word_boundary(&self, found: &Range<usize>) -> bool {
+        let word = |range: Range<usize>| {
+            self.snapshot
+                .byte_slice(range)
+                .and_then(|slice| slice.chars().next())
+                .is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
+        };
+        let before =
+            crate::core::step_grapheme(self.snapshot, crate::core::ByteOffset(found.start), false)
+                .map_or(found.start, |offset| offset.0);
+        let after =
+            crate::core::step_grapheme(self.snapshot, crate::core::ByteOffset(found.end), true)
+                .map_or(found.end, |offset| offset.0);
+        !(before < found.start && word(before..found.start))
+            && !(after > found.end && word(found.end..after))
+    }
+    fn next_literal(&mut self) -> Option<Range<usize>> {
         if !self.query.is_valid() {
             return None;
         }

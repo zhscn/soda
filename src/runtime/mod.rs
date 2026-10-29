@@ -39,6 +39,10 @@ pub struct Runtime {
     file_root: PathBuf,
     message: String,
     epoch: Instant,
+    /// Input `.` and macros still have to replay, next first, as Vim's
+    /// typeahead: a replay started while replaying goes to the front.
+    replay: std::collections::VecDeque<UserInput>,
+    replaying: bool,
     quit: bool,
     dirty: bool,
 }
@@ -65,6 +69,8 @@ impl Runtime {
             file_root,
             message: String::new(),
             epoch: Instant::now(),
+            replay: Default::default(),
+            replaying: false,
             quit: false,
             dirty: true,
         })
@@ -153,6 +159,10 @@ impl Runtime {
     pub fn input_hint(&self) -> String {
         self.layers.input_hint()
     }
+    /// The register a macro is being recorded into.
+    pub fn recording(&self) -> Option<char> {
+        self.layers.recording()
+    }
     pub fn pending_keys(&self) -> Option<String> {
         self.layers.pending()
     }
@@ -230,8 +240,14 @@ impl Runtime {
     }
     fn reduce(&mut self, event: Event, time: Duration) -> bool {
         let operation = event.operation();
+        // Named registers stay inside the editor.
         if let Event::Clipboard {
-            action: ClipboardAction::Put { .. } | ClipboardAction::Paste,
+            action:
+                ClipboardAction::Put {
+                    register: None | Some('"' | '+' | '*'),
+                    ..
+                }
+                | ClipboardAction::Paste,
             ..
         } = &event
         {
@@ -361,7 +377,37 @@ impl Runtime {
             }
         }
         self.quit |= response.quit;
+        for input in response.replay.into_iter().rev() {
+            self.replay.push_front(input);
+        }
+        if !self.replaying && !self.replay.is_empty() {
+            self.replay(time);
+        }
         true
+    }
+    /// Routes `.` and macro input again. A failing command drops the rest,
+    /// which is how a recursive macro ends; a bound on the number of inputs
+    /// ends one that never fails.
+    fn replay(&mut self, time: Duration) {
+        self.replaying = true;
+        self.layers.clear_failed();
+        let mut budget = 1_000_000usize;
+        while let Some(input) = self.replay.pop_front() {
+            if budget == 0 {
+                self.replay.clear();
+                self.message = "Replay stopped after a million keys".into();
+                break;
+            }
+            budget -= 1;
+            let result = self
+                .layers
+                .route_replayed(input, &self.app, time, &self.file_root);
+            self.input_result(result, time);
+            if self.layers.failed() {
+                self.replay.clear();
+            }
+        }
+        self.replaying = false;
     }
     fn load_clipboard(&mut self) {
         let Some(text) = self.clipboard.as_mut().and_then(|system| system.load()) else {

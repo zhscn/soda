@@ -238,12 +238,35 @@ pub(super) fn indent_selection(
     if !range.is_empty() && last > first && snapshot.line_start(last) == Some(range.end) {
         last -= 1;
     }
-    let settings = language.whitespace();
-    if settings.indent_width == 0 {
-        return Transaction::new(snapshot.version(), vec![]);
-    }
+    let changes = shift_lines(
+        snapshot,
+        first..=last,
+        outdent,
+        1,
+        &language.whitespace(),
+        false,
+    );
+    Transaction::new(snapshot.version(), changes)
+}
+/// Changes that move the leading whitespace of `lines` by `levels` indent
+/// widths, optionally leaving empty lines alone.
+pub(crate) fn shift_lines(
+    snapshot: &crate::core::Snapshot,
+    lines: std::ops::RangeInclusive<usize>,
+    outdent: bool,
+    levels: usize,
+    settings: &crate::language::WhitespacePolicy,
+    skip_empty: bool,
+) -> Vec<Change> {
+    let width = settings.indent_width.saturating_mul(levels);
     let mut changes = Vec::new();
-    for line in first..=last {
+    if width == 0 {
+        return changes;
+    }
+    for line in lines {
+        if skip_empty && snapshot.line_content_range(line).unwrap().is_empty() {
+            continue;
+        }
         let old = snapshot.leading_whitespace(line).unwrap();
         let start = snapshot.line_start(line).unwrap();
         let column = logical_column_at(
@@ -254,15 +277,14 @@ pub(super) fn indent_selection(
         .unwrap()
         .0;
         let target = if outdent {
-            column.saturating_sub(settings.indent_width)
+            column.saturating_sub(width)
         } else {
-            column + settings.indent_width
+            column + width
         };
-        let inserted = whitespace(target, language);
+        let inserted = crate::language::materialize(target, 0, target, settings);
         if old != inserted {
-            let start = snapshot.line_start(line).unwrap();
             changes.push(Change::new(start..start + old.len_bytes(), inserted));
         }
     }
-    Transaction::new(snapshot.version(), changes)
+    changes
 }

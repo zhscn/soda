@@ -40,20 +40,49 @@
 
 默认从 Normal 开始。Insert 接收文字和粘贴；Esc、Ctrl-[ 或 Ctrl-C 返回 Normal，并将光标移回前一个字符。Normal 的光标停在行内字符上，空行允许停在行首。Visual 和 VisualLine 分别选择字符与整行。模式、待完成命令和期望列由交互层拥有，文档选区、文本事务与撤销仍由 editor/core 拥有。
 
-`vim/parser.rs` 解析计数、operator 和待完成按键，输出类型化 VimCommand。`vim/motion.rs` 计算移动终点；`vim/execute.rs` 将 inclusive/exclusive、行操作及模式转换转换成 Application 事件。移动终点与 operator 范围分开，不能直接用核心的选区扩展代替 Vim motion。Visual 选区在核心中仍为半开范围，实际光标位置单独提供给前端；前端据此跟随光标并绘制选区。
+`vim/parser.rs` 解析计数、operator、寄存器名和待完成按键，输出类型化 VimCommand。各模块分工：
+- `vim/motion.rs`：计算移动终点，并标出每种移动的类型（exclusive、inclusive、按行）。
+- `vim/object.rs`：计算文本对象的范围。
+- `vim/execute.rs`：把移动类型、行操作和模式转换变成 Application 事件。
+- `vim/replay.rs`：保存 `.` 和宏要重放的按键，以及标记。
+
+移动终点与 operator 范围分开，不能直接用核心的选区扩展代替 Vim motion。Visual 选区在核心中仍为半开范围，实际光标位置单独提供给前端；前端据此跟随光标并绘制选区。
 
 | 操作 | 当前支持 |
 | --- | --- |
-| 移动 | h/j/k/l、箭头、w/b/e、0/^/$、gg/G，以及对应计数 |
+| 移动 | h/j/k/l、箭头、w/b/e、0/^/$、gg/G、f/t/F/T 及 `;`/`,`、`%`、`{`/`}`，以及对应计数；Ctrl-D/Ctrl-U 移动半页并同样滚动视图 |
 | 插入 | i/a、I/A、o/O；Enter 和 o 使用已有语言缩进服务，O 插入后重算缩进 |
-| operator | d/c/y 加支持的 motion，dd/cc/yy，operator 前后计数相乘 |
-| 修改 | x/X、r 加单个字符、D/C、s/S |
-| 寄存器 | 一个应用内 unnamed register，区分字符与整行；p/P 支持计数 |
-| Visual | v/V，支持的 motion，d/c/y；Esc 返回 Normal |
+| operator | d/c/y、`>`/`<`、gu/gU/g~，加 motion 或文本对象；dd/cc/yy/`>>`/`<<`/guu 等按行；operator 前后计数相乘 |
+| 文本对象 | iw/aw、iW/aW，`i"`/`a"` 等三种引号，`i(`/`a(`（含 `b`）、`i[`、`i{`（含 `B`）、`i<`，ip/ap |
+| 修改 | x/X、r 加单个字符、D/C、s/S、`~`、J |
+| 重复 | `.` 重复上一次修改，带计数时替换原计数；q 加寄存器录制宏，@ 加寄存器重放，`@@` 重放上一个 |
+| 寄存器 | `"a`–`"z` 命名寄存器，`"A`–`"Z` 追加，`"_` 丢弃，`"+`、`"*` 与无名寄存器相同；p/P 支持计数 |
+| 标记 | m 加小写字母设置，`'` 跳到标记行首个非空白，`` ` `` 跳到精确位置 |
+| Visual | v/V，支持的 motion 与文本对象，d/c/y、`>`/`<`、`~`/u/U、J、o 交换两端、p/P 替换选区；Esc 返回 Normal |
 | 历史 | u、Ctrl-R；Insert 和 change 的修改作为一次撤销单元 |
-| 搜索 | / 和 ? 的字面量增量搜索，n/N 按已确认方向重复或反向 |
+| 搜索 | / 和 ? 的字面量增量搜索，n/N 按已确认方向重复或反向；`*`/`#` 按整词搜索光标下的单词 |
 
-Normal 计数限制为 10,000。输入 operator 或 g 等前缀后，Esc、Ctrl-[ 或 Ctrl-C 取消；未知组合被消费并显示错误，不落入文档。修改绑定、直接调用命令、目标文档发生文本变化或活动视图变化时清理待完成状态。计数插入、文本对象、dot repeat、命名寄存器、宏、Visual block、正则搜索和完整 Ex 语法尚未实现。Unicode 移动沿用编辑核心的 grapheme 边界，词分类使用字母数字下划线、标点、空白三类；不提供 Vim 的 iskeyword 配置。终止换行保存在文本中，末尾空行的光标表示不完全等同于 Vim 的 endofline 元数据。
+**移动类型**：
+- 跨行的 exclusive 移动如果终点在行首，会退到上一行行尾。若起点又在首个非空白字符之前，范围改为整行。所以在段首执行 `d}` 会删掉整段。
+- 带计数的 `dd` 超出缓冲区时删到末尾；光标已在最后一行时则失败。
+- 光标不在任何括号对内时，`i(` 等使用本行后面的第一对括号。
+
+**`.` 和宏**：
+- 两者都重放当初键入的按键，而不是重放编辑结果，所以 Insert 中键入的文字、补全和缩进会按原样再执行一遍。
+- 一次修改从 Normal 空闲时的第一个键开始，到修改完成后回到空闲 Normal 结束，包括期间的 Insert。
+- Runtime 用一个类似 Vim typeahead 的队列执行重放：重放中再触发的重放插到队列前面。任何 Vim 命令失败（移动越界、找不到字符、寄存器为空）都会清空队列，这就是递归宏结束的方式。从不失败的宏在一百万个键后停止。
+- 宏录制时状态栏显示 `recording @a`；录下的是用户键入的键，不包括重放产生的键。
+
+**寄存器和标记**：
+- 命名寄存器同时成为无名寄存器，也会同步到系统剪贴板。
+- 标记以文档位置保存，随每次编辑映射；位置被删除或文档关闭时丢弃。
+
+**限制**：
+- Normal 计数限制为 10,000。
+- 输入 operator 或 g 等前缀后，Esc、Ctrl-[ 或 Ctrl-C 取消；未知组合被消费并显示错误，不落入文档。修改绑定、直接调用命令、目标文档发生文本变化或活动视图变化时清理待完成状态。
+- 计数插入、Visual block、大写（跨文件）标记、正则搜索和完整 Ex 语法尚未实现。
+- Unicode 移动沿用编辑核心的 grapheme 边界，词分类使用字母数字下划线、标点、空白三类；不提供 Vim 的 iskeyword 配置。
+- 终止换行保存在文本中，末尾空行的光标表示不完全等同于 Vim 的 endofline 元数据。
 
 BeginUndoGroup 保存操作开始前的选区，EndUndoGroup 保存结束时的选区。打开新行时的定位、缩进和后续输入因此可以作为一次撤销恢复，并在 redo 时恢复 Normal 光标。失败事务不改变分组计划；移动、保存、其他会话操作、焦点切换和进入功能会话建立分组边界。Vim 层不维护第二份文本或撤销历史。
 
@@ -474,6 +503,6 @@ IntelliJ 的旧 `platform/lang-impl/src/com/intellij/ide/actions/searcheverywher
 
 ## Vim 基线验证
 
-`tests/fixtures/vim.json` 保存隔离 Vim 实际生成的文本与字节光标结果。`cargo test --test vim` 对照这些结果，覆盖普通移动、计数、operator 范围、字符/行寄存器、Visual、插入、搜索、undo/redo，并验证 C++ 缩进与保存退出流程。夹具只覆盖已支持的语义子集，不表示完整兼容性。
+`tests/fixtures/vim.json` 保存隔离 Vim 实际生成的文本与字节光标结果。`cargo test --test vim` 对照这些结果，覆盖普通移动、计数、operator 范围、字符/行寄存器、Visual、插入、搜索、undo/redo，并验证 C++ 缩进与保存退出流程。夹具只覆盖已支持的语义子集，不表示完整兼容性。`normal!` 中失败的按键会中止其后的按键，宏也无法在其中录制，所以夹具里每条按键序列都不能中途失败；宏、`>`/`<`（Vim 默认插入 tab）和 Ctrl-D/Ctrl-U 由 `tests/vim.rs` 中的单独测试覆盖。
 
 使用 `python scripts/generate_vim_cases.py --vim /path/to/vim` 更新期望值。生成器使用 `-Nu NONE -i NONE -n -es`，不读取用户配置或 viminfo，固定 tabstop/shiftwidth 为 4 并启用 autoindent。新用例只需给出 before 和 keys，生成器填充 after 与 cursor；测试运行不依赖 Vim 可执行文件。`cargo test --test keymaps` 验证模式覆盖、输入组件覆盖、多键冲突、取消与注册命令边界。

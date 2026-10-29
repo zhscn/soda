@@ -153,6 +153,7 @@ impl Layers {
         }
         self.sequence.clear();
         self.vim.clear();
+        let register = self.vim.armed.take();
         let mut response = Response {
             redraw: true,
             message: Message::Clear,
@@ -209,7 +210,7 @@ impl Layers {
                     )?;
                 }
             }
-            Command::Vim(command) => response = self.vim_execute(command, app, time),
+            Command::Vim(command) => response = self.vim_execute(command, register, app, time),
             Command::Ex(_) | Command::Ask { .. } => {
                 let (text, note) = match command {
                     Command::Ask { line, note } => (line, Some(note)),

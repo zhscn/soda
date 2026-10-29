@@ -158,6 +158,7 @@ pub fn key_notation(keys: &[KeyStroke]) -> String {
     keys.iter().map(ToString::to_string).collect()
 }
 
+#[derive(Clone, Debug)]
 pub enum UserInput {
     Key(KeyStroke),
     Paste(String),
@@ -178,6 +179,56 @@ impl Layers {
     /// A consumed event is never replayed after a layer closes. Execute the
     /// response and observe every resulting update before routing more input.
     pub fn route_input(
+        &mut self,
+        input: UserInput,
+        app: &Application,
+        time: Duration,
+        file_root: &Path,
+    ) -> Result<InputResult, EditError> {
+        self.route_recorded(input, false, app, time, file_root)
+    }
+    /// Routes input replayed by `.` or a macro; a macro being recorded
+    /// keeps the keys that started the replay, not the replayed ones.
+    pub fn route_replayed(
+        &mut self,
+        input: UserInput,
+        app: &Application,
+        time: Duration,
+        file_root: &Path,
+    ) -> Result<InputResult, EditError> {
+        self.route_recorded(input, true, app, time, file_root)
+    }
+    fn idle(&self) -> bool {
+        self.active.is_none()
+            && self.mode == EditMode::Normal
+            && !self.vim.active()
+            && !self.sequence.active()
+    }
+    fn route_recorded(
+        &mut self,
+        input: UserInput,
+        replayed: bool,
+        app: &Application,
+        time: Duration,
+        file_root: &Path,
+    ) -> Result<InputResult, EditError> {
+        let typed = match &input {
+            UserInput::Key(key) => !key.release,
+            UserInput::Paste(_) => true,
+            UserInput::Pointer(_) | UserInput::Unrecognized | UserInput::FocusLost => false,
+        };
+        if typed {
+            let idle = self.idle();
+            self.vim.replay.typed(&input, replayed, idle);
+        }
+        let result = self.route(input, app, time, file_root);
+        if typed {
+            let idle = self.idle();
+            self.vim.replay.routed(idle);
+        }
+        result
+    }
+    fn route(
         &mut self,
         input: UserInput,
         app: &Application,
@@ -290,7 +341,10 @@ impl Layers {
             return match self.vim.key(ch, visual) {
                 Ok(Some(command)) => self.execute(command, app, time, file_root),
                 Ok(None) => Ok(pending(Message::Clear)),
-                Err(error) => Ok(pending(Message::Set(format!("{error}: {ch}")))),
+                Err(error) => {
+                    self.failed = true;
+                    Ok(pending(Message::Set(format!("{error}: {ch}"))))
+                }
             };
         }
         if self.vim.active() {

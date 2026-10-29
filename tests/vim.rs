@@ -21,10 +21,12 @@ fn keys(r: &mut Runtime, text: &str) {
         if let Some(tail) = rest.strip_prefix("<Esc>") {
             r.input(UserInput::Key(KeyStroke::plain(Key::Esc)));
             rest = tail;
-        } else if let Some(tail) = rest.strip_prefix("<C-r>") {
+        } else if let Some(tail) = rest.strip_prefix("<C-")
+            && let Some((ch, tail)) = tail.split_once('>')
+        {
             r.input(UserInput::Key(KeyStroke {
                 control: true,
-                ..KeyStroke::plain(Key::Char('r'))
+                ..KeyStroke::plain(Key::Char(ch.chars().next().unwrap()))
             }));
             rest = tail;
         } else if let Some(tail) = rest.strip_prefix("<CR>") {
@@ -196,4 +198,77 @@ fn write_quit_saves_the_active_document_before_asking_about_other_dirty_buffers(
     assert!(!r.quit_requested());
     keys(&mut r, "<Esc>");
     assert!(!r.quit_requested());
+}
+#[test]
+fn macros_record_typed_keys_and_replay_with_counts() {
+    let mut r = runtime("a\nb\nc\nd\ne");
+    keys(&mut r, "qaA!<Esc>jq");
+    assert_eq!(r.app().workspace().documents().count(), 1);
+    keys(&mut r, "@a");
+    assert_eq!(state(&r).0, "a!\nb!\nc\nd\ne");
+    keys(&mut r, "@@2@a");
+    assert_eq!(state(&r).0, "a!\nb!\nc!\nd!\ne!");
+    // Uppercase registers append.
+    let mut r = runtime("a\nb");
+    keys(&mut r, "qbA1<Esc>qqBA2<Esc>qj@b");
+    assert_eq!(state(&r).0, "a12\nb12");
+}
+#[test]
+fn recursive_macros_stop_at_the_first_failing_command() {
+    let lines: Vec<String> = (0..300).map(|n| n.to_string()).collect();
+    let mut r = runtime(&lines.join("\n"));
+    // Clear `a`, then record a macro that calls itself after moving down.
+    keys(&mut r, "qaqqaA!<Esc>j@aq@a");
+    let text = state(&r).0.to_owned();
+    assert!(text.lines().all(|line| line.ends_with('!')), "{text}");
+    assert!(!text.contains("!!"));
+    // A macro that never fails stops at the replay bound.
+    let mut r = runtime("x");
+    keys(&mut r, "qbq");
+    keys(&mut r, "qb@bq@b");
+    assert!(r.message().contains("Replay stopped"), "{}", r.message());
+}
+#[test]
+fn dot_repeats_the_change_a_macro_made() {
+    let mut r = runtime("one two three");
+    keys(&mut r, "qadwq@a.");
+    assert_eq!(state(&r).0, "");
+}
+#[test]
+fn shift_operators_use_the_document_indent_and_skip_empty_lines() {
+    let mut r = runtime("a\n\nb\nc");
+    keys(&mut r, ">2j");
+    assert_eq!(state(&r), ("    a\n\n    b\nc", 4));
+    keys(&mut r, "j.");
+    assert_eq!(state(&r).0, "    a\n\n        b\n    c");
+    keys(&mut r, "j<<");
+    assert_eq!(state(&r).0, "    a\n\n    b\n    c");
+    keys(&mut r, "ggVG2>");
+    assert_eq!(
+        state(&r),
+        ("            a\n\n            b\n            c", 12)
+    );
+}
+#[test]
+fn half_page_moves_and_scrolls_by_half_the_rows() {
+    let lines: Vec<String> = (0..40).map(|n| format!("  {n}")).collect();
+    let mut r = runtime(&lines.join("\n"));
+    r.resize(10, 5);
+    keys(&mut r, "<C-d>");
+    let line_of = |r: &Runtime| {
+        let (text, caret) = state(r);
+        text[..caret].matches('\n').count()
+    };
+    assert_eq!(line_of(&r), 5);
+    assert_eq!(
+        state(&r).1 - state(&r).0[..state(&r).1].rfind('\n').unwrap(),
+        3
+    );
+    let view = r.app().view(r.app().active_view().unwrap()).unwrap();
+    assert_eq!(
+        view.viewport.anchor.offset.0,
+        state(&r).0.find("  5").unwrap()
+    );
+    keys(&mut r, "<C-u><C-u>");
+    assert_eq!(line_of(&r), 0);
 }

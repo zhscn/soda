@@ -276,6 +276,8 @@ const NORMAL: &[(&str, &str)] = &[
     ("<c-r>", "redo"),
     ("<c-f>", "page-down"),
     ("<c-b>", "page-up"),
+    ("<c-d>", "half-page-down"),
+    ("<c-u>", "half-page-up"),
     ("<f1>", "help"),
     ("<space>f", "project"),
     ("<space>b", "buffers"),
@@ -284,6 +286,8 @@ const NORMAL: &[(&str, &str)] = &[
 const VISUAL: &[(&str, &str)] = &[
     ("<c-f>", "page-down"),
     ("<c-b>", "page-up"),
+    ("<c-d>", "half-page-down"),
+    ("<c-u>", "half-page-up"),
     ("<f1>", "help"),
 ];
 const INSERT: &[(&str, &str)] = &[
