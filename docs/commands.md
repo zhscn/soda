@@ -34,11 +34,11 @@ core 的 History 保存、组合和恢复修改。editor 的 InputHistory 只负
 
 ## 搜索与替换
 
-SearchQuery 提供区分大小写的字面查询。SearchCursor 使用 memchr 匹配，逐 chunk 读取 rope，保留跨 chunk 的查询尾部，不请求全文字符串。cursor 返回非重叠的 UTF-8 字节范围，空查询没有匹配。
+SearchQuery 是正则表达式（regex crate 语法），smart case：模式中没有大写字母时忽略大小写，`\S`、`\W` 这类转义里的大写不算。SearchCursor 逐行匹配，所以匹配不跨行，`^`/`$` 是行首行尾；只读取正在扫描的一行，不请求全文字符串。cursor 返回非重叠、非空的 UTF-8 字节范围，空查询和无法编译的模式没有匹配，后者通过 `error()` 报告。`SearchQuery::word` 是 `*` 用的整词精确查询。在 3 万行的文件上扫描全文约 13 ms。
 
 `SetSearchQuery` 更新当前会话的 SearchState。`Find` 选择前一个或后一个匹配，调用方决定是否环绕。搜索结果按当前快照重新计算，查询不依赖语法分析或 picker。
 
-`ReplaceCurrent` 仅在当前选区仍完整匹配查询时替换；`ReplaceAll` 基于同一快照构造所有修改，一次提交与撤销。其他会话的选区通过精确变更映射。大小写折叠、正则表达式和项目搜索通过查询层继续扩展。
+`ReplaceCurrent` 仅在当前选区恰好是一处匹配时替换；`ReplaceAll` 基于同一快照构造所有修改，一次提交与撤销。替换文字中 `$1`、`${name}` 代表分组，`$0` 代表整个匹配，`$$` 是字面的 `$`。其他会话的选区通过精确变更映射。
 
 ## 文件工作流
 

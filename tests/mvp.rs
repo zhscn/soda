@@ -14,7 +14,7 @@ fn cpp_edit_search_history_and_save_workflow_preserves_mixed_whitespace() {
     {
         let mut editor = workspace.editor_mut(id).unwrap();
         editor
-            .execute(Command::SetSearchQuery(SearchQuery::new("{}")))
+            .execute(Command::SetSearchQuery(SearchQuery::new(r"\{\}")))
             .unwrap();
         editor
             .execute(Command::Find {

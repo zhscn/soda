@@ -1,64 +1,138 @@
-//! Literal search queries and snapshot cursors, independent of UI and parsers.
+//! Search queries and snapshot cursors, independent of UI and parsers.
+//! Patterns are regular expressions matched within lines, ignoring case
+//! unless they contain a capital, as kakoune and Vim's smartcase.
 use crate::core::Snapshot;
-use std::ops::Range;
+use regex::{Regex, RegexBuilder};
+use std::{collections::VecDeque, ops::Range};
 
 #[derive(Clone, Debug)]
 pub struct SearchQuery {
     text: String,
     /// Matches only where no word character touches either end.
     whole_word: bool,
-    finder: std::sync::Arc<memchr::memmem::Finder<'static>>,
+    regex: Result<Regex, String>,
+}
+/// Whether a pattern asks for exact case: a capital that is not an escape
+/// such as `\S` or `\W`.
+fn has_capital(pattern: &str) -> bool {
+    let mut chars = pattern.chars();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' => {
+                chars.next();
+            }
+            ch if ch.is_uppercase() => return true,
+            _ => {}
+        }
+    }
+    false
 }
 impl SearchQuery {
     pub fn new(text: impl Into<String>) -> Self {
         let text = text.into();
-        let finder = std::sync::Arc::new(memchr::memmem::Finder::new(text.as_bytes()).into_owned());
+        let regex = RegexBuilder::new(&text)
+            .case_insensitive(!has_capital(&text))
+            .build()
+            .map_err(|_| "invalid pattern".to_owned());
         Self {
             text,
             whole_word: false,
-            finder,
+            regex,
         }
     }
-    /// A query for `text` as a whole word, as Vim's `*` searches.
+    /// A query for `text` exactly, as a whole word, as Vim's `*` searches.
     pub fn word(text: impl Into<String>) -> Self {
+        let text = text.into();
         Self {
+            regex: Ok(Regex::new(&regex::escape(&text)).unwrap()),
+            text,
             whole_word: true,
-            ..Self::new(text)
         }
     }
     pub fn text(&self) -> &str {
         &self.text
     }
     pub fn is_valid(&self) -> bool {
-        !self.text.is_empty()
+        !self.text.is_empty() && self.regex.is_ok()
     }
+    /// Why the pattern matches nothing, when it does not compile.
+    pub fn error(&self) -> Option<&str> {
+        self.regex.as_ref().err().map(String::as_str)
+    }
+    /// Matches from the start of the document.
     pub fn cursor<'a>(&'a self, snapshot: &'a Snapshot) -> SearchCursor<'a> {
+        self.cursor_from(snapshot, 0)
+    }
+    /// Matches from the line holding `offset` on.
+    pub fn cursor_from<'a>(&'a self, snapshot: &'a Snapshot, offset: usize) -> SearchCursor<'a> {
         SearchCursor {
             query: self,
             snapshot,
-            chunks: Box::new(snapshot.chunks()),
-            buffer: Vec::new(),
-            base: 0,
-            scan: 0,
+            line: snapshot
+                .line_of(offset.min(snapshot.len_bytes()))
+                .unwrap_or(0),
+            found: VecDeque::new(),
         }
+    }
+    /// Whether `range` is one of the matches.
+    pub fn matches(&self, snapshot: &Snapshot, range: &Range<usize>) -> bool {
+        self.cursor_from(snapshot, range.start)
+            .take_while(|found| found.start <= range.start)
+            .any(|found| found == *range)
+    }
+    /// The replacement for the match at `range`: `$1` or `${name}` stands for
+    /// a group, `$0` for the whole match and `$$` for a dollar sign.
+    pub fn expand(&self, snapshot: &Snapshot, range: &Range<usize>, template: &str) -> String {
+        let Ok(regex) = &self.regex else {
+            return template.to_owned();
+        };
+        let Some(line) = snapshot.line_of(range.start) else {
+            return template.to_owned();
+        };
+        let start = snapshot.line_start(line).unwrap();
+        let text = snapshot.line(line).unwrap_or_default();
+        let mut out = String::new();
+        match regex.captures_at(&text, range.start - start) {
+            Some(captures)
+                if captures.get(0).unwrap().range() == (range.start - start..range.end - start) =>
+            {
+                captures.expand(template, &mut out)
+            }
+            _ => out.push_str(template),
+        }
+        out
     }
 }
 pub struct SearchCursor<'a> {
     query: &'a SearchQuery,
     snapshot: &'a Snapshot,
-    chunks: Box<dyn Iterator<Item = &'a str> + 'a>,
-    buffer: Vec<u8>,
-    base: usize,
-    scan: usize,
+    /// The next line to scan.
+    line: usize,
+    found: VecDeque<Range<usize>>,
 }
 impl Iterator for SearchCursor<'_> {
     type Item = Range<usize>;
     fn next(&mut self) -> Option<Self::Item> {
+        let regex = self
+            .query
+            .regex
+            .as_ref()
+            .ok()
+            .filter(|_| self.query.is_valid())?;
         loop {
-            let found = self.next_literal()?;
-            if !self.query.whole_word || self.is_word_boundary(&found) {
+            if let Some(found) = self.found.pop_front() {
                 return Some(found);
             }
+            let text = self.snapshot.line(self.line)?;
+            let start = self.snapshot.line_start(self.line).unwrap();
+            self.line += 1;
+            let found: Vec<_> = regex
+                .find_iter(&text)
+                .filter(|m| !m.is_empty())
+                .map(|m| start + m.start()..start + m.end())
+                .filter(|found| !self.query.whole_word || self.is_word_boundary(found))
+                .collect();
+            self.found.extend(found);
         }
     }
 }
@@ -78,25 +152,6 @@ impl SearchCursor<'_> {
                 .map_or(found.end, |offset| offset.0);
         !(before < found.start && word(before..found.start))
             && !(after > found.end && word(found.end..after))
-    }
-    fn next_literal(&mut self) -> Option<Range<usize>> {
-        if !self.query.is_valid() {
-            return None;
-        }
-        loop {
-            if let Some(offset) = self.query.finder.find(&self.buffer[self.scan..]) {
-                let start = self.scan + offset;
-                self.scan = start + self.query.text.len();
-                return Some(self.base + start..self.base + self.scan);
-            }
-            let chunk = self.chunks.next()?;
-            let keep = self.query.text.len() - 1;
-            let discard = self.scan.max(self.buffer.len().saturating_sub(keep));
-            self.buffer.drain(..discard);
-            self.base += discard;
-            self.scan = 0;
-            self.buffer.extend_from_slice(chunk.as_bytes());
-        }
     }
 }
 #[derive(Clone, Debug, Default)]
@@ -130,7 +185,7 @@ pub(super) fn find(
             })
     } else {
         query
-            .cursor(snapshot)
+            .cursor_from(snapshot, range.end)
             .find(|found| found.start >= range.end)
             .or_else(|| {
                 if wrap {

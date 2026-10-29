@@ -213,7 +213,11 @@ impl SearchSession {
         } else {
             format!("Find [{}]: ", self.results().count)
         };
-        super::session::field_presentation(label, field)
+        let mut presentation = super::session::field_presentation(label, field);
+        if let Some(error) = self.query.error() {
+            presentation.text.push_str(&format!("  ({error})"));
+        }
+        presentation
     }
     pub(super) fn cancel_response(
         &self,

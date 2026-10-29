@@ -266,6 +266,54 @@ fn search_cursor_handles_chunk_boundaries_and_nonoverlapping_matches() {
 }
 
 #[test]
+fn search_patterns_are_smart_case_regexes_and_replacements_use_groups() {
+    let state = soda::core::EditorState::new("Foo foo\nbar(1) FOO\n".to_owned());
+    let found =
+        |pattern: &str| -> Vec<_> { SearchQuery::new(pattern).cursor(state.snapshot()).collect() };
+    // Lower case ignores case; a capital asks for it, but escapes do not.
+    assert_eq!(found("foo"), [0..3, 4..7, 15..18]);
+    assert_eq!(found("Foo"), vec![(0..3)]);
+    assert_eq!(found(r"\S+o\b").len(), 3);
+    // Patterns match within lines, `^` and `$` at their ends.
+    assert_eq!(found("^bar"), vec![(8..11)]);
+    assert_eq!(found("o$"), [6..7, 17..18]);
+    assert!(found("x*").is_empty(), "empty matches are skipped");
+    let invalid = SearchQuery::new("bar(");
+    assert!(!invalid.is_valid());
+    assert_eq!(invalid.error(), Some("invalid pattern"));
+    assert_eq!(SearchQuery::word("foo").cursor(state.snapshot()).count(), 1);
+
+    let mut editor = Editor::new(
+        "let a = f(1);\nlet b = g(22);\n",
+        soda::editor::Language::PlainText,
+    );
+    editor
+        .execute(Command::SetSearchQuery(SearchQuery::new(r"(\w)\((\d+)\)")))
+        .unwrap();
+    editor
+        .execute(Command::ReplaceAll("$2.$1()$$".into()))
+        .unwrap();
+    assert_eq!(
+        editor.state().snapshot().text(),
+        "let a = 1.f()$;\nlet b = 22.g()$;\n"
+    );
+    // Replacing the current match needs the selection to be one.
+    editor
+        .execute(Command::SetSearchQuery(SearchQuery::new(r"let (\w)")))
+        .unwrap();
+    select(&mut editor, 0, 4);
+    editor
+        .execute(Command::ReplaceCurrent("var $1".into()))
+        .unwrap();
+    assert!(editor.state().snapshot().text().starts_with("let a"));
+    select(&mut editor, 0, 5);
+    editor
+        .execute(Command::ReplaceCurrent("var $1".into()))
+        .unwrap();
+    assert!(editor.state().snapshot().text().starts_with("var a = 1"));
+}
+
+#[test]
 fn deletion_from_inside_a_grapheme_consumes_the_whole_cluster() {
     for direction in [Direction::Backward, Direction::Forward] {
         let mut editor = Editor::new("e\u{301}x", soda::editor::Language::PlainText);

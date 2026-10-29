@@ -55,7 +55,16 @@ impl ReplaceSession {
         } else {
             "Replacement: ".to_owned()
         };
-        super::session::field_presentation(label, &self.input)
+        let mut presentation = super::session::field_presentation(label, &self.input);
+        if let Some(error) = self
+            .search
+            .query()
+            .error()
+            .filter(|_| self.phase == ReplacePhase::Query)
+        {
+            presentation.text.push_str(&format!("  ({error})"));
+        }
+        presentation
     }
 }
 

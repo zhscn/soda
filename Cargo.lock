@@ -937,7 +937,6 @@ version = "0.1.0"
 dependencies = [
  "crossterm",
  "ignore",
- "memchr",
  "nucleo-matcher",
  "onig",
  "ratatui",

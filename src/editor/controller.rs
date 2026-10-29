@@ -486,14 +486,9 @@ fn replace_current(
     text: String,
 ) -> Result<Transaction, EditError> {
     let selected = state.selection().range();
-    let matches = query.is_some_and(|query| {
-        query.is_valid()
-            && state
-                .snapshot()
-                .byte_slice(selected)
-                .is_some_and(|slice| slice == query.text())
-    });
-    if matches {
+    let query = query.filter(|query| query.matches(state.snapshot(), &selected));
+    if let Some(query) = query {
+        let text = query.expand(state.snapshot(), &selected, &text);
         operations::prepare_insert(state, text)
     } else {
         Ok(Transaction::new(state.snapshot().version(), vec![]))
@@ -504,7 +499,10 @@ fn replace_all(state: &EditorState, query: Option<&SearchQuery>, text: &str) -> 
         .map(|query| {
             query
                 .cursor(state.snapshot())
-                .map(|range| Change::new(range, text))
+                .map(|range| {
+                    let replacement = query.expand(state.snapshot(), &range, text);
+                    Change::new(range, replacement)
+                })
                 .collect()
         })
         .unwrap_or_default();
