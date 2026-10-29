@@ -221,6 +221,7 @@ hook open .*/Makefile set-local expand-tab false
 | `suspend` | | 挂起编辑器回到 shell，用 `fg` 继续 |
 | `messages` | | 在 `*messages*` 中显示最近的消息 |
 | `highlight FACE PATTERN` / `highlight-local FACE PATTERN` | | 在所有文档 / 当前文档中高亮正则表达式 |
+| `flag-lines GROUP FACE SIGN LINES` / `unflag-lines [GROUP]` | | 在当前文档的行号栏给行打上标记 / 去掉一组或全部标记 |
 | `unhighlight [PATTERN]` | | 去掉某个模式的高亮，或者全部 |
 | `each-line KEYS` | | 在每个选中行的行首以 Normal 模式输入 KEYS，相当于 Vim 的 `:'<,'>normal` |
 | `each-match PATTERN KEYS` | | 在每处匹配以 Normal 模式输入 KEYS；有选区时只在选中的行中 |
@@ -470,6 +471,15 @@ map normal <space>I unhighlight
 - **执行**：KEYS 用按键记法书写，可以包含宏，如 `each-line @q`、`each-match foo ciwbar<esc>`。每个目标先回到 Normal 模式，光标放在行首或匹配开头，再像键入一样回放 KEYS。目标从下往上处理，所以对一行的修改不会移动上方的目标。
 - **撤销**：全部修改合并为一步撤销。
 - **失败**：某个目标上的按键失败时，只放弃这个目标剩下的按键，其余目标照常执行。最多处理 10,000 个目标。
+
+## 行标记
+
+`flag-lines GROUP FACE SIGN LINES` 在当前文档行号栏的第一格画出 SIGN，与 kakoune 的 flag-lines 相同。它是给扩展用的原语：版本控制的增删改标记、构建报告错误的行、书签，都可以由配置或外部命令生成这条命令，编辑器本身不需要知道 git 或 LSP。
+
+- **参数**：GROUP 是不含空白的组名；FACE 是 `todo`、`error` 或 `mark1` 到 `mark4`，标记用它的颜色；SIGN 是一个单宽字符，如 `+`、`~`、`✗`、`●`；LINES 是从 1 开始的行号或 `3-7` 这样的范围，用空格分隔，超过文档末尾的行被忽略。可以使用展开：`flag-lines bookmark mark1 ● %val{line}`。
+- **分组**：同一组可以多次添加，`unflag-lines GROUP` 只去掉这一组，不带参数时去掉当前文档的全部标记；没有可去掉的标记时报错。一行有多组标记时显示后添加的那组的。
+- **随编辑移动**：标记保存为行首的文档位置，随每次编辑映射。在行首插入的文字（包括在上方新开一行）把标记连同这一行一起推下去；整行被删除时，标记留给顶替它的下一行。文档关闭时标记一并删除。
+- **显示**：标记占行号栏的第一格，软换行的续行不显示。关掉行号时，只要文档有标记，就留出两格宽的标记栏。
 
 ## 屏幕标签跳转
 

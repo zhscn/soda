@@ -26,6 +26,8 @@ pub(super) struct Row {
     pub line: usize,
     /// A later row of a wrapped line, which has no number.
     pub continued: bool,
+    /// The line's flag, on its first row.
+    pub flag: Option<crate::application::Flag>,
     pub spans: Vec<Span>,
 }
 /// The text area of the active view, positioned relative to its top left.
@@ -556,6 +558,7 @@ pub(super) fn frame(
             .map(|column| column as u16),
     };
     let patterns: Vec<_> = app.highlights(view.document_id).collect();
+    let flags = app.flags(view.document_id);
     let mut text = std::borrow::Cow::Borrowed("");
     for ((number, row), segment) in &shown {
         let number = *number;
@@ -587,6 +590,10 @@ pub(super) fn frame(
         output.push(Row {
             line: number,
             continued: *row > 0,
+            flag: flags
+                .get(&number)
+                .filter(|_| *row == 0)
+                .map(|flag| (*flag).clone()),
             spans: styled_row(
                 &text,
                 snapshot.line_start(number).unwrap(),

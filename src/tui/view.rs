@@ -77,8 +77,12 @@ impl Areas {
                 // ` 123 │ ` keeps numbers right-aligned with a separator.
                 let gutter = digits.max(3) + 4;
                 let numbers = app.options().choice(document, "line-numbers") != "off";
+                // Without numbers, flags keep a column of their own.
+                let flagged = document.is_some_and(|d| !app.flags(d).is_empty());
                 let gutter = if numbers && body.width >= gutter + 16 {
                     gutter
+                } else if flagged && body.width >= 18 {
+                    2
                 } else {
                     0
                 };
@@ -352,12 +356,19 @@ fn editor(
             } else {
                 row.line + 1
             };
-            let number = if row.continued {
+            let number = if window.gutter == 2 {
+                "  ".to_owned()
+            } else if row.continued {
                 format!(" {:>digits$} │ ", "")
             } else {
                 format!(" {shown:>digits$} │ ")
             };
             buf.set_stringn(left, y, &number, window.gutter.into(), style);
+            // The flag takes the first cell, before the number.
+            if let Some(flag) = &row.flag {
+                let style = style.patch(theme.sign(flag.face));
+                buf.set_stringn(left, y, &flag.sign, 1, style);
+            }
         }
         spans(buf, area.x, y, area.width, &row.spans, base, theme);
         if let Some(column) = text.ruler {
@@ -898,6 +909,35 @@ mod tests {
         let shown = rows(&mut r);
         assert!(!shown[2].contains('2'), "{shown:?}");
         assert!(shown[6].contains("1:1"));
+    }
+    #[test]
+    fn flags_take_the_first_gutter_cell() {
+        let root = tempfile::tempdir().unwrap();
+        let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.start(None);
+        r.command(Command::Edit(crate::editor::Command::InsertText(
+            "a\nb\nc".into(),
+        )));
+        r.command(Command::SetMode(EditMode::Normal));
+        r.command(Command::Named("flag-lines git mark2 + 2".into()));
+        let text = screen(&mut r, 40, 8);
+        let rows: Vec<_> = text.lines().collect();
+        assert!(rows[1].starts_with("   1 │ a"), "{text}");
+        assert!(rows[2].starts_with("+  2 │ b"), "{text}");
+        // Without numbers the flags keep a column of their own.
+        r.command(Command::Named("set line-numbers off".into()));
+        let text = screen(&mut r, 40, 8);
+        let rows: Vec<_> = text.lines().collect();
+        assert!(rows[1].starts_with("  a"), "{text}");
+        assert!(rows[2].starts_with("+ b"), "{text}");
+        r.command(Command::Named("unflag-lines".into()));
+        assert!(
+            screen(&mut r, 40, 8)
+                .lines()
+                .nth(2)
+                .unwrap()
+                .starts_with("b")
+        );
     }
     #[test]
     fn line_numbers_follow_the_option() {

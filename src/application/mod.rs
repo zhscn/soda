@@ -17,8 +17,10 @@
 mod clipboard;
 pub use clipboard::ClipboardAction;
 mod display;
+mod flags;
 mod highlights;
 mod tidy;
+pub use flags::Flag;
 pub use highlights::{Face, Highlight, MARKS};
 mod windows;
 pub use display::Placement;
@@ -158,6 +160,18 @@ pub enum Event {
         document: Option<DocumentId>,
         pattern: Option<String>,
     },
+    /// Flags zero-based lines of a document in a group.
+    Flag {
+        document: DocumentId,
+        group: String,
+        flag: Flag,
+        lines: Vec<usize>,
+    },
+    /// Removes a group's flags, or all, from a document.
+    Unflag {
+        document: DocumentId,
+        group: Option<String>,
+    },
 }
 /// Identity of an attempted operation, retained when reduction fails.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -246,6 +260,8 @@ pub enum Error {
     LastWindow,
     SideWindow,
     NoHighlight,
+    /// `unflag-lines` found nothing to remove.
+    NoFlags,
     Edit(EditError),
     File(FileError),
 }
@@ -266,6 +282,7 @@ impl fmt::Display for Error {
             Self::LastWindow => f.write_str("cannot close the last window"),
             Self::SideWindow => f.write_str("side windows cannot be split"),
             Self::NoHighlight => f.write_str("no such highlight"),
+            Self::NoFlags => f.write_str("no such flags"),
             Self::Edit(e) => e.fmt(f),
             Self::File(e) => e.fmt(f),
         }
@@ -276,7 +293,11 @@ impl std::error::Error for Error {
         match self {
             Self::Edit(e) => Some(e),
             Self::File(e) => Some(e),
-            Self::UnknownView | Self::LastWindow | Self::SideWindow | Self::NoHighlight => None,
+            Self::UnknownView
+            | Self::LastWindow
+            | Self::SideWindow
+            | Self::NoHighlight
+            | Self::NoFlags => None,
         }
     }
 }
@@ -311,6 +332,7 @@ pub struct Application {
     /// What was edited since each file was loaded or saved.
     touched: tidy::Touched,
     highlights: highlights::Highlights,
+    flags: flags::Flags,
 }
 impl Application {
     pub fn new(service: FileService) -> Self {
@@ -350,6 +372,13 @@ impl Application {
     }
     pub fn options(&self) -> &crate::options::Options {
         &self.options
+    }
+    /// The flag on each flagged line of a document, by zero-based line.
+    pub fn flags(&self, document: DocumentId) -> BTreeMap<usize, &Flag> {
+        self.workspace
+            .editor(document)
+            .map(|editor| self.flags.of(editor.model().document()))
+            .unwrap_or_default()
     }
     /// The highlights shown in a document, global ones first.
     pub fn highlights(&self, document: DocumentId) -> impl Iterator<Item = &Highlight> {
@@ -523,6 +552,7 @@ impl Application {
             {
                 self.touched.record(change);
             }
+            self.flags.map(change);
             for view in self
                 .views
                 .values_mut()
@@ -871,6 +901,7 @@ impl Application {
                 self.options.forget(document);
                 self.touched.forget(document);
                 self.highlights.forget(document);
+                self.flags.forget(document);
                 self.repair_windows();
                 update.closed_views = ids;
                 update.closed_documents.push(document);
@@ -1042,6 +1073,26 @@ impl Application {
             Event::Unhighlight { document, pattern } => {
                 if self.highlights.remove(document, pattern.as_deref()) == 0 {
                     return Err(Error::NoHighlight);
+                }
+                update.options_changed = true;
+            }
+            Event::Flag {
+                document,
+                group,
+                flag,
+                lines,
+            } => {
+                let editor = self
+                    .workspace
+                    .editor(document)
+                    .ok_or(FileError::UnknownDocument)?;
+                self.flags
+                    .add(editor.model().document(), &group, &flag, &lines);
+                update.options_changed = true;
+            }
+            Event::Unflag { document, group } => {
+                if !self.flags.remove(document, group.as_deref()) {
+                    return Err(Error::NoFlags);
                 }
                 update.options_changed = true;
             }

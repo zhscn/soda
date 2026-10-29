@@ -107,6 +107,14 @@ pub enum Command {
     },
     /// Removes the highlights of a pattern, or all of them.
     Unhighlight(Option<String>),
+    /// Flags zero-based lines of the current document in a group.
+    FlagLines {
+        group: String,
+        flag: crate::application::Flag,
+        lines: Vec<usize>,
+    },
+    /// Removes a group's flags, or all, from the current document.
+    UnflagLines(Option<String>),
     /// Replays keys in Normal mode from the start of each selected line,
     /// or of the caret's line.
     EachLine(Vec<super::KeyStroke>),
@@ -686,6 +694,25 @@ impl Layers {
                 response
                     .events
                     .push(Event::Unhighlight { document, pattern });
+            }
+            Command::FlagLines { group, flag, lines } => {
+                match app.active_view().and_then(|id| app.view(id)) {
+                    Some(view) => response.events.push(Event::Flag {
+                        document: view.document_id,
+                        group,
+                        flag,
+                        lines,
+                    }),
+                    None => response.message = Message::Set("No document to flag".into()),
+                }
+            }
+            Command::UnflagLines(group) => {
+                if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
+                    response.events.push(Event::Unflag {
+                        document: view.document_id,
+                        group,
+                    });
+                }
             }
             Command::EachLine(_) | Command::EachMatch { .. } => {
                 if let Some(view) = app.active_view().and_then(|id| app.view(id)) {

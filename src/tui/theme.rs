@@ -185,6 +185,16 @@ impl Theme {
             crate::application::Face::Mark(n) => self.marks[usize::from(n)],
         }
     }
+    /// A flag's sign: the face's colour on the gutter's background.
+    pub fn sign(&self, face: crate::application::Face) -> Style {
+        let colour = match face {
+            crate::application::Face::Mark(n) => self.marks[usize::from(n)].bg,
+            face => self.face(face).fg,
+        };
+        Style::new()
+            .fg(colour.unwrap_or_default())
+            .add_modifier(Modifier::BOLD)
+    }
     pub fn category(&self, category: Category) -> Style {
         self.syntax[CATEGORY_ORDER.iter().position(|c| *c == category).unwrap()]
     }

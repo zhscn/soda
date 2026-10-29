@@ -118,6 +118,46 @@ const FACE: Slot = slot(
         word("mark4", "Fourth mark background"),
     ]),
 );
+/// `flag-lines GROUP FACE SIGN LINES`: LINES are one-based numbers or
+/// ranges such as `3-7`, separated by spaces.
+fn flag_lines(args: &str) -> Result<Command, String> {
+    let mut words = args.split_whitespace();
+    let (Some(group), Some(face), Some(sign)) = (words.next(), words.next(), words.next()) else {
+        return Err("flag-lines needs GROUP FACE SIGN LINES".into());
+    };
+    let face = crate::application::Face::parse(face)?
+        .ok_or_else(|| "flags need a face: todo, error or mark1 to mark4".to_owned())?;
+    let mut cells = unicode_segmentation::UnicodeSegmentation::graphemes(sign, true);
+    let sign = match (cells.next(), cells.next()) {
+        (Some(cell), None) if unicode_width::UnicodeWidthStr::width(cell) == 1 => cell.to_owned(),
+        _ => return Err(format!("a sign is one narrow character, not {sign}")),
+    };
+    let mut lines = vec![];
+    for word in words {
+        let number = |text: &str| {
+            text.parse::<usize>()
+                .ok()
+                .filter(|n| *n > 0)
+                .ok_or_else(|| format!("not a line or range: {word}"))
+        };
+        let (first, last) = match word.split_once('-') {
+            Some((first, last)) => (number(first)?, number(last)?),
+            None => (number(word)?, number(word)?),
+        };
+        if last < first || last - first >= 1_000_000 {
+            return Err(format!("not a line or range: {word}"));
+        }
+        lines.extend(first - 1..last);
+    }
+    if lines.is_empty() {
+        return Err("flag-lines needs GROUP FACE SIGN LINES".into());
+    }
+    Ok(Command::FlagLines {
+        group: group.to_owned(),
+        flag: crate::application::Flag { face, sign },
+        lines,
+    })
+}
 fn highlight(args: &str, local: bool) -> Result<Command, String> {
     let (face, pattern) = split(args);
     let face = crate::application::Face::parse(face)?;
@@ -726,6 +766,26 @@ pub static BUILTINS: &[Builtin] = &[
         }],
         "Remove the highlights of PATTERN, or all, here and everywhere",
         |a| Ok(Command::Unhighlight((!a.is_empty()).then(|| a.to_owned())))
+    ),
+    builtin!(
+        "flag-lines",
+        [
+            slot("GROUP", SlotKind::Word),
+            FACE,
+            slot("SIGN", SlotKind::Word),
+            slot("LINES", SlotKind::Rest)
+        ],
+        "Put a one-character SIGN in the gutter of LINES (3 or 3-7) of the current document",
+        flag_lines
+    ),
+    builtin!(
+        "unflag-lines",
+        [Slot {
+            required: false,
+            ..slot("GROUP", SlotKind::Rest)
+        }],
+        "Remove the flags of GROUP, or all, from the current document",
+        |a| Ok(Command::UnflagLines((!a.is_empty()).then(|| a.to_owned())))
     ),
     builtin!(
         "each-line",
