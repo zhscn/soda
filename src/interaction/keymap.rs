@@ -538,6 +538,31 @@ impl Keymap {
             },
         }
     }
+    /// Next keys after a pending prefix and the label of each binding;
+    /// a key that continues a longer sequence reports its own keys.
+    pub fn continuations(
+        &self,
+        context: Context,
+        prefix: &[KeyStroke],
+    ) -> Vec<(KeyStroke, String)> {
+        let mut out: Vec<(KeyStroke, String)> = vec![];
+        for (keys, label) in self.bindings(context) {
+            if keys.len() <= prefix.len() || !keys.starts_with(prefix) {
+                continue;
+            }
+            let next = keys[prefix.len()];
+            if out.iter().any(|(key, _)| *key == next) {
+                continue;
+            }
+            let label = if keys.len() == prefix.len() + 1 {
+                label
+            } else {
+                format!("+{}", super::key_notation(&keys[..=prefix.len()]))
+            };
+            out.push((next, label));
+        }
+        out
+    }
     /// Effective bindings of a context, for help and listings.
     pub fn bindings(&self, context: Context) -> Vec<(Vec<KeyStroke>, String)> {
         fn pairs<T>(layer: &Layer<T>) -> Vec<(Vec<KeyStroke>, String)> {
@@ -594,5 +619,8 @@ impl Sequence {
     }
     pub fn hint(&self) -> String {
         format!("{} …  (Esc cancels)", super::key_notation(&self.keys))
+    }
+    pub fn keys(&self) -> &[KeyStroke] {
+        &self.keys
     }
 }

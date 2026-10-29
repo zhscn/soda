@@ -56,10 +56,13 @@ impl Runtime {
             dirty: true,
         })
     }
+    /// Opens the file given on the command line, or an untitled document.
     pub fn start(&mut self, path: Option<PathBuf>) {
-        self.command(Command::New);
-        if let Some(path) = path {
-            self.dispatch(Event::Open(path));
+        match path {
+            Some(path) => {
+                self.dispatch(Event::Open(path));
+            }
+            None => self.command(Command::New),
         }
     }
     pub fn app(&self) -> &Application {
@@ -133,6 +136,15 @@ impl Runtime {
     pub fn input_hint(&self) -> String {
         self.layers.input_hint()
     }
+    pub fn pending_keys(&self) -> Option<String> {
+        self.layers.pending()
+    }
+    pub fn key_continuations(&self) -> Vec<(String, String)> {
+        self.layers.continuations()
+    }
+    pub fn file_root(&self) -> &std::path::Path {
+        &self.file_root
+    }
     pub fn message(&self) -> &str {
         &self.message
     }
@@ -144,7 +156,8 @@ impl Runtime {
     }
     pub fn resize(&mut self, editor_rows: usize, picker_rows: usize) {
         self.layers.set_page_rows(editor_rows);
-        self.layers.resize_help(editor_rows);
+        // Help draws inside a bordered popup over the editing area.
+        self.layers.resize_help(editor_rows.saturating_sub(2));
         self.layers.resize_picker(picker_rows);
         self.dirty = true;
     }

@@ -11,10 +11,18 @@ pub(super) struct Span {
     pub selected: bool,
     pub matched: bool,
 }
+/// One visible document line: its zero-based number and clipped text.
+pub(super) struct Row {
+    pub line: usize,
+    pub spans: Vec<Span>,
+}
+/// The text area of the active view, positioned relative to its top left.
 pub(super) struct Frame {
-    pub rows: Vec<Vec<Span>>,
+    pub rows: Vec<Row>,
     pub cursor: Option<(u16, u16)>,
-    pub status: String,
+    /// Zero-based line and logical column of the caret.
+    pub caret: (usize, usize),
+    pub line_count: usize,
 }
 
 /// Clip by terminal cells. Partially visible tabs/wide graphemes become spaces;
@@ -112,7 +120,7 @@ pub(super) fn plain(text: &str, left: usize, width: usize) -> String {
 pub(super) fn follow_caret(
     app: &Application,
     width: u16,
-    height: u16,
+    rows: u16,
     caret: Option<usize>,
 ) -> Result<Option<ViewportAdjustment>, crate::application::Error> {
     let Some(id) = app.active_view() else {
@@ -138,7 +146,7 @@ pub(super) fn follow_caret(
     let head = caret.unwrap_or(state.selection().head);
     let line = snapshot.line_of(head).unwrap();
     let column = logical_column_at(snapshot, ByteOffset(head), tab)?.0;
-    let rows = usize::from(height.saturating_sub(2));
+    let rows = usize::from(rows);
     let mut top = snapshot.line_of(view.viewport.anchor.offset.0).unwrap();
     let mut left = view.viewport.horizontal_column;
     if rows > 0 {
@@ -179,20 +187,16 @@ pub(super) struct ViewportAdjustment {
     pub horizontal_column: usize,
 }
 
-/// Render an immutable application projection. Viewport decisions are applied
-/// by Runtime before this function is called.
+/// Render an immutable application projection of the active view's text
+/// area. Viewport decisions are applied by Runtime before this is called.
 pub(super) fn frame(
     app: &Application,
     width: u16,
-    height: u16,
+    rows: u16,
     caret: Option<usize>,
-) -> Result<Frame, crate::application::Error> {
+) -> Result<Option<Frame>, crate::application::Error> {
     let Some(id) = app.active_view() else {
-        return Ok(Frame {
-            rows: vec![],
-            cursor: None,
-            status: "Soda — :enew New  :open Open  :q Quit".into(),
-        });
+        return Ok(None);
     };
     let view = app.view(id).unwrap();
     let editor = app.workspace().editor(view.document_id).unwrap();
@@ -203,42 +207,24 @@ pub(super) fn frame(
     let line = snapshot.line_of(head).unwrap();
     let tab = document.whitespace().tab_width;
     let column = logical_column_at(snapshot, ByteOffset(head), tab)?.0;
-    let rows = usize::from(height.saturating_sub(2));
+    let rows = usize::from(rows);
     let top = snapshot.line_of(view.viewport.anchor.offset.0).unwrap();
     let left = view.viewport.horizontal_column;
     let mut output = Vec::new();
-    for line in top..top.saturating_add(rows).min(snapshot.line_count()) {
-        let text = snapshot.line(line).unwrap();
-        output.push(row(
-            &text,
-            snapshot.line_start(line).unwrap(),
-            state.selection().range(),
-            left,
-            usize::from(width),
-            tab,
-        ));
+    for number in top..top.saturating_add(rows).min(snapshot.line_count()) {
+        let text = snapshot.line(number).unwrap();
+        output.push(Row {
+            line: number,
+            spans: row(
+                &text,
+                snapshot.line_start(number).unwrap(),
+                state.selection().range(),
+                left,
+                usize::from(width),
+                tab,
+            ),
+        });
     }
-    let path = app
-        .workspace()
-        .file(view.document_id)
-        .and_then(|file| file.path())
-        .map_or_else(|| "[untitled]".into(), |p| p.display().to_string());
-    let status = format!(
-        "{}{}{}  {}:{}  :open Open  :w Save  :q Quit",
-        path,
-        if app.workspace().is_dirty(view.document_id) {
-            " *"
-        } else {
-            ""
-        },
-        if app.workspace().is_saving(view.document_id) {
-            " [saving]"
-        } else {
-            ""
-        },
-        line + 1,
-        column + 1
-    );
     let cursor = if rows > 0
         && width > 0
         && line >= top
@@ -250,11 +236,12 @@ pub(super) fn frame(
     } else {
         None
     };
-    Ok(Frame {
+    Ok(Some(Frame {
         rows: output,
         cursor,
-        status,
-    })
+        caret: (line, column),
+        line_count: snapshot.line_count(),
+    }))
 }
 
 pub(super) fn prompt_row(
@@ -303,7 +290,7 @@ mod tests {
                 horizontal_column: viewport.horizontal_column,
             })?;
         }
-        super::frame(app, width, height, None)
+        Ok(super::frame(app, width, height, None)?.unwrap())
     }
 
     use crate::{
@@ -378,10 +365,10 @@ mod tests {
             time: Duration::ZERO,
         })
         .unwrap();
-        let frame = frame(&mut app, 6, 5).unwrap();
+        let frame = frame(&mut app, 6, 3).unwrap();
         assert_eq!(frame.cursor, Some((5, 0)));
         assert_eq!(app.view(view).unwrap().viewport.horizontal_column, 5);
-        let frame = super::frame(&app, 0, 1, None).unwrap();
+        let frame = super::frame(&app, 0, 0, None).unwrap().unwrap();
         assert!(frame.rows.is_empty());
         assert!(frame.cursor.is_none());
     }
@@ -395,11 +382,12 @@ mod tests {
             time: Duration::ZERO,
         })
         .unwrap();
-        let frame = frame(&mut app, 5, 4).unwrap();
+        let frame = frame(&mut app, 5, 2).unwrap();
         assert_eq!(frame.cursor, Some((3, 0)));
         assert_eq!(app.view(view).unwrap().viewport.horizontal_column, 1);
         assert_eq!(
             frame.rows[0]
+                .spans
                 .iter()
                 .map(|span| span.text.as_str())
                 .collect::<String>(),
@@ -411,11 +399,11 @@ mod tests {
         let mut app = app("a\nb\nc\nd", Language::PlainText);
         let a = app.active_view().unwrap();
         let document = app.view(a).unwrap().document_id;
-        assert_eq!(frame(&mut app, 10, 4).unwrap().cursor, Some((1, 1)));
+        assert_eq!(frame(&mut app, 10, 2).unwrap().cursor, Some((1, 1)));
         let anchor = app.view(a).unwrap().viewport.anchor;
         app.dispatch(Event::AddView(document)).unwrap();
         let b = app.active_view().unwrap();
-        assert_eq!(frame(&mut app, 10, 4).unwrap().cursor, Some((0, 0)));
+        assert_eq!(frame(&mut app, 10, 2).unwrap().cursor, Some((0, 0)));
         assert_eq!(app.view(a).unwrap().viewport.anchor, anchor);
         assert_eq!(app.view(b).unwrap().viewport.anchor.offset, ByteOffset(0));
     }
@@ -497,9 +485,9 @@ mod tests {
         })
         .unwrap();
         let before = app.view(view).unwrap().viewport;
-        let projected = super::frame(&app, 10, 6, None).unwrap();
+        let projected = super::frame(&app, 10, 4, None).unwrap().unwrap();
         assert_eq!(app.view(view).unwrap().viewport, before);
         assert!(projected.cursor.is_none());
-        assert!(super::follow_caret(&app, 10, 6, None).unwrap().is_some());
+        assert!(super::follow_caret(&app, 10, 4, None).unwrap().is_some());
     }
 }

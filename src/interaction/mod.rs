@@ -165,6 +165,32 @@ impl Layers {
             format!("{:?}  {}", self.mode, help::HINT)
         }
     }
+    /// Keys typed toward an unfinished binding or Vim command, if any.
+    pub fn pending(&self) -> Option<String> {
+        if self.sequence.active() {
+            Some(key_notation(self.sequence.keys()))
+        } else if self.vim.active() {
+            Some(self.vim.hint())
+        } else {
+            None
+        }
+    }
+    /// The next keys of a pending multi-key binding, each with the
+    /// documentation of its command, for a key hint popup.
+    pub fn continuations(&self) -> Vec<(String, String)> {
+        if !self.sequence.active() {
+            return vec![];
+        }
+        self.keymap
+            .continuations(self.mode.into(), self.sequence.keys())
+            .into_iter()
+            .map(|(key, label)| {
+                let doc = self.registry.doc(&label);
+                let text = if doc.is_empty() { label } else { doc };
+                (key_notation(&[key]), text)
+            })
+            .collect()
+    }
     pub fn active(&self) -> Option<&Layer> {
         self.active.as_ref()
     }

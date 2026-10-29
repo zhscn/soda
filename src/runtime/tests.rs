@@ -290,5 +290,6 @@ fn new_help_session_inherits_geometry_before_first_render() {
     let Some(Layer::Help(session)) = runtime.layer() else {
         panic!()
     };
-    assert_eq!(session.lines().count(), 5);
+    // The help popup's border takes two of the rows.
+    assert_eq!(session.lines().count(), 3);
 }

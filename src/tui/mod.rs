@@ -2,21 +2,20 @@
 //! interaction state and task scheduling; layout reads immutable application state.
 mod input;
 mod layout;
-use crate::{
-    interaction::{Layer as Prompt, Presentation},
-    runtime::Runtime,
-};
+mod theme;
+mod view;
+use crate::{interaction::EditMode, runtime::Runtime};
 use crossterm::{
-    cursor::{Hide, MoveTo, SetCursorStyle, Show},
+    cursor::{Hide, SetCursorStyle, Show},
     event::{
         self, DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange,
     },
-    execute, queue,
-    style::{Attribute, Print, SetAttribute},
-    terminal::{self, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen},
+    execute,
+    style::{Attribute, SetAttribute},
+    terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use std::{
-    io::{self, IsTerminal, Write},
+    io::{self, IsTerminal},
     path::PathBuf,
     time::Duration,
 };
@@ -49,131 +48,30 @@ impl Drop for Terminal {
         let _ = terminal::disable_raw_mode();
     }
 }
-fn draw_candidates<T>(
-    output: &mut impl Write,
-    rows: &[crate::interaction::picker::MatchedCandidate<T>],
-    list: &crate::interaction::picker::CandidateListState,
-    width: u16,
-    height: u16,
-    count: usize,
+/// Draws one frame. The cursor shape follows the edit mode; ratatui places
+/// the cursor and writes only changed cells.
+fn draw(
+    terminal: &mut ratatui::DefaultTerminal,
+    runtime: &Runtime,
+    theme: &theme::Theme,
+    areas: &view::Areas,
 ) -> io::Result<()> {
-    let start = usize::from(height.saturating_sub(2)) - count;
-    for offset in 0..count {
-        queue!(
-            output,
-            MoveTo(0, (start + offset) as u16),
-            Clear(ClearType::CurrentLine)
-        )?;
-        if let Some(row) = rows.get(list.first_visible() + offset) {
-            draw_spans(
-                output,
-                &layout::candidate_row(row, list.selected(), usize::from(width)),
-            )?;
-        }
-    }
+    let text = areas.text();
+    let frame = layout::frame(
+        runtime.app(),
+        text.width,
+        text.height,
+        runtime.editor_caret(),
+    )
+    .map_err(io::Error::other)?;
+    let shape = if runtime.layer().is_none() && runtime.edit_mode() != EditMode::Insert {
+        SetCursorStyle::SteadyBlock
+    } else {
+        SetCursorStyle::SteadyBar
+    };
+    execute!(io::stdout(), shape)?;
+    terminal.draw(|f| view::render(f, runtime, theme, areas, frame.as_ref()))?;
     Ok(())
-}
-fn draw(runtime: &Runtime, width: u16, height: u16) -> io::Result<()> {
-    let list_rows = usize::from(height.saturating_sub(2)).min(10);
-    let frame = layout::frame(runtime.app(), width, height, runtime.editor_caret())
-        .map_err(io::Error::other)?;
-    let mut output = io::stdout().lock();
-    queue!(
-        output,
-        Hide,
-        if runtime.edit_mode() == crate::interaction::EditMode::Insert {
-            SetCursorStyle::SteadyBar
-        } else {
-            SetCursorStyle::SteadyBlock
-        },
-        SetAttribute(Attribute::Reset)
-    )?;
-    // Overwrite rows in place and clear only their tails; clearing the whole
-    // screen before every frame flickers.
-    let editor_rows = usize::from(height.saturating_sub(2)).max(frame.rows.len());
-    for y in 0..editor_rows {
-        queue!(output, MoveTo(0, y as u16))?;
-        if let Some(row) = frame.rows.get(y) {
-            draw_spans(&mut output, row)?;
-        }
-        queue!(output, Clear(ClearType::UntilNewLine))?;
-    }
-    if let Some(Prompt::CommandLine(session)) = runtime.layer() {
-        draw_candidates(
-            &mut output,
-            session.rows(),
-            session.list(),
-            width,
-            height,
-            list_rows,
-        )?;
-    }
-    if let Some(Prompt::Help(session)) = runtime.layer() {
-        for y in 0..height.saturating_sub(2) {
-            queue!(output, MoveTo(0, y), Clear(ClearType::CurrentLine))?;
-        }
-        for (y, line) in session.lines().enumerate() {
-            queue!(
-                output,
-                MoveTo(0, y as u16),
-                Print(layout::plain(line, 0, usize::from(width)))
-            )?;
-        }
-    }
-    queue!(output, SetAttribute(Attribute::Reset))?;
-    let mut cursor = frame.cursor;
-    if width > 0 && height > 0 {
-        if height > 1 {
-            queue!(
-                output,
-                MoveTo(0, height - 2),
-                SetAttribute(Attribute::Reverse),
-                Print(layout::plain(
-                    &format!("[{:?}] {}", runtime.edit_mode(), frame.status),
-                    0,
-                    usize::from(width)
-                )),
-                SetAttribute(Attribute::Reset),
-                Clear(ClearType::UntilNewLine)
-            )?;
-        }
-        let presentation = runtime.layer().map_or_else(
-            || Presentation {
-                text: if runtime.message().is_empty() {
-                    runtime.input_hint()
-                } else {
-                    runtime.message().to_owned()
-                },
-                cursor: None,
-                selection: 0..0,
-            },
-            Prompt::presentation,
-        );
-        let (footer, prompt_cursor) = layout::prompt_row(&presentation, usize::from(width));
-        queue!(output, MoveTo(0, height - 1))?;
-        draw_spans(&mut output, &footer)?;
-        queue!(output, Clear(ClearType::UntilNewLine))?;
-        if runtime.layer().is_some() {
-            cursor = prompt_cursor.map(|x| (x.min(usize::from(width - 1)) as u16, height - 1));
-        }
-    }
-    if let Some((x, y)) = cursor {
-        queue!(output, MoveTo(x, y), Show)?;
-    }
-    output.flush()
-}
-fn draw_spans(output: &mut impl Write, spans: &[layout::Span]) -> io::Result<()> {
-    for span in spans {
-        queue!(output, SetAttribute(Attribute::Reset))?;
-        if span.selected {
-            queue!(output, SetAttribute(Attribute::Reverse))?;
-        }
-        if span.matched {
-            queue!(output, SetAttribute(Attribute::Underlined))?;
-        }
-        queue!(output, Print(&span.text))?;
-    }
-    queue!(output, SetAttribute(Attribute::Reset))
 }
 
 /// `$XDG_CONFIG_HOME/soda/init`, falling back to `~/.config/soda/init`.
@@ -190,6 +88,9 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
         return Err(io::Error::other("interactive editing requires a terminal"));
     }
     let _terminal = Terminal::enter()?;
+    let mut terminal =
+        ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(io::stdout()))?;
+    let theme = theme::Theme::detect();
     let mut runtime = Runtime::new(std::env::current_dir()?)?;
     runtime.start(path);
     if let Some(config) = config.then(config_path).flatten() {
@@ -201,23 +102,31 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
             Err(error) => runtime.report(format!("{}: {error}", config.display())),
         }
     }
-    let mut dimensions = None;
+    let mut geometry = None;
     while !runtime.quit_requested() {
         runtime.poll();
         let (width, height) = terminal::size()?;
-        if dimensions != Some((width, height)) {
-            dimensions = Some((width, height));
-            let rows = usize::from(height.saturating_sub(2));
-            runtime.resize(rows, rows.min(10));
+        let areas = view::Areas::new(&runtime, width, height);
+        let rows = (areas.editor.height, areas.list_rows());
+        if geometry != Some(rows) {
+            geometry = Some(rows);
+            runtime.resize(rows.0.into(), rows.1);
         }
         if runtime.take_redraw() {
-            if let Some(viewport) =
-                layout::follow_caret(runtime.app(), width, height, runtime.editor_caret())
-                    .map_err(io::Error::other)?
+            let text = areas.text();
+            if let Some(viewport) = layout::follow_caret(
+                runtime.app(),
+                text.width,
+                text.height,
+                runtime.editor_caret(),
+            )
+            .map_err(io::Error::other)?
             {
                 runtime.update_viewport(viewport.view, viewport.anchor, viewport.horizontal_column);
             }
-            draw(&runtime, width, height)?;
+            // The gutter widens with the line count, so measure again.
+            let areas = view::Areas::new(&runtime, width, height);
+            draw(&mut terminal, &runtime, &theme, &areas)?;
             runtime.take_redraw();
         }
         if !runtime.quit_requested() && event::poll(Duration::from_millis(30))? {

@@ -168,6 +168,27 @@ impl CommandLine {
     pub fn picker(&self) -> Option<super::picker::PickerId> {
         self.files.as_ref().map(PickerSession::id)
     }
+    pub fn note(&self) -> Option<&str> {
+        self.note.as_deref()
+    }
+    pub fn error(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+    /// The typed command with its synopsis, such as `open PATH`.
+    pub fn heading(&self) -> Option<String> {
+        let text = self.input.text().trim_start();
+        let name = &text[..word_end(text, 0)];
+        let info = self.info(name)?;
+        Some(
+            format!("{} {}", info.name, info.synopsis())
+                .trim_end()
+                .to_owned(),
+        )
+    }
+    /// The input with its `:` prompt, for drawing outside `presentation`.
+    pub fn field(&self) -> Presentation {
+        field_presentation(":".into(), &self.input)
+    }
     pub(super) fn resize(&mut self, rows: usize) {
         self.list.resize(&self.rows, rows);
     }
@@ -447,7 +468,7 @@ impl CommandLine {
     pub(super) fn picker_failed(&mut self, error: String) {
         self.error = Some(error);
     }
-    fn loading(&self) -> bool {
+    pub fn loading(&self) -> bool {
         let target = self.query.as_ref().map(|q| q.target);
         (target == Some(Target::Slot(SlotKind::Path))
             && self.directory.as_ref().is_some_and(|d| d.pending.is_some()))

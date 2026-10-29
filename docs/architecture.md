@@ -27,7 +27,7 @@ Soda 是以 TUI 交付、以 C++ 交互缩进为核心体验的 Rust 编辑器�
 | `application` | owner-thread 状态归约：视图、文档、剪贴板、文件完成 | [边界契约](contracts.md) |
 | `interaction` | 键位、命令表、Vim 语法、输入框、picker、搜索替换等会话 | [交互层](interaction.md) |
 | `runtime` | 命令循环：执行响应、观察更新、调度后台任务与外部命令 | [交互层](interaction.md) |
-| `tui` | crossterm 输入规范化、布局与绘制、配置文件加载 | — |
+| `tui` | crossterm 输入规范化、ratatui 绘制、布局与主题、配置文件加载 | [终端界面](ui.md) |
 
 数据单向流动：前端把平台输入交给 Runtime；交互层把按键解析为命令并输出 Application 事件；Application 通过 editor 提交事务；语言服务只读快照并返回建议，修改始终由事务入口统一提交。后台任务读取快照，结果带版本与请求身份回到 owner thread，过期结果被拒绝。
 

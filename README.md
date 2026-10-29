@@ -22,6 +22,7 @@ map normal <space>= fmt
 - [编辑命令](docs/commands.md)、[文件服务](docs/files.md)
 - [交互缩进设计与契约](docs/indentation.md)、[clang-format 配置](docs/clang-format.md)
 - [交互层：键位、命令与配置](docs/interaction.md)
+- [终端界面](docs/ui.md)
 
 ## 构建与验证
 
