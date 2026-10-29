@@ -631,7 +631,7 @@ impl Application {
             .model()
             .document()
             .snapshot();
-        let line = line.min(snapshot.line_count() - 1);
+        let line = line.min(snapshot.text_lines() - 1);
         let range = snapshot.line_content_range(line).unwrap();
         let offset = crate::core::clip_grapheme_offset(
             snapshot,

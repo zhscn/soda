@@ -254,7 +254,8 @@ fn goto_validates_input_clamps_location_and_cancel_keeps_selection() {
     editor.command(Command::Ex("goto ".into()));
     editor.input(UserInput::Paste("999:999".into()));
     editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
-    assert_eq!(editor.selection().head, editor.text().len());
+    // The last line is the one before the final newline.
+    assert_eq!(editor.selection().head, editor.text().len() - 1);
 }
 #[test]
 fn goto_closes_when_external_focus_changes() {

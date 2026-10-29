@@ -78,6 +78,16 @@ impl Snapshot {
     pub fn line_count(&self) -> usize {
         self.storage.rope.len_lines()
     }
+    /// Lines as Vim and kakoune count them: the empty line after a final
+    /// terminator is not one, so `a\n` has one line and `a\n\n` two.
+    pub fn text_lines(&self) -> usize {
+        let count = self.line_count();
+        if count > 1 && self.line_start(count - 1) == Some(self.len_bytes()) {
+            count - 1
+        } else {
+            count
+        }
+    }
     pub fn line_start(&self, line: usize) -> Option<usize> {
         if line >= self.line_count() {
             return None;

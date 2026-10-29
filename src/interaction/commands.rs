@@ -504,7 +504,7 @@ impl Layers {
                         top.saturating_sub(count)
                     } else {
                         top.saturating_add(count)
-                            .min(snapshot.line_count().saturating_sub(self.page_rows.max(1)))
+                            .min(snapshot.text_lines().saturating_sub(self.page_rows.max(1)))
                     };
                     response.events.push(Event::Edit {
                         view: view.id,
@@ -811,7 +811,7 @@ impl Layers {
                 )
             }
             Command::EachMatch { pattern, keys } => {
-                let lines = lines.unwrap_or(0..=snapshot.line_count() - 1);
+                let lines = lines.unwrap_or(0..=snapshot.text_lines() - 1);
                 let mut targets = vec![];
                 for line in lines {
                     let start = snapshot.line_start(line).unwrap();

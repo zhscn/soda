@@ -284,7 +284,7 @@ pub(super) fn offset_at(app: &Application, row: isize, column: usize) -> Option<
     let top = snapshot.line_of(view.viewport.anchor.offset.0)?;
     let line = top
         .saturating_add_signed(row)
-        .min(snapshot.line_count() - 1);
+        .min(snapshot.text_lines() - 1);
     let column = LogicalColumn(view.viewport.horizontal_column + column);
     offset_at_logical_column(snapshot, line, column, document.whitespace().tab_width)
         .ok()
@@ -308,7 +308,7 @@ pub(super) fn scroll(
     let top = snapshot.line_of(view.viewport.anchor.offset.0)?;
     let top = top
         .saturating_add_signed(lines)
-        .min(snapshot.line_count() - 1);
+        .min(snapshot.text_lines() - 1);
     let head = caret.unwrap_or(editor.model().session(view.session_id)?.selection().head);
     let line = snapshot.line_of(head)?;
     let bottom = top + usize::from(rows.max(1)) - 1;
@@ -359,7 +359,10 @@ pub(super) fn frame(
     let top = snapshot.line_of(view.viewport.anchor.offset.0).unwrap();
     let left = view.viewport.horizontal_column;
     let mut output = Vec::new();
-    let bottom = top.saturating_add(rows).min(snapshot.line_count());
+    // The empty line after a final newline shows only while the caret is
+    // on it, as when Insert's Enter has just opened it.
+    let lines = snapshot.text_lines().max(line + 1);
+    let bottom = top.saturating_add(rows).min(lines);
     let highlights = highlighter.lines(app, view.document_id, top..bottom);
     let options = app.options();
     let show_whitespace = options.bool(Some(view.document_id), "show-whitespace");
@@ -419,7 +422,7 @@ pub(super) fn frame(
         rows: output,
         cursor,
         caret: (line, column),
-        line_count: snapshot.line_count(),
+        line_count: lines,
         language: highlighter
             .language(view.document_id)
             .unwrap_or("text")

@@ -186,7 +186,7 @@ fn find(app: &Application, view: ViewId, rows: usize, query: &str) -> Vec<(ViewI
     let top = snapshot
         .line_of(state.viewport.anchor.offset.0)
         .unwrap_or(0);
-    let bottom = top.saturating_add(rows.max(1)).min(snapshot.line_count());
+    let bottom = top.saturating_add(rows.max(1)).min(snapshot.text_lines());
     let fold = !query.chars().any(char::is_uppercase);
     let query = if fold {
         query.to_lowercase()

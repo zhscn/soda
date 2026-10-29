@@ -52,12 +52,7 @@ pub(super) fn kind(motion: Motion) -> Kind {
     }
 }
 pub(super) fn lines(text: &Snapshot) -> usize {
-    let count = text.line_count();
-    if count > 1 && text.line_start(count - 1) == Some(text.len_bytes()) {
-        count - 1
-    } else {
-        count
-    }
+    text.text_lines()
 }
 pub(super) fn next(text: &Snapshot, offset: usize) -> usize {
     step_grapheme(text, ByteOffset(offset), true).unwrap().0

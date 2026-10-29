@@ -71,7 +71,7 @@ impl Areas {
                 let lines = document
                     .and_then(|document| app.workspace().editor(document))
                     .map_or(1, |editor| {
-                        editor.model().document().snapshot().line_count()
+                        editor.model().document().snapshot().text_lines()
                     });
                 let digits = lines.max(1).ilog10() as u16 + 1;
                 // ` 123 │ ` keeps numbers right-aligned with a separator.
@@ -855,6 +855,43 @@ mod tests {
                 .starts_with("╭ Help · Esc closes")
         );
         assert!(text.lines().nth(2).unwrap().starts_with("│ Vim editing"));
+    }
+    #[test]
+    fn the_line_after_a_final_newline_is_not_shown() {
+        let root = tempfile::tempdir().unwrap();
+        let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.start(None);
+        r.command(Command::Edit(crate::editor::Command::InsertText(
+            "a\nb\n\n".into(),
+        )));
+        r.command(Command::SetMode(EditMode::Normal));
+        let rows = |r: &mut Runtime| -> Vec<String> {
+            screen(r, 40, 8).lines().map(str::to_owned).collect()
+        };
+        // Line 3 is a real empty line and reachable; nothing follows it.
+        keys(&mut r, "ggjjjj");
+        let shown = rows(&mut r);
+        assert!(shown[3].starts_with("   3 │"), "{shown:?}");
+        assert!(!shown[4].contains('4'));
+        assert!(shown[6].trim_end().ends_with("3:1  100%"));
+        // Insert stops there too.
+        keys(&mut r, "i<down><down>");
+        assert!(rows(&mut r)[6].contains("3:1"));
+        // Enter at the end of text without a final newline puts the caret
+        // after it; that line shows until Insert ends.
+        keys(&mut r, "<esc>");
+        r.command(Command::New);
+        r.command(Command::Edit(crate::editor::Command::InsertText(
+            "a".into(),
+        )));
+        keys(&mut r, "A<ret>");
+        let shown = rows(&mut r);
+        assert!(shown[2].starts_with("   2 │"), "{shown:?}");
+        assert!(shown[6].contains("2:1"));
+        keys(&mut r, "<esc>");
+        let shown = rows(&mut r);
+        assert!(!shown[2].contains('2'), "{shown:?}");
+        assert!(shown[6].contains("1:1"));
     }
     #[test]
     fn line_numbers_follow_the_option() {
