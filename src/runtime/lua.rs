@@ -1,0 +1,379 @@
+//! Lua extensions (Lua 5.4 through mlua). Lua reaches the editor through
+//! the `soda` table, whose functions run commands and read state as the
+//! command line does, register hooks and commands as Lua functions, and run
+//! processes in the background with a function to call when they finish.
+//!
+//! The runtime runs one Lua request at a time and lends itself to it:
+//! `soda` functions act on the runtime directly, and Lua that the request
+//! starts in turn, such as a hook of an edit it makes, waits in a queue
+//! until the request returns.
+use super::Runtime;
+use crate::interaction::{Command, LuaRequest};
+use mlua::{Function, Lua, Table, Value};
+use std::{
+    cell::{Cell, RefCell},
+    sync::mpsc::{Receiver, Sender, channel},
+};
+
+/// Functions of the `soda` table; each forwards to the implementation lent
+/// for the request being run.
+const FUNCTIONS: &[&str] = &[
+    "command",
+    "val",
+    "option",
+    "message",
+    "flag",
+    "unflag",
+    "hook",
+    "define_command",
+    "spawn",
+];
+const PRELUDE: &str = r#"
+local current, names = ...
+soda = {}
+for _, name in ipairs(names) do
+  soda[name] = function(...)
+    local implementation = current()
+    if not implementation then
+      error("soda." .. name .. " is only available while the editor runs Lua", 2)
+    end
+    return implementation[name](...)
+  end
+end
+"#;
+const IMPLEMENTATION: &str = "soda.implementation";
+const CALLBACKS: &str = "soda.callbacks";
+
+/// A finished `soda.spawn` process.
+pub(super) struct Job {
+    id: u64,
+    /// Where `soda.spawn` was called; the function runs there.
+    view: Option<crate::application::ViewId>,
+    code: Option<i32>,
+    stdout: String,
+    stderr: String,
+}
+pub(super) enum Request {
+    Chunk { origin: String, code: String },
+    Call { id: u64, argument: String },
+    Done(Job),
+}
+impl From<LuaRequest> for Request {
+    fn from(request: LuaRequest) -> Self {
+        match request {
+            LuaRequest::Chunk { origin, code } => Self::Chunk { origin, code },
+            LuaRequest::Call { id, argument } => Self::Call { id, argument },
+        }
+    }
+}
+pub(super) struct Host {
+    lua: Lua,
+    /// The id the next registered function gets.
+    next: Cell<u64>,
+    jobs: (Sender<Job>, Receiver<Job>),
+}
+impl Host {
+    fn new() -> mlua::Result<Self> {
+        let lua = Lua::new();
+        lua.set_named_registry_value(CALLBACKS, lua.create_table()?)?;
+        let current =
+            lua.create_function(|lua, ()| lua.named_registry_value::<Value>(IMPLEMENTATION))?;
+        lua.load(PRELUDE)
+            .set_name("soda prelude")
+            .call::<()>((current, FUNCTIONS))?;
+        Ok(Self {
+            lua,
+            next: Cell::new(1),
+            jobs: channel(),
+        })
+    }
+    fn callbacks(&self) -> mlua::Result<Table> {
+        self.lua.named_registry_value(CALLBACKS)
+    }
+    /// Keeps a function for a later call; returns its id.
+    fn keep(&self, function: Function) -> mlua::Result<u64> {
+        let id = self.next.get();
+        self.next.set(id + 1);
+        self.callbacks()?.set(id, function)?;
+        Ok(id)
+    }
+    /// Runs one request with the `soda` functions lent the runtime.
+    fn run(&self, runtime: &mut Runtime, request: Request) -> mlua::Result<()> {
+        let lua = &self.lua;
+        let runtime = RefCell::new(runtime);
+        lua.scope(|scope| {
+            let soda = lua.create_table()?;
+            soda.set(
+                "command",
+                scope.create_function(|_, line: String| {
+                    let mut runtime = runtime.borrow_mut();
+                    runtime.failed = false;
+                    runtime.command(Command::Named(line));
+                    Ok((!runtime.failed, runtime.message.clone()))
+                })?,
+            )?;
+            soda.set(
+                "val",
+                scope.create_function(|_, name: String| {
+                    expand(&runtime.borrow(), &format!("%val{{{name}}}"))
+                })?,
+            )?;
+            soda.set(
+                "option",
+                scope.create_function(|_, name: String| {
+                    expand(&runtime.borrow(), &format!("%opt{{{name}}}"))
+                })?,
+            )?;
+            soda.set(
+                "message",
+                scope.create_function(|_, text: String| {
+                    runtime.borrow_mut().report(text);
+                    Ok(())
+                })?,
+            )?;
+            soda.set(
+                "flag",
+                scope.create_function(
+                    |_, (group, face, sign, lines): (String, String, String, Vec<usize>)| {
+                        let flag = crate::application::Flag::new(&face, &sign)
+                            .map_err(mlua::Error::runtime)?;
+                        let lines = lines
+                            .into_iter()
+                            .filter(|line| *line > 0)
+                            .map(|line| line - 1)
+                            .collect();
+                        let mut runtime = runtime.borrow_mut();
+                        let document = runtime.document().map_err(mlua::Error::runtime)?;
+                        runtime.edit_event(crate::application::Event::Flag {
+                            document,
+                            group,
+                            flag,
+                            lines,
+                        })
+                    },
+                )?,
+            )?;
+            soda.set(
+                "unflag",
+                scope.create_function(|_, group: Option<String>| {
+                    let mut runtime = runtime.borrow_mut();
+                    let document = runtime.document().map_err(mlua::Error::runtime)?;
+                    // Nothing to remove is not a failure for a script.
+                    let _ = runtime
+                        .app
+                        .dispatch(crate::application::Event::Unflag { document, group });
+                    runtime.dirty = true;
+                    Ok(())
+                })?,
+            )?;
+            soda.set(
+                "hook",
+                scope.create_function(
+                    |_, (event, filter, function): (String, String, Function)| {
+                        let id = self.keep(function)?;
+                        runtime
+                            .borrow_mut()
+                            .layers
+                            .add_hook(&event, &filter, format!("lua-call {id} %val{{hook}}"))
+                            .map_err(mlua::Error::runtime)
+                    },
+                )?,
+            )?;
+            soda.set(
+                "define_command",
+                scope.create_function(|_, (name, function): (String, Function)| {
+                    let id = self.keep(function)?;
+                    runtime
+                        .borrow_mut()
+                        .layers
+                        .configure(Command::Define {
+                            name,
+                            body: format!("lua-call {id} %arg{{@}}"),
+                        })
+                        .map_err(mlua::Error::runtime)
+                })?,
+            )?;
+            soda.set(
+                "spawn",
+                scope.create_function(
+                    |_, (argv, function, input): (Vec<String>, Function, Option<String>)| {
+                        if argv.is_empty() {
+                            return Err(mlua::Error::runtime("soda.spawn needs a program"));
+                        }
+                        let id = self.keep(function)?;
+                        let (root, view) = {
+                            let runtime = runtime.borrow();
+                            (runtime.file_root.clone(), runtime.app.active_view())
+                        };
+                        let sender = self.jobs.0.clone();
+                        std::thread::spawn(move || {
+                            let mut job = spawn(id, &argv, &root, input);
+                            job.view = view;
+                            let _ = sender.send(job);
+                        });
+                        Ok(())
+                    },
+                )?,
+            )?;
+            lua.set_named_registry_value(IMPLEMENTATION, soda)?;
+            let result = match request {
+                Request::Chunk { origin, code } => lua.load(code).set_name(origin).exec(),
+                Request::Call { id, argument } => {
+                    self.callbacks()?.get::<Function>(id)?.call::<()>(argument)
+                }
+                Request::Done(job) => {
+                    let callbacks = self.callbacks()?;
+                    let function = callbacks.get::<Function>(job.id)?;
+                    callbacks.set(job.id, Value::Nil)?;
+                    function.call::<()>((job.code, job.stdout, job.stderr))
+                }
+            };
+            lua.set_named_registry_value(IMPLEMENTATION, Value::Nil)?;
+            result
+        })
+    }
+}
+fn expand(runtime: &Runtime, text: &str) -> mlua::Result<String> {
+    runtime
+        .layers
+        .expand(text, &runtime.app, &runtime.file_root)
+        .map_err(mlua::Error::runtime)
+}
+/// Runs a process to its end, in the project root.
+fn spawn(id: u64, argv: &[String], root: &std::path::Path, input: Option<String>) -> Job {
+    use std::{io::Write, process::Stdio};
+    let child = std::process::Command::new(&argv[0])
+        .args(&argv[1..])
+        .current_dir(root)
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
+    let output = child.and_then(|mut child| {
+        if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
+            // A process that exits without reading is not an error here.
+            let _ = stdin.write_all(input.as_bytes());
+        }
+        child.wait_with_output()
+    });
+    match output {
+        Ok(output) => Job {
+            id,
+            view: None,
+            code: output.status.code(),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        },
+        Err(error) => Job {
+            id,
+            view: None,
+            code: None,
+            stdout: String::new(),
+            stderr: format!("{}: {error}", argv[0]),
+        },
+    }
+}
+
+impl Runtime {
+    /// Runs Lua code, such as `init.lua`; returns its error, which is also
+    /// the status message and logged.
+    pub fn source_lua(&mut self, origin: &str, code: &str) -> Result<(), String> {
+        let view = self.app.active_view();
+        self.lua_queue.push_back((
+            Request::Chunk {
+                origin: origin.to_owned(),
+                code: code.to_owned(),
+            },
+            view,
+        ));
+        match self.run_lua() {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+    /// Runs queued Lua unless Lua is running already, in which case it
+    /// runs when that returns. Returns the last error.
+    pub(super) fn run_lua(&mut self) -> Option<String> {
+        if self.lua_running {
+            return None;
+        }
+        let host = match self.lua.take().map_or_else(Host::new, Ok) {
+            Ok(host) => host,
+            Err(error) => {
+                self.lua_queue.clear();
+                let error = format!("lua: {error}");
+                self.lua_failed(error.clone());
+                return Some(error);
+            }
+        };
+        self.lua_running = true;
+        let mut last = None;
+        while let Some((request, view)) = self.lua_queue.pop_front() {
+            // Commands act on the view the request came from while it is
+            // open, as hooks do.
+            let outer = self.app.context();
+            let _ = self
+                .app
+                .dispatch(crate::application::Event::SetContext(view));
+            let result = host.run(self, request);
+            let _ = self
+                .app
+                .dispatch(crate::application::Event::SetContext(outer));
+            if let Err(error) = result {
+                let error = format!("lua: {error}");
+                self.lua_failed(error.clone());
+                last = Some(error);
+            }
+        }
+        self.lua_running = false;
+        self.lua = Some(host);
+        last
+    }
+    fn lua_failed(&mut self, error: String) {
+        self.log(error.clone());
+        self.logged = error.clone();
+        self.message = error;
+        self.dirty = true;
+    }
+    /// Collects finished processes and calls their functions.
+    pub(super) fn poll_lua(&mut self) {
+        let Some(host) = &self.lua else {
+            return;
+        };
+        let done: Vec<_> = host
+            .jobs
+            .1
+            .try_iter()
+            .map(|job| {
+                let view = job.view;
+                (Request::Done(job), view)
+            })
+            .collect();
+        if !done.is_empty() {
+            self.lua_queue.extend(done);
+            self.run_lua();
+        }
+    }
+    /// The current document, for Lua functions acting on it.
+    fn document(&self) -> Result<crate::editor::DocumentId, String> {
+        self.app
+            .active_view()
+            .and_then(|id| self.app.view(id))
+            .map(|view| view.document_id)
+            .ok_or_else(|| "no document".to_owned())
+    }
+    /// Dispatches an event for Lua; a failure becomes a Lua error.
+    fn edit_event(&mut self, event: crate::application::Event) -> mlua::Result<()> {
+        self.failed = false;
+        self.dispatch(event);
+        if self.failed {
+            Err(mlua::Error::runtime(self.message.clone()))
+        } else {
+            Ok(())
+        }
+    }
+}

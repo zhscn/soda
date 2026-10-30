@@ -205,7 +205,8 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
     let mut catching_up = false;
     let mut runtime = Runtime::new(std::env::current_dir()?)?;
     runtime.set_system_clipboard(Box::new(clipboard::Clipboard::detect()));
-    // Configuration comes first so that its hooks see the first document.
+    // Configuration comes first so that its hooks see the first document:
+    // the command file, then init.lua beside it.
     if let Some(config) = config.then(config_path).flatten() {
         match std::fs::read_to_string(&config) {
             Ok(text) => {
@@ -213,6 +214,23 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => runtime.report(format!("{}: {error}", config.display())),
+        }
+        let script = config.with_extension("lua");
+        // Modules in the lua directory beside it can be required.
+        let modules = config.with_file_name("lua").join("?.lua");
+        let _ = runtime.source_lua(
+            "package.path",
+            &format!(
+                "package.path = [==[{}]==] .. ';' .. package.path",
+                modules.display()
+            ),
+        );
+        match std::fs::read_to_string(&script) {
+            Ok(code) => {
+                let _ = runtime.source_lua(&script.display().to_string(), &code);
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => runtime.report(format!("{}: {error}", script.display())),
         }
     }
     let state = state_path();

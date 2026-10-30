@@ -351,6 +351,11 @@ impl Application {
     pub fn view(&self, id: ViewId) -> Option<&View> {
         self.views.get(&id)
     }
+    /// The view hooks and callbacks act on, when it differs from the
+    /// focused one.
+    pub fn context(&self) -> Option<ViewId> {
+        self.context
+    }
     pub fn active_view(&self) -> Option<ViewId> {
         self.context
             .filter(|view| self.views.contains_key(view))

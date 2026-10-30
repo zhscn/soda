@@ -92,6 +92,13 @@ pub enum Command {
     Stop,
     /// Hands the terminal back to the shell until the editor is resumed.
     Suspend,
+    /// Runs Lua code.
+    Lua(String),
+    /// Calls a Lua function registered under an id, with one argument.
+    LuaCall {
+        id: u64,
+        argument: String,
+    },
     /// Looks for open files changed on disk: reloads those without unsaved
     /// edits and reports the rest.
     CheckFiles,
@@ -405,13 +412,7 @@ impl Layers {
                 let line = if holds_commands(&line) || !expand::has_expansions(&line) {
                     line
                 } else {
-                    let state = expand::State {
-                        app,
-                        mode: self.mode,
-                        caret: self.vim.caret(),
-                        root: file_root,
-                    };
-                    match expand::expand(&line, &state) {
+                    match expand::expand(&line, &self.expansion(app, file_root)) {
                         Ok(line) => line,
                         Err(error) => {
                             response.message = Message::Set(error);
@@ -452,6 +453,7 @@ impl Layers {
             | Command::Unhook { .. } => {
                 if let Err(error) = self.configure(command) {
                     response.message = Message::Set(error);
+                    response.failed = true;
                 }
             }
             Command::Pipe(shell) => {
@@ -478,7 +480,10 @@ impl Layers {
                             });
                         }
                     }
-                    Err(error) => response.message = Message::Set(error),
+                    Err(error) => {
+                        response.message = Message::Set(error);
+                        response.failed = true;
+                    }
                 }
             }
             Command::WriteQuit => {
@@ -665,6 +670,13 @@ impl Layers {
             }
             Command::Stop => response.stop = true,
             Command::Suspend => response.suspend = true,
+            Command::Lua(code) => response.lua.push(super::LuaRequest::Chunk {
+                origin: "lua".into(),
+                code,
+            }),
+            Command::LuaCall { id, argument } => {
+                response.lua.push(super::LuaRequest::Call { id, argument })
+            }
             Command::Messages => response.messages = true,
             Command::Echo(text) => response.message = Message::Set(text),
             Command::Highlight {

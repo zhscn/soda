@@ -1,11 +1,13 @@
 # 扩展模型
 
-soda 的扩展沿用 kakoune 的思路：一切可配置、可组合的行为都表达为命令行，配置文件、键位、用户命令、钩子执行的是同一种东西。嵌入脚本语言不是第一步。先把扩展能读写什么定下来，命令语言就已经够用；以后需要脚本语言时，它只是同一组接口之上的另一层绑定。
+soda 的扩展分两层。命令行沿用 kakoune 的形式，配置文件、键位、用户命令、钩子执行的是同一种东西，用来写配置。需要逻辑和数据结构的扩展写成 Lua（Lua 5.4，经 mlua 嵌入），它与命令行共用同一组接口。
+
+kakoune 没有脚本语言，所以要用 `%sh{}` 和 `evaluate-commands` 把 shell 的输出再当命令执行，转义层层叠加，数据只能是字符串。soda 不走这条路：命令语言停在配置所需的规模，不加条件、循环或执行 shell 输出；有逻辑的部分交给 Lua。
 
 ## 分层
 
 ```
-配置文件 / 键位 / 命令行 / 钩子          以后：脚本语言
+配置文件 / 键位 / 命令行 / 钩子          init.lua / lua 命令
               │                               │
               └──────────── 命令行 ────────────┘
                              │  展开 %opt{} %val{} %arg{}
@@ -57,7 +59,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 
 命令行在执行时展开，而不是在定义时展开：
 - `%opt{NAME}`：选项在当前文档的值。
-- `%val{NAME}`：编辑器状态：`file`、`name`、`kind`、`line`、`column`、`selection`、`word`、`root`、`mode`、`column-limit`。
+- `%val{NAME}`：编辑器状态：`file`、`name`、`kind`、`line`、`column`、`selection`、`word`、`root`、`mode`、`column-limit`，钩子中还有 `hook`（事件参数）。
 - `%arg{N}`、`%arg{@}`：用户命令的参数（已有）。
 
 用户命令按 `;` 分成语句，每条语句在轮到它执行时才展开 `%opt` 和 `%val`。这样 `goto 10; shell echo %val{line}` 读到的是跳转后的行号。命令名和不读状态的语句仍在执行前检查，读取状态的语句在展开后检查参数，失败时停止后续语句。展开结果按原文替换，不再拆分；包含空格的值只适合放在最后一个参数位。`map`、`define-command`（以及以后的 `hook`）的参数是延后执行的命令行，其中的展开保留到执行时。
@@ -83,9 +85,30 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 
 按语言的设置通过钩子表达，不另设作用域：`hook open .*\.py set-local indent-width 4`。
 
+## Lua
+
+启动时，配置文件 `init` 之后加载同一目录下的 `init.lua`；该目录下 `lua/` 中的模块可以用 `require` 加载。命令行上 `lua CODE` 执行一段 Lua。Lua 通过全局的 `soda` 表操作编辑器：
+
+| 函数 | 作用 |
+| --- | --- |
+| `soda.command(line)` | 执行一条命令行，与 `:` 相同；返回是否成功和当前消息 |
+| `soda.val(name)` / `soda.option(name)` | 读取 `%val{name}` / `%opt{name}` |
+| `soda.message(text)` | 设置状态消息 |
+| `soda.flag(group, face, sign, lines)` / `soda.unflag([group])` | 行标记，`lines` 是从 1 开始的行号数组；`unflag` 没有标记可去时不报错 |
+| `soda.hook(event, filter, fn)` | 事件发生时以事件参数调用 `fn` |
+| `soda.define_command(name, fn)` | 定义命令，调用时把参数文本整体传给 `fn` |
+| `soda.spawn(argv, fn, [input])` | 在项目根目录后台运行程序（不经过 shell），结束后调用 `fn(code, stdout, stderr)`；`input` 写入标准输入 |
+
+- **执行模型**：Lua 运行在编辑器线程上，同一时间只运行一个请求（一段代码、一次钩子或命令调用、一个进程的回调）。请求运行时 `soda` 的函数直接作用于编辑器。请求中引发的 Lua（例如 `soda.command` 触发的钩子、执行的 `lua` 命令）排队，等当前请求返回后运行。
+- **作用对象**：每个请求在它产生时所在的视图上运行，就像钩子一样。所以 `soda.spawn` 的回调作用于调用 `spawn` 时的文档，即使用户已经切换到别的文档；焦点不因此改变。
+- **错误**：Lua 错误以 `lua: ` 开头显示在消息行并写入 `*messages*`，不影响编辑器继续运行。
+- **钩子和命令**：`soda.hook` 和 `soda.define_command` 保存 Lua 函数本身，在命令表和钩子中表现为 `lua-call ID`。钩子的事件参数也可以在命令行钩子中用 `%val{hook}` 读取。
+
+示例：`lua/git-flags.lua` 在打开和保存时运行 `git diff -U0`，用行标记标出新增、修改和删除的行，约 40 行。
+
 ## 实施顺序
 
 1. **选项**：选项表与作用域、`set`/`set-local`/`unset-local`；把现有写死的值改为选项（纯文本缩进、行号、滚轮行数、鼠标、系统剪贴板）。（已完成）
 2. **展开**：`%opt{}`、`%val{}`，用户命令改为逐条展开。（已完成）
 3. **钩子**：通知、`hook`/`unhook`，配置文件中可用。（已完成）
-4. **脚本语言**（按需）：在同一组命令、展开和通知之上做绑定；候选是 mlua，见对 Steel 的比较。
+4. **脚本语言**：Lua 5.4（mlua），`soda` 表、函数钩子与命令、后台进程。（已完成）

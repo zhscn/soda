@@ -23,6 +23,10 @@ pub const VALUES: &[(&str, &str)] = &[
         "clang-format's ColumnLimit for the file, 0 without one",
     ),
     ("mode", "normal, insert, visual or visual-line"),
+    (
+        "hook",
+        "In a hook, the event's parameter, such as the saved path",
+    ),
 ];
 
 /// Whether a line reads state when it runs.
@@ -36,6 +40,8 @@ pub(super) struct State<'a> {
     /// The Vim caret when it differs from the selection head.
     pub caret: Option<usize>,
     pub root: &'a Path,
+    /// The parameter of the event whose hooks are running.
+    pub hook: Option<&'a str>,
 }
 
 pub(super) fn expand(line: &str, state: &State) -> Result<String, String> {
@@ -76,6 +82,7 @@ fn value(name: &str, state: &State) -> Result<String, String> {
     match name {
         "root" => return Ok(state.root.to_string_lossy().into_owned()),
         "mode" => return Ok(state.mode.name().into()),
+        "hook" => return Ok(state.hook.unwrap_or_default().into()),
         _ if !VALUES.iter().any(|(value, _)| *value == name) => {
             return Err(format!("%val{{{name}}}: unknown value"));
         }

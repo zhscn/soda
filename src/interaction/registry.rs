@@ -125,13 +125,7 @@ fn flag_lines(args: &str) -> Result<Command, String> {
     let (Some(group), Some(face), Some(sign)) = (words.next(), words.next(), words.next()) else {
         return Err("flag-lines needs GROUP FACE SIGN LINES".into());
     };
-    let face = crate::application::Face::parse(face)?
-        .ok_or_else(|| "flags need a face: todo, error or mark1 to mark4".to_owned())?;
-    let mut cells = unicode_segmentation::UnicodeSegmentation::graphemes(sign, true);
-    let sign = match (cells.next(), cells.next()) {
-        (Some(cell), None) if unicode_width::UnicodeWidthStr::width(cell) == 1 => cell.to_owned(),
-        _ => return Err(format!("a sign is one narrow character, not {sign}")),
-    };
+    let flag = crate::application::Flag::new(face, sign)?;
     let mut lines = vec![];
     for word in words {
         let number = |text: &str| {
@@ -154,7 +148,7 @@ fn flag_lines(args: &str) -> Result<Command, String> {
     }
     Ok(Command::FlagLines {
         group: group.to_owned(),
-        flag: crate::application::Flag { face, sign },
+        flag,
         lines,
     })
 }
@@ -261,7 +255,7 @@ fn option(args: &str, local: bool) -> Result<Command, String> {
         value: info.parse(value)?,
     })
 }
-fn hook_event(name: &str) -> Result<&'static str, String> {
+pub(crate) fn hook_event(name: &str) -> Result<&'static str, String> {
     let SlotKind::Choice(events) = EVENT.kind else {
         unreachable!()
     };
@@ -827,6 +821,33 @@ pub static BUILTINS: &[Builtin] = &[
         "stop",
         "Stop the running run, shell command and search",
         Command::Stop
+    ),
+    builtin!(
+        "lua",
+        [slot("CODE", SlotKind::Rest)],
+        "Run Lua code, with the soda table for the editor",
+        |a| Ok(Command::Lua(required(a)?))
+    ),
+    builtin!(
+        "lua-call",
+        [
+            slot("ID", SlotKind::Word),
+            Slot {
+                required: false,
+                ..slot("ARGUMENT", SlotKind::Rest)
+            }
+        ],
+        "Call the Lua function a hook or command registered under ID",
+        |a| {
+            let (id, argument) = split(a);
+            let id = id
+                .parse()
+                .map_err(|_| format!("not a Lua function id: {id}"))?;
+            Ok(Command::LuaCall {
+                id,
+                argument: argument.to_owned(),
+            })
+        }
     ),
     builtin!(
         "suspend",

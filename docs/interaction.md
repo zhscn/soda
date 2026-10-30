@@ -104,7 +104,7 @@ BeginUndoGroup 保存操作开始前的选区，EndUndoGroup 保存结束时的�
 
 用户定义命令的命令体用 `;` 分隔多条命令行，`\;` 表示字面分号。`%arg{1}` 到 `%arg{9}` 替换为按空白拆分的调用参数，`%arg{@}` 替换为完整参数。展开在执行时进行，嵌套用户命令最多展开 16 层，超过时整条命令失败且不执行任何部分；未知命令名和参数错误同样在执行前报告。展开得到的命令依次执行，与 `Response.commands` 一样在第一次失败时停止；某条命令打开交互组件后，后续命令被阻止。Rust 处理函数在轮到它时才读取 Application，返回 `Named` 会被拒绝，避免处理函数之间的递归分发。
 
-`%opt{NAME}` 替换为选项在当前文档的值，`%val{NAME}` 替换为编辑器状态：`file`、`name`、`kind`、`line`、`column`（一起始，制表符按制表位计）、`selection`、`word`、`root`、`mode`、`column-limit`（clang-format 的 `ColumnLimit`，没有时为 0）。它们在语句执行时才展开：`:` 中的一行在执行前展开；用户命令的每条语句在轮到它时展开，所以 `goto 10; shell echo %val{line}` 读到跳转后的行号。读取状态的语句在执行前只检查命令名，参数在展开后检查；展开失败或参数不合法时，这条语句和其后的语句都不执行。命令名本身不能来自展开。`map` 和 `define-command` 的参数是以后才执行的命令行，其中的展开保留原样。展开结果按原文替换，不再拆分。
+`%opt{NAME}` 替换为选项在当前文档的值，`%val{NAME}` 替换为编辑器状态：`file`、`name`、`kind`、`line`、`column`（一起始，制表符按制表位计）、`selection`、`word`、`root`、`mode`、`column-limit`（clang-format 的 `ColumnLimit`，没有时为 0），以及钩子中的 `hook`（事件参数，如保存的路径）。它们在语句执行时才展开：`:` 中的一行在执行前展开；用户命令的每条语句在轮到它时展开，所以 `goto 10; shell echo %val{line}` 读到跳转后的行号。读取状态的语句在执行前只检查命令名，参数在展开后检查；展开失败或参数不合法时，这条语句和其后的语句都不执行。命令名本身不能来自展开。`map` 和 `define-command` 的参数是以后才执行的命令行，其中的展开保留原样。展开结果按原文替换，不再拆分。
 
 ### 键位上下文
 
@@ -156,7 +156,7 @@ Shift 加方向键、Home 和 End 扩展选区，对应 `extend-` 前缀的同�
 
 ### 配置文件
 
-启动时读取 `$XDG_CONFIG_HOME/soda/init`，未设置时读取 `~/.config/soda/init`；文件不存在时不报错。每行是一条命令行，空行和 `#` 开头的行被忽略。配置文件只接受 `map`、`unmap`、`define-command`、`hook`、`unhook`、`set`、`display` 和 `highlight`，打开文件、切换模式等操作不能在启动时执行。错误行被跳过并记录行号，其余行照常生效，第一条错误显示在消息行。配置文件在第一个文档创建之前执行，所以其中的钩子也作用于启动时的文档。`--no-config` 跳过配置文件。
+启动时读取 `$XDG_CONFIG_HOME/soda/init`，未设置时读取 `~/.config/soda/init`；文件不存在时不报错。每行是一条命令行，空行和 `#` 开头的行被忽略。配置文件只接受 `map`、`unmap`、`define-command`、`hook`、`unhook`、`set`、`display` 和 `highlight`，打开文件、切换模式等操作不能在启动时执行。错误行被跳过并记录行号，其余行照常生效，第一条错误显示在消息行。配置文件在第一个文档创建之前执行，所以其中的钩子也作用于启动时的文档。配置文件之后加载同一目录下的 `init.lua`，见[扩展模型](extension.md)中的 Lua 一节。`--no-config` 跳过两者。
 
 ```
 # ~/.config/soda/init
@@ -219,6 +219,8 @@ hook open .*/Makefile set-local expand-tab false
 | `run CMD` | `make` | 后台运行命令，输出流式写入 `*run*` |
 | `stop` | | 停止 `run`、`shell`/`pipe` 和项目搜索 |
 | `suspend` | | 挂起编辑器回到 shell，用 `fg` 继续 |
+| `lua CODE` | | 执行一段 Lua，见[扩展模型](extension.md) |
+| `lua-call ID [ARGUMENT]` | | 调用 Lua 注册的钩子或命令函数（由 `soda.hook`/`soda.define_command` 生成） |
 | `messages` | | 在 `*messages*` 中显示最近的消息 |
 | `highlight FACE PATTERN` / `highlight-local FACE PATTERN` | | 在所有文档 / 当前文档中高亮正则表达式 |
 | `flag-lines GROUP FACE SIGN LINES` / `unflag-lines [GROUP]` | | 在当前文档的行号栏给行打上标记 / 去掉一组或全部标记 |

@@ -16,6 +16,7 @@ use std::{
 };
 
 mod grep;
+mod lua;
 mod process;
 mod run;
 mod shell;
@@ -70,6 +71,13 @@ pub struct Runtime {
     seen: (crate::interaction::EditMode, Option<ViewId>),
     quit: bool,
     suspend: bool,
+    /// A command, or an event it produced, failed since this was cleared.
+    failed: bool,
+    lua: Option<lua::Host>,
+    /// Lua work waiting for the host, which runs one request at a time.
+    /// Each with the view it acts on: where it was asked for.
+    lua_queue: std::collections::VecDeque<(lua::Request, Option<ViewId>)>,
+    lua_running: bool,
     dirty: bool,
 }
 impl Runtime {
@@ -108,6 +116,10 @@ impl Runtime {
             seen: Default::default(),
             quit: false,
             suspend: false,
+            failed: false,
+            lua: None,
+            lua_queue: Default::default(),
+            lua_running: false,
             dirty: true,
         })
     }
@@ -452,7 +464,9 @@ impl Runtime {
                 for line in self.layers.hooks(event, &parameter) {
                     let _ = self.app.dispatch(Event::SetContext(view));
                     let message = std::mem::take(&mut self.message);
+                    self.layers.set_hook(Some(parameter.clone()));
                     self.command_at(Command::Named(line), time);
+                    self.layers.set_hook(None);
                     let _ = self.app.dispatch(Event::SetContext(None));
                     if self.message.is_empty() {
                         self.message = message;
@@ -497,6 +511,7 @@ impl Runtime {
                 self.accept(update, time)
             }
             Err(error) => {
+                self.failed = true;
                 if !matches!(
                     (&operation, &error),
                     (
@@ -710,6 +725,7 @@ impl Runtime {
             }
         }
         if response.failed {
+            self.failed = true;
             return false;
         }
         for command in response.commands {
@@ -731,6 +747,16 @@ impl Runtime {
         }
         self.quit |= response.quit;
         self.suspend |= response.suspend;
+        if !response.lua.is_empty() {
+            let view = self.app.active_view();
+            self.lua_queue.extend(
+                response
+                    .lua
+                    .into_iter()
+                    .map(|request| (lua::Request::from(request), view)),
+            );
+            self.run_lua();
+        }
         for input in response.replay.into_iter().rev() {
             self.replay.push_front(input);
         }
@@ -801,6 +827,7 @@ impl Runtime {
         }
     }
     fn interaction_failed(&mut self, error: EditError, time: Duration) {
+        self.failed = true;
         if let Ok(response) = self.layers.close(&self.app, time) {
             self.respond(response, time);
         }
@@ -809,6 +836,7 @@ impl Runtime {
     }
     /// Bounded completion reduction prevents workers from monopolizing input.
     pub fn poll(&mut self) {
+        self.poll_lua();
         for _ in 0..8 {
             match self.files.poll() {
                 Ok(Some(FileCompletion::Open(completion))) => {

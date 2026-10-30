@@ -123,12 +123,23 @@ pub struct Response {
     /// Input to route again, after the rest of the response, for `.` and
     /// macros.
     pub replay: Vec<UserInput>,
+    /// Lua to run once the rest of the response is done.
+    pub lua: Vec<LuaRequest>,
     pub quit: bool,
     /// Give the terminal back to the shell, as Ctrl-Z in a shell job.
     pub suspend: bool,
     pub redraw: bool,
     /// A named command failed; the statements queued after it are dropped.
     pub failed: bool,
+}
+
+/// Work for the Lua host, which the runtime owns.
+#[derive(Clone, Debug, PartialEq)]
+pub enum LuaRequest {
+    /// Code to run, named by where it came from for error messages.
+    Chunk { origin: String, code: String },
+    /// A function registered by `soda.hook` or `soda.define_command`.
+    Call { id: u64, argument: String },
 }
 
 /// Owns editing input state and one modal layer. Read-only access keeps transitions inside
@@ -158,6 +169,8 @@ pub struct Layers {
     picker_rows: usize,
     /// A Vim command failed since this was last taken; replays stop.
     failed: bool,
+    /// The parameter of the event whose hooks are running, `%val{hook}`.
+    hook: Option<String>,
 }
 impl Layers {
     pub fn bind(
@@ -204,6 +217,41 @@ impl Layers {
     /// Whether a Vim command failed since `clear_failed`.
     pub fn failed(&self) -> bool {
         self.failed
+    }
+    /// Adds a hook by event name, as the `hook` command does.
+    pub fn add_hook(&mut self, event: &str, filter: &str, command: String) -> Result<(), String> {
+        let event = registry::hook_event(event)?;
+        self.configure(Command::Hook {
+            event,
+            filter: filter.to_owned(),
+            command,
+        })
+    }
+    /// Sets what `%val{hook}` expands to while a hook runs.
+    pub fn set_hook(&mut self, parameter: Option<String>) {
+        self.hook = parameter;
+    }
+    /// Expands `%opt{}` and `%val{}` as a command line running now would.
+    pub fn expand(
+        &self,
+        text: &str,
+        app: &crate::application::Application,
+        file_root: &std::path::Path,
+    ) -> Result<String, String> {
+        expand::expand(text, &self.expansion(app, file_root))
+    }
+    fn expansion<'a>(
+        &'a self,
+        app: &'a crate::application::Application,
+        file_root: &'a std::path::Path,
+    ) -> expand::State<'a> {
+        expand::State {
+            app,
+            mode: self.mode,
+            caret: self.vim.caret(),
+            root: file_root,
+            hook: self.hook.as_deref(),
+        }
     }
     pub fn clear_failed(&mut self) {
         self.failed = false;
