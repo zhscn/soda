@@ -377,6 +377,22 @@ fn saving_through_symlink_preserves_target_permissions_and_link() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn new_files_get_the_permissions_of_the_umask() {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = |path: &std::path::Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+    let directory = tempdir().unwrap();
+    // What any other program creating a file here gets.
+    let control = directory.path().join("control");
+    fs::write(&control, "").unwrap();
+    let path = directory.path().join("new.txt");
+    let mut workspace = Workspace::default();
+    let id = workspace.new_document(soda::editor::Language::PlainText);
+    workspace.save(id, Some(&path)).unwrap();
+    assert_eq!(mode(&path), mode(&control));
+}
+
 #[test]
 fn preparing_save_seals_history_group_at_the_saved_snapshot() {
     use soda::core::{Change, Transaction};

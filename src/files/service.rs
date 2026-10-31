@@ -225,7 +225,16 @@ impl FileService {
         if !self.check(path, request.expected.as_ref())? {
             return Err(FileError::Conflict(path.clone()));
         }
-        let mut temporary = tempfile::NamedTempFile::new_in(path.parent().unwrap())
+        let mut builder = tempfile::Builder::new();
+        // A new file is created as any program creates one, for the umask to
+        // limit, rather than private as temporary files are.
+        #[cfg(unix)]
+        if request.expected.is_none() {
+            use std::os::unix::fs::PermissionsExt;
+            builder.permissions(fs::Permissions::from_mode(0o666));
+        }
+        let mut temporary = builder
+            .tempfile_in(path.parent().unwrap())
             .map_err(|e| io_error(path, e))?;
         if request.expected.is_some() {
             let permissions = fs::metadata(path)
