@@ -31,6 +31,7 @@ mod routing;
 pub use routing::{Key, KeyStroke, UserInput, key_notation};
 mod search;
 pub use search::{SearchResults, SearchSession};
+mod jumps;
 mod keymap;
 pub use keymap::{BindingError, Context, Keymap, LineEdit};
 mod registry;
@@ -156,6 +157,7 @@ pub struct Layers {
     sequence: keymap::Sequence,
     keymap: Keymap,
     vim: vim::State,
+    jumps: jumps::Jumps,
     registry: Registry,
     hooks: hooks::Hooks,
     /// Recently used files, newest first, for `recent`.
@@ -381,6 +383,8 @@ impl Layers {
             }
         }
         let confirm = matches!(input, Input::Confirm);
+        let searching = matches!(layer, Layer::Search { .. });
+        let labels = matches!(layer, Layer::Labels(_));
         let transition = layer.handle(input, app, time)?;
         if confirm
             && matches!(transition, Transition::Closed(_))
@@ -388,9 +392,14 @@ impl Layers {
         {
             self.history[kind].record(&text);
         }
-        Ok(self
-            .transition(transition)
-            .map_or(InputResult::Blocked, InputResult::Handled))
+        let closed = matches!(transition, Transition::Closed(_));
+        let result = self.transition(transition);
+        if closed && labels {
+            self.jumps.expect();
+        } else if closed && searching && confirm {
+            self.jumps.searched(app);
+        }
+        Ok(result.map_or(InputResult::Blocked, InputResult::Handled))
     }
     /// Recently used files, newest first.
     pub fn set_recent_files(&mut self, files: Vec<std::path::PathBuf>) {
@@ -418,6 +427,8 @@ impl Layers {
         time: Duration,
     ) -> Result<Response, EditError> {
         self.vim.marks.observe(update);
+        let searching = matches!(self.active, Some(Layer::Search { .. }));
+        self.jumps.observe(app, update, searching);
         let group_end = if update.active_changed {
             self.end_insert_group(app, time)
         } else {

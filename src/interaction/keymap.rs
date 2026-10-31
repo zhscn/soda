@@ -306,6 +306,10 @@ const NORMAL: &[(&str, &str)] = &[
     ("<c-w>W", "window-previous"),
     ("<ret>", "jump"),
     ("]q", "next-result"),
+    ("<c-o>", "jump-back"),
+    ("<c-i>", "jump-forward"),
+    // Terminals without the kitty protocol send Tab for Ctrl-I.
+    ("<tab>", "jump-forward"),
     ("[q", "previous-result"),
     ("<c-c>", "stop"),
     ("<c-z>", "suspend"),

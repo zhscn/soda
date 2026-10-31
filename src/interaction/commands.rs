@@ -81,6 +81,9 @@ pub enum Command {
     /// Opens the location on the caret line, or moves to the next line's
     /// first non-blank as Vim's Enter does.
     Jump,
+    /// Goes back to where the caret jumped from, or forward again.
+    JumpBack,
+    JumpForward,
     /// Opens the next or previous location in the latest results: search
     /// matches or `run` output.
     ResultStep {
@@ -337,7 +340,27 @@ impl Layers {
             ..Response::default()
         };
         let opening_path = matches!(command, Command::OpenPath(_));
+        self.jumps.clear_pending();
+        use super::vim::{Motion, VimCommand};
+        match &command {
+            Command::Vim(
+                VimCommand::Move(Motion::Top | Motion::Bottom | Motion::MatchPair, _)
+                | VimCommand::RepeatSearch { .. }
+                | VimCommand::SearchWord { .. }
+                | VimCommand::JumpMark { .. },
+            ) => self.jumps.expect(),
+            Command::ResultStep { .. } => self.jumps.expect_result(),
+            _ => {}
+        }
         match command {
+            Command::JumpBack => match self.jumps.back(app) {
+                Some(place) => go(app, place, time, &mut response),
+                None => response.message = Message::Set("At the oldest jump".into()),
+            },
+            Command::JumpForward => match self.jumps.forward() {
+                Some(place) => go(app, place, time, &mut response),
+                None => response.message = Message::Set("At the newest jump".into()),
+            },
             Command::SetMode(mode) => {
                 if matches!(mode, super::EditMode::Visual | super::EditMode::VisualLine) {
                     if self.mode == mode {
@@ -667,8 +690,10 @@ impl Layers {
                 if document.map(|view| view.document_id) == app.workspace().scratch(&self.results) {
                     self.results_fresh = false;
                 }
+                self.jumps.expect_result();
                 if !super::grep::jump(app, file_root, time, &mut response) {
-                    use super::vim::{Motion, VimCommand};
+                    self.jumps.clear_pending();
+                    self.jumps.end_walk();
                     response.commands.extend([
                         Command::Vim(VimCommand::Move(Motion::Down, 1)),
                         Command::Vim(VimCommand::Move(Motion::First, 1)),
@@ -932,6 +957,7 @@ impl Layers {
     fn set_results(&mut self, name: String) {
         self.results = name;
         self.results_fresh = true;
+        self.jumps.end_walk();
     }
     /// Closes or reloads a document that needs no decision.
     fn leave(&self, document: DocumentId, reload: bool, app: &Application) -> Response {
@@ -1040,6 +1066,31 @@ impl Layers {
 
 /// Shows a document in the active view's place: focuses a view of it, or
 /// adds one.
+/// Takes the caret to a place from the jump history: focusing a view of its
+/// document, one on screen if any, in the window that holds it.
+fn go(
+    app: &Application,
+    place: crate::editor::DocumentPosition,
+    time: Duration,
+    response: &mut Response,
+) {
+    let view = app
+        .views()
+        .filter(|view| view.document_id == place.document_id)
+        .max_by_key(|view| app.windows().contains(view.id));
+    let Some(view) = view else {
+        response.events.push(Event::AddView(place.document_id));
+        return;
+    };
+    response.events.extend([
+        Event::Focus(view.id),
+        Event::Edit {
+            view: view.id,
+            command: EditCommand::SetSelection(crate::core::Selection::caret(place.offset.0)),
+            time,
+        },
+    ]);
+}
 pub(super) fn show(app: &Application, document: crate::editor::DocumentId) -> Event {
     let active = app
         .active_view()

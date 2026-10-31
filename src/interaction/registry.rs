@@ -711,6 +711,16 @@ pub static BUILTINS: &[Builtin] = &[
         Command::Jump
     ),
     builtin!(
+        "jump-back",
+        "Go back to where the caret jumped from",
+        Command::JumpBack
+    ),
+    builtin!(
+        "jump-forward",
+        "Go forward again after jump-back",
+        Command::JumpForward
+    ),
+    builtin!(
         "next-result" | "cn" | "cnext",
         "Open the next location in the latest search or run output",
         Command::ResultStep { backward: false }
