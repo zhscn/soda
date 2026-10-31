@@ -16,7 +16,10 @@ use crossterm::{
     },
     execute,
     style::{Attribute, SetAttribute},
-    terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{
+        self, BeginSynchronizedUpdate, EndSynchronizedUpdate, EnterAlternateScreen,
+        LeaveAlternateScreen,
+    },
 };
 use std::{
     io::{self, IsTerminal},
@@ -96,6 +99,12 @@ impl Terminal {
 }
 /// Draws one frame. The cursor shape follows the edit mode; ratatui places
 /// the cursor and writes only changed cells.
+///
+/// ratatui writes the changed cells with the cursor still shown and moves it
+/// back afterwards, so the terminal can show the cursor passing through the
+/// middle of the screen. The frame goes out as one synchronized update, and
+/// the cursor stays hidden while cells are written for terminals that do not
+/// support synchronized updates.
 fn draw(
     terminal: &mut ratatui::DefaultTerminal,
     runtime: &Runtime,
@@ -109,8 +118,11 @@ fn draw(
     } else {
         SetCursorStyle::SteadyBar
     };
-    execute!(io::stdout(), shape)?;
-    terminal.draw(|f| view::render(f, runtime, theme, areas, &texts))?;
+    execute!(io::stdout(), BeginSynchronizedUpdate, shape)?;
+    terminal.hide_cursor()?;
+    let drawn = terminal.draw(|f| view::render(f, runtime, theme, areas, &texts));
+    execute!(io::stdout(), EndSynchronizedUpdate)?;
+    drawn?;
     Ok(())
 }
 /// The text of every window; only the active one shows the Vim caret.
