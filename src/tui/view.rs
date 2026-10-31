@@ -792,9 +792,12 @@ mod tests {
         runtime.set_page_rows(areas.text(runtime).height.into());
         super::super::follow(runtime, &areas).unwrap();
         let areas = Areas::new(runtime, width, height);
-        let texts =
-            super::super::frames(runtime, &mut crate::syntax::Highlighter::default(), &areas)
-                .unwrap();
+        let texts = super::super::frames(
+            runtime,
+            &mut crate::tui::highlight::Highlighter::default(),
+            &areas,
+        )
+        .unwrap();
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         terminal
             .draw(|f| render(f, runtime, &theme, &areas, &texts))

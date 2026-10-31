@@ -1,10 +1,11 @@
+use super::highlight::Highlighter;
 use crate::{
     application::{Application, ViewId},
     core::{
         ByteOffset, LogicalColumn, column_width, logical_column_at, offset_at_logical_column,
         step_grapheme,
     },
-    syntax::{Category, Highlighter},
+    syntax::Category,
 };
 use std::num::NonZeroUsize;
 use unicode_segmentation::UnicodeSegmentation;
@@ -628,10 +629,7 @@ pub(super) fn frame(
         cursor,
         caret: (line, column),
         line_count: lines,
-        language: highlighter
-            .language(view.document_id)
-            .unwrap_or("text")
-            .to_owned(),
+        language: document.language().profile().name.clone(),
         ruler,
     }))
 }

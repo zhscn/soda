@@ -189,6 +189,30 @@ fn write_failure_releases_reservation_and_preserves_untitled_document() {
 }
 
 #[test]
+fn saving_under_another_extension_changes_the_language() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("a.txt");
+    fs::write(&path, "x\n").unwrap();
+    let mut workspace = Workspace::default();
+    let id = workspace.open(&path).unwrap();
+    let name = |workspace: &Workspace| {
+        let editor = workspace.editor(id).unwrap();
+        editor.model().language().profile().name.clone()
+    };
+    assert_eq!(name(&workspace), "text");
+    let update = workspace
+        .save(id, Some(&directory.path().join("a.rs")))
+        .unwrap();
+    assert!(update.language_changed);
+    assert_eq!(name(&workspace), "Rust");
+    assert!(matches!(
+        workspace.editor(id).unwrap().model().language(),
+        Language::TextMate(_)
+    ));
+    // Saving in place changes nothing.
+    assert!(!workspace.save(id, None).unwrap().language_changed);
+}
+#[test]
 fn cpp_configuration_is_loaded_reloaded_and_changed_on_save_as() {
     let directory = tempdir().unwrap();
     let first = directory.path().join("first");

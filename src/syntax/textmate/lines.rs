@@ -131,6 +131,51 @@ impl Lines {
             .map(|line| self.runs.get(line).cloned().unwrap_or_default())
             .collect()
     }
+    /// See `Tokens::in_literal`. A position between two characters has no
+    /// category of its own, and an end of line closes some literals but not
+    /// others, so a probe character is scanned in the position's place: it
+    /// falls outside a string that just ended and inside one still open.
+    /// Literals that grammars match whole need their end, so the runs of
+    /// the line itself count too. A line not reached within `budget` counts
+    /// as code; what was scanned stays for the next request.
+    pub fn in_literal(
+        &mut self,
+        registry: &mut Registry,
+        snapshot: &Snapshot,
+        position: usize,
+        budget: Option<std::time::Duration>,
+    ) -> bool {
+        let Some(line) = snapshot.line_of(position) else {
+            return false;
+        };
+        self.highlights_within(registry, snapshot, line..line + 1, budget);
+        let (Some(runs), Some(start), Some(text), Some(line_start)) = (
+            self.runs.get(line),
+            self.starts.get(line),
+            snapshot.line(line),
+            snapshot.line_start(line),
+        ) else {
+            return false;
+        };
+        let column = position - line_start;
+        let literal = |category: &Category| {
+            matches!(
+                category,
+                Category::Comment | Category::String | Category::Escape
+            )
+        };
+        if runs.iter().any(|(range, category)| {
+            literal(category) && range.start < column && column < range.end
+        }) {
+            return true;
+        }
+        let probe = format!("{}x", &text[..column.min(text.len())]);
+        let mut state = start.clone();
+        registry
+            .scan_line(self.grammar, &probe, &mut state)
+            .iter()
+            .any(|(range, category)| literal(category) && range.contains(&column))
+    }
     pub fn complete(&self, lines: &Range<usize>, snapshot: &Snapshot) -> bool {
         self.runs.len() >= lines.end.min(snapshot.line_count())
     }

@@ -118,7 +118,7 @@ fn token_category(kind: K, text: &str) -> Option<Category> {
     })
 }
 
-pub(super) struct Lexed {
+pub(crate) struct Lexed {
     source: Arc<str>,
     tokens: Vec<Token>,
 }

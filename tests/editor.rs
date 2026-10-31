@@ -334,3 +334,61 @@ fn explicit_edit_groups_preserve_original_and_final_carets_across_failed_edits()
     assert_eq!(editor.state().snapshot().text(), "ab");
     assert_eq!(editor.state().selection(), Selection::caret(1));
 }
+
+mod languages {
+    use soda::{
+        core::Selection,
+        editor::{Command, Editor, Language},
+        language::{TabPolicy, WhitespacePolicy, catalog},
+    };
+    use std::num::NonZeroUsize;
+
+    fn language(path: &str) -> Language {
+        Language::TextMate(catalog().detect(path.as_ref()).unwrap().clone())
+    }
+    fn typed(language: Language, text: &str, at: usize, ch: char) -> String {
+        let mut editor = Editor::new(text, language);
+        editor.execute(Command::SetAutoPairs(true)).unwrap();
+        editor
+            .execute(Command::SetSelection(Selection::caret(at)))
+            .unwrap();
+        editor.execute(Command::TypeChar(ch)).unwrap();
+        editor.model().document().snapshot().text().to_string()
+    }
+    #[test]
+    fn quotes_pair_as_each_language_says() {
+        assert_eq!(typed(language("a.rs"), "", 0, '"'), "\"\"");
+        // In Rust a single quote also starts a lifetime.
+        assert_eq!(typed(language("a.rs"), "", 0, '\''), "'");
+        assert_eq!(typed(language("a.py"), "", 0, '\''), "''");
+        assert_eq!(typed(Language::PlainText, "", 0, '"'), "\"");
+    }
+    #[test]
+    fn nothing_pairs_inside_comments_and_strings_of_textmate_languages() {
+        assert_eq!(typed(language("a.rs"), "", 0, '('), "()");
+        assert_eq!(typed(language("a.rs"), "// a", 4, '('), "// a(");
+        assert_eq!(typed(language("a.rs"), "\"a\"", 2, '('), "\"a(\"");
+        assert_eq!(typed(language("a.py"), "# a", 3, '['), "# a[");
+    }
+    #[test]
+    fn whitespace_from_options_survives_a_change_of_language() {
+        let policy = WhitespacePolicy {
+            indent_width: 7,
+            tab_width: NonZeroUsize::new(7).unwrap(),
+            tabs: TabPolicy::Never,
+        };
+        let mut editor = Editor::new("", Language::PlainText);
+        editor
+            .execute(Command::SetWhitespace(policy.clone()))
+            .unwrap();
+        let update = editor
+            .execute(Command::SetLanguage(language("a.rs")))
+            .unwrap();
+        assert!(update.language_changed);
+        assert_eq!(editor.model().document().whitespace(), policy);
+        editor
+            .execute(Command::SetLanguage(Language::PlainText))
+            .unwrap();
+        assert_eq!(editor.model().document().whitespace(), policy);
+    }
+}

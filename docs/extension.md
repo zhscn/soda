@@ -39,7 +39,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `indent-width` | 0–16 | 4 | 每级缩进的列数 |
 | `tab-width` | 1–16 | 4 | 制表位间隔 |
 | `expand-tab` | true/false | true | 用空格缩进；false 时缩进用制表符 |
-| `auto-pairs` | true/false | true | 成对输入括号（C++ 中还有引号），退格删除空的一对 |
+| `auto-pairs` | true/false | true | 成对输入括号和语言配置列出的引号，退格删除空的一对 |
 | `line-numbers` | absolute/relative/off | absolute | 行号栏；relative 时光标行显示自身行号，其他行显示距离 |
 | `wrap` | true/false | false | 长行折到下一屏幕行，能在空格后断开时在空格后断开 |
 | `show-whitespace` | true/false | false | 用 `»` 标出制表符，用 `·` 标出行尾空格 |
@@ -122,7 +122,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `buf:set_selection(anchor, head?)` | 设置选区；省略 head 时为 caret |
 | `buf:edit(changes, revision?)` | 应用编辑，返回新的修订号 |
 | `buf:indent(n)` | 语言给第 n 行的缩进字符串；语言不给出时为 nil |
-| `buf:line_comment()` | 该语言的行注释标记，来自语言配置；C++ 为 `//`；没有行注释时为 nil |
+| `buf:line_comment()` | 该语言的行注释标记，来自语言档案；没有行注释时为 nil |
 | `buf:offset(position)`、`buf:point(offset)` | 位置与字节偏移互相转换 |
 
 - **坐标**：位置是 `{line, column}`，都从 1 开始，列按字节计，与 `string.sub` 一致。范围由两个位置组成，不包含第二个位置。行尾文本之后的列合法，`{line_count() + 1, 1}` 在文本以换行结束时也合法。字节偏移同样从 1 开始。位置严格校验：超出文档或落在字符内部都会报错，不做 clipping。

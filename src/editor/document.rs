@@ -94,6 +94,10 @@ impl Document {
     pub fn language(&self) -> Language {
         self.language.description()
     }
+    /// The document's TextMate results, in languages that have them.
+    pub fn tokens(&self) -> Option<&crate::syntax::Tokens> {
+        self.language.tokens()
+    }
     pub fn whitespace(&self) -> crate::language::WhitespacePolicy {
         self.language.whitespace()
     }

@@ -285,14 +285,9 @@ pub(super) fn register<'scope, 'r: 'scope>(
         "buffer_line_comment",
         scope.create_function(|_, number: u64| {
             let runtime = runtime.borrow();
-            let workspace = runtime.app.workspace();
             let document = document(&runtime, number)?;
-            let editor = workspace.editor(document).unwrap();
-            if matches!(editor.model().language(), crate::editor::Language::Cpp(_)) {
-                return Ok(Some("//".to_owned()));
-            }
-            let path = workspace.file(document).and_then(|file| file.path());
-            Ok(path.and_then(crate::syntax::line_comment))
+            let editor = runtime.app.workspace().editor(document).unwrap();
+            Ok(editor.model().language().profile().line_comment.clone())
         })?,
     )?;
     soda.set(

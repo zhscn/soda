@@ -166,7 +166,7 @@ impl Workspace {
     /// Registers an empty, unsaved document bound to a path not on disk yet.
     fn create_named(&mut self, path: PathBuf) -> Result<DocumentId, FileError> {
         let configuration = self.service.configuration(&path)?;
-        let editor = Editor::new("", FileService::language(&configuration));
+        let editor = Editor::new("", FileService::language(&path, &configuration));
         Ok(self.insert(
             editor,
             FileState {
@@ -219,7 +219,7 @@ impl Workspace {
         {
             return Err(FileError::PathInUse(loaded.path));
         }
-        let language = FileService::language(&loaded.configuration);
+        let language = FileService::language(&loaded.path, &loaded.configuration);
         let document = self.editors.get(&id).unwrap().model().document();
         if document.language() != language {
             document
@@ -325,7 +325,10 @@ impl Workspace {
         self.insert_loaded(loaded)
     }
     fn insert_loaded(&mut self, loaded: LoadedFile) -> Result<DocumentId, FileError> {
-        let editor = Editor::new(loaded.text, FileService::language(&loaded.configuration));
+        let editor = Editor::new(
+            loaded.text,
+            FileService::language(&loaded.path, &loaded.configuration),
+        );
         let snapshot = editor.model().document().snapshot().for_history();
         let file = FileState {
             path: Some(loaded.path),
@@ -404,7 +407,7 @@ impl Workspace {
         } else {
             self.service.configuration(&path)?
         };
-        if !same_path && document.language() != FileService::language(&configuration) {
+        if !same_path && document.language() != FileService::language(&path, &configuration) {
             document
                 .config_generation()
                 .checked_add(1)
@@ -475,6 +478,7 @@ impl Workspace {
         {
             editor
                 .execute(Command::SetLanguage(FileService::language(
+                    &plan.path,
                     &plan.configuration,
                 )))?
                 .language_changed
@@ -587,7 +591,10 @@ impl Workspace {
         let configuration = self.service.configuration(&path)?;
         let editor = self.editors.get_mut(&id).unwrap();
         let changed = editor
-            .execute(Command::SetLanguage(FileService::language(&configuration)))?
+            .execute(Command::SetLanguage(FileService::language(
+                &path,
+                &configuration,
+            )))?
             .language_changed;
         self.files.get_mut(&id).unwrap().configuration = configuration;
         Ok(changed)

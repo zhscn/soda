@@ -33,20 +33,6 @@ fn has(lines: &[Vec<(String, Category)>], text: &str, category: Category) -> boo
 }
 
 #[test]
-fn bundled_languages_are_detected_by_name_and_extension() {
-    let registry = Registry::bundled();
-    let detect = |path: &str| {
-        registry
-            .detect(std::path::Path::new(path))
-            .map(|l| l.id.clone())
-    };
-    assert_eq!(detect("src/main.rs").as_deref(), Some("rust"));
-    assert_eq!(detect("Makefile").as_deref(), Some("makefile"));
-    assert_eq!(detect("a/b.tsx").as_deref(), Some("typescriptreact"));
-    assert_eq!(detect("x.unknown"), None);
-}
-
-#[test]
 fn rust_keywords_strings_comments_and_functions() {
     let lines = fragments(
         "source.rust",
@@ -208,12 +194,13 @@ fn bench_full_and_incremental_highlighting() {
     let path = std::env::var("SODA_BENCH_FILE").unwrap();
     let text = std::fs::read_to_string(&path).unwrap();
     let mut registry = Registry::bundled();
-    let scope = registry
+    let profile = crate::language::catalog()
         .detect(std::path::Path::new(&path))
-        .unwrap()
-        .scope
-        .clone();
-    let grammar = registry.grammar(&scope).unwrap();
+        .unwrap();
+    let crate::language::Analyzer::TextMate { scope } = &profile.analyzer else {
+        panic!("{path} is not in a TextMate language");
+    };
+    let grammar = registry.grammar(scope).unwrap();
     let before = snapshot(&text);
     let count = before.line_count();
     let mut lines = Lines::new(&registry, grammar);
@@ -235,52 +222,76 @@ fn bench_full_and_incremental_highlighting() {
         lines.computed()
     );
 }
-#[test]
-fn line_comments_come_from_language_configurations() {
-    let comment = |name: &str| super::line_comment(std::path::Path::new(name));
-    assert_eq!(comment("a.rs").as_deref(), Some("//"));
-    assert_eq!(comment("a.py").as_deref(), Some("#"));
-    assert_eq!(comment("a.lua").as_deref(), Some("--"));
-    // Written as an object with settings.
-    assert_eq!(comment("Makefile").as_deref(), Some("#"));
-    // Block comments only, and no language at all.
-    assert_eq!(comment("a.md"), None);
-    assert_eq!(comment("a.unknown"), None);
+/// Whether the place marked `|` in `text` is inside a comment or a string.
+fn literal(scope: &str, text: &str) -> bool {
+    let position = text.find('|').unwrap();
+    let text = text.replacen('|', "", 1);
+    super::Tokens::new(scope).in_literal(&snapshot(&text), position)
 }
 #[test]
-fn every_language_configuration_parses() {
-    for language in Registry::bundled().languages() {
-        if let Some(source) = language.configuration {
-            let parsed: Result<serde_json::Value, _> =
-                serde_json::from_str(&super::textmate::plain_json(source));
-            assert!(parsed.is_ok(), "{}: {parsed:?}", language.id);
-        }
-    }
+fn literals_are_told_from_code_between_characters() {
+    let rust = |text| literal("source.rust", text);
+    assert!(rust("let a = \"x|y\";"));
+    assert!(rust("let a = \"x\\n|y\";"));
+    // Finished, or not yet.
+    assert!(!rust("let a = \"x\"|;"));
+    assert!(!rust("let a = \"x\"|"));
+    assert!(rust("let a = \"x|"));
+    assert!(!rust("let a = |\"x\";"));
+    assert!(rust("/* a| b */"));
+    assert!(rust("/* a|"));
+    assert!(!rust("/* a */|"));
+    assert!(rust("/* a\n b| */"));
+    assert!(!rust("/* a\n */ b|"));
+    assert!(rust("x(); // a| b"));
+    assert!(rust("x(); // a|"));
+    assert!(rust(
+        "x(); // a|
+b"
+    ));
+    assert!(!rust("x(); // a\nb|"));
+    assert!(!rust("fn |main() {}"));
+    let python = |text| literal("source.python", text);
+    assert!(python("# a|"));
+    assert!(python("x = 'a|"));
+    assert!(!python("x = 'a'|"));
+    let lua = |text| literal("source.lua", text);
+    assert!(lua("-- a|"));
+    assert!(!lua("local a|"));
 }
 #[test]
-fn results_color_names_numbers_and_matches() {
-    use super::results::runs;
-    use Category::*;
-    let pattern = regex::Regex::new("needle").unwrap();
-    // A file's name, then a row: the number 12 is not a match of 12.
-    assert_eq!(runs("src/a.rs", true, Some(&pattern)), [(0..8, Heading)]);
-    assert_eq!(runs("", true, None), []);
-    assert_eq!(
-        runs("  12:5  a needle, needle", true, Some(&pattern)),
-        [(2..6, Number), (10..16, Match), (18..24, Match)]
-    );
-    let digits = regex::Regex::new("12").unwrap();
-    assert_eq!(runs("  12:5  x", true, Some(&digits)), [(2..6, Number)]);
-    // Compiler output names the location in the line.
-    assert_eq!(
-        runs("src/a.c:3:7: error: x", false, None),
-        [(0..7, Namespace), (8..11, Number)]
-    );
-    assert_eq!(
-        runs("src/a.c:3: note", true, None),
-        [(0..7, Namespace), (8..9, Number)]
-    );
-    // Without rows, plain lines stay plain.
-    assert_eq!(runs("  12:5  x", false, None), []);
-    assert_eq!(runs("make: done", false, None), []);
+fn tokens_share_one_cache_and_follow_the_snapshot() {
+    let tokens = super::Tokens::new("source.rust");
+    let copy = tokens.clone();
+    let before = snapshot("fn a() {}\n");
+    let (runs, complete) = tokens.lines(&before, 0..1, None);
+    assert!(complete && !runs[0].is_empty());
+    // A speculative clone asking about other text leaves no trace.
+    let other = snapshot("// fn a() {}\n");
+    assert!(copy.in_literal(&other, 5));
+    assert!(!tokens.in_literal(&before, 5));
+    let (runs, _) = tokens.lines(&before, 0..1, None);
+    assert_eq!(runs[0][0].1, Category::Keyword);
+}
+#[test]
+fn a_literal_out_of_reach_counts_as_code_until_scanning_gets_there() {
+    use std::time::Duration;
+    let text = format!("{}// a\n", "x\n".repeat(200));
+    let text = snapshot(&text);
+    let position = text.len_bytes() - 2;
+    let mut registry = Registry::bundled();
+    let grammar = registry.grammar("source.rust").unwrap();
+    let mut lines = Lines::new(&registry, grammar);
+    let budget = Some(Duration::ZERO);
+    assert!(!lines.in_literal(&mut registry, &text, position, budget));
+    assert!(lines.in_literal(&mut registry, &text, position, None));
+    // Nothing is left to scan, so no budget is too small now.
+    assert!(lines.in_literal(&mut registry, &text, position, budget));
+}
+#[test]
+fn a_grammar_that_does_not_exist_has_no_tokens() {
+    let tokens = super::Tokens::new("source.nothing");
+    let text = snapshot("x\n");
+    assert_eq!(tokens.lines(&text, 0..1, None), (vec![], true));
+    assert!(!tokens.in_literal(&text, 0));
 }

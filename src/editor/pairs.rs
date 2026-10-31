@@ -35,7 +35,7 @@ pub(super) fn typed(
 ) -> Result<Option<Typed>, EditError> {
     let snapshot = state.snapshot();
     let range = state.selection().range();
-    if quote(ch) && !language.pairs_quotes() {
+    if quote(ch) && !language.pairs_quote(ch) {
         return Ok(None);
     }
     if !range.is_empty() {
@@ -120,7 +120,7 @@ pub(super) fn empty_pair(
     let end = snapshot.line_content_range(line)?.end;
     let open = snapshot.byte_slice(start..position)?.chars().last()?;
     let close = snapshot.byte_slice(position..end)?.chars().next()?;
-    if quote(open) && !language.pairs_quotes() {
+    if quote(open) && !language.pairs_quote(open) {
         return None;
     }
     (closer(open) == Some(close)).then(|| position - open.len_utf8()..position + close.len_utf8())

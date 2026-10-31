@@ -22,13 +22,13 @@ Soda 是以 TUI 交付、以 C++ 交互缩进为核心体验的 Rust 编辑器�
 | `editor` | 文档模型、编辑会话、命令控制器、输入与缩进建议的原子组合 | [编辑命令](commands.md) |
 | `cpp` | 无损词法、容错结构分析、增量重分析、缩进与续行求解 | [交互缩进](indentation.md) |
 | `config` | clang-format 配置解析、预设、目录继承，编译为缩进规则 | [clang-format 配置](clang-format.md) |
-| `language` | 跨语言共享的空白策略与生成 | [交互缩进](indentation.md) |
+| `language` | 语言档案与目录（文件归属的唯一判断）、跨语言共享的空白策略与生成 | [语法高亮与导航](syntax.md)、[交互缩进](indentation.md) |
 | `files` | 文件 I/O、工作区、打开与保存请求、后台 worker | [文件服务](files.md) |
 | `application` | owner-thread 状态归约：视图、窗口树、文档、剪贴板与寄存器、文件完成 | [边界契约](contracts.md) |
 | `interaction` | 键位、命令表、Vim 语法、输入框、picker、搜索替换等会话 | [交互层](interaction.md)、[扩展模型](extension.md) |
 | `options` | 带类型的选项表，全局值与文档覆盖 | [扩展模型](extension.md) |
 | `runtime` | 命令循环：执行响应、观察更新、调度后台任务与外部命令 | [交互层](interaction.md) |
-| `syntax` | 语法高亮：分类、C++ 词法着色、TextMate 引擎与增量行缓存、内置语法 | [语法高亮与导航](syntax.md) |
+| `syntax` | 分类、C++ 词法着色、TextMate 引擎与增量行缓存、内置语法；只依赖 `core` 和 `cpp` | [语法高亮与导航](syntax.md) |
 | `tui` | crossterm 输入规范化、ratatui 绘制、布局与主题、配置文件加载 | [终端界面](ui.md) |
 
 数据单向流动：前端把平台输入交给 Runtime；交互层把按键解析为命令并输出 Application 事件；Application 通过 editor 提交事务；语言服务只读快照并返回建议，修改始终由事务入口统一提交。后台任务读取快照，结果带版本与请求身份回到 owner thread，过期结果被拒绝。

@@ -87,7 +87,7 @@ pub const OPTIONS: &[OptionInfo] = &[
         name: "auto-pairs",
         kind: Kind::Bool,
         default: Value::Bool(true),
-        doc: "Type brackets, and quotes in C++, in pairs; Backspace removes an empty pair",
+        doc: "Type brackets, and the quotes a language lists, in pairs; Backspace removes an empty pair",
     },
     OptionInfo {
         name: "line-numbers",

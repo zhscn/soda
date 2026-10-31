@@ -1,7 +1,10 @@
 use crate::{
     core::{EditError, Snapshot},
     cpp::{CppRules, CppSession},
-    language::{EnterAdvice, IndentAdvice, IndentRequest},
+    language::{
+        Analyzer, EnterAdvice, IndentAdvice, IndentRequest, Profile, WhitespacePolicy, catalog,
+    },
+    syntax::Tokens,
 };
 use std::sync::Arc;
 
@@ -9,7 +12,18 @@ use std::sync::Arc;
 pub enum Language {
     #[default]
     PlainText,
+    /// A language with a TextMate grammar; it has no rules of its own.
+    TextMate(Arc<Profile>),
     Cpp(Arc<CppRules>),
+}
+impl Language {
+    pub fn profile(&self) -> &Profile {
+        match self {
+            Self::PlainText => catalog().plain(),
+            Self::TextMate(profile) => profile,
+            Self::Cpp(_) => catalog().cpp(),
+        }
+    }
 }
 impl From<CppRules> for Language {
     fn from(rules: CppRules) -> Self {
@@ -25,12 +39,17 @@ impl From<&CppRules> for Language {
 #[derive(Clone)]
 enum Session {
     /// Plain text keeps whitespace settings that options choose.
-    PlainText(crate::language::WhitespacePolicy),
+    PlainText(WhitespacePolicy),
+    TextMate {
+        profile: Arc<Profile>,
+        whitespace: WhitespacePolicy,
+        tokens: Tokens,
+    },
     Cpp(CppSession),
 }
 /// Plain text indents with four spaces until options say otherwise.
-pub(crate) fn plain_whitespace() -> crate::language::WhitespacePolicy {
-    crate::language::WhitespacePolicy {
+pub(crate) fn plain_whitespace() -> WhitespacePolicy {
+    WhitespacePolicy {
         indent_width: 4,
         tab_width: std::num::NonZeroUsize::new(4).unwrap(),
         tabs: crate::language::TabPolicy::Never,
@@ -45,6 +64,14 @@ impl LanguageSession {
         Self {
             inner: match language {
                 Language::PlainText => Session::PlainText(plain_whitespace()),
+                Language::TextMate(profile) => Session::TextMate {
+                    tokens: Tokens::new(match &profile.analyzer {
+                        Analyzer::TextMate { scope } => scope,
+                        _ => "",
+                    }),
+                    profile,
+                    whitespace: plain_whitespace(),
+                },
                 Language::Cpp(rules) => Session::Cpp(CppSession::new(rules)),
             },
         }
@@ -52,6 +79,7 @@ impl LanguageSession {
     pub fn description(&self) -> Language {
         match &self.inner {
             Session::PlainText(_) => Language::PlainText,
+            Session::TextMate { profile, .. } => Language::TextMate(profile.clone()),
             Session::Cpp(session) => Language::Cpp(session.rules().clone()),
         }
     }
@@ -59,42 +87,85 @@ impl LanguageSession {
         match (&mut self.inner, language) {
             (Session::Cpp(session), Language::Cpp(rules)) => session.set_rules(rules),
             (Session::PlainText(_), Language::PlainText) => {}
-            (_, language) => *self = Self::new(language),
+            (_, language) => {
+                // What options chose outlives a change between languages
+                // that take them.
+                let chosen = self.chosen_whitespace().cloned();
+                *self = Self::new(language);
+                if let Some(policy) = chosen {
+                    self.set_whitespace(policy);
+                }
+            }
         }
     }
-    /// Sets plain text whitespace; other languages keep their own rules.
-    /// Returns whether anything changed.
-    pub fn set_whitespace(&mut self, policy: crate::language::WhitespacePolicy) -> bool {
+    fn chosen_whitespace(&self) -> Option<&WhitespacePolicy> {
+        match &self.inner {
+            Session::PlainText(whitespace) | Session::TextMate { whitespace, .. } => {
+                Some(whitespace)
+            }
+            Session::Cpp(_) => None,
+        }
+    }
+    /// Sets the whitespace options choose; C++ keeps its own rules. Returns
+    /// whether anything changed.
+    pub fn set_whitespace(&mut self, policy: WhitespacePolicy) -> bool {
         match &mut self.inner {
-            Session::PlainText(current) if *current != policy => {
+            Session::PlainText(current)
+            | Session::TextMate {
+                whitespace: current,
+                ..
+            } if *current != policy => {
                 *current = policy;
                 true
             }
             _ => false,
         }
     }
-    pub fn whitespace(&self) -> crate::language::WhitespacePolicy {
+    pub fn whitespace(&self) -> WhitespacePolicy {
         match &self.inner {
             Session::Cpp(session) => session.rules().whitespace().clone(),
-            Session::PlainText(policy) => policy.clone(),
+            Session::PlainText(policy)
+            | Session::TextMate {
+                whitespace: policy, ..
+            } => policy.clone(),
         }
     }
-    /// Whether quotes are typed in pairs.
-    pub fn pairs_quotes(&self) -> bool {
-        matches!(self.inner, Session::Cpp(_))
+    pub fn profile(&self) -> &Profile {
+        match &self.inner {
+            Session::PlainText(_) => catalog().plain(),
+            Session::TextMate { profile, .. } => profile,
+            Session::Cpp(_) => catalog().cpp(),
+        }
+    }
+    /// The TextMate results of the document, in languages that have them.
+    pub fn tokens(&self) -> Option<&Tokens> {
+        match &self.inner {
+            Session::TextMate { tokens, .. } => Some(tokens),
+            _ => None,
+        }
+    }
+    /// Whether this quote is typed in pairs.
+    pub fn pairs_quote(&self, quote: char) -> bool {
+        self.profile().quotes.contains(&quote)
     }
     /// Whether a position is inside a comment or a string or character
     /// literal, where brackets and quotes are text.
     pub fn in_literal(&mut self, snapshot: &Snapshot, position: usize) -> Result<bool, EditError> {
         match &mut self.inner {
-            Session::PlainText(_) => Ok(false),
             Session::Cpp(session) => session.in_literal(snapshot, position),
+            Session::TextMate { tokens, .. } => {
+                if !snapshot.is_char_boundary(position) {
+                    return Err(EditError::InvalidRange);
+                }
+                Ok(tokens.in_literal(snapshot, position))
+            }
+            Session::PlainText(_) => Ok(false),
         }
     }
     pub fn triggers(&self, ch: char) -> bool {
         match &self.inner {
-            Session::PlainText(_) => false,
             Session::Cpp(session) => session.triggers(ch),
+            _ => false,
         }
     }
     pub fn enter_advice(
@@ -103,8 +174,8 @@ impl LanguageSession {
         position: usize,
     ) -> Result<EnterAdvice, EditError> {
         match &mut self.inner {
-            Session::PlainText(_) => Ok(EnterAdvice::default()),
             Session::Cpp(session) => session.enter_advice(snapshot, position),
+            _ => Ok(EnterAdvice::default()),
         }
     }
     pub fn indent(
@@ -113,8 +184,8 @@ impl LanguageSession {
         request: IndentRequest,
     ) -> Result<IndentAdvice, EditError> {
         match &mut self.inner {
-            Session::PlainText(_) => Ok(IndentAdvice::Unavailable),
             Session::Cpp(session) => session.indent(snapshot, request),
+            _ => Ok(IndentAdvice::Unavailable),
         }
     }
 }

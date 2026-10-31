@@ -1,12 +1,14 @@
 //! Terminal input adapter and renderer. Runtime owns command execution,
 //! interaction state and task scheduling; layout reads immutable application state.
 mod clipboard;
+mod highlight;
 mod input;
 mod layout;
 mod mouse;
+mod results;
 mod theme;
 mod view;
-use crate::{interaction::EditMode, runtime::Runtime, syntax::Highlighter};
+use crate::{interaction::EditMode, runtime::Runtime};
 use crossterm::{
     cursor::{Hide, SetCursorStyle, Show},
     event::{
@@ -21,6 +23,7 @@ use crossterm::{
         LeaveAlternateScreen,
     },
 };
+use highlight::Highlighter;
 use std::{
     io::{self, IsTerminal},
     path::PathBuf,

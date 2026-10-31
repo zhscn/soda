@@ -5,6 +5,7 @@ use super::state::DiskImage;
 use crate::{
     config::{ConfigError, ConfigOptions, ResolvedConfig, resolve_config},
     editor::Language,
+    language::{Analyzer, catalog},
 };
 use std::{
     fmt, fs,
@@ -129,21 +130,26 @@ impl FileService {
         }
     }
     pub(crate) fn configuration(&self, path: &Path) -> Result<Option<ResolvedConfig>, FileError> {
-        let cpp = matches!(
-            path.extension().and_then(|value| value.to_str()),
-            Some("c" | "cc" | "cpp" | "cxx" | "h" | "hh" | "hpp" | "hxx" | "C" | "H")
-        );
+        let cpp = catalog()
+            .detect(path)
+            .is_some_and(|profile| profile.analyzer == Analyzer::Cpp);
         if cpp {
             Ok(Some(resolve_config(path, &self.options)?))
         } else {
             Ok(None)
         }
     }
-    pub(crate) fn language(configuration: &Option<ResolvedConfig>) -> Language {
-        configuration
-            .as_ref()
-            .map(|config| config.config.rules.clone().into())
-            .unwrap_or_default()
+    /// The language of a file, given what `configuration` found for it.
+    pub(crate) fn language(path: &Path, configuration: &Option<ResolvedConfig>) -> Language {
+        if let Some(config) = configuration {
+            return config.config.rules.clone().into();
+        }
+        match catalog().detect(path) {
+            Some(profile) if matches!(profile.analyzer, Analyzer::TextMate { .. }) => {
+                Language::TextMate(profile.clone())
+            }
+            _ => Language::PlainText,
+        }
     }
     pub fn read(&self, path: &Path) -> Result<LoadedFile, FileError> {
         let path = self.resolve_path(path)?;
