@@ -3,6 +3,7 @@
 //! categories, which themes color without knowing any grammar.
 mod bundled;
 mod cpp;
+mod results;
 mod scope;
 mod textmate;
 
@@ -36,6 +37,8 @@ pub enum Category {
     Deleted,
     Changed,
     Invalid,
+    /// What a search found, in its results.
+    Match,
 }
 
 /// Category runs of one line, as byte ranges relative to the line start.
@@ -51,10 +54,13 @@ enum Backend {
     Plain,
     Cpp(cpp::Lexed),
     TextMate(textmate::Lines),
+    /// Whether rows under file names count; see `results_kind`.
+    Results(bool),
 }
 struct Entry {
     path: Option<PathBuf>,
     cpp: bool,
+    results: Option<bool>,
     name: String,
     backend: Backend,
 }
@@ -103,12 +109,19 @@ impl Highlighter {
             .and_then(|file| file.path())
             .map(ToOwned::to_owned);
         let cpp = matches!(editor.model().language(), Language::Cpp(_));
+        let results = app
+            .workspace()
+            .file(document)
+            .and_then(|file| file.scratch())
+            .and_then(crate::interaction::grep::results_kind);
         let stale = self
             .documents
             .get(&document)
-            .is_none_or(|entry| entry.path != path || entry.cpp != cpp);
+            .is_none_or(|entry| entry.path != path || entry.cpp != cpp || entry.results != results);
         if stale {
-            let (name, backend) = if cpp {
+            let (name, backend) = if let Some(grouped) = results {
+                ("text".to_owned(), Backend::Results(grouped))
+            } else if cpp {
                 (
                     "C++".to_owned(),
                     Backend::Cpp(cpp::Lexed::new(snapshot.shared_text())),
@@ -121,6 +134,7 @@ impl Highlighter {
                 Entry {
                     path,
                     cpp,
+                    results,
                     name,
                     backend,
                 },
@@ -131,6 +145,12 @@ impl Highlighter {
         let end = lines.end.min(snapshot.line_count());
         match &mut entry.backend {
             Backend::Plain => vec![],
+            Backend::Results(grouped) => (lines.start.min(end)..end)
+                .map(|line| {
+                    let text = snapshot.line(line).unwrap_or_default();
+                    results::runs(&text, *grouped, app.grep_pattern(document))
+                })
+                .collect(),
             Backend::Cpp(lexed) => {
                 lexed.update(&snapshot.shared_text());
                 (lines.start.min(end)..end)

@@ -122,3 +122,27 @@ fn stepping_starts_at_the_first_result() {
     keys(&mut r, "[q");
     wait(&mut r, |r| caret_line(r) == 0);
 }
+#[test]
+fn grep_groups_results_under_file_names_and_enter_reaches_them() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a b.txt"), "x\n    needle\n").unwrap();
+    std::fs::write(dir.path().join("c.txt"), "needle\n").unwrap();
+    let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.start(None);
+    line(&mut r, "grep needle");
+    wait(&mut r, |r| r.message().starts_with("2 matches"));
+    assert_eq!(
+        scratch(&r, "*grep*"),
+        "a b.txt\n  2:5  needle\n\nc.txt\n  1:1  needle\n"
+    );
+    let document = r.app().workspace().scratch("*grep*");
+    assert_eq!(r.app().options().choice(document, "line-numbers"), "off");
+    // Enter on a file's name opens its first result; a path may hold spaces.
+    keys(&mut r, "<ret>");
+    wait(&mut r, |r| active_name(r).ends_with("a b.txt"));
+    assert_eq!(caret_line(&r), 1);
+    keys(&mut r, "]q");
+    wait(&mut r, |r| active_name(r).ends_with("c.txt"));
+    keys(&mut r, "]q");
+    assert_eq!(r.message(), "At the last result");
+}

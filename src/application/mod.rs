@@ -147,6 +147,11 @@ pub enum Event {
         name: String,
         text: String,
     },
+    /// The matches of the latest project search, shown in its results.
+    GrepPattern {
+        document: DocumentId,
+        pattern: regex::Regex,
+    },
     /// Highlights a pattern in one document, or everywhere. Without a face,
     /// a mark takes the next colour.
     Highlight {
@@ -332,6 +337,7 @@ pub struct Application {
     /// What was edited since each file was loaded or saved.
     touched: tidy::Touched,
     highlights: highlights::Highlights,
+    grep_pattern: Option<(DocumentId, regex::Regex)>,
     flags: flags::Flags,
 }
 impl Application {
@@ -396,6 +402,11 @@ impl Application {
             .editor(document)
             .map(|editor| self.flags.of(editor.model().document()))
             .unwrap_or_default()
+    }
+    /// The pattern of the project search whose results a document holds.
+    pub fn grep_pattern(&self, document: DocumentId) -> Option<&regex::Regex> {
+        let (holder, pattern) = self.grep_pattern.as_ref()?;
+        (*holder == document).then_some(pattern)
     }
     /// The highlights shown in a document, global ones first.
     pub fn highlights(&self, document: DocumentId) -> impl Iterator<Item = &Highlight> {
@@ -697,6 +708,14 @@ impl Application {
             Some(document) => document,
             None => {
                 let document = self.workspace.new_scratch(name);
+                // Grouped results carry the numbers that matter.
+                if crate::interaction::grep::results_kind(name) == Some(true) {
+                    self.options.set(
+                        crate::options::Scope::Document(document),
+                        "line-numbers",
+                        crate::options::Value::Choice("off"),
+                    );
+                }
                 self.apply_options(document, update);
                 document
             }
@@ -1079,6 +1098,10 @@ impl Application {
                 self.accept_file(result.file, None, &mut update);
             }
             Event::SetContext(view) => self.context = view,
+            Event::GrepPattern { document, pattern } => {
+                self.grep_pattern = Some((document, pattern));
+                update.options_changed = true;
+            }
             Event::Highlight {
                 document,
                 face,

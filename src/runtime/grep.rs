@@ -19,11 +19,13 @@ const LINE_LIMIT: usize = 400;
 
 pub struct GrepCompletion {
     pub pattern: String,
+    pub regex: regex::Regex,
     /// Result lines and the match count, or why the search failed.
     pub result: Result<(String, usize, bool), String>,
 }
 struct Running {
     pattern: String,
+    regex: regex::Regex,
     cancel: Arc<AtomicBool>,
     result: Receiver<Result<(String, usize, bool), String>>,
 }
@@ -48,11 +50,13 @@ impl GrepRunner {
         let cancel = Arc::new(AtomicBool::new(false));
         let (sender, result) = mpsc::channel();
         let stop = cancel.clone();
+        let searched = regex.clone();
         std::thread::spawn(move || {
-            let _ = sender.send(search(&request.root, &regex, &stop));
+            let _ = sender.send(search(&request.root, &searched, &stop));
         });
         self.running = Some(Running {
             pattern: request.pattern,
+            regex,
             cancel,
             result,
         });
@@ -76,6 +80,7 @@ impl GrepRunner {
         let running = self.running.take().unwrap();
         Some(GrepCompletion {
             pattern: running.pattern,
+            regex: running.regex,
             result,
         })
     }
@@ -110,29 +115,51 @@ fn search(
             continue;
         }
         let path = entry.path().strip_prefix(root).unwrap_or(entry.path());
+        let mut rows = vec![];
+        let mut full = false;
         for (number, line) in text.lines().enumerate() {
             let Some(found) = regex.find(line) else {
                 continue;
             };
             if count == MATCH_LIMIT {
-                return Ok((out, count, true));
+                full = true;
+                break;
             }
             count += 1;
-            let mut end = line.len().min(LINE_LIMIT);
-            while !line.is_char_boundary(end) {
-                end -= 1;
-            }
-            let _ = writeln!(
-                out,
-                "{}:{}:{}: {}",
-                path.display(),
-                number + 1,
-                found.start() + 1,
-                &line[..end]
-            );
+            rows.push((number + 1, found.start() + 1, shown(line)));
+        }
+        group(&mut out, path, &rows);
+        if full {
+            return Ok((out, count, true));
         }
     }
     Ok((out, count, false))
+}
+/// The text a result shows: without indentation, cut at the limit.
+fn shown(line: &str) -> &str {
+    let line = line.trim_start();
+    let mut end = line.len().min(LINE_LIMIT);
+    while !line.is_char_boundary(end) {
+        end -= 1;
+    }
+    &line[..end]
+}
+/// Writes a file's name and its matches below it, numbers aligned, with an
+/// empty line before every file but the first.
+fn group(out: &mut String, path: &Path, rows: &[(usize, usize, &str)]) {
+    if rows.is_empty() {
+        return;
+    }
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    let _ = writeln!(out, "{}", path.display());
+    let width = |value: usize| value.to_string().len();
+    let lines = rows.iter().map(|row| width(row.0)).max().unwrap_or(1);
+    let columns = rows.iter().map(|row| width(row.1)).max().unwrap_or(1);
+    for (line, column, text) in rows {
+        let _ = writeln!(out, "  {line:>lines$}:{column:<columns$}  {text}");
+    }
 }
 
 #[cfg(test)]
@@ -158,8 +185,21 @@ mod tests {
             search(root.path(), &regex, &AtomicBool::new(false)).unwrap();
         assert_eq!(
             text,
-            "src/a.rs:1:4: fn main() {}\nsrc/a.rs:2:5: let Main = 1;\n"
+            "src/a.rs\n  1:4  fn main() {}\n  2:5  let Main = 1;\n"
         );
         assert_eq!((count, truncated), (2, false));
+    }
+    #[test]
+    fn groups_align_numbers_and_drop_indentation() {
+        let mut out = String::new();
+        group(
+            &mut out,
+            Path::new("a b.rs"),
+            &[(9, 5, "x"), (120, 13, "y")],
+        );
+        group(&mut out, Path::new("c.rs"), &[]);
+        group(&mut out, Path::new("d.rs"), &[(1, 1, "z")]);
+        assert_eq!(out, "a b.rs\n    9:5   x\n  120:13  y\n\nd.rs\n  1:1  z\n");
+        assert_eq!(shown("    x  "), "x  ");
     }
 }

@@ -257,3 +257,30 @@ fn every_language_configuration_parses() {
         }
     }
 }
+#[test]
+fn results_color_names_numbers_and_matches() {
+    use super::results::runs;
+    use Category::*;
+    let pattern = regex::Regex::new("needle").unwrap();
+    // A file's name, then a row: the number 12 is not a match of 12.
+    assert_eq!(runs("src/a.rs", true, Some(&pattern)), [(0..8, Heading)]);
+    assert_eq!(runs("", true, None), []);
+    assert_eq!(
+        runs("  12:5  a needle, needle", true, Some(&pattern)),
+        [(2..6, Number), (10..16, Match), (18..24, Match)]
+    );
+    let digits = regex::Regex::new("12").unwrap();
+    assert_eq!(runs("  12:5  x", true, Some(&digits)), [(2..6, Number)]);
+    // Compiler output names the location in the line.
+    assert_eq!(
+        runs("src/a.c:3:7: error: x", false, None),
+        [(0..7, Namespace), (8..11, Number)]
+    );
+    assert_eq!(
+        runs("src/a.c:3: note", true, None),
+        [(0..7, Namespace), (8..9, Number)]
+    );
+    // Without rows, plain lines stay plain.
+    assert_eq!(runs("  12:5  x", false, None), []);
+    assert_eq!(runs("make: done", false, None), []);
+}

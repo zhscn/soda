@@ -166,6 +166,7 @@ impl Theme {
                     Category::Deleted => fg(p.red),
                     Category::Changed => fg(p.yellow),
                     Category::Invalid => fg(p.red).add_modifier(Modifier::UNDERLINED),
+                    Category::Match => fg(p.red).add_modifier(Modifier::BOLD),
                 })
             },
             key: Style::new().fg(c(p.magenta)).add_modifier(Modifier::BOLD),
@@ -199,7 +200,7 @@ impl Theme {
         self.syntax[CATEGORY_ORDER.iter().position(|c| *c == category).unwrap()]
     }
 }
-const CATEGORIES: usize = 22;
+const CATEGORIES: usize = 23;
 const CATEGORY_ORDER: [Category; CATEGORIES] = [
     Category::Comment,
     Category::String,
@@ -223,6 +224,7 @@ const CATEGORY_ORDER: [Category; CATEGORIES] = [
     Category::Deleted,
     Category::Changed,
     Category::Invalid,
+    Category::Match,
 ];
 
 fn color(rgb: u32, truecolor: bool) -> Color {

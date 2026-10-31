@@ -93,7 +93,7 @@ pub const OPTIONS: &[OptionInfo] = &[
         name: "line-numbers",
         kind: Kind::Choice(&["absolute", "relative", "off"]),
         default: Value::Choice("absolute"),
-        doc: "Line numbers in the gutter: absolute, relative to the caret line, or none",
+        doc: "Line numbers in the gutter: absolute, relative to the caret line, or off",
     },
     OptionInfo {
         name: "wrap",

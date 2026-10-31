@@ -97,7 +97,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `soda.flag(group, face, sign, lines)` / `soda.unflag([group])` | 行标记，`lines` 是从 1 开始的行号数组；`unflag` 没有标记可去时不报错 |
 | `soda.hook(event, filter, fn)` | 事件发生时以事件参数调用 `fn` |
 | `soda.define_command(name, fn)` | 定义命令，调用时把参数文本整体传给 `fn` |
-| `soda.results(kind, lines)` | 把结果行写入 `*kind*` 并设为最近的结果，回车和 `]q`/`[q` 与 `grep`、`run` 的结果相同；`lines` 中不是位置的行留作标题，一个位置都没有时只显示消息 |
+| `soda.results(kind, lines)` | 把结果行写入 `*kind*` 并设为最近的结果，回车和 `]q`/`[q` 与 `grep`、`run` 的结果相同；`lines` 可以是 `路径:行:列:` 行，或文件名行加缩进的 `行:列  文本` 分组行；其他行留作标题，一个位置都没有时只显示消息 |
 | `soda.open(path, [line], [column])` | 打开文件并放置光标，行列从 1 开始，列按字节；打开是异步的，文件内容要在之后的请求里读 |
 | `soda.spawn(argv, fn, [input])` | 在项目根目录后台运行程序（不经过 shell），结束后调用 `fn(code, stdout, stderr)`；`input` 写入标准输入 |
 

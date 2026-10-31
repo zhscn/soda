@@ -663,7 +663,7 @@ impl Layers {
                 if document.map(|view| view.document_id) == app.workspace().scratch(&self.results) {
                     self.results_fresh = false;
                 }
-                if !super::grep::jump(app, file_root, &mut response) {
+                if !super::grep::jump(app, file_root, time, &mut response) {
                     use super::vim::{Motion, VimCommand};
                     response.commands.extend([
                         Command::Vim(VimCommand::Move(Motion::Down, 1)),
@@ -684,10 +684,9 @@ impl Layers {
                 )
             }
             Command::Results { kind, lines } => {
-                if lines
-                    .iter()
-                    .any(|line| super::grep::location(line).is_some())
-                {
+                if lines.iter().any(|line| {
+                    super::grep::location(line).is_some() || super::grep::row(line).is_some()
+                }) {
                     let name = format!("*{kind}*");
                     self.set_results(name.clone());
                     response.events.push(Event::Scratch {

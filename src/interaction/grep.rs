@@ -1,12 +1,13 @@
-//! Results documents: project search writes `*grep*`, one match per line
-//! as `path:line:column: text`, and `run` writes its output to `*run*`,
-//! where compilers report `path:line[:column]: message`. Enter on such a
-//! line, or stepping through the latest results, opens the location.
+//! Results documents: project search writes `*grep*`, a file's name with
+//! its matches indented below as `line:column  text`, and `run` writes its
+//! output to `*run*`, where compilers report `path:line[:column]: message`.
+//! Enter on such a line, or stepping through the latest results, opens the
+//! location.
 use super::{Message, Response};
 use crate::{
     application::{Application, Event, ViewId},
-    core::Selection,
-    editor::Command as Edit,
+    core::{Selection, Snapshot},
+    editor::{Command as Edit, DocumentId},
 };
 use std::{path::Path, time::Duration};
 
@@ -40,6 +41,44 @@ pub fn location(line: &str) -> Option<(&str, usize, usize)> {
     Some((path, number, column))
 }
 
+/// The zero-based line and column of a row under a file's name, indented
+/// as `line:column  text`.
+pub fn row(line: &str) -> Option<(usize, usize)> {
+    let rest = line.strip_prefix(' ')?.trim_start();
+    let (number, rest) = rest.split_once(':')?;
+    let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+    let number = number.parse::<usize>().ok()?.checked_sub(1)?;
+    let column = rest[..end].parse::<usize>().ok()?.checked_sub(1)?;
+    Some((number, column))
+}
+
+/// Whether a scratch document holds results, and if so whether rows under
+/// file names count: compiler output in `*run*` is not grouped.
+pub fn results_kind(name: &str) -> Option<bool> {
+    (name != "*messages*").then_some(name != RUN)
+}
+fn grouped(app: &Application, document: DocumentId) -> bool {
+    app.workspace()
+        .file(document)
+        .and_then(|file| file.scratch())
+        .and_then(results_kind)
+        .unwrap_or(false)
+}
+
+/// The location a line of a results document names, if any.
+fn entry(snapshot: &Snapshot, line: usize, grouped: bool) -> Option<(String, usize, usize)> {
+    let text = snapshot.line(line)?;
+    if grouped && let Some((number, column)) = row(&text) {
+        let heading = (0..line)
+            .rev()
+            .filter_map(|line| snapshot.line(line))
+            .find(|text| !text.is_empty() && !text.starts_with(char::is_whitespace))?;
+        return Some((heading.into_owned(), number, column));
+    }
+    let (path, number, column) = location(&text)?;
+    Some((path.to_owned(), number, column))
+}
+
 /// A results document's view to step through: one on screen if any.
 fn results_view(app: &Application, name: &str) -> Option<ViewId> {
     let document = app.workspace().scratch(name)?;
@@ -49,21 +88,24 @@ fn results_view(app: &Application, name: &str) -> Option<ViewId> {
         .map(|view| view.id)
 }
 
-fn open(file_root: &Path, text: &str, response: &mut Response) -> bool {
-    let Some((path, line, column)) = location(text) else {
-        return false;
-    };
+fn open(file_root: &Path, target: (String, usize, usize), response: &mut Response) {
+    let (path, line, column) = target;
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-    match super::path::resolve_path(file_root, home.as_deref(), Path::new(path)) {
+    match super::path::resolve_path(file_root, home.as_deref(), Path::new(&path)) {
         Ok(path) => response.events.push(Event::OpenAt { path, line, column }),
         Err(error) => response.message = Message::Set(error),
     }
-    true
 }
 
 /// Opens the location on the caret line of the active view. Returns false
-/// when that line names none, so Enter can keep its usual meaning.
-pub(super) fn jump(app: &Application, file_root: &Path, response: &mut Response) -> bool {
+/// when that line names none, so Enter can keep its usual meaning. On a
+/// file's name, it goes to the first result below.
+pub(super) fn jump(
+    app: &Application,
+    file_root: &Path,
+    time: Duration,
+    response: &mut Response,
+) -> bool {
     let Some(view) = app.active_view().and_then(|id| app.view(id)) else {
         return false;
     };
@@ -76,8 +118,21 @@ pub(super) fn jump(app: &Application, file_root: &Path, response: &mut Response)
         .selection()
         .head;
     let line = snapshot.line_of(head).unwrap();
-    let text = snapshot.line(line).unwrap_or_default();
-    open(file_root, &text, response)
+    let grouped = grouped(app, view.document_id);
+    if let Some(target) = entry(snapshot, line, grouped) {
+        open(file_root, target, response);
+        return true;
+    }
+    let Some(target) = grouped.then(|| entry(snapshot, line + 1, true)).flatten() else {
+        return false;
+    };
+    response.events.push(Event::Edit {
+        view: view.id,
+        command: Edit::SetSelection(Selection::caret(snapshot.line_start(line + 1).unwrap())),
+        time,
+    });
+    open(file_root, target, response);
+    true
 }
 
 /// Moves the results caret to the next or previous result line and opens
@@ -106,6 +161,7 @@ pub(super) fn step(
         .head;
     let current = snapshot.line_of(head).unwrap();
     let lines = snapshot.line_count();
+    let grouped = grouped(app, view.document_id);
     let mut line = current;
     let mut stay = fresh && !backward && current == 0;
     loop {
@@ -121,14 +177,13 @@ pub(super) fn step(
         } else {
             break;
         };
-        let text = snapshot.line(line).unwrap_or_default();
-        if location(&text).is_some() {
+        if let Some(target) = entry(snapshot, line, grouped) {
             response.events.push(Event::Edit {
                 view: view.id,
                 command: Edit::SetSelection(Selection::caret(snapshot.line_start(line).unwrap())),
                 time,
             });
-            open(file_root, &text, response);
+            open(file_root, target, response);
             return;
         }
     }
@@ -163,5 +218,14 @@ mod tests {
             Some(("src/a.cpp", 2, 6))
         );
         assert_eq!(super::location("note: see a.cpp:3"), None);
+    }
+    #[test]
+    fn rows_are_indented_lines_and_columns() {
+        assert_eq!(super::row("  12:5   text: 1"), Some((11, 4)));
+        assert_eq!(super::row("  12:5"), Some((11, 4)));
+        assert_eq!(super::row("12:5  text"), None);
+        assert_eq!(super::row("  12:x  text"), None);
+        assert_eq!(super::row("  0:5  text"), None);
+        assert_eq!(super::row("  note: text"), None);
     }
 }

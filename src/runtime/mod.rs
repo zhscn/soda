@@ -921,6 +921,16 @@ impl Runtime {
                     text,
                 });
                 if shown {
+                    if let Some(document) = self
+                        .app
+                        .workspace()
+                        .scratch(crate::interaction::grep::SCRATCH)
+                    {
+                        let _ = self.app.dispatch(Event::GrepPattern {
+                            document,
+                            pattern: completion.regex,
+                        });
+                    }
                     self.message = format!(
                         "{count} matches for {pattern}{}",
                         if truncated { " (stopped there)" } else { "" }
