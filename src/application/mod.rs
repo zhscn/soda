@@ -345,6 +345,18 @@ impl Application {
     pub fn workspace(&self) -> &Workspace {
         &self.workspace
     }
+    /// The indentation the language asks for on a zero-based line.
+    pub fn indentation(
+        &mut self,
+        document: DocumentId,
+        line: usize,
+    ) -> Result<crate::language::IndentAdvice, Error> {
+        let mut editor = self
+            .workspace
+            .editor_mut(document)
+            .ok_or(FileError::UnknownDocument)?;
+        Ok(editor.indentation(line)?)
+    }
     pub fn views(&self) -> impl Iterator<Item = &View> {
         self.views.values()
     }

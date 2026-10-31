@@ -104,7 +104,29 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 - **错误**：Lua 错误以 `lua: ` 开头显示在消息行并写入 `*messages*`，不影响编辑器继续运行。
 - **钩子和命令**：`soda.hook` 和 `soda.define_command` 保存 Lua 函数本身，在命令表和钩子中表现为 `lua-call ID`。钩子的事件参数也可以在命令行钩子中用 `%val{hook}` 读取。
 
-示例：`lua/git-flags.lua` 在打开和保存时运行 `git diff -U0`，用行标记标出新增、修改和删除的行，约 40 行。
+示例：`lua/git-flags.lua` 在打开和保存时运行 `git diff -U0`，用行标记标出新增、修改和删除的行，约 40 行。`lua/clang-format.lua` 用 clang-format 格式化文档或 Visual 选中的行，只替换有变化的行。
+
+### 文档
+
+`soda.buffer()` 返回当前文档的句柄。句柄只记住文档编号，可以保存到以后的请求中使用；文档关闭后，它的方法报错。
+
+| 方法 | 作用 |
+| --- | --- |
+| `buf:text()`、`buf:text(from, to)` | 全文或一段范围的文本 |
+| `buf:line(n)` | 第 n 行的文本，不含换行 |
+| `buf:line_count()` | 行数；最后一个换行之后的空行不算，与 Vim 相同 |
+| `buf:revision()` | 文本修订号，文本每次改变都变化 |
+| `buf:selection()` | 返回 anchor 和 head 两个位置 |
+| `buf:set_selection(anchor, head?)` | 设置选区；省略 head 时为 caret |
+| `buf:edit(changes, revision?)` | 应用编辑，返回新的修订号 |
+| `buf:indent(n)` | 语言给第 n 行的缩进字符串；语言不给出时为 nil |
+| `buf:offset(position)`、`buf:point(offset)` | 位置与字节偏移互相转换 |
+
+- **坐标**：位置是 `{line, column}`，都从 1 开始，列按字节计，与 `string.sub` 一致。范围由两个位置组成，不包含第二个位置。行尾文本之后的列合法，`{line_count() + 1, 1}` 在文本以换行结束时也合法。字节偏移同样从 1 开始。位置严格校验：超出文档或落在字符内部都会报错，不做 clipping。
+- **编辑**：`changes` 是 `{ {from, to, text}, ... }`，所有位置都相对同一份修订，范围不能重叠。传入 `revision` 时，文档已经变化就报错；`soda.spawn` 的回调应该这样做，因为进程运行期间用户可能继续编辑。
+- **撤销**：一次请求对一个文档的全部编辑合并成一个撤销步。钩子是单独的请求，所以它的编辑自成一步，不并入 Insert 模式的输入。
+- **作用视图**：选区属于视图。请求所在的视图显示该文档时用它，否则用屏幕上的视图，再否则用任一视图。
+- **选区与模式**：选区是半开区间，Visual 模式下读到的范围就是选中的文本。按行选中时范围的终点在下一行行首，把选区换算成行号要去掉这一行。Normal 模式只有 caret，设置范围选区后会收缩到范围起点。Visual 模式下设置与之不符的选区、或编辑当前文档，会回到 Normal。
 
 ## 实施顺序
 

@@ -8,6 +8,7 @@
 //! starts in turn, such as a hook of an edit it makes, waits in a queue
 //! until the request returns.
 use super::Runtime;
+mod buffer;
 use crate::interaction::{Command, LuaRequest};
 use mlua::{Function, Lua, Table, Value};
 use std::{
@@ -29,16 +30,34 @@ const FUNCTIONS: &[&str] = &[
     "spawn",
 ];
 const PRELUDE: &str = r#"
-local current, names = ...
+local current, names, methods = ...
+local function lent(name)
+  local implementation = current()
+  if not implementation then
+    error(name .. " is only available while the editor runs Lua", 3)
+  end
+  return implementation
+end
 soda = {}
 for _, name in ipairs(names) do
   soda[name] = function(...)
-    local implementation = current()
-    if not implementation then
-      error("soda." .. name .. " is only available while the editor runs Lua", 2)
-    end
-    return implementation[name](...)
+    return lent("soda." .. name)[name](...)
   end
+end
+local Buffer = { __name = "soda.buffer" }
+Buffer.__index = Buffer
+Buffer.__eq = function(a, b) return a.id == b.id end
+Buffer.__tostring = function(buffer) return "buffer " .. buffer.id end
+for _, name in ipairs(methods) do
+  Buffer[name] = function(self, ...)
+    if getmetatable(self) ~= Buffer then
+      error("buf:" .. name .. " is a method; call it with ':'", 2)
+    end
+    return lent("buf:" .. name)["buffer_" .. name](self.id, ...)
+  end
+end
+function soda.buffer()
+  return setmetatable({ id = lent("soda.buffer").buffer() }, Buffer)
 end
 "#;
 const IMPLEMENTATION: &str = "soda.implementation";
@@ -78,9 +97,11 @@ impl Host {
         lua.set_named_registry_value(CALLBACKS, lua.create_table()?)?;
         let current =
             lua.create_function(|lua, ()| lua.named_registry_value::<Value>(IMPLEMENTATION))?;
-        lua.load(PRELUDE)
-            .set_name("soda prelude")
-            .call::<()>((current, FUNCTIONS))?;
+        lua.load(PRELUDE).set_name("soda prelude").call::<()>((
+            current,
+            FUNCTIONS,
+            buffer::METHODS,
+        ))?;
         Ok(Self {
             lua,
             next: Cell::new(1),
@@ -101,8 +122,10 @@ impl Host {
     fn run(&self, runtime: &mut Runtime, request: Request) -> mlua::Result<()> {
         let lua = &self.lua;
         let runtime = RefCell::new(runtime);
-        lua.scope(|scope| {
+        let edited = buffer::Edited::default();
+        let result = lua.scope(|scope| {
             let soda = lua.create_table()?;
+            buffer::register(scope, &soda, &runtime, &edited)?;
             soda.set(
                 "command",
                 scope.create_function(|_, line: String| {
@@ -230,7 +253,9 @@ impl Host {
             };
             lua.set_named_registry_value(IMPLEMENTATION, Value::Nil)?;
             result
-        })
+        });
+        buffer::squash(runtime.into_inner(), edited.into_inner());
+        result
     }
 }
 fn expand(runtime: &Runtime, text: &str) -> mlua::Result<String> {
