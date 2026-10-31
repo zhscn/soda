@@ -41,6 +41,12 @@ pub enum Category {
 /// Category runs of one line, as byte ranges relative to the line start.
 pub type Runs = Vec<(Range<usize>, Category)>;
 
+/// The marker that starts a line comment in a file of this path. Reads the
+/// bundled manifests, so it is for commands, not for drawing.
+pub fn line_comment(path: &std::path::Path) -> Option<String> {
+    textmate::Registry::bundled().detect(path)?.line_comment()
+}
+
 enum Backend {
     Plain,
     Cpp(cpp::Lexed),

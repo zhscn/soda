@@ -235,3 +235,25 @@ fn bench_full_and_incremental_highlighting() {
         lines.computed()
     );
 }
+#[test]
+fn line_comments_come_from_language_configurations() {
+    let comment = |name: &str| super::line_comment(std::path::Path::new(name));
+    assert_eq!(comment("a.rs").as_deref(), Some("//"));
+    assert_eq!(comment("a.py").as_deref(), Some("#"));
+    assert_eq!(comment("a.lua").as_deref(), Some("--"));
+    // Written as an object with settings.
+    assert_eq!(comment("Makefile").as_deref(), Some("#"));
+    // Block comments only, and no language at all.
+    assert_eq!(comment("a.md"), None);
+    assert_eq!(comment("a.unknown"), None);
+}
+#[test]
+fn every_language_configuration_parses() {
+    for language in Registry::bundled().languages() {
+        if let Some(source) = language.configuration {
+            let parsed: Result<serde_json::Value, _> =
+                serde_json::from_str(&super::textmate::plain_json(source));
+            assert!(parsed.is_ok(), "{}: {parsed:?}", language.id);
+        }
+    }
+}

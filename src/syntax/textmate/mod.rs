@@ -81,6 +81,61 @@ pub(super) struct Language {
     pub scope: String,
     extensions: Vec<String>,
     filenames: Vec<String>,
+    /// The language configuration file's text.
+    pub configuration: Option<&'static str>,
+}
+impl Language {
+    /// The marker that starts a line comment, from the configuration.
+    pub fn line_comment(&self) -> Option<String> {
+        let value: Value = serde_json::from_str(&plain_json(self.configuration?)).ok()?;
+        let comment = value.get("comments")?.get("lineComment")?;
+        // Either the marker, or an object holding it with settings.
+        let marker = comment.as_str().or_else(|| text(comment, "comment"))?;
+        Some(marker.to_owned())
+    }
+}
+
+/// JSON from the JSONC of language configurations: comments and trailing
+/// commas go, strings stay as they are.
+pub(super) fn plain_json(source: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    let mut chars = source.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => {
+                out.push(c);
+                while let Some(c) = chars.next() {
+                    out.push(c);
+                    match c {
+                        '\\' => out.extend(chars.next()),
+                        '"' => break,
+                        _ => {}
+                    }
+                }
+            }
+            '/' if chars.peek() == Some(&'/') => {
+                chars.by_ref().find(|c| *c == '\n');
+            }
+            '/' if chars.peek() == Some(&'*') => {
+                chars.next();
+                let mut last = ' ';
+                for c in chars.by_ref() {
+                    if last == '*' && c == '/' {
+                        break;
+                    }
+                    last = c;
+                }
+            }
+            '}' | ']' => {
+                if out.trim_end().ends_with(',') {
+                    out.truncate(out.trim_end().len() - 1);
+                }
+                out.push(c);
+            }
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 #[derive(Default)]
@@ -172,10 +227,15 @@ impl Registry {
                     scope: scope.to_owned(),
                     extensions: strings(language, "extensions"),
                     filenames: strings(language, "filenames"),
+                    configuration: text(language, "configuration").and_then(file),
                 });
             }
         }
         registry
+    }
+    #[cfg(test)]
+    pub fn languages(&self) -> &[Language] {
+        &self.languages
     }
     /// The language of a file: exact file names first, then the longest
     /// matching extension (extensions may contain dots, as in `.js.map`).

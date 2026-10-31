@@ -104,7 +104,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 - **错误**：Lua 错误以 `lua: ` 开头显示在消息行并写入 `*messages*`，不影响编辑器继续运行。
 - **钩子和命令**：`soda.hook` 和 `soda.define_command` 保存 Lua 函数本身，在命令表和钩子中表现为 `lua-call ID`。钩子的事件参数也可以在命令行钩子中用 `%val{hook}` 读取。
 
-示例：`lua/git-flags.lua` 在打开和保存时运行 `git diff -U0`，用行标记标出新增、修改和删除的行，约 40 行。`lua/clang-format.lua` 用 clang-format 格式化文档或 Visual 选中的行，只替换有变化的行。
+示例：`lua/git-flags.lua` 在打开和保存时运行 `git diff -U0`，用行标记标出新增、修改和删除的行，约 40 行。`lua/clang-format.lua` 用 clang-format 格式化文档或 Visual 选中的行，只替换有变化的行。`lua/comment.lua` 切换行注释，`lua/surround.lua` 在 Visual 选区两侧加上成对的文本。
 
 ### 文档
 
@@ -120,6 +120,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `buf:set_selection(anchor, head?)` | 设置选区；省略 head 时为 caret |
 | `buf:edit(changes, revision?)` | 应用编辑，返回新的修订号 |
 | `buf:indent(n)` | 语言给第 n 行的缩进字符串；语言不给出时为 nil |
+| `buf:line_comment()` | 该语言的行注释标记，来自语言配置；C++ 为 `//`；没有行注释时为 nil |
 | `buf:offset(position)`、`buf:point(offset)` | 位置与字节偏移互相转换 |
 
 - **坐标**：位置是 `{line, column}`，都从 1 开始，列按字节计，与 `string.sub` 一致。范围由两个位置组成，不包含第二个位置。行尾文本之后的列合法，`{line_count() + 1, 1}` 在文本以换行结束时也合法。字节偏移同样从 1 开始。位置严格校验：超出文档或落在字符内部都会报错，不做 clipping。

@@ -437,3 +437,99 @@ fn clang_format_extension_drops_output_when_the_buffer_changed() {
     assert_eq!(text(&r), "xint  a;\n");
     assert!(r.message().contains("dropped"), "{}", r.message());
 }
+/// A runtime with these lines and the example extension loaded.
+fn extension(lines: &str, source: &str) -> Runtime {
+    let mut r = Runtime::new(PathBuf::from("/")).unwrap();
+    r.start(None);
+    r.command(Command::SetMode(EditMode::Insert));
+    r.input(UserInput::Paste(lines.into()));
+    r.command(Command::SetMode(EditMode::Normal));
+    lua(&mut r, source);
+    r
+}
+#[test]
+fn comment_extension_says_when_a_buffer_has_no_marker() {
+    let comment = include_str!("../lua/comment.lua");
+    let mut r = extension("one\n", comment);
+    r.command(Command::Named("comment".into()));
+    assert_eq!(text(&r), "one\n");
+    assert!(r.message().contains("no line comments"), "{}", r.message());
+}
+#[test]
+fn surround_extension_wraps_the_selection_from_a_key() {
+    let surround = include_str!("../lua/surround.lua");
+    let mut r = extension("one two\n", surround);
+    lua(
+        &mut r,
+        r#"
+        soda.command("map visual S( surround (")
+        soda.command('map visual S" surround "')
+        "#,
+    );
+    keys(&mut r, "ggwveS(");
+    assert_eq!(text(&r), "one (two)\n", "{}", r.message());
+    assert_eq!(r.edit_mode(), EditMode::Normal);
+    keys(&mut r, "u");
+    assert_eq!(text(&r), "one two\n");
+    keys(&mut r, "ggveS\"");
+    assert_eq!(text(&r), "\"one\" two\n", "{}", r.message());
+}
+#[test]
+fn surround_extension_takes_any_pair_and_needs_a_selection() {
+    let surround = include_str!("../lua/surround.lua");
+    let mut r = extension("word\n", surround);
+    r.command(Command::Named("surround (".into()));
+    assert!(r.message().contains("select text"), "{}", r.message());
+    keys(&mut r, "ggve");
+    r.command(Command::Named("surround <b> </b>".into()));
+    assert_eq!(text(&r), "<b>word</b>\n", "{}", r.message());
+}
+/// A runtime on a file of `name` holding `lines`, with comments loaded.
+fn commented(dir: &tempfile::TempDir, name: &str, lines: &str) -> Runtime {
+    let path = dir.path().join(name);
+    std::fs::write(&path, lines).unwrap();
+    let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.start(Some(path));
+    for _ in 0..400 {
+        r.poll();
+        if r.app().active_view().is_some() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(text(&r), lines);
+    lua(&mut r, include_str!("../lua/comment.lua"));
+    lua(&mut r, r#"soda.command("map visual gc comment")"#);
+    r
+}
+#[test]
+fn comment_extension_toggles_the_line_of_the_caret() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut r = commented(&dir, "a.py", "x = 1\n    y = 2\n");
+    lua(&mut r, r#"soda.command("map normal gc comment")"#);
+    keys(&mut r, "ggjgc");
+    assert_eq!(text(&r), "x = 1\n    # y = 2\n");
+    r.command(Command::Named("comment".into()));
+    assert_eq!(text(&r), "x = 1\n    y = 2\n");
+}
+#[test]
+fn comment_extension_aligns_markers_and_skips_blank_lines() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = "int f() {\n    int a;\n\n        int b;\n}\n";
+    let mut r = commented(&dir, "a.cpp", source);
+    keys(&mut r, "ggjVjjgc");
+    let on = "int f() {\n    // int a;\n\n    //     int b;\n}\n";
+    assert_eq!(text(&r), on, "{}", r.message());
+    keys(&mut r, "u");
+    assert_eq!(text(&r), source, "one undo step");
+    keys(&mut r, "ggjVjjgc");
+    keys(&mut r, "ggjVjjgc");
+    assert_eq!(text(&r), source, "{}", r.message());
+}
+#[test]
+fn comment_extension_leaves_out_the_line_a_selection_ends_before() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut r = commented(&dir, "a.lua", "a()\nb()\nc()\n");
+    keys(&mut r, "ggjVgc");
+    assert_eq!(text(&r), "a()\n-- b()\nc()\n", "{}", r.message());
+}
