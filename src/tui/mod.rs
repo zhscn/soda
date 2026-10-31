@@ -97,6 +97,56 @@ impl Terminal {
         let _ = terminal::disable_raw_mode();
     }
 }
+/// How often the watch on the terminal looks.
+#[cfg(unix)]
+const HANGUP_CHECK: Duration = Duration::from_millis(100);
+/// Ends the event loop when the terminal goes away, as a hangup signal
+/// would. It has to come from outside the loop: reading a hung-up terminal
+/// returns nothing instead of failing, and crossterm reads again forever,
+/// past its timeout and any signal handler's flag. See crossterm#793.
+#[cfg(unix)]
+fn watch_terminal(ended: std::sync::Arc<std::sync::atomic::AtomicBool>) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    let stdin = io::stdin().as_raw_fd();
+    std::thread::Builder::new()
+        .name("soda-hangup".into())
+        .spawn(move || {
+            while !hung_up(stdin) {
+                std::thread::sleep(HANGUP_CHECK);
+            }
+            ended.store(true, std::sync::atomic::Ordering::Relaxed);
+            release_input(stdin);
+        })?;
+    Ok(())
+}
+#[cfg(unix)]
+fn hung_up(fd: std::os::fd::RawFd) -> bool {
+    let mut poll = libc::pollfd {
+        fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // SAFETY: `poll` is one valid pollfd, and the count says so.
+    let ready = unsafe { libc::poll(&mut poll, 1, 0) };
+    ready > 0 && poll.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0
+}
+/// Puts an empty pipe in place of a hung-up terminal, so that a read says
+/// there is nothing yet and crossterm's loop returns. The write end stays
+/// open for the rest of the process: closed, reads would see end of file,
+/// which is what spins.
+#[cfg(unix)]
+fn release_input(fd: std::os::fd::RawFd) {
+    let mut pipe = [0; 2];
+    // SAFETY: `pipe` has room for the two descriptors. Failing leaves `fd`
+    // as it was; replacing it is atomic for a read running on another thread.
+    unsafe {
+        if libc::pipe(pipe.as_mut_ptr()) == 0 {
+            libc::fcntl(pipe[0], libc::F_SETFL, libc::O_NONBLOCK);
+            libc::dup2(pipe[0], fd);
+            libc::close(pipe[0]);
+        }
+    }
+}
 /// Draws one frame. The cursor shape follows the edit mode; ratatui places
 /// the cursor and writes only changed cells.
 ///
@@ -202,7 +252,6 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err(io::Error::other("interactive editing requires a terminal"));
     }
-    let mut screen = Terminal::enter()?;
     // Hangup and termination end the loop like a terminal error, so unsaved
     // documents go to recovery instead of being lost.
     let ended = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -210,6 +259,11 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
     for signal in [signal_hook::consts::SIGHUP, signal_hook::consts::SIGTERM] {
         signal_hook::flag::register(signal, ended.clone())?;
     }
+    #[cfg(unix)]
+    watch_terminal(ended.clone())?;
+    // After the watch: entering asks the terminal about its keyboard, and
+    // that read spins like any other if the terminal goes away.
+    let mut screen = Terminal::enter()?;
     let mut terminal =
         ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(io::stdout()))?;
     let theme = theme::Theme::detect();
@@ -425,5 +479,51 @@ mod tests {
             std::fs::read_to_string(target.join(&names[0])).unwrap(),
             "x"
         );
+    }
+}
+
+#[cfg(all(test, unix))]
+mod hangup {
+    use super::{hung_up, release_input};
+    use std::{io, os::fd::RawFd};
+
+    /// A pseudo-terminal: the side a program reads, and the emulator's.
+    fn pty() -> (RawFd, RawFd) {
+        let (mut emulator, mut program) = (0, 0);
+        // SAFETY: the pointers are valid; the others may be null.
+        let result = unsafe {
+            libc::openpty(
+                &mut emulator,
+                &mut program,
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        };
+        assert_eq!(result, 0);
+        (program, emulator)
+    }
+    #[test]
+    fn a_closed_terminal_is_a_hangup_and_an_open_one_is_not() {
+        let (program, emulator) = pty();
+        assert!(!hung_up(program));
+        // SAFETY: closed once and not used after.
+        unsafe { libc::close(emulator) };
+        assert!(hung_up(program));
+        // SAFETY: as above.
+        unsafe { libc::close(program) };
+    }
+    #[test]
+    fn released_input_would_block_instead_of_ending() {
+        let (program, emulator) = pty();
+        // SAFETY: closed once and not used after.
+        unsafe { libc::close(emulator) };
+        release_input(program);
+        assert!(!hung_up(program), "the watch would fire again");
+        let mut buffer = [0u8; 8];
+        // SAFETY: as above.
+        let count = unsafe { libc::read(program, buffer.as_mut_ptr().cast(), 8) };
+        assert_eq!(count, -1, "end of file is what spins");
+        assert_eq!(io::Error::last_os_error().kind(), io::ErrorKind::WouldBlock);
     }
 }

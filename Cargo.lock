@@ -992,6 +992,7 @@ version = "0.1.0"
 dependencies = [
  "crossterm",
  "ignore",
+ "libc",
  "mlua",
  "nucleo-matcher",
  "onig",
