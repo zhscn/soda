@@ -97,6 +97,8 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `soda.flag(group, face, sign, lines)` / `soda.unflag([group])` | 行标记，`lines` 是从 1 开始的行号数组；`unflag` 没有标记可去时不报错 |
 | `soda.hook(event, filter, fn)` | 事件发生时以事件参数调用 `fn` |
 | `soda.define_command(name, fn)` | 定义命令，调用时把参数文本整体传给 `fn` |
+| `soda.results(kind, lines)` | 把结果行写入 `*kind*` 并设为最近的结果，回车和 `]q`/`[q` 与 `grep`、`run` 的结果相同；`lines` 中不是位置的行留作标题，一个位置都没有时只显示消息 |
+| `soda.open(path, [line], [column])` | 打开文件并放置光标，行列从 1 开始，列按字节；打开是异步的，文件内容要在之后的请求里读 |
 | `soda.spawn(argv, fn, [input])` | 在项目根目录后台运行程序（不经过 shell），结束后调用 `fn(code, stdout, stderr)`；`input` 写入标准输入 |
 
 - **执行模型**：Lua 运行在编辑器线程上，同一时间只运行一个请求（一段代码、一次钩子或命令调用、一个进程的回调）。请求运行时 `soda` 的函数直接作用于编辑器。请求中引发的 Lua（例如 `soda.command` 触发的钩子、执行的 `lua` 命令）排队，等当前请求返回后运行。
@@ -104,7 +106,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 - **错误**：Lua 错误以 `lua: ` 开头显示在消息行并写入 `*messages*`，不影响编辑器继续运行。
 - **钩子和命令**：`soda.hook` 和 `soda.define_command` 保存 Lua 函数本身，在命令表和钩子中表现为 `lua-call ID`。钩子的事件参数也可以在命令行钩子中用 `%val{hook}` 读取。
 
-示例：`lua/git-flags.lua` 在打开和保存时运行 `git diff -U0`，用行标记标出新增、修改和删除的行，约 40 行。`lua/clang-format.lua` 用 clang-format 格式化文档或 Visual 选中的行，只替换有变化的行。`lua/comment.lua` 切换行注释，`lua/surround.lua` 在 Visual 选区两侧加上成对的文本。
+示例：`lua/git-flags.lua` 在打开和保存时运行 `git diff -U0`，用行标记标出新增、修改和删除的行，约 40 行。`lua/clang-format.lua` 用 clang-format 格式化文档或 Visual 选中的行，只替换有变化的行。`lua/comment.lua` 切换行注释，`lua/surround.lua` 在 Visual 选区两侧加上成对的文本。`lua/git-changes.lua` 把 `git diff` 的每个改动块列入 `*changes*`。
 
 ### 文档
 

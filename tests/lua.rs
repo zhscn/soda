@@ -533,3 +533,122 @@ fn comment_extension_leaves_out_the_line_a_selection_ends_before() {
     keys(&mut r, "ggjVgc");
     assert_eq!(text(&r), "a()\n-- b()\nc()\n", "{}", r.message());
 }
+fn active_name(r: &Runtime) -> String {
+    let view = r.app().view(r.app().active_view().unwrap()).unwrap();
+    r.app().document_name(view.document_id)
+}
+fn wait(r: &mut Runtime, done: impl Fn(&Runtime) -> bool) {
+    for _ in 0..1000 {
+        r.poll();
+        if done(r) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    panic!("timed out: {}", r.message());
+}
+fn caret(r: &Runtime) -> usize {
+    let view = r.app().view(r.app().active_view().unwrap()).unwrap();
+    let editor = r.app().workspace().editor(view.document_id).unwrap();
+    editor
+        .model()
+        .session(view.session_id)
+        .unwrap()
+        .selection()
+        .head
+}
+#[test]
+fn lua_results_step_with_the_built_in_keys() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.txt"), "one\ntwo\nthree\n").unwrap();
+    std::fs::write(dir.path().join("b.txt"), "four\nfive\n").unwrap();
+    let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.start(None);
+    lua(
+        &mut r,
+        r#"
+        soda.command("display lint bottom")
+        soda.results("lint", {
+          "a.txt:2:2: first",
+          "a heading",
+          "b.txt:2: second",
+        })
+        "#,
+    );
+    assert_eq!(active_name(&r), "*lint*");
+    keys(&mut r, "]q");
+    wait(&mut r, |r| active_name(r).ends_with("a.txt"));
+    assert_eq!(caret(&r), 5);
+    keys(&mut r, "]q");
+    wait(&mut r, |r| active_name(r).ends_with("b.txt"));
+    assert_eq!(caret(&r), 5);
+    keys(&mut r, "]q");
+    assert_eq!(r.message(), "At the last result");
+}
+#[test]
+fn lua_results_without_a_location_leave_the_list_alone() {
+    let mut r = runtime();
+    lua(&mut r, r#"soda.results("lint", {"nothing here"})"#);
+    assert_eq!(r.message(), "lint: no results");
+    assert!(r.app().workspace().scratch("*lint*").is_none());
+    let error = r
+        .source_lua("test", r#"soda.results("*x*", {})"#)
+        .unwrap_err();
+    assert!(error.contains("cannot name results"), "{error}");
+}
+#[test]
+fn lua_opens_a_position_and_reports_a_bad_one() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.txt"), "one\ntwo\n").unwrap();
+    let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.start(None);
+    lua(&mut r, r#"soda.open("a.txt", 2, 3)"#);
+    wait(&mut r, |r| active_name(r).ends_with("a.txt"));
+    assert_eq!(caret(&r), 6);
+    let error = r
+        .source_lua("test", r#"soda.open("a.txt", 0)"#)
+        .unwrap_err();
+    assert!(error.contains("outside"), "{error}");
+}
+#[test]
+fn git_changes_extension_lists_each_hunk() {
+    let dir = tempfile::tempdir().unwrap();
+    let git = |args: &[&str]| {
+        let ok = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir.path())
+            .output()
+            .is_ok_and(|output| output.status.success());
+        assert!(ok, "git {args:?}");
+    };
+    if std::process::Command::new("git")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
+        return;
+    }
+    git(&["init", "-q"]);
+    let path = dir.path().join("a.txt");
+    std::fs::write(&path, "a\nb\nc\nd\ne\n").unwrap();
+    git(&["add", "."]);
+    // A changed line, one that reads like a file header, and a removal.
+    std::fs::write(&path, "a\nB\n++ b/fake\nc\ne\n").unwrap();
+    let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.start(None);
+    lua(&mut r, include_str!("../lua/git-changes.lua"));
+    r.command(Command::Named("git-changes".into()));
+    wait(&mut r, |r| {
+        r.app().workspace().scratch("*changes*").is_some()
+    });
+    assert_eq!(active_name(&r), "*changes*");
+    assert_eq!(
+        text(&r),
+        "a.txt:2: B\na.txt:4: (lines removed)\n",
+        "{}",
+        r.message()
+    );
+    keys(&mut r, "]q");
+    wait(&mut r, |r| active_name(r).ends_with("a.txt"));
+    assert_eq!(caret(&r), 2);
+}

@@ -28,6 +28,8 @@ const FUNCTIONS: &[&str] = &[
     "hook",
     "define_command",
     "spawn",
+    "results",
+    "open",
 ];
 const PRELUDE: &str = r#"
 local current, names, methods = ...
@@ -215,6 +217,46 @@ impl Host {
                         })
                         .map_err(mlua::Error::runtime)
                 })?,
+            )?;
+            soda.set(
+                "results",
+                scope.create_function(|_, (kind, lines): (String, Vec<String>)| {
+                    if kind.is_empty() || kind == "file" || kind.contains(['*', ' ']) {
+                        return Err(mlua::Error::runtime(format!(
+                            "{kind:?} cannot name results"
+                        )));
+                    }
+                    let mut runtime = runtime.borrow_mut();
+                    runtime.command(Command::Results { kind, lines });
+                    Ok(())
+                })?,
+            )?;
+            soda.set(
+                "open",
+                scope.create_function(
+                    |_, (path, line, column): (String, Option<i64>, Option<i64>)| {
+                        let line = line.unwrap_or(1);
+                        let column = column.unwrap_or(1);
+                        if line < 1 || column < 1 {
+                            return Err(mlua::Error::runtime(format!(
+                                "position {{{line}, {column}}} is outside the buffer"
+                            )));
+                        }
+                        let mut runtime = runtime.borrow_mut();
+                        let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+                        let path = crate::interaction::path::resolve_path(
+                            &runtime.file_root,
+                            home.as_deref(),
+                            std::path::Path::new(&path),
+                        )
+                        .map_err(mlua::Error::runtime)?;
+                        runtime.edit_event(crate::application::Event::OpenAt {
+                            path,
+                            line: line as usize - 1,
+                            column: column as usize - 1,
+                        })
+                    },
+                )?,
             )?;
             soda.set(
                 "spawn",

@@ -105,3 +105,20 @@ fn stop_ends_runs_and_shell_commands() {
     assert_eq!(r.message(), "sleep 30: was stopped");
     assert!(started.elapsed() < Duration::from_secs(10));
 }
+#[test]
+fn stepping_starts_at_the_first_result() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.txt"), "x needle\nx\nneedle\n").unwrap();
+    let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.start(None);
+    line(&mut r, "grep needle");
+    wait(&mut r, |r| r.message().starts_with("2 matches"));
+    keys(&mut r, "]q");
+    wait(&mut r, |r| active_name(r).ends_with("a.txt"));
+    assert_eq!(caret_line(&r), 0);
+    keys(&mut r, "]q");
+    wait(&mut r, |r| caret_line(r) != 0);
+    assert_eq!(caret_line(&r), 2);
+    keys(&mut r, "[q");
+    wait(&mut r, |r| caret_line(r) == 0);
+}

@@ -81,10 +81,12 @@ pub(super) fn jump(app: &Application, file_root: &Path, response: &mut Response)
 }
 
 /// Moves the results caret to the next or previous result line and opens
-/// it, as Vim's `:cnext` and `:cprevious`.
+/// it, as Vim's `:cnext` and `:cprevious`. On fresh results the caret has
+/// not visited its line yet, so a first line that is a result comes first.
 pub(super) fn step(
     app: &Application,
     results: &str,
+    fresh: bool,
     file_root: &Path,
     backward: bool,
     time: Duration,
@@ -105,8 +107,11 @@ pub(super) fn step(
     let current = snapshot.line_of(head).unwrap();
     let lines = snapshot.line_count();
     let mut line = current;
+    let mut stay = fresh && !backward && current == 0;
     loop {
-        line = if backward {
+        line = if std::mem::take(&mut stay) {
+            line
+        } else if backward {
             match line.checked_sub(1) {
                 Some(line) => line,
                 None => break,

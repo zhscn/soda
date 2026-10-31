@@ -86,6 +86,12 @@ pub enum Command {
     ResultStep {
         backward: bool,
     },
+    /// Fills the `*KIND*` document with result lines for `]q` to step
+    /// through; lines that name no location stay as headings.
+    Results {
+        kind: String,
+        lines: Vec<String>,
+    },
     /// Runs a command whose output streams into the `*run*` document.
     Run(String),
     /// Stops background work: the run, the shell command and the search.
@@ -645,13 +651,18 @@ impl Layers {
                 }
             }
             Command::Grep(pattern) => {
-                self.results = super::grep::SCRATCH;
+                self.set_results(super::grep::SCRATCH.to_owned());
                 response.grep = Some(Box::new(super::grep::GrepRequest {
                     pattern,
                     root: file_root.to_owned(),
                 }));
             }
             Command::Jump => {
+                // Enter on the results visits that line, as `]q` would.
+                let document = app.active_view().and_then(|id| app.view(id));
+                if document.map(|view| view.document_id) == app.workspace().scratch(&self.results) {
+                    self.results_fresh = false;
+                }
                 if !super::grep::jump(app, file_root, &mut response) {
                     use super::vim::{Motion, VimCommand};
                     response.commands.extend([
@@ -661,10 +672,34 @@ impl Layers {
                 }
             }
             Command::ResultStep { backward } => {
-                super::grep::step(app, self.results, file_root, backward, time, &mut response)
+                let fresh = std::mem::take(&mut self.results_fresh);
+                super::grep::step(
+                    app,
+                    &self.results,
+                    fresh,
+                    file_root,
+                    backward,
+                    time,
+                    &mut response,
+                )
+            }
+            Command::Results { kind, lines } => {
+                if lines
+                    .iter()
+                    .any(|line| super::grep::location(line).is_some())
+                {
+                    let name = format!("*{kind}*");
+                    self.set_results(name.clone());
+                    response.events.push(Event::Scratch {
+                        name,
+                        text: lines.join("\n") + "\n",
+                    });
+                } else {
+                    response.message = Message::Set(format!("{kind}: no results"));
+                }
             }
             Command::Run(shell) => {
-                self.results = super::grep::RUN;
+                self.set_results(super::grep::RUN.to_owned());
                 let view = app.active_view().and_then(|id| app.view(id));
                 response.run = Some(Box::new(super::shell::run(app, view, shell, file_root)));
             }
@@ -879,6 +914,11 @@ impl Layers {
             Command::Edit(EditCommand::SquashHistory(document.history_depth())),
         ]);
         commands
+    }
+    /// Makes a results document the one `]q` and `[q` step through.
+    fn set_results(&mut self, name: String) {
+        self.results = name;
+        self.results_fresh = true;
     }
     /// Closes or reloads a document that needs no decision.
     fn leave(&self, document: DocumentId, reload: bool, app: &Application) -> Response {

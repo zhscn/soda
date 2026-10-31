@@ -163,7 +163,9 @@ pub struct Layers {
     /// Command line and search histories.
     history: [history::History; 2],
     /// The results document `]q` and `[q` step through: the latest filled.
-    results: &'static str,
+    results: String,
+    /// `]q` has not stepped through these results yet.
+    results_fresh: bool,
     page_rows: usize,
     help_rows: usize,
     picker_rows: usize,

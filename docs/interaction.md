@@ -419,7 +419,7 @@ Runtime 在更新中观察 SaveId，并将带 Operation 身份的失败交给等
 
 打开结果位置：
 - Normal 模式的回车执行 `jump`：当前行是位置行时打开该位置，否则像 Vim 一样移到下一行首个非空白字符。
-- `]q`/`[q`（`next-result`/`previous-result`）移动最近一次 `grep` 或 `run` 的结果文档的光标并打开对应位置，相当于 Vim 的 `:cnext`/`:cprevious`。
+- `]q`/`[q`（`next-result`/`previous-result`）移动最近一次 `grep`、`run` 或扩展（`soda.results`）的结果文档的光标并打开对应位置，相当于 Vim 的 `:cnext`/`:cprevious`。结果刚生成时，第一次 `]q` 打开第一个结果。
 - 位置行的格式是 `路径:行:列:` 或 `路径:行:`，后者是编译器常见的格式，列按第一列处理。路径不能含空白，相对路径以文件根目录为基准。
 - 打开位置使用 `OpenAt` 事件：文件还没加载时，行列随打开请求保存，加载完成后再放置光标，所以异步打开不需要另外的跳转步骤。
 
