@@ -289,11 +289,17 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
                 areas.editor.height,
                 areas.list_rows(),
                 areas.text(&runtime).height,
+                areas
+                    .windows
+                    .iter()
+                    .map(|window| (window.view, usize::from(window.text.height)))
+                    .collect::<Vec<_>>(),
             );
-            if geometry != Some(rows) {
-                geometry = Some(rows);
+            if geometry.as_ref() != Some(&rows) {
                 runtime.resize(rows.0.into(), rows.1);
                 runtime.set_page_rows(rows.2.into());
+                runtime.set_window_rows(rows.3.clone());
+                geometry = Some(rows);
             }
             if runtime.take_redraw() || catching_up || std::mem::take(&mut resumed) {
                 follow(&mut runtime, &areas)?;

@@ -167,6 +167,7 @@ pub struct Layers {
     /// `]q` has not stepped through these results yet.
     results_fresh: bool,
     page_rows: usize,
+    window_rows: Vec<(crate::application::ViewId, usize)>,
     help_rows: usize,
     picker_rows: usize,
     /// A Vim command failed since this was last taken; replays stop.

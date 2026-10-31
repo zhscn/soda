@@ -309,6 +309,10 @@ impl Layers {
         }
         Sourced { errors, settings }
     }
+    /// The rows of text each window shows.
+    pub fn set_window_rows(&mut self, rows: Vec<(crate::application::ViewId, usize)>) {
+        self.window_rows = rows;
+    }
     pub fn set_page_rows(&mut self, rows: usize) {
         self.page_rows = rows;
     }
@@ -770,7 +774,17 @@ impl Layers {
             }
             Command::JumpTo => {
                 if let Some(view) = app.active_view() {
-                    let session = super::labels::LabelSession::jump(view, self.page_rows);
+                    let rows = |id: crate::application::ViewId| {
+                        let shown = self.window_rows.iter().find(|(view, _)| *view == id);
+                        shown.map_or(self.page_rows, |(_, rows)| *rows)
+                    };
+                    let others = app.windows().views();
+                    let others = others.into_iter().filter(|id| *id != view);
+                    let windows = std::iter::once(view)
+                        .chain(others)
+                        .map(|id| (id, rows(id)))
+                        .collect();
+                    let session = super::labels::LabelSession::jump(view, windows);
                     response = self.enter(Layer::Labels(session), app, time)?;
                 }
             }

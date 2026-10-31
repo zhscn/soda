@@ -200,3 +200,53 @@ fn grep_results_show_below_and_open_locations_in_the_other_window() {
     r.command(Command::Named("buffer *grep*".into()));
     assert_eq!(r.app().windows().side(results), Some(Side::Right));
 }
+/// Two windows on different documents; the second is active.
+fn two_documents(first: &str, second: &str) -> (Runtime, Vec<soda::application::ViewId>) {
+    let mut r = runtime(first);
+    keys(&mut r, "<c-w>s");
+    r.command(Command::New);
+    r.command(Command::SetMode(soda::interaction::EditMode::Insert));
+    r.input(UserInput::Paste(second.into()));
+    r.command(Command::SetMode(soda::interaction::EditMode::Normal));
+    keys(&mut r, "gg");
+    let windows = r.app().windows().views();
+    assert_eq!(windows.len(), 2);
+    let rows = windows.iter().map(|view| (*view, 10)).collect();
+    r.set_window_rows(rows);
+    (r, windows)
+}
+#[test]
+fn jump_labels_cover_every_window_with_the_active_one_first() {
+    let (mut r, windows) = two_documents("xy one\n", "  xy two\n");
+    let active = r.app().active_view().unwrap();
+    let other = *windows.iter().find(|view| **view != active).unwrap();
+    keys(&mut r, "<space>jxy");
+    let Some(soda::interaction::Layer::Labels(session)) = r.layer() else {
+        panic!("no labels: {}", r.message());
+    };
+    let targets: Vec<_> = session
+        .targets()
+        .map(|(target, _)| (target.label.clone(), target.view))
+        .collect();
+    assert_eq!(targets, [("a".to_owned(), active), ("s".to_owned(), other)]);
+    keys(&mut r, "s");
+    assert_eq!(r.app().active_view(), Some(other));
+    assert_eq!(caret(&r), 0);
+}
+#[test]
+fn jump_takes_a_single_match_in_another_window() {
+    let (mut r, windows) = two_documents("  only here\n", "nothing\n");
+    let active = r.app().active_view().unwrap();
+    let other = *windows.iter().find(|view| **view != active).unwrap();
+    keys(&mut r, "<space>jon");
+    assert_eq!(r.app().active_view(), Some(other));
+    assert_eq!(caret(&r), 2);
+}
+#[test]
+fn jump_respects_the_rows_of_each_window() {
+    let (mut r, windows) = two_documents("a\nb\nzz\n", "nothing\n");
+    let rows = windows.iter().map(|view| (*view, 2)).collect();
+    r.set_window_rows(rows);
+    keys(&mut r, "<space>jzz");
+    assert_eq!(r.message(), "No zz on screen");
+}

@@ -1,7 +1,7 @@
 //! Jumps chosen by on-screen labels, after avy and ace-window. `jump-to`
-//! reads two characters, labels where they occur in the lines the window
-//! shows, and moves the caret to the labelled one; `window-pick` labels the
-//! windows and focuses one. A single candidate is taken at once.
+//! reads two characters, labels where they occur in the lines every window
+//! shows, and goes to the labelled one; `window-pick` labels the windows and
+//! focuses one. A single candidate is taken at once.
 use super::{Input, InputKey, Message, Presentation, Response, session::Transition};
 use crate::{
     application::{Application, Event, ViewId},
@@ -24,7 +24,9 @@ pub struct LabelSession {
     /// The characters to find while they are still being typed.
     query: Option<String>,
     view: ViewId,
-    rows: usize,
+    /// The windows to search and their rows, the active one first so that
+    /// it gets the easiest labels.
+    windows: Vec<(ViewId, usize)>,
     targets: Vec<Target>,
     typed: String,
 }
@@ -42,12 +44,12 @@ fn labels(count: usize) -> Vec<String> {
         .collect()
 }
 impl LabelSession {
-    /// Starts a jump in the active view over `rows` shown lines.
-    pub(super) fn jump(view: ViewId, rows: usize) -> Self {
+    /// Starts a jump from the active view over the lines each window shows.
+    pub(super) fn jump(view: ViewId, windows: Vec<(ViewId, usize)>) -> Self {
         Self {
             query: Some(String::new()),
             view,
-            rows,
+            windows,
             targets: vec![],
             typed: String::new(),
         }
@@ -73,7 +75,7 @@ impl LabelSession {
         Ok(Self {
             query: None,
             view: active.unwrap(),
-            rows: 0,
+            windows: vec![],
             targets,
             typed: String::new(),
         })
@@ -124,7 +126,12 @@ impl LabelSession {
                 return Transition::redraw();
             }
             let query = query.clone();
-            let found = find(app, self.view, self.rows, &query);
+            let mut found: Vec<_> = self
+                .windows
+                .iter()
+                .flat_map(|(view, rows)| find(app, *view, *rows, &query))
+                .collect();
+            found.truncate(LETTERS.len() * LETTERS.len());
             match found.len() {
                 0 => return message(format!("No {query} on screen")),
                 1 => return self.take(found[0].0, Some(found[0].1), time),
@@ -211,7 +218,6 @@ fn find(app: &Application, view: ViewId, rows: usize, query: &str) -> Vec<(ViewI
         }
         found.extend(text.match_indices(&query).map(|(at, _)| (view, start + at)));
     }
-    found.truncate(LETTERS.len() * LETTERS.len());
     found
 }
 

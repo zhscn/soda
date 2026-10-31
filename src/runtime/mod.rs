@@ -261,6 +261,10 @@ impl Runtime {
     }
     /// The active window's text rows, for paging, when windows split the
     /// editing area; `resize` sets them to the whole area.
+    /// The rows of text each window shows.
+    pub fn set_window_rows(&mut self, rows: Vec<(ViewId, usize)>) {
+        self.layers.set_window_rows(rows);
+    }
     pub fn set_page_rows(&mut self, rows: usize) {
         self.layers.set_page_rows(rows);
     }
