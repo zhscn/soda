@@ -271,6 +271,10 @@ impl Runtime {
     pub fn set_page_rows(&mut self, rows: usize) {
         self.layers.set_page_rows(rows);
     }
+    /// The size of the editing area, for placing new side windows.
+    pub fn set_editing_area(&mut self, width: u16, height: u16) {
+        self.app.set_editing_area(width, height);
+    }
     pub fn resize(&mut self, editor_rows: usize, picker_rows: usize) {
         self.layers.set_page_rows(editor_rows);
         // Help draws inside a bordered popup over the editing area.

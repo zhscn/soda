@@ -82,6 +82,16 @@ impl Windows {
         };
         *slot = Some((view, size.max(1)));
     }
+    /// Shows `view` in the open side window, the bottom one if both are.
+    pub fn reuse_side(&mut self, view: ViewId) -> bool {
+        match self.bottom.as_mut().or(self.right.as_mut()) {
+            Some(slot) => {
+                slot.0 = view;
+                true
+            }
+            None => false,
+        }
+    }
     /// Shows `view` as the only split window when there is none.
     pub fn place(&mut self, view: ViewId) {
         if self.root.is_none() {

@@ -341,6 +341,7 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
             }
             let (width, height) = terminal::size()?;
             let areas = view::Areas::new(&runtime, width, height);
+            runtime.set_editing_area(areas.editor.width, areas.editor.height);
             let rows = (
                 areas.editor.height,
                 areas.list_rows(),

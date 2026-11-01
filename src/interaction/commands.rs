@@ -761,6 +761,7 @@ impl Layers {
                 }) {
                     let name = format!("*{kind}*");
                     self.set_results(name.clone());
+                    response.events.push(Event::ResultsDisplay { kind });
                     response.events.push(Event::Scratch {
                         name,
                         text: lines.join("\n") + "\n",

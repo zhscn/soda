@@ -1,6 +1,7 @@
 //! Lua extensions: the soda table, hooks and commands as Lua functions,
 //! background processes, errors and Lua started from Lua.
 use soda::{
+    application::Side,
     interaction::{Command, EditMode, KeyStroke, UserInput},
     runtime::Runtime,
 };
@@ -567,7 +568,6 @@ fn lua_results_step_with_the_built_in_keys() {
     lua(
         &mut r,
         r#"
-        soda.command("display lint bottom")
         soda.results("lint", {
           "a.txt:2:2: first",
           "a heading",
@@ -576,6 +576,8 @@ fn lua_results_step_with_the_built_in_keys() {
         "#,
     );
     assert_eq!(active_name(&r), "*lint*");
+    let list = r.app().active_view().unwrap();
+    assert_eq!(r.app().windows().side(list), Some(Side::Bottom));
     keys(&mut r, "]q");
     wait(&mut r, |r| active_name(r).ends_with("a.txt"));
     assert_eq!(caret(&r), 5);
@@ -584,6 +586,59 @@ fn lua_results_step_with_the_built_in_keys() {
     assert_eq!(caret(&r), 5);
     keys(&mut r, "]q");
     assert_eq!(r.message(), "At the last result");
+}
+#[test]
+fn lua_results_follow_the_shape_of_the_largest_window() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.txt"), "one\n").unwrap();
+    let side = |width, height, setup: &str| {
+        let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+        r.start(None);
+        r.set_editing_area(width, height);
+        if !setup.is_empty() {
+            r.command(Command::Named(setup.into()));
+        }
+        lua(&mut r, r#"soda.results("lint", { "a.txt:1:1: first" })"#);
+        let list = r.app().active_view().unwrap();
+        r.app().windows().side(list)
+    };
+    // Wide and flat, as 256 by 29.
+    assert_eq!(side(256, 26, ""), Some(Side::Right));
+    // Tall enough that a list below costs little.
+    assert_eq!(side(200, 120, ""), Some(Side::Bottom));
+    assert_eq!(side(100, 26, ""), Some(Side::Bottom));
+    // Two columns already: halving one would leave neither usable.
+    assert_eq!(side(256, 26, "vsplit"), Some(Side::Bottom));
+}
+#[test]
+fn lua_results_use_the_side_window_already_open() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.txt"), "one\n").unwrap();
+    let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.start(None);
+    r.set_editing_area(256, 26);
+    lua(&mut r, r#"soda.results("lint", { "a.txt:1:1: first" })"#);
+    r.set_editing_area(100, 26);
+    lua(&mut r, r#"soda.results("tidy", { "a.txt:1:1: first" })"#);
+    assert_eq!(active_name(&r), "*tidy*");
+    let list = r.app().active_view().unwrap();
+    assert_eq!(r.app().windows().side(list), Some(Side::Right));
+}
+#[test]
+fn lua_results_keep_a_configured_placement() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.txt"), "one\n").unwrap();
+    let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.start(None);
+    lua(
+        &mut r,
+        r#"
+        soda.command("display lint right 30")
+        soda.results("lint", { "a.txt:1:1: first" })
+        "#,
+    );
+    let list = r.app().active_view().unwrap();
+    assert_eq!(r.app().windows().side(list), Some(Side::Right));
 }
 #[test]
 fn lua_results_without_a_location_leave_the_list_alone() {

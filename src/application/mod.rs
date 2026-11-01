@@ -110,6 +110,10 @@ pub enum Event {
         text: String,
     },
     /// Sets where documents of a kind are shown.
+    /// `kind` is a list of results; see `Rules::results`.
+    ResultsDisplay {
+        kind: String,
+    },
     SetDisplay {
         kind: String,
         placement: Placement,
@@ -332,6 +336,7 @@ pub struct Application {
     /// Views by when they were last focused, most recent last.
     recent: Vec<ViewId>,
     rules: display::Rules,
+    area: windows::Area,
     options: crate::options::Options,
     context: Option<ViewId>,
     /// What was edited since each file was loaded or saved.
@@ -1042,6 +1047,7 @@ impl Application {
             }
             Event::Scratch { name, text } => self.scratch(&name, text, &mut update)?,
             Event::SetDisplay { kind, placement } => self.rules.set(kind, placement),
+            Event::ResultsDisplay { kind } => self.rules.results(kind),
             Event::SetOption { scope, name, value } => {
                 let documents: Vec<_> = match scope {
                     crate::options::Scope::Global => self.workspace.documents().collect(),

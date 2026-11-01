@@ -932,7 +932,7 @@ pub static BUILTINS: &[Builtin] = &[
             slot("KIND", SlotKind::Word),
             slot("PLACEMENT", SlotKind::Rest)
         ],
-        "Show documents of a kind (file, grep) in the same, other, bottom [ROWS] or right [COLUMNS] window",
+        "Show documents of a kind (file, grep) in the same, other, auto, bottom [ROWS] or right [COLUMNS] window",
         |a| {
             let (kind, placement) = a
                 .split_once(' ')
