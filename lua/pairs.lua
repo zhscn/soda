@@ -5,9 +5,11 @@
 -- Where they have no answer, as with an unfinished expression, the commands
 -- do what the built-in ones do.
 --
--- Built in: <a-f> <a-b> <a-u> <a-o> move and select in Normal and Visual;
--- <c-k>, <c-s-right> and <c-s-left> work in Normal and Insert; Backspace and
--- word deletion are soft in Insert. To keep a built-in key, unmap it:
+-- Built in, with Emacs's keys: <c-a-f> <c-a-b> <c-a-u> <c-a-a> <c-a-e> move
+-- in every mode; <a-o> and <c-a-space> select in Normal and Visual; <c-k>,
+-- <c-a-k>, <c-a-bs>, <c-s-right> and <c-s-left> work in Normal and Insert;
+-- Backspace and word deletion are soft in Insert. To keep a built-in key,
+-- unmap it:
 --
 --   soda.command("unmap insert <bs>")
 
@@ -251,14 +253,62 @@ soda.define_command("sexp-barf", function()
   buf:edit({ { target, target, close }, { group.inner_to, group.to, "" } })
 end)
 
+local function kill_to(buf, from, to)
+  soda.clipboard(buf:text(from, to))
+  buf:edit({ { from, to, "" } })
+end
+
+soda.define_command("sexp-beginning", function()
+  local buf = soda.buffer()
+  local _, head = buf:selection()
+  local group = buf:enclosing(head)
+  if group then
+    move(buf, group.inner_from)
+  end
+end)
+
+soda.define_command("sexp-end", function()
+  local buf = soda.buffer()
+  local _, head = buf:selection()
+  local group = buf:enclosing(head)
+  if group then
+    move(buf, group.inner_to)
+  end
+end)
+
+soda.define_command("sexp-kill-forward", function()
+  local buf = soda.buffer()
+  local _, head = buf:selection()
+  local item = step(buf, head, "next_item")
+  if item then
+    kill_to(buf, head, item.to)
+  end
+end)
+
+soda.define_command("sexp-kill-backward", function()
+  local buf = soda.buffer()
+  local _, head = buf:selection()
+  local item = step(buf, head, "prev_item")
+  if item then
+    kill_to(buf, item.from, head)
+  end
+end)
+
+for _, mode in ipairs({ "normal", "visual", "insert" }) do
+  soda.command("map " .. mode .. " <c-a-f> sexp-forward")
+  soda.command("map " .. mode .. " <c-a-b> sexp-backward")
+  soda.command("map " .. mode .. " <c-a-u> sexp-up")
+  soda.command("map " .. mode .. " <c-a-a> sexp-beginning")
+  soda.command("map " .. mode .. " <c-a-e> sexp-end")
+end
 for _, mode in ipairs({ "normal", "visual" }) do
-  soda.command("map " .. mode .. " <a-f> sexp-forward")
-  soda.command("map " .. mode .. " <a-b> sexp-backward")
-  soda.command("map " .. mode .. " <a-u> sexp-up")
   soda.command("map " .. mode .. " <a-o> sexp-expand")
+  soda.command("map " .. mode .. " <c-a-space> sexp-expand")
 end
 for _, mode in ipairs({ "normal", "insert" }) do
   soda.command("map " .. mode .. " <c-k> sexp-kill")
+  soda.command("map " .. mode .. " <c-a-k> sexp-kill-forward")
+  soda.command("map " .. mode .. " <c-a-bs> sexp-kill-backward")
   soda.command("map " .. mode .. " <c-s-right> sexp-slurp")
   soda.command("map " .. mode .. " <c-s-left> sexp-barf")
 end

@@ -97,6 +97,8 @@ pub enum VimCommand {
         exact: bool,
     },
     /// Moves half a page and scrolls the view by as much.
+    /// Scrolls the caret's line to the middle of the window.
+    Recenter,
     HalfPage {
         down: bool,
         count: usize,

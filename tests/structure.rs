@@ -65,21 +65,21 @@ fn moves_step_over_whole_expressions() {
         "a.cpp",
         N,
         &[
-            ("|foo(a, b).bar", "<a-f>", "foo|(a, b).bar"),
-            ("foo|(a, b).bar", "<a-f>", "foo(a, b)|.bar"),
-            ("foo(a, b)|.bar;", "<a-f>", "foo(a, b).bar|;"),
-            ("foo(a, b)|.bar;", "<a-b>", "foo|(a, b).bar;"),
+            ("|foo(a, b).bar", "<c-a-f>", "foo|(a, b).bar"),
+            ("foo|(a, b).bar", "<c-a-f>", "foo(a, b)|.bar"),
+            ("foo(a, b)|.bar;", "<c-a-f>", "foo(a, b).bar|;"),
+            ("foo(a, b)|.bar;", "<c-a-b>", "foo|(a, b).bar;"),
             // The ends of a group stop a move.
-            ("f(a|)", "<a-f>", "f(a|)"),
-            ("f(|a)", "<a-b>", "f(|a)"),
-            ("f(a, g(|b))", "<a-u>", "f(a, g|(b))"),
-            ("f(a, g|(b))", "<a-u>", "f|(a, g(b))"),
+            ("f(a|)", "<c-a-f>", "f(a|)"),
+            ("f(|a)", "<c-a-b>", "f(|a)"),
+            ("f(a, g(|b))", "<c-a-u>", "f(a, g|(b))"),
+            ("f(a, g|(b))", "<c-a-u>", "f|(a, g(b))"),
             // Comments are passed over.
-            ("|/* x */ a;", "<a-f>", "/* x */ a|;"),
+            ("|/* x */ a;", "<c-a-f>", "/* x */ a|;"),
             // Brackets in a literal or a comment are text.
-            ("|\"a)\" b", "<a-f>", "\"a)\"| b"),
-            ("(a /* ) */ |b)", "<a-u>", "|(a /* ) */ b)"),
-            ("void f() { |g(); }", "<a-u>", "void f() |{ g(); }"),
+            ("|\"a)\" b", "<c-a-f>", "\"a)\"| b"),
+            ("(a /* ) */ |b)", "<c-a-u>", "|(a /* ) */ b)"),
+            ("void f() { |g(); }", "<c-a-u>", "void f() |{ g(); }"),
         ],
     );
 }
@@ -90,19 +90,19 @@ fn templates_are_groups_and_comparisons_are_not() {
         "a.cpp",
         N,
         &[
-            ("vector|<map<a, b>> x;", "<a-f>", "vector<map<a, b>>| x;"),
-            ("vector<map|<a, b>> x;", "<a-f>", "vector<map<a, b>|> x;"),
-            ("vector<map<a, b>>| x;", "<a-b>", "vector|<map<a, b>> x;"),
-            ("vector<map<a, |b>> x;", "<a-u>", "vector<map|<a, b>> x;"),
-            ("int x = |a < b;", "<a-f>", "int x = a| < b;"),
+            ("vector|<map<a, b>> x;", "<c-a-f>", "vector<map<a, b>>| x;"),
+            ("vector<map|<a, b>> x;", "<c-a-f>", "vector<map<a, b>|> x;"),
+            ("vector<map<a, b>>| x;", "<c-a-b>", "vector|<map<a, b>> x;"),
+            ("vector<map<a, |b>> x;", "<c-a-u>", "vector<map|<a, b>> x;"),
+            ("int x = |a < b;", "<c-a-f>", "int x = a| < b;"),
             (
                 "bool f() { return |x < y && y > z; }",
-                "<a-f><a-f>",
+                "<c-a-f><c-a-f>",
                 "bool f() { return x < y| && y > z; }",
             ),
             (
                 "bool b = x < y && |y > z;",
-                "<a-u>",
+                "<c-a-u>",
                 "bool b = x < y && |y > z;",
             ),
         ],
@@ -220,9 +220,9 @@ fn other_languages_use_brackets_and_literals() {
         "a.rs",
         N,
         &[
-            ("|f(a, \")\").g", "<a-f><a-f>", "f(a, \")\")|.g"),
-            ("(a /* ) */ |b)", "<a-u>", "|(a /* ) */ b)"),
-            ("|\"a b\" c", "<a-f>", "\"a b\"| c"),
+            ("|f(a, \")\").g", "<c-a-f><c-a-f>", "f(a, \")\")|.g"),
+            ("(a /* ) */ |b)", "<c-a-u>", "|(a /* ) */ b)"),
+            ("|\"a b\" c", "<c-a-f>", "\"a b\"| c"),
         ],
     );
     check("a.rs", I, &[("|foo(a,\n  b);\nc", "<c-k>", "|;\nc")]);
@@ -230,8 +230,8 @@ fn other_languages_use_brackets_and_literals() {
         "a.txt",
         N,
         &[
-            ("|f(a, b) c", "<a-f><a-f>", "f(a, b)| c"),
-            ("(a| b", "<a-u>", "(a| b"),
+            ("|f(a, b) c", "<c-a-f><c-a-f>", "f(a, b)| c"),
+            ("(a| b", "<c-a-u>", "(a| b"),
         ],
     );
     check("a.txt", I, &[("f(a)|", "<bs>", "f(a|)")]);
@@ -239,7 +239,7 @@ fn other_languages_use_brackets_and_literals() {
 #[test]
 fn a_group_split_by_conditional_compilation_is_not_a_group() {
     let source = "#if X\nvoid f() {\n#else\nvoid g() {\n#endif\n    |h();\n}\nz;\n";
-    check("a.cpp", EditMode::Normal, &[(source, "<a-u>", source)]);
+    check("a.cpp", EditMode::Normal, &[(source, "<c-a-u>", source)]);
     let kill = "#if X\nvoid f() {\n#else\nvoid g() |{\n#endif\n    h();\n}\nz;\n";
     let killed = "#if X\nvoid f() {\n#else\nvoid g() |\n#endif\n    h();\n}\nz;\n";
     check("a.cpp", EditMode::Insert, &[(kill, "<c-k>", killed)]);

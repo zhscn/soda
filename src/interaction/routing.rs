@@ -64,6 +64,7 @@ const NAMED_KEYS: &[(&str, Key)] = &[
     ("del", Key::Delete),
     ("space", Key::Char(' ')),
     ("lt", Key::Char('<')),
+    ("gt", Key::Char('>')),
     ("left", Key::Left),
     ("right", Key::Right),
     ("up", Key::Up),
@@ -130,6 +131,8 @@ impl std::fmt::Display for KeyStroke {
         let name = match self.code {
             Key::Char(' ') => "space".into(),
             Key::Char('<') => "lt".into(),
+            // `<a->>` would end at its first `>`.
+            Key::Char('>') if self.control || self.alt || self.shift => "gt".into(),
             Key::Char(ch) => ch.to_string(),
             Key::F(number) => format!("f{number}"),
             Key::Unrecognized => "?".into(),
@@ -167,6 +170,42 @@ pub enum UserInput {
     FocusLost,
     /// The terminal has focus again; files may have changed meanwhile.
     FocusGained,
+}
+
+/// Emacs keys of Normal and Visual as the Vim keys that do the same, so
+/// they take counts and follow operators as arrows do. The rest of the
+/// table has no use after an operator: `d<c-w>` is not `dd`.
+fn emacs_keys(key: &KeyStroke, visual: bool, pending: bool) -> Option<&'static str> {
+    let key = keymap::canonical(*key).ok()?;
+    let motion = match (key.control, key.alt, key.code) {
+        (true, false, Key::Char('f')) => Some("l"),
+        (true, false, Key::Char('b')) => Some("h"),
+        (true, false, Key::Char('n')) => Some("j"),
+        (true, false, Key::Char('p')) => Some("k"),
+        (true, false, Key::Char('a')) => Some("0"),
+        (true, false, Key::Char('e')) => Some("$"),
+        (false, true, Key::Char('f')) => Some("w"),
+        (false, true, Key::Char('b')) => Some("b"),
+        (false, true, Key::Char('m')) => Some("^"),
+        (false, true, Key::Char('<')) => Some("gg"),
+        (false, true, Key::Char('>')) => Some("G"),
+        (false, true, Key::Char('{')) => Some("{"),
+        (false, true, Key::Char('}')) => Some("}"),
+        _ => None,
+    };
+    if motion.is_some() || pending {
+        return motion;
+    }
+    match (key.control, key.alt, key.code) {
+        (true, false, Key::Char('s')) => Some("/"),
+        (true, false, Key::Char(' ')) => Some("v"),
+        (true, false, Key::Char('y')) => Some("P"),
+        (true, false, Key::Char('w')) if visual => Some("d"),
+        (false, true, Key::Char('w')) if visual => Some("y"),
+        (false, true, Key::Char('d')) if !visual => Some("dw"),
+        (false, true, Key::Backspace) if !visual => Some("db"),
+        _ => None,
+    }
 }
 
 fn pending(message: Message) -> InputResult {
@@ -294,7 +333,8 @@ impl Layers {
             }
             _ => return Ok(InputResult::Blocked),
         };
-        let cancel = keymap::is_cancel(&key);
+        let cancel = keymap::is_cancel(&key)
+            && !self.sequence.continues(key, self.mode.into(), &self.keymap);
         if cancel && (self.sequence.active() || self.vim.active()) {
             let exit_visual =
                 self.vim.active() && matches!(self.mode, EditMode::Visual | EditMode::VisualLine);
@@ -348,16 +388,24 @@ impl Layers {
             Key::End => Some('$'),
             _ => None,
         };
-        if let Some(ch) = vim_key.filter(|_| plain) {
-            let visual = matches!(self.mode, EditMode::Visual | EditMode::VisualLine);
-            return match self.vim.key(ch, visual) {
-                Ok(Some(command)) => self.execute(command, app, time, file_root),
-                Ok(None) => Ok(pending(Message::Clear)),
-                Err(error) => {
-                    self.failed = true;
-                    Ok(pending(Message::Set(format!("{error}: {ch}"))))
+        let visual = matches!(self.mode, EditMode::Visual | EditMode::VisualLine);
+        let mut plain_key = [0; 4];
+        let vim_keys = match vim_key.filter(|_| plain) {
+            Some(ch) => Some(&*ch.encode_utf8(&mut plain_key)),
+            None => emacs_keys(&key, visual, self.vim.active()),
+        };
+        if let Some(keys) = vim_keys {
+            for ch in keys.chars() {
+                match self.vim.key(ch, visual) {
+                    Ok(Some(command)) => return self.execute(command, app, time, file_root),
+                    Ok(None) => {}
+                    Err(error) => {
+                        self.failed = true;
+                        return Ok(pending(Message::Set(format!("{error}: {ch}"))));
+                    }
                 }
-            };
+            }
+            return Ok(pending(Message::Clear));
         }
         if self.vim.active() {
             self.vim.clear();

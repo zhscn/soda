@@ -2,13 +2,43 @@
 use crate::interaction::{Key, KeyStroke, UserInput};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
+/// The character Shift gives on a US keyboard. With Control or Alt the
+/// kitty protocol reports the unshifted key: `,` and Shift for `<`.
+fn shifted(ch: char) -> char {
+    const PAIRS: [(char, char); 21] = [
+        ('1', '!'),
+        ('2', '@'),
+        ('3', '#'),
+        ('4', '$'),
+        ('5', '%'),
+        ('6', '^'),
+        ('7', '&'),
+        ('8', '*'),
+        ('9', '('),
+        ('0', ')'),
+        ('-', '_'),
+        ('=', '+'),
+        ('[', '{'),
+        (']', '}'),
+        ('\\', '|'),
+        (';', ':'),
+        ('\'', '"'),
+        ('`', '~'),
+        (',', '<'),
+        ('.', '>'),
+        ('/', '?'),
+    ];
+    match PAIRS.iter().find(|(plain, _)| *plain == ch) {
+        Some((_, shifted)) => *shifted,
+        None => ch.to_ascii_uppercase(),
+    }
+}
+
 fn normalize_key(key: KeyEvent) -> KeyStroke {
     let code = match key.code {
         // The kitty protocol reports Shift with the unshifted letter; legacy
         // encodings send the shifted one.
-        KeyCode::Char(ch) if key.modifiers.contains(KeyModifiers::SHIFT) => {
-            Key::Char(ch.to_ascii_uppercase())
-        }
+        KeyCode::Char(ch) if key.modifiers.contains(KeyModifiers::SHIFT) => Key::Char(shifted(ch)),
         KeyCode::Char(ch) => Key::Char(ch),
         KeyCode::Enter => Key::Enter,
         KeyCode::Esc => Key::Esc,

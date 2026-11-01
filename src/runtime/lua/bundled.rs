@@ -9,6 +9,7 @@ pub(super) const MODULES: &[(&str, &str)] = &[
         include_str!("../../../lua/clang-format.lua"),
     ),
     ("comment", include_str!("../../../lua/comment.lua")),
+    ("emacs", include_str!("../../../lua/emacs.lua")),
     ("git-changes", include_str!("../../../lua/git-changes.lua")),
     ("git-flags", include_str!("../../../lua/git-flags.lua")),
     ("pairs", include_str!("../../../lua/pairs.lua")),
@@ -20,6 +21,7 @@ pub(super) const MODULES: &[(&str, &str)] = &[
 pub(super) const STARTUP: &[&str] = &[
     "clang-format",
     "comment",
+    "emacs",
     "git-changes",
     "pairs",
     "surround",

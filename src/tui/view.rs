@@ -843,7 +843,7 @@ mod tests {
             "the message row is empty without a message"
         );
         keys(&mut r, "<space>");
-        assert!(screen(&mut r, 60, 14).contains("f  Open a project file"));
+        assert!(screen(&mut r, 120, 14).contains("f  Open a project file"));
         keys(&mut r, "<esc>");
         r.command(Command::Close(None));
         let text = screen(&mut r, 60, 14);

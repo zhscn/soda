@@ -450,6 +450,11 @@ pub static BUILTINS: &[Builtin] = &[
         |a| { Ok(path_or(a, Command::OpenPath, interactive("project"))) }
     ),
     builtin!("search", "Search the document", Command::Search),
+    builtin!(
+        "search-backward",
+        "Search the document backward",
+        Command::Vim(VimCommand::Search { backward: true })
+    ),
     builtin!("replace", "Search and replace", Command::Replace),
     builtin!(
         "goto",
@@ -482,6 +487,11 @@ pub static BUILTINS: &[Builtin] = &[
             redo: true,
             count: 1
         })
+    ),
+    builtin!(
+        "recenter",
+        "Scroll so the caret's line is in the middle of the window",
+        Command::Vim(VimCommand::Recenter)
     ),
     builtin!(
         "half-page-down",
@@ -703,7 +713,11 @@ pub static BUILTINS: &[Builtin] = &[
         "grep",
         [slot("PATTERN", SlotKind::Rest)],
         "Search project files for a regular expression; lowercase ignores case",
-        |a| Ok(Command::Grep(required(a)?))
+        |a| Ok(if a.is_empty() {
+            interactive("grep")
+        } else {
+            Command::Grep(a.into())
+        })
     ),
     builtin!(
         "jump",
@@ -885,13 +899,21 @@ pub static BUILTINS: &[Builtin] = &[
         "pipe",
         [slot("SHELL-COMMAND", SlotKind::Rest)],
         "Replace the selection or document with command output",
-        |a| { Ok(Command::Pipe(required(a)?)) }
+        |a| Ok(if a.is_empty() {
+            interactive("pipe")
+        } else {
+            Command::Pipe(a.into())
+        })
     ),
     builtin!(
         "shell",
         [slot("SHELL-COMMAND", SlotKind::Rest)],
         "Run a shell command and show its status",
-        |a| { Ok(Command::Shell(required(a)?)) }
+        |a| Ok(if a.is_empty() {
+            interactive("shell")
+        } else {
+            Command::Shell(a.into())
+        })
     ),
     builtin!("nop", "Do nothing; hides a default binding", Command::Nop),
 ];

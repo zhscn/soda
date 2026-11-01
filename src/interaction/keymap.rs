@@ -282,10 +282,55 @@ const READLINE: &[(&str, &str)] = &[
     ("<c-k>", "kill-line-end"),
     ("<c-y>", "yank"),
 ];
+/// Emacs commands with no Vim meaning here, the same in every editing mode.
+/// Emacs motions in Normal and Visual feed the Vim grammar: see `routing`.
+const EMACS: &[(&str, &str)] = &[
+    ("<c-x><c-s>", "write"),
+    ("<c-x><c-w>", "saveas"),
+    ("<c-x><c-f>", "open"),
+    ("<c-x><c-r>", "recent"),
+    ("<c-x><c-c>", "quit"),
+    ("<c-x>b", "buffers"),
+    ("<c-x><c-b>", "buffers"),
+    ("<c-x>k", "close"),
+    ("<c-x>0", "close-window"),
+    ("<c-x>1", "only"),
+    ("<c-x>2", "split"),
+    ("<c-x>3", "vsplit"),
+    ("<c-x>o", "window-next"),
+    ("<c-x><c-o>", "window-pick"),
+    ("<c-x>u", "undo"),
+    ("<c-x>`", "next-result"),
+    ("<c-x>pf", "project"),
+    ("<c-x>pb", "buffers"),
+    ("<c-x>pg", "grep"),
+    ("<a-x>", "commands"),
+    ("<a-!>", "shell"),
+    ("<a-|>", "pipe"),
+    ("<a-%>", "replace"),
+    ("<a-g>g", "goto"),
+    ("<a-g><a-g>", "goto"),
+    ("<a-g>n", "next-result"),
+    ("<a-g><a-n>", "next-result"),
+    ("<a-g>p", "previous-result"),
+    ("<a-g><a-p>", "previous-result"),
+    ("<a-,>", "jump-back"),
+    ("<c-a-,>", "jump-forward"),
+    ("<c-v>", "half-page-down"),
+    ("<a-v>", "half-page-up"),
+    ("<c-l>", "recenter"),
+    ("<c-/>", "undo"),
+    ("<c-_>", "undo"),
+    // Terminals without the kitty protocol send this for Ctrl-/.
+    ("<c-7>", "undo"),
+    ("<c-a-/>", "redo"),
+    ("<c-a-_>", "redo"),
+    ("<c-z>", "suspend"),
+];
 const NORMAL: &[(&str, &str)] = &[
     ("<c-r>", "redo"),
-    ("<c-f>", "page-down"),
-    ("<c-b>", "page-up"),
+    ("<pagedown>", "page-down"),
+    ("<pageup>", "page-up"),
     ("<c-d>", "half-page-down"),
     ("<c-u>", "half-page-up"),
     ("<c-w>s", "split"),
@@ -312,7 +357,6 @@ const NORMAL: &[(&str, &str)] = &[
     ("<tab>", "jump-forward"),
     ("[q", "previous-result"),
     ("<c-c>", "stop"),
-    ("<c-z>", "suspend"),
     ("<f1>", "help"),
     ("<space>f", "project"),
     ("<space>b", "buffers"),
@@ -320,10 +364,14 @@ const NORMAL: &[(&str, &str)] = &[
     ("<space>j", "jump-to"),
     ("<space>w", "window-pick"),
     ("<space>r", "recent"),
+    ("<space>H", "window-left"),
+    ("<space>J", "window-down"),
+    ("<space>K", "window-up"),
+    ("<space>L", "window-right"),
 ];
 const VISUAL: &[(&str, &str)] = &[
-    ("<c-f>", "page-down"),
-    ("<c-b>", "page-up"),
+    ("<pagedown>", "page-down"),
+    ("<pageup>", "page-up"),
     ("<c-d>", "half-page-down"),
     ("<c-u>", "half-page-up"),
     ("<f1>", "help"),
@@ -333,7 +381,14 @@ const INSERT: &[(&str, &str)] = &[
     ("<down>", "move-down"),
     ("<s-up>", "extend-move-up"),
     ("<s-down>", "extend-move-down"),
+    ("<c-p>", "move-up"),
+    ("<c-n>", "move-down"),
+    ("<a-lt>", "document-start"),
+    ("<a-gt>", "document-end"),
+    ("<c-s>", "search"),
+    ("<c-r>", "search-backward"),
     ("<ret>", "newline"),
+    ("<c-j>", "newline"),
     ("<tab>", "insert-tab"),
     ("<backtab>", "outdent"),
     ("<s-backtab>", "outdent"),
@@ -342,7 +397,9 @@ const INSERT: &[(&str, &str)] = &[
 const PROMPT: &[(&str, &str)] = &[
     ("<esc>", "cancel"),
     ("<c-c>", "cancel"),
+    ("<c-g>", "cancel"),
     ("<ret>", "confirm"),
+    ("<c-j>", "confirm"),
     ("<c-ret>", "replace-all"),
     ("<f4>", "replace-all"),
     ("<tab>", "complete"),
@@ -357,8 +414,14 @@ const PROMPT: &[(&str, &str)] = &[
     ("<a-n>", "history-next"),
     ("<c-up>", "candidate-first"),
     ("<c-down>", "candidate-last"),
+    ("<a-lt>", "candidate-first"),
+    ("<a-gt>", "candidate-last"),
     ("<pageup>", "page-previous"),
     ("<pagedown>", "page-next"),
+    ("<a-v>", "page-previous"),
+    ("<c-v>", "page-next"),
+    ("<c-s>", "match-next"),
+    ("<c-r>", "match-previous"),
     ("<f1>", "help"),
     ("<f3>", "match-next"),
     ("<s-f3>", "match-previous"),
@@ -389,9 +452,7 @@ pub(super) fn canonical(mut key: KeyStroke) -> Result<KeyStroke, BindingError> {
     }
     // Printable characters already encode Shift in their character value.
     if let Key::Char(ch) = key.code
-        && !key.control
-        && !key.alt
-        && (ch.is_uppercase() || !ch.is_alphabetic())
+        && (!ch.is_alphabetic() || (ch.is_uppercase() && !key.control && !key.alt))
     {
         key.shift = false;
     }
@@ -402,7 +463,7 @@ pub(super) fn is_cancel(key: &KeyStroke) -> bool {
         && !key.shift
         && !key.unsupported_modifiers
         && ((key.code == Key::Esc && !key.control)
-            || (key.control && matches!(key.code, Key::Char('[' | 'c'))))
+            || (key.control && matches!(key.code, Key::Char('[' | 'c' | 'g'))))
 }
 
 /// A binding target and the text shown for it in help.
@@ -496,7 +557,13 @@ fn sequence(keys: &[KeyStroke]) -> Result<Vec<KeyStroke>, BindingError> {
         .copied()
         .map(canonical)
         .collect::<Result<Vec<_>, _>>()?;
-    if keys.iter().skip(1).any(is_cancel) {
+    // Ctrl-C may continue a sequence, as in `<c-x><c-c>`; elsewhere it cancels.
+    let ctrl_c = |key: &KeyStroke| key.control && key.code == Key::Char('c');
+    if keys
+        .iter()
+        .skip(1)
+        .any(|key| is_cancel(key) && !ctrl_c(key))
+    {
         return Err(BindingError::InvalidKey);
     }
     Ok(keys)
@@ -516,9 +583,12 @@ impl Default for Keymap {
         let parse = |keys: &str| KeyStroke::parse_sequence(keys).unwrap();
         for (context, table) in [
             (Context::Normal, NORMAL),
+            (Context::Normal, EMACS),
             (Context::Visual, VISUAL),
+            (Context::Visual, EMACS),
             (Context::Insert, INSERT),
             (Context::Insert, READLINE),
+            (Context::Insert, EMACS),
         ] {
             for (keys, line) in table {
                 let target = registry.parse_builtin(line).unwrap();
@@ -663,5 +733,10 @@ impl Sequence {
     }
     pub fn keys(&self) -> &[KeyStroke] {
         &self.keys
+    }
+    /// Whether a key goes on with the pending sequence.
+    pub fn continues(&self, key: KeyStroke, context: Context, map: &Keymap) -> bool {
+        let keys = [&self.keys[..], &[key]].concat();
+        self.active() && !matches!(map.resolve(context, &keys), Resolution::Pass)
     }
 }

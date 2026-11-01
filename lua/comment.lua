@@ -1,7 +1,7 @@
 -- Toggles line comments on the caret's line, or on the lines of a Visual
 -- selection: if every line with text is a comment they stop being comments,
 -- otherwise all become comments at the shallowest indentation among them.
--- Built in: gc in Normal and Visual.
+-- Built in: gc in Normal and Visual, <a-;> in those and Insert.
 
 local function selected_lines(buf)
   local anchor, head = buf:selection()
@@ -56,3 +56,6 @@ end)
 
 soda.command("map normal gc comment")
 soda.command("map visual gc comment")
+for _, mode in ipairs({ "normal", "visual", "insert" }) do
+  soda.command("map " .. mode .. " <a-;> comment")
+end

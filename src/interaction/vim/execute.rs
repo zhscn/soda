@@ -606,6 +606,14 @@ impl Layers {
                     .events
                     .push(self.move_to(view.id, text, head, time));
             }
+            VimCommand::Recenter => {
+                let top = line.saturating_sub(self.page_rows / 2);
+                response.events.push(Event::SetViewport {
+                    view: view.id,
+                    anchor: crate::core::ByteOffset(text.line_start(top).unwrap()),
+                    horizontal_column: view.viewport.horizontal_column,
+                });
+            }
             VimCommand::HalfPage { down, count } => {
                 let rows = if count > 0 {
                     count

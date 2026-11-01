@@ -114,11 +114,11 @@ BeginUndoGroup 保存操作开始前的选区，EndUndoGroup 保存结束时的�
 2. 默认层：`interaction::keymap` 中的静态表，引用命令名并在启动时解析，测试保证每个默认条目都能解析。
 3. 兜底：normal/visual 的普通字符交给 Vim 语法；insert 和 prompt 的可打印字符直接输入。
 
-用户层的完整绑定不能同时是另一个用户绑定的前缀；用户层前缀会遮住默认层中相同开头的单键。序列最多四个按键。Esc、Ctrl-[ 和 Ctrl-C 取消待完成序列，不能作为序列的第二个及以后的按键。要关闭某个默认键，把它绑定到 `nop`。
+用户层的完整绑定不能同时是另一个用户绑定的前缀；用户层前缀会遮住默认层中相同开头的单键。序列最多四个按键。Esc、Ctrl-[、Ctrl-G 和 Ctrl-C 取消待完成序列；前三个不能作为序列的第二个及以后的按键，Ctrl-C 可以（`<c-x><c-c>`）。要关闭某个默认键，把它绑定到 `nop`。
 
 `prompt` 上下文的目标是输入动作，不是应用命令：`confirm`、`cancel`、`complete`、`complete-backward`、`candidate-next`、`candidate-previous`、`candidate-first`、`candidate-last`、`page-next`、`page-previous`、`match-next`、`match-previous`、`replace-all`、`help`、`select-all`、`nop`，以及下面的行编辑名。prompt 绑定只接受单个按键。输入组件因此不会执行文档命令或切换编辑模式。
 
-Normal 的默认绑定除 Vim 语法外还有 `<c-r>` 重做、`<c-f>` / `<c-b>` 翻页、`<c-z>` 挂起、`<f1>` 帮助，以及 helix 式的空格菜单：`<space>f` 项目文件、`<space>b` 缓冲区、`<space>:` 命令面板。Insert 中方向键、Enter、Tab 和 Shift-Tab 分别绑定 `move-up`/`move-down`、`newline`、`insert-tab` 和 `outdent`。
+Normal 的默认绑定除 Vim 语法外还有 `<c-r>` 重做、PageDown / PageUp 翻页、`<c-z>` 挂起、`<f1>` 帮助，以及 helix 式的空格菜单：`<space>f` 项目文件、`<space>b` 缓冲区、`<space>:` 命令面板。Insert 中方向键、Enter、Tab 和 Shift-Tab 分别绑定 `move-up`/`move-down`、`newline`、`insert-tab` 和 `outdent`。
 
 ### 括号配对
 
@@ -132,23 +132,69 @@ Insert 中按选项 `auto-pairs`（默认开）成对输入括号，与 Emacs �
 
 ### 结构化编辑
 
-内置模块 `pairs` 提供与 Emacs 的 puni 相同的操作，用的是 `buf:enclosing`、`buf:next_item` 和 `buf:prev_item`，所以所有语言都能用；结构不明确时（未闭合的分组、被 `#if` 拆开的分组）退回普通命令的行为。这些移动不进入跳转历史。
+内置模块 `pairs` 提供与 Emacs 的 puni 相同的操作和键位，用的是 `buf:enclosing`、`buf:next_item` 和 `buf:prev_item`，所以所有语言都能用；结构不明确时（未闭合的分组、被 `#if` 拆开的分组）退回普通命令的行为。这些移动不进入跳转历史。
 
 | 键 | 命令 | 作用 |
 | --- | --- | --- |
-| Normal、Visual `<a-f>` / `<a-b>` | `sexp-forward` / `sexp-backward` | 越过一个表达式，停在分组边界 |
-| Normal、Visual `<a-u>` | `sexp-up` | 到包围它的括号 |
-| Normal、Visual `<a-o>` | `sexp-expand` | 选中光标处或包围它的分组，再按扩大一层 |
+| `<c-a-f>` / `<c-a-b>` | `sexp-forward` / `sexp-backward` | 越过一个表达式，停在分组边界 |
+| `<c-a-u>` | `sexp-up` | 到包围它的括号 |
+| `<c-a-a>` / `<c-a-e>` | `sexp-beginning` / `sexp-end` | 到所在分组内部的开头 / 结尾 |
+| Normal、Visual `<a-o>`、`<c-a-space>` | `sexp-expand` | 选中光标处或包围它的分组，再按扩大一层 |
+| Normal、Insert `<c-a-k>` / `<c-a-bs>` | `sexp-kill-forward` / `sexp-kill-backward` | 剪切下一个 / 上一个表达式 |
 | Normal、Insert `<c-k>` | `sexp-kill` | 剪切到行尾；有表达式越过行尾时剪切到它结束，遇到所在分组的闭括号时停在它之前 |
 | Normal、Insert `<c-s-right>` / `<c-s-left>` | `sexp-slurp` / `sexp-barf` | 把闭括号移到下一个表达式之后 / 最后一个表达式之前 |
 | Insert `<bs>`、`<c-h>` | `soft-backspace` | 删除会破坏配对时只移动光标；空的一对整个删除 |
 | Insert `<c-w>`、`<c-bs>`、`<a-bs>` | `soft-delete-word` | 标点删到最近的括号为止，紧邻括号时同 `soft-backspace` |
 
-`foo(a,⏎ b);` 行首的 `<c-k>` 留下 `;`，`if (x) {⏎} else {⏎}` 行首的留下 `else {⏎}`，这与 puni 的 `beyond` 相同。Insert 的 `<a-f>`、`<a-b>` 仍是按词移动。用 `unmap insert <bs>` 这样的命令恢复内置行为。
+`foo(a,⏎ b);` 行首的 `<c-k>` 留下 `;`，`if (x) {⏎} else {⏎}` 行首的留下 `else {⏎}`，这与 puni 的 `beyond` 相同。没有写模式的键在 Normal、Visual 和 Insert 中都有效。用 `unmap insert <bs>` 这样的命令恢复内置行为。
+
+### Emacs 键位
+
+Vim 布局不变，Emacs 的键加在 Vim 没有用到的位置上，所以两边的习惯可以混用。键位取自 Emacs 默认值，再加上这几处本地习惯：`C-v` / `M-v` 翻半页（view-mode），`C-x C-o` 选窗口（ace-window）。
+
+Normal、Visual 和 Insert 都有效：
+
+| 键 | 命令 |
+| --- | --- |
+| `C-x C-s`、`C-x C-w`、`C-x C-f`、`C-x C-r` | `write`、`saveas`、`open`、`recent` |
+| `C-x b`、`C-x C-b`、`C-x k`、`C-x C-c` | `buffer`、`close`、`quit` |
+| `C-x 0`、`1`、`2`、`3`、`o`、`C-x C-o` | `close-window`、`only`、`split`、`vsplit`、`window-next`、`window-pick` |
+| `C-x p f`、`C-x p b`、`C-x p g` | `project`、`buffer`、`grep` |
+| `M-x`、`M-!`、`M-\|`、`M-%` | `commands`、`shell`、`pipe`、`replace` |
+| `M-g g`、`M-g M-g` | `goto` |
+| `M-g n`、`M-g p`、``C-x ` `` | `next-result`、`previous-result` |
+| `M-,`、`C-M-,` | `jump-back`、`jump-forward` |
+| `C-v`、`M-v`、`C-l` | `half-page-down`、`half-page-up`、`recenter`（居中，不循环） |
+| `C-/`、`C-_`、`C-x u`，`C-M-/`、`C-M-_` | `undo`，`redo` |
+| `M-;` | `comment`（只切换行注释） |
+| `C-z` | `suspend` |
+| `C-g` | 与 Esc 相同：取消待完成的键，离开 Insert 和 Visual |
+
+Normal 和 Visual 中，下面的移动直接交给 Vim 语法，所以能带计数、跟在 operator 后面（`d<a-f>`、`3<c-n>`）：`C-f`、`C-b`（`l`、`h`），`C-n`、`C-p`（`j`、`k`），`C-a`、`C-e`（`0`、`$`），`M-f`、`M-b`（`w`、`b`），`M-m`（`^`），`M-<`、`M->`（`gg`、`G`），`M-{`、`M-}`。这些键没有绑定时才走这条路，所以 `map` 可以覆盖；帮助页的键表里不列出它们。
+
+| 模式 | 键 | 作用 |
+| --- | --- | --- |
+| Normal、Visual | `C-s` | `/` |
+| Normal、Visual | `C-Space` | `v`，再按退出 |
+| Normal、Visual | `C-y` | `P` |
+| Visual | `C-w`、`M-w` | `d`、`y` |
+| Normal | `M-d`、`M-Backspace` | `dw`、`db` |
+| Normal、Insert | `M-u`、`M-l`、`M-c` | `upcase-word`、`downcase-word`、`capitalize-word`，只看当前行，大小写转换只处理 ASCII |
+| Normal、Insert | `C-t`、`M-t` | `transpose-chars`、`transpose-words`，只看当前行 |
+| Normal、Insert | `M-\`、`M-Space`、`M-^` | `delete-horizontal-space`、`just-one-space`、`join-line` |
+| Insert | `C-n`、`C-p`、`M-<`、`M->` | 移动 |
+| Insert | `C-s`、`C-r` | `search`、`search-backward`，结束后回到 Insert，光标在匹配结尾 |
+| Insert | `C-o`、`C-j`、`M-m` | `open-line`、`newline`、`back-to-indentation` |
+
+输入框另有 `C-g` 取消、`C-j` 确认、`M-<` / `M->` 到第一个 / 最后一个候选、`C-v` / `M-v` 翻页、`C-s` / `C-r` 下一个 / 上一个匹配。
+
+和 Vim 冲突的其余键保持 Vim 的含义：Normal 的 `C-d`、`C-u`、`C-w`、`C-r`、`C-o`。要换成 Emacs 的含义，用 `map` 重新绑定。
+
+`M-y`（kill ring）、`C-Space` 在 Insert 中设置 mark、`M-.`（没有 LSP）、连续 `C-k` 合并没有实现。Alt 加 Shift 的符号键在 kitty 协议下按美式键盘换算。
 
 ### 按键记法
 
-单个字符直接书写；带修饰键或特殊键写在尖括号中，大小写不敏感：`<c-x>`、`<a-f>`（`<m-f>` 同义）、`<s-tab>`、`<c-s-left>`。特殊键名为 `esc`、`ret`（`cr`、`enter`）、`tab`、`backtab`、`bs`（`backspace`）、`del`、`space`、`lt`、`left`、`right`、`up`、`down`、`home`、`end`、`pageup`、`pagedown` 和 `f1` 到 `f12`。序列直接拼接，例如 `<space>f`、`<c-x><c-s>`。帮助和前缀提示使用同一记法输出。
+单个字符直接书写；带修饰键或特殊键写在尖括号中，大小写不敏感：`<c-x>`、`<a-f>`（`<m-f>` 同义）、`<s-tab>`、`<c-s-left>`。特殊键名为 `esc`、`ret`（`cr`、`enter`）、`tab`、`backtab`、`bs`（`backspace`）、`del`、`space`、`lt`、`gt`、`left`、`right`、`up`、`down`、`home`、`end`、`pageup`、`pagedown` 和 `f1` 到 `f12`。序列直接拼接，例如 `<space>f`、`<c-x><c-s>`。帮助和前缀提示使用同一记法输出。
 
 ### 行编辑键
 
@@ -166,9 +212,9 @@ Insert 和 prompt 共享一组 readline 风格的行编辑命令。名字只定�
 | Ctrl-K | `kill-line-end` | 剪切到行尾；位于行尾时剪切换行 |
 | Ctrl-Y | `yank` | 粘贴剪切内容 |
 
-Shift 加方向键、Home 和 End 扩展选区，对应 `extend-` 前缀的同名命令。Insert 中 `kill-line-end` 写入应用剪贴板，`yank` 等同于粘贴剪贴板；输入框使用组件自己的剪切缓冲。连续剪切不合并。Normal 和 Visual 不使用这组键，保持 Vim 语义。
+Shift 加方向键、Home 和 End 扩展选区，对应 `extend-` 前缀的同名命令。Insert 中 `kill-line-end` 写入应用剪贴板，`yank` 等同于粘贴剪贴板；输入框使用组件自己的剪切缓冲。连续剪切不合并。Normal 和 Visual 不使用这组键；这两个模式的 Emacs 键见[Emacs 键位](#emacs-键位)。
 
-这组键替换了 Vim Insert 中的少数原义：Ctrl-A/E 的重复插入与行尾滚动、Ctrl-K 二合字符、Ctrl-D 减少缩进（由 Shift-Tab 承担）、Ctrl-Y 复制上一行字符。Ctrl-N/Ctrl-P 在 Insert 中保留给以后的补全。
+这组键替换了 Vim Insert 中的少数原义：Ctrl-A/E 的重复插入与行尾滚动、Ctrl-K 二合字符、Ctrl-D 减少缩进（由 Shift-Tab 承担）、Ctrl-Y 复制上一行字符。Ctrl-N/Ctrl-P 上下移动；以后有补全时，弹窗打开期间由补全使用。
 
 ### 配置文件
 
@@ -255,7 +301,8 @@ hook open .*/Makefile set-local expand-tab false
 | `new` | `enew` | 新文档 |
 | `project FILE` | | 打开项目中的文件 |
 | `goto LINE[:COLUMN]` | | 跳转到行列，从 1 开始，列为逻辑列 |
-| `search` / `replace` | | 搜索与替换会话 |
+| `search` / `search-backward` / `replace` | | 搜索与替换会话 |
+| `recenter` | | 把光标所在行滚动到窗口中间 |
 | `help` | | 帮助 |
 | `commands` | `command-line` | 打开空的命令行，即命令面板 |
 | `undo` / `redo`、`copy` / `cut` / `paste` | | 历史与剪贴板 |
