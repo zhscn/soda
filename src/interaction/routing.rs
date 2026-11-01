@@ -265,6 +265,7 @@ impl Layers {
             let idle = self.idle();
             self.vim.replay.typed(&input, replayed, idle);
         }
+        self.replaying = replayed;
         let result = self.route(input, app, time, file_root);
         if typed {
             let idle = self.idle();
@@ -333,6 +334,17 @@ impl Layers {
             }
             _ => return Ok(InputResult::Blocked),
         };
+        if self.mode == EditMode::Insert
+            && self.completion.visible()
+            && !self.sequence.active()
+            && let Some(command) = self.keymap.completion(key)
+            // Enter is a line break until a candidate is chosen.
+            && (self.completion.selected()
+                || !matches!(command, Command::Completion(super::completion::Action::Accept)))
+        {
+            self.vim.replay.unrecord();
+            return self.execute(command, app, time, file_root);
+        }
         let cancel = keymap::is_cancel(&key)
             && !self.sequence.continues(key, self.mode.into(), &self.keymap);
         if cancel && (self.sequence.active() || self.vim.active()) {
@@ -367,12 +379,15 @@ impl Layers {
         let plain = !key.alt && !key.control && !key.unsupported_modifiers;
         if self.mode == EditMode::Insert {
             return match key.code {
-                Key::Char(ch) if plain => self.execute(
-                    Command::Edit(EditCommand::TypeChar(ch)),
-                    app,
-                    time,
-                    file_root,
-                ),
+                Key::Char(ch) if plain => {
+                    self.completion.typed = !self.replaying;
+                    self.execute(
+                        Command::Edit(EditCommand::TypeChar(ch)),
+                        app,
+                        time,
+                        file_root,
+                    )
+                }
                 _ => Ok(InputResult::Blocked),
             };
         }

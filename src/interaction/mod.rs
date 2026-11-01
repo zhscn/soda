@@ -4,6 +4,7 @@
 mod command_line;
 pub use command_line::{CommandLine, Completion};
 mod commands;
+pub mod completion;
 pub mod vim;
 pub use commands::{Command, Departure, Sourced, WindowCommand};
 mod departure;
@@ -157,6 +158,9 @@ pub struct Layers {
     sequence: keymap::Sequence,
     keymap: Keymap,
     vim: vim::State,
+    completion: completion::State,
+    /// The input being routed comes from `.` or a macro.
+    replaying: bool,
     jumps: jumps::Jumps,
     registry: Registry,
     hooks: hooks::Hooks,
@@ -301,6 +305,28 @@ impl Layers {
             })
             .collect()
     }
+    /// Brings completion in line with the caret; call after input settles.
+    /// Returns a request for sources, and whether to redraw.
+    pub fn completion_sync(
+        &mut self,
+        app: &Application,
+        file_root: &std::path::Path,
+    ) -> (Option<completion::Request>, bool) {
+        self.completion
+            .sync(app, self.mode, self.active.is_some(), file_root)
+    }
+    pub fn completion_results(
+        &mut self,
+        generation: u64,
+        items: Vec<completion::Item>,
+        app: &Application,
+    ) -> bool {
+        self.completion.results(generation, items, app)
+    }
+    /// The list to show under the caret.
+    pub fn completion_popup(&self) -> Option<completion::Popup> {
+        self.completion.popup()
+    }
     pub fn active(&self) -> Option<&Layer> {
         self.active.as_ref()
     }
@@ -427,6 +453,7 @@ impl Layers {
         time: Duration,
     ) -> Result<Response, EditError> {
         self.vim.marks.observe(update);
+        self.completion.observe(update);
         let searching = matches!(self.active, Some(Layer::Search { .. }));
         self.jumps.observe(app, update, searching);
         let group_end = if update.active_changed {

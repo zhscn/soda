@@ -14,15 +14,24 @@ pub enum Context {
     Normal,
     Visual,
     Insert,
+    /// Insert while the completion list shows; other keys go to Insert.
+    Completion,
     Prompt,
 }
 impl Context {
-    pub const ALL: [Self; 4] = [Self::Normal, Self::Visual, Self::Insert, Self::Prompt];
+    pub const ALL: [Self; 5] = [
+        Self::Normal,
+        Self::Visual,
+        Self::Insert,
+        Self::Completion,
+        Self::Prompt,
+    ];
     pub fn name(self) -> &'static str {
         match self {
             Self::Normal => "normal",
             Self::Visual => "visual",
             Self::Insert => "insert",
+            Self::Completion => "completion",
             Self::Prompt => "prompt",
         }
     }
@@ -376,7 +385,17 @@ const VISUAL: &[(&str, &str)] = &[
     ("<c-u>", "half-page-up"),
     ("<f1>", "help"),
 ];
+const COMPLETION: &[(&str, &str)] = &[
+    ("<tab>", "completion-replace"),
+    ("<ret>", "completion-accept"),
+    ("<c-n>", "completion-next"),
+    ("<down>", "completion-next"),
+    ("<c-p>", "completion-previous"),
+    ("<up>", "completion-previous"),
+    ("<c-g>", "completion-dismiss"),
+];
 const INSERT: &[(&str, &str)] = &[
+    ("<a-/>", "completion-trigger"),
     ("<up>", "move-up"),
     ("<down>", "move-down"),
     ("<s-up>", "extend-move-up"),
@@ -570,7 +589,7 @@ fn sequence(keys: &[KeyStroke]) -> Result<Vec<KeyStroke>, BindingError> {
 }
 
 pub struct Keymap {
-    edit: [Layer<Command>; 3],
+    edit: [Layer<Command>; 4],
     prompt: Layer<Input>,
 }
 impl Default for Keymap {
@@ -589,6 +608,7 @@ impl Default for Keymap {
             (Context::Insert, INSERT),
             (Context::Insert, READLINE),
             (Context::Insert, EMACS),
+            (Context::Completion, COMPLETION),
         ] {
             for (keys, line) in table {
                 let target = registry.parse_builtin(line).unwrap();
@@ -634,6 +654,14 @@ impl Keymap {
         match context {
             Context::Prompt => self.prompt.unbind(keys),
             context => self.edit[context as usize].unbind(keys),
+        }
+    }
+    /// The command of a key while the completion list shows, if it has one.
+    pub(super) fn completion(&self, key: KeyStroke) -> Option<Command> {
+        let key = canonical(key).ok()?;
+        match self.resolve(Context::Completion, &[key]) {
+            Resolution::Complete(command) => Some(command),
+            _ => None,
         }
     }
     pub(super) fn resolve(&self, context: Context, keys: &[KeyStroke]) -> Resolution<Command> {

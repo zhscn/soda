@@ -160,6 +160,7 @@ pub enum Command {
         placement: crate::application::Placement,
     },
     Search,
+    Completion(super::completion::Action),
     Replace,
 }
 #[derive(Clone, Debug)]
@@ -592,6 +593,32 @@ impl Layers {
                     response
                         .events
                         .push(Event::Clipboard { view, action, time });
+                }
+            }
+            Command::Completion(action) => {
+                use super::completion::Action;
+                match action {
+                    Action::Trigger => self.completion.trigger(),
+                    Action::Dismiss => self.completion.dismiss(app),
+                    Action::Move { backward } => self.completion.step(backward),
+                    Action::Accept | Action::Replace => {
+                        let replace = action == Action::Replace;
+                        if let Some((view, tx, replay)) = self.completion.accept(replace, app) {
+                            use super::{Key, KeyStroke, UserInput};
+                            for key in std::iter::repeat_n(Key::Backspace, replay.before)
+                                .chain(std::iter::repeat_n(Key::Delete, replay.after))
+                            {
+                                let key = KeyStroke::plain(key);
+                                self.vim.replay.record(UserInput::Key(key));
+                            }
+                            self.vim.replay.record(UserInput::Paste(replay.text));
+                            response.events.push(Event::Edit {
+                                view,
+                                command: EditCommand::Apply(tx),
+                                time,
+                            });
+                        }
+                    }
                 }
             }
             Command::Edit(command) => {

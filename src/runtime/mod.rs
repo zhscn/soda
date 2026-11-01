@@ -15,6 +15,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+mod completion;
 mod grep;
 mod lua;
 mod process;
@@ -41,6 +42,7 @@ pub struct Runtime {
     files: FileRunner,
     shell: shell::ShellRunner,
     grep: grep::GrepRunner,
+    completions: completion::Completions,
     run: run::RunRunner,
     picker: PickerRunner,
     paths: PathRunner,
@@ -95,6 +97,7 @@ impl Runtime {
             files: FileRunner::new()?,
             shell: shell::ShellRunner::default(),
             grep: grep::GrepRunner::default(),
+            completions: completion::Completions::default(),
             run: run::RunRunner::default(),
             picker: PickerRunner::new()?,
             paths: PathRunner::new()?,
@@ -298,6 +301,18 @@ impl Runtime {
             .route_input(input, &self.app, time, &self.file_root);
         self.input_result(result, time);
         self.settle(time);
+        self.complete();
+    }
+    fn complete(&mut self) {
+        let (request, changed) = self.layers.completion_sync(&self.app, &self.file_root);
+        if let Some(request) = request {
+            self.completions.request(request);
+        }
+        self.dirty |= changed;
+    }
+    /// The list of candidates to show under the caret.
+    pub fn completion_popup(&self) -> Option<crate::interaction::completion::Popup> {
+        self.layers.completion_popup()
     }
     pub fn command(&mut self, command: Command) {
         self.command_at(command, self.epoch.elapsed());
@@ -308,6 +323,7 @@ impl Runtime {
             .execute(command, &self.app, time, &self.file_root);
         self.input_result(result, time);
         self.settle(time);
+        self.complete();
     }
     fn input_result(&mut self, result: Result<InputResult, EditError>, time: Duration) {
         match result {
@@ -885,6 +901,9 @@ impl Runtime {
             };
             let response = self.layers.path_finished(completion, &self.app);
             self.respond(response, self.epoch.elapsed());
+        }
+        if let Some((generation, items)) = self.completions.poll() {
+            self.dirty |= self.layers.completion_results(generation, items, &self.app);
         }
         if let Some(completion) = self.shell.poll() {
             self.shell_finished(completion);

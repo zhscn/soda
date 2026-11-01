@@ -108,7 +108,7 @@ BeginUndoGroup 保存操作开始前的选区，EndUndoGroup 保存结束时的�
 
 ### 键位上下文
 
-键位按上下文解析：`normal`、`visual`（同时用于字符和整行 Visual）、`insert` 和 `prompt`（所有输入框、picker 与确认对话框）。每个上下文依次查找：
+键位按上下文解析：`normal`、`visual`（同时用于字符和整行 Visual）、`insert`、`completion`（补全列表显示时，只接受单键，没有绑定的键落回 Insert，见[补全](completion.md)）和 `prompt`（所有输入框、picker 与确认对话框）。每个上下文依次查找：
 
 1. 用户层：`map` 和 Rust `bind`（prompt 为 `bind_input`）写入；`unmap`、`unbind` 和 `unbind_input` 删除用户条目，默认解释随之恢复。
 2. 默认层：`interaction::keymap` 中的静态表，引用命令名并在启动时解析，测试保证每个默认条目都能解析。

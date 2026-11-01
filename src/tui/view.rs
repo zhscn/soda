@@ -218,8 +218,69 @@ pub(super) fn render(
         Some(_) => cursor = prompt,
         None => key_hints(buf, areas, runtime, theme),
     }
+    if let (Some(position), None, Some(popup)) =
+        (cursor, runtime.layer(), runtime.completion_popup())
+    {
+        completions(buf, areas, position, popup, theme);
+    }
     if let Some(position) = cursor {
         frame.set_cursor_position(position);
+    }
+}
+
+/// The candidates, under the word at the caret, or above it near the bottom.
+fn completions(
+    buf: &mut Buffer,
+    areas: &Areas,
+    caret: Position,
+    popup: crate::interaction::completion::Popup,
+    theme: &Theme,
+) {
+    let width = |text: &str| layout::plain(text, 0, usize::MAX >> 1).chars().count();
+    let label = popup
+        .rows
+        .iter()
+        .map(|r| width(&r.label))
+        .max()
+        .unwrap_or(0);
+    let detail = popup.rows.iter().map(|r| r.detail.len()).max().unwrap_or(0);
+    let area = areas.editor;
+    let wide = ((label + detail + 4) as u16).min(area.width);
+    let high = popup.rows.len() as u16;
+    let x = caret
+        .x
+        .saturating_sub(popup.typed as u16 + 1)
+        .max(area.x)
+        .min(area.right().saturating_sub(wide));
+    let y = if caret.y + 1 + high <= area.bottom() {
+        caret.y + 1
+    } else {
+        caret.y.saturating_sub(high).max(area.y)
+    };
+    let name = wide.saturating_sub(detail as u16 + 4) as usize;
+    for (row, candidate) in popup.rows.iter().enumerate() {
+        let y = y + row as u16;
+        let style = if candidate.selected {
+            theme.panel.patch(theme.candidate_selected)
+        } else {
+            theme.panel
+        };
+        buf.set_style(Rect::new(x, y, wide, 1), style);
+        buf.set_stringn(x + 1, y, &candidate.label, name, style);
+        for range in &candidate.matched {
+            let column = width(&candidate.label[..range.start]);
+            if column < name {
+                let matched = &candidate.label[range.clone()];
+                buf.set_stringn(x + 1 + column as u16, y, matched, 1, style.patch(theme.key));
+            }
+        }
+        buf.set_stringn(
+            x + wide - detail as u16 - 1,
+            y,
+            candidate.detail,
+            detail,
+            style,
+        );
     }
 }
 

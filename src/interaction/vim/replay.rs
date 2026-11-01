@@ -94,6 +94,21 @@ impl Replay {
         }
         self.typed.push(input.clone());
     }
+    /// Takes back the key just typed: it chose from a list, which a replay
+    /// has no use for.
+    pub fn unrecord(&mut self) {
+        if let Some((_, keys)) = &mut self.recording {
+            keys.pop();
+        }
+        self.typed.pop();
+    }
+    /// Records input that did not come from a key.
+    pub fn record(&mut self, input: UserInput) {
+        if let Some((_, keys)) = &mut self.recording {
+            keys.push(input.clone());
+        }
+        self.typed.push(input);
+    }
     /// Called after routing input; `idle` as in `typed`.
     pub fn routed(&mut self, idle: bool) {
         if std::mem::take(&mut self.changed) {

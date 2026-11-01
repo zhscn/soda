@@ -81,6 +81,7 @@ const MODE: Slot = slot(
         word("normal", "Normal mode keys"),
         word("visual", "Visual mode keys"),
         word("insert", "Insert mode keys"),
+        word("completion", "Keys while the completion list shows"),
         word("prompt", "Command line and prompt keys"),
     ]),
 );
@@ -487,6 +488,36 @@ pub static BUILTINS: &[Builtin] = &[
             redo: true,
             count: 1
         })
+    ),
+    builtin!(
+        "completion-trigger",
+        "List candidates for the word at the caret",
+        Command::Completion(super::completion::Action::Trigger)
+    ),
+    builtin!(
+        "completion-dismiss",
+        "Close the completion list",
+        Command::Completion(super::completion::Action::Dismiss)
+    ),
+    builtin!(
+        "completion-next",
+        "Select the next candidate",
+        Command::Completion(super::completion::Action::Move { backward: false })
+    ),
+    builtin!(
+        "completion-previous",
+        "Select the previous candidate",
+        Command::Completion(super::completion::Action::Move { backward: true })
+    ),
+    builtin!(
+        "completion-accept",
+        "Take the selected candidate, keeping the text after the caret",
+        Command::Completion(super::completion::Action::Accept)
+    ),
+    builtin!(
+        "completion-replace",
+        "Take the selected or first candidate, replacing to the end of the word",
+        Command::Completion(super::completion::Action::Replace)
     ),
     builtin!(
         "recenter",

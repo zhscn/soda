@@ -90,6 +90,18 @@ pub const OPTIONS: &[OptionInfo] = &[
         doc: "Type brackets, and the quotes a language lists, in pairs; Backspace removes an empty pair",
     },
     OptionInfo {
+        name: "completion",
+        kind: Kind::Bool,
+        default: Value::Bool(true),
+        doc: "Show candidates while typing in Insert; <a-/> asks for them regardless",
+    },
+    OptionInfo {
+        name: "completion-min-prefix",
+        kind: Kind::Int { min: 1, max: 16 },
+        default: Value::Int(2),
+        doc: "Characters of a word to type before candidates show",
+    },
+    OptionInfo {
         name: "line-numbers",
         kind: Kind::Choice(&["absolute", "relative", "off"]),
         default: Value::Choice("absolute"),
