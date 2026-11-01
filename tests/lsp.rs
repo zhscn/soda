@@ -216,3 +216,63 @@ fn a_missing_server_is_said_once() {
     keys(&mut r, "K");
     assert_eq!(r.message(), "No language server for this document");
 }
+#[test]
+fn each_project_has_a_server_and_a_jump_stays_with_its_own() {
+    if Process::new("python3").arg("--version").output().is_err() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().canonicalize().unwrap();
+    for repo in ["one", "two", "library"] {
+        std::fs::create_dir_all(base.join(repo).join(".git")).unwrap();
+        std::fs::write(base.join(repo).join("a.cpp"), format!("// {repo}\n")).unwrap();
+    }
+    let log = base.join("log");
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_lsp.py");
+    let mut r = Runtime::started_in(base.clone()).unwrap();
+    r.load_startup_lua();
+    r.enable_lsp();
+    r.source_lua(
+        "test",
+        &format!(
+            r#"soda.lsp.server("cpp", {{ "env", "FAKE_LSP_LOG={}", "python3", "{}" }})"#,
+            log.display(),
+            script.display()
+        ),
+    )
+    .unwrap();
+    let read = {
+        let log = log.clone();
+        move || std::fs::read_to_string(&log).unwrap_or_default()
+    };
+    let roots = {
+        let read = read.clone();
+        move || {
+            read()
+                .lines()
+                .filter(|l| l.starts_with("initialize "))
+                .count()
+        }
+    };
+    r.start(Some(base.join("one/a.cpp")));
+    let seen = read.clone();
+    wait(&mut r, move |_| seen().contains("// one"));
+    r.command(Command::OpenPath(base.join("two/a.cpp")));
+    let seen = read.clone();
+    wait(&mut r, move |_| seen().contains("// two"));
+    let count = roots.clone();
+    wait(&mut r, move |_| count() == 2);
+    let log_text = read();
+    assert!(
+        log_text.contains("one") && log_text.contains("/two"),
+        "{log_text}"
+    );
+    // A jump into a third repository uses the server it came from.
+    let library = base.join("library/a.cpp");
+    r.source_lua("test", &format!("soda.open({:?}, 1, 1)", library.display()))
+        .unwrap();
+    let seen = read.clone();
+    wait(&mut r, move |_| seen().contains("// library"));
+    assert_eq!(roots(), 2, "{}", read());
+    assert_eq!(r.app().project(), Some(base.join("library")));
+}

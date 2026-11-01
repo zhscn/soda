@@ -91,6 +91,12 @@ pub enum Command {
     },
     /// Fills the `*KIND*` document with result lines for `]q` to step
     /// through; lines that name no location stay as headings.
+    /// Opens a file named relative to the project.
+    OpenProjectFile(std::path::PathBuf),
+    /// Asks for a file, starting from the active document's directory.
+    OpenPrompt,
+    /// Shows the project, or makes a directory it.
+    ProjectRoot(Option<std::path::PathBuf>),
     Results {
         kind: String,
         lines: Vec<String>,
@@ -193,6 +199,21 @@ pub enum Departure {
     Discard,
 }
 
+/// A directory as a path to start from: under `~` when it can be, and
+/// ending in a slash so that a file name follows.
+fn prompt_directory(directory: &Path) -> String {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let shown = match home.and_then(|home| directory.strip_prefix(home).ok().map(Path::to_owned)) {
+        Some(below) if below.as_os_str().is_empty() => "~".to_owned(),
+        Some(below) => format!("~/{}", below.display()),
+        None => directory.display().to_string(),
+    };
+    if shown.ends_with('/') {
+        shown
+    } else {
+        shown + "/"
+    }
+}
 fn check_files(app: &Application, file_root: &Path, response: &mut Response) {
     // Focus comes back often; the message stays unless something changed.
     response.message = Message::Keep;
@@ -423,9 +444,14 @@ impl Layers {
                     Command::Ex(text) => (text, None),
                     _ => unreachable!(),
                 };
-                let mut line =
-                    CommandLine::new(&text, self.registry.commands(), file_root.to_owned(), app)
-                        .with_recent(self.recent_files.clone());
+                let mut line = CommandLine::new(
+                    &text,
+                    self.registry.commands(),
+                    file_root.to_owned(),
+                    app.directory(),
+                    app,
+                )
+                .with_recent(self.recent_files.clone());
                 if let Some(note) = note {
                     line = line.with_note(note);
                 }
@@ -497,18 +523,53 @@ impl Layers {
             }
             Command::Pipe(shell) => {
                 if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
+                    let directory = app.directory();
                     response.shell =
-                        Some(Box::new(super::shell::pipe(app, view, shell, file_root)));
+                        Some(Box::new(super::shell::pipe(app, view, shell, &directory)));
                 }
             }
             Command::Shell(shell) => {
                 let view = app.active_view().and_then(|id| app.view(id));
-                response.shell = Some(Box::new(super::shell::run(app, view, shell, file_root)));
+                let directory = app.directory();
+                response.shell = Some(Box::new(super::shell::run(app, view, shell, &directory)));
             }
             Command::Nop => {}
+            Command::OpenPrompt => {
+                let line = format!("open {}", prompt_directory(&app.directory()));
+                return self.execute(Command::Ex(line), app, time, file_root);
+            }
+            Command::ProjectRoot(None) => {
+                response.message = Message::Set(match app.project() {
+                    Some(project) => project.display().to_string(),
+                    None => format!("No project; using {}", app.directory().display()),
+                });
+            }
+            Command::ProjectRoot(Some(path)) => {
+                let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+                match super::path::resolve_path(&app.directory(), home.as_deref(), &path).and_then(
+                    |path| {
+                        std::fs::canonicalize(&path)
+                            .ok()
+                            .filter(|path| path.is_dir())
+                            .ok_or_else(|| format!("{} is not a directory", path.display()))
+                    },
+                ) {
+                    Ok(directory) => {
+                        response.message = Message::Set(format!("Project {}", directory.display()));
+                        response.events.push(Event::SetProject(directory));
+                    }
+                    Err(error) => {
+                        response.message = Message::Set(error);
+                        response.failed = true;
+                    }
+                }
+            }
+            Command::OpenProjectFile(path) => {
+                response.events.push(Event::Open(file_root.join(path)));
+            }
             Command::OpenPath(path) | Command::SavePath(path) => {
                 let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-                match super::path::resolve_path(file_root, home.as_deref(), &path) {
+                match super::path::resolve_path(&app.directory(), home.as_deref(), &path) {
                     Ok(path) => {
                         if opening_path {
                             response.events.push(Event::Open(path));
@@ -679,7 +740,10 @@ impl Layers {
                     let path = app.workspace().file(document).unwrap().path();
                     if choose_path || path.is_none() {
                         let text = path.map_or_else(String::new, |p| {
-                            p.strip_prefix(file_root).unwrap_or(p).display().to_string()
+                            p.strip_prefix(app.directory())
+                                .unwrap_or(p)
+                                .display()
+                                .to_string()
                         });
                         return self.execute(
                             Command::Ex(format!("saveas {text}")),
@@ -734,7 +798,7 @@ impl Layers {
                     self.results_fresh = false;
                 }
                 self.jumps.expect_result();
-                if !super::grep::jump(app, file_root, time, &mut response) {
+                if !super::grep::jump(app, time, &mut response) {
                     self.jumps.clear_pending();
                     self.jumps.end_walk();
                     response.commands.extend([
@@ -745,15 +809,7 @@ impl Layers {
             }
             Command::ResultStep { backward } => {
                 let fresh = std::mem::take(&mut self.results_fresh);
-                super::grep::step(
-                    app,
-                    &self.results,
-                    fresh,
-                    file_root,
-                    backward,
-                    time,
-                    &mut response,
-                )
+                super::grep::step(app, &self.results, fresh, backward, time, &mut response)
             }
             Command::Results { kind, lines } => {
                 if lines.iter().any(|line| {
@@ -764,6 +820,7 @@ impl Layers {
                     response.events.push(Event::ResultsDisplay { kind });
                     response.events.push(Event::Scratch {
                         name,
+                        directory: file_root.to_owned(),
                         text: lines.join("\n") + "\n",
                     });
                 } else {
@@ -1082,7 +1139,7 @@ impl Layers {
                 let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
                 let target = match path {
                     Some(path) => {
-                        match super::path::resolve_path(file_root, home.as_deref(), &path) {
+                        match super::path::resolve_path(&app.directory(), home.as_deref(), &path) {
                             Ok(target) => Some(target),
                             Err(error) => {
                                 response.message = Message::Set(error);
@@ -1095,7 +1152,8 @@ impl Layers {
                 let retry = target.as_ref().map_or_else(
                     || format!("{action} save"),
                     |target| {
-                        let shown = target.strip_prefix(file_root).unwrap_or(target);
+                        let directory = app.directory();
+                        let shown = target.strip_prefix(directory).unwrap_or(target);
                         format!("{action} save {}", shown.display())
                     },
                 );

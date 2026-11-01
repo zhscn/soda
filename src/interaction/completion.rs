@@ -239,7 +239,6 @@ impl State {
         app: &Application,
         mode: EditMode,
         blocked: bool,
-        file_root: &Path,
     ) -> (Option<Request>, bool) {
         let typed = std::mem::take(&mut self.typed);
         let manual = std::mem::take(&mut self.manual);
@@ -299,12 +298,7 @@ impl State {
         let document = view.document_id;
         let options = app.options();
         let workspace = app.workspace();
-        let base = workspace
-            .file(document)
-            .and_then(|file| file.path())
-            .and_then(Path::parent)
-            .unwrap_or(file_root);
-        let directory = directory(text, caret, base);
+        let directory = directory(text, caret, &app.directory_of(document));
         let long_enough =
             caret - start >= options.int(Some(document), "completion-min-prefix") as usize;
         let after_slash = directory.as_ref().is_some_and(|d| d.back == 0);

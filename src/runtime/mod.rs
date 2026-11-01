@@ -53,7 +53,6 @@ pub struct Runtime {
     clipboard: Option<Box<dyn SystemClipboard>>,
     /// The application clipboard revision last stored or loaded.
     clipboard_revision: u64,
-    file_root: PathBuf,
     message: String,
     epoch: Instant,
     /// Input `.` and macros still have to replay, next first, as Vim's
@@ -85,16 +84,27 @@ pub struct Runtime {
     dirty: bool,
 }
 impl Runtime {
-    pub fn new(file_root: PathBuf) -> io::Result<Self> {
-        Self::with_application(Application::default(), file_root)
+    /// A runtime with `root` as a project, whatever the directory holds.
+    pub fn new(root: PathBuf) -> io::Result<Self> {
+        Self::with_application(Application::default(), root)
     }
-    pub fn with_application(app: Application, file_root: PathBuf) -> io::Result<Self> {
+    /// A runtime started in `directory`, which is only where documents with
+    /// nothing else to go by stand.
+    pub fn started_in(directory: PathBuf) -> io::Result<Self> {
+        Self::with_application_in(Application::default(), directory)
+    }
+    pub fn with_application(mut app: Application, root: PathBuf) -> io::Result<Self> {
+        app.add_project(root.clone());
+        Self::with_application_in(app, root)
+    }
+    fn with_application_in(mut app: Application, file_root: PathBuf) -> io::Result<Self> {
         if !file_root.is_absolute() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "Runtime requires an absolute file root",
             ));
         }
+        app.set_start(file_root);
         Ok(Self {
             files: FileRunner::new()?,
             shell: shell::ShellRunner::default(),
@@ -108,7 +118,6 @@ impl Runtime {
             layers: Layers::default(),
             clipboard: None,
             clipboard_revision: 0,
-            file_root,
             message: String::new(),
             epoch: Instant::now(),
             replay: Default::default(),
@@ -248,9 +257,6 @@ impl Runtime {
     pub fn key_continuations(&self) -> Vec<(String, String)> {
         self.layers.continuations()
     }
-    pub fn file_root(&self) -> &std::path::Path {
-        &self.file_root
-    }
     pub fn message(&self) -> &str {
         &self.message
     }
@@ -305,13 +311,13 @@ impl Runtime {
     pub fn input_at(&mut self, input: UserInput, time: Duration) {
         let result = self
             .layers
-            .route_input(input, &self.app, time, &self.file_root);
+            .route_input(input, &self.app, time, &self.app.root());
         self.input_result(result, time);
         self.settle(time);
         self.complete();
     }
     fn complete(&mut self) {
-        let (request, changed) = self.layers.completion_sync(&self.app, &self.file_root);
+        let (request, changed) = self.layers.completion_sync(&self.app);
         if let Some(request) = request {
             self.ask_lua_sources(&request.asked);
             if request.asked.builtin {
@@ -334,7 +340,7 @@ impl Runtime {
     pub fn command_at(&mut self, command: Command, time: Duration) {
         let result = self
             .layers
-            .execute(command, &self.app, time, &self.file_root);
+            .execute(command, &self.app, time, &self.app.root());
         self.input_result(result, time);
         self.settle(time);
         self.complete();
@@ -693,6 +699,7 @@ impl Runtime {
                 Event::Scratch {
                     name: MESSAGES.into(),
                     text,
+                    directory: self.app.directory(),
                 },
                 time,
             ) && let Some(view) = self.app.active_view()
@@ -728,12 +735,14 @@ impl Runtime {
         }
         if let Some(request) = response.run {
             let header = format!("$ {}", request.command);
+            let cwd = request.cwd.clone();
             match self.run.submit(*request) {
                 Ok(()) => {
                     self.reduce(
                         Event::Scratch {
                             name: crate::interaction::grep::RUN.into(),
                             text: header,
+                            directory: cwd,
                         },
                         time,
                     );
@@ -765,7 +774,7 @@ impl Runtime {
         for command in response.commands {
             match self
                 .layers
-                .execute(command, &self.app, time, &self.file_root)
+                .execute(command, &self.app, time, &self.app.root())
             {
                 Ok(InputResult::Handled(response)) => {
                     if !self.respond(response, time) {
@@ -815,7 +824,7 @@ impl Runtime {
             budget -= 1;
             let result = self
                 .layers
-                .route_replayed(input, &self.app, time, &self.file_root);
+                .route_replayed(input, &self.app, time, &self.app.root());
             self.input_result(result, time);
             if self.layers.failed() {
                 self.replay.clear();
@@ -963,6 +972,7 @@ impl Runtime {
                 let shown = self.dispatch(Event::Scratch {
                     name: crate::interaction::grep::SCRATCH.into(),
                     text,
+                    directory: completion.root,
                 });
                 if shown {
                     if let Some(document) = self

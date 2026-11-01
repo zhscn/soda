@@ -88,10 +88,11 @@ fn results_view(app: &Application, name: &str) -> Option<ViewId> {
         .map(|view| view.id)
 }
 
-fn open(file_root: &Path, target: (String, usize, usize), response: &mut Response) {
+/// Relative paths mean the directory of the list that holds them.
+fn open(base: &Path, target: (String, usize, usize), response: &mut Response) {
     let (path, line, column) = target;
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-    match super::path::resolve_path(file_root, home.as_deref(), Path::new(&path)) {
+    match super::path::resolve_path(base, home.as_deref(), Path::new(&path)) {
         Ok(path) => response.events.push(Event::OpenAt { path, line, column }),
         Err(error) => response.message = Message::Set(error),
     }
@@ -100,12 +101,7 @@ fn open(file_root: &Path, target: (String, usize, usize), response: &mut Respons
 /// Opens the location on the caret line of the active view. Returns false
 /// when that line names none, so Enter can keep its usual meaning. On a
 /// file's name, it goes to the first result below.
-pub(super) fn jump(
-    app: &Application,
-    file_root: &Path,
-    time: Duration,
-    response: &mut Response,
-) -> bool {
+pub(super) fn jump(app: &Application, time: Duration, response: &mut Response) -> bool {
     let Some(view) = app.active_view().and_then(|id| app.view(id)) else {
         return false;
     };
@@ -119,8 +115,9 @@ pub(super) fn jump(
         .head;
     let line = snapshot.line_of(head).unwrap();
     let grouped = grouped(app, view.document_id);
+    let base = app.directory_of(view.document_id);
     if let Some(target) = entry(snapshot, line, grouped) {
-        open(file_root, target, response);
+        open(&base, target, response);
         return true;
     }
     let Some(target) = grouped.then(|| entry(snapshot, line + 1, true)).flatten() else {
@@ -131,7 +128,7 @@ pub(super) fn jump(
         command: Edit::SetSelection(Selection::caret(snapshot.line_start(line + 1).unwrap())),
         time,
     });
-    open(file_root, target, response);
+    open(&base, target, response);
     true
 }
 
@@ -142,7 +139,6 @@ pub(super) fn step(
     app: &Application,
     results: &str,
     fresh: bool,
-    file_root: &Path,
     backward: bool,
     time: Duration,
     response: &mut Response,
@@ -183,7 +179,7 @@ pub(super) fn step(
                 command: Edit::SetSelection(Selection::caret(snapshot.line_start(line).unwrap())),
                 time,
             });
-            open(file_root, target, response);
+            open(&app.directory_of(view.document_id), target, response);
             return;
         }
     }

@@ -49,18 +49,6 @@ fn enumerate(request: &PathRequest) -> Result<Vec<DirectoryEntry>, String> {
         });
     }
     entries.sort_by(|a, b| (!a.directory, &a.name, &a.path).cmp(&(!b.directory, &b.name, &b.path)));
-    if request.prefix.is_empty()
-        && let Some(parent) = directory.parent()
-    {
-        entries.insert(
-            0,
-            DirectoryEntry {
-                path: parent.to_owned(),
-                name: "..".into(),
-                directory: true,
-            },
-        );
-    }
     Ok(entries)
 }
 use std::{
@@ -196,7 +184,7 @@ mod tests {
                 .unwrap();
         }
         let entries = enumerate(&request(temp.path().to_owned(), "")).unwrap();
-        assert_eq!(entries[0].name, "..");
+        assert!(!entries.iter().any(|entry| entry.name == ".."));
         assert!(entries.iter().any(|entry| entry.name == ".hidden"));
         assert!(!entries.iter().any(|entry| entry.name == "nested"));
         #[cfg(unix)]

@@ -272,7 +272,14 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
     let theme = theme::Theme::detect();
     let mut highlighter = Highlighter::with_budget(Duration::from_millis(12));
     let mut catching_up = false;
-    let mut runtime = Runtime::new(std::env::current_dir()?)?;
+    // A directory argument is a project; otherwise the working directory
+    // only places documents that have nothing else to go by.
+    let project = path.as_deref().filter(|path| path.is_dir());
+    let mut runtime = match project.map(std::fs::canonicalize).transpose()? {
+        Some(project) => Runtime::new(project)?,
+        None => Runtime::started_in(std::env::current_dir()?)?,
+    };
+    let path = path.filter(|path| !path.is_dir());
     runtime.set_system_clipboard(Box::new(clipboard::Clipboard::detect()));
     // Built-in modules come first so that configuration can replace their
     // commands and keys; modules in the lua directory beside the command

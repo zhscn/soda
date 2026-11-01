@@ -2,15 +2,15 @@
 //! keeping servers' copies of documents current. What to ask a server, and
 //! what to do with its answers, is Lua's: `lua/lsp.lua`.
 //!
-//! A server is started for the first document in its language. Documents are
-//! sent whole, shortly after typing stops and before any request. Bytes are
+//! A server is started for the first document of a language under a root,
+//! so two projects have two servers. Documents are sent whole, shortly after typing stops and before any request. Bytes are
 //! written on a thread, so that a large document costs the editor nothing.
 use crate::{application::Application, core::Snapshot, editor::DocumentId};
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
     io::{BufRead, BufReader, Write},
-    path::Path,
+    path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::mpsc::{self, Receiver, Sender},
     time::{Duration, Instant},
@@ -70,8 +70,8 @@ impl Outgoing {
 
 /// What a server said, or that it is gone.
 enum Incoming {
-    Message(String, Value),
-    Closed(String),
+    Message(Key, Value),
+    Closed(Key),
 }
 /// What the runtime hands to Lua.
 pub(super) enum Delivery {
@@ -84,6 +84,9 @@ pub(super) enum Delivery {
     /// A notification, for a function given to `soda.lsp.on`.
     Notification { function: u64, params: Value },
 }
+
+/// A language and the root a server for it runs in.
+pub(super) type Key = (String, PathBuf);
 
 struct Opened {
     uri: String,
@@ -121,9 +124,9 @@ impl Client {
 pub(super) struct Lsp {
     enabled: bool,
     servers: HashMap<String, Vec<String>>,
-    clients: HashMap<String, Client>,
-    /// Languages whose server failed; `lsp-restart` lets them try again.
-    failed: Vec<String>,
+    clients: HashMap<Key, Client>,
+    /// Servers that failed; `lsp-restart` lets them try again.
+    failed: Vec<Key>,
     handlers: HashMap<String, Vec<u64>>,
     incoming: (Sender<Incoming>, Receiver<Incoming>),
 }
@@ -217,22 +220,23 @@ impl Lsp {
             }
             None => {
                 self.servers.remove(&language);
-                self.clients.remove(&language);
+                self.clients.retain(|key, _| key.0 != language);
             }
         }
     }
     pub fn on(&mut self, method: String, function: u64) {
         self.handlers.entry(method).or_default().push(function);
     }
-    pub fn restart(&mut self, language: &str) {
-        self.failed.retain(|failed| failed != language);
-        self.clients.remove(language);
+    pub fn restart(&mut self, key: &Key) {
+        self.failed.retain(|failed| failed != key);
+        self.clients.remove(key);
     }
-    pub fn client_of(&self, language: &str) -> Option<(&str, &Value)> {
-        let client = self.clients.get(language)?;
+    pub fn client_of(&self, key: &Key) -> Option<(&str, &Value)> {
+        let client = self.clients.get(key)?;
         Some((&client.encoding, &client.capabilities))
     }
-    fn start(&mut self, language: &str, root: &Path) -> Result<(), String> {
+    fn start(&mut self, key: &Key) -> Result<(), String> {
+        let (language, root) = key;
         let command = &self.servers[language];
         let mut process = Command::new(&command[0])
             .args(&command[1..])
@@ -258,7 +262,7 @@ impl Lsp {
             }
         });
         let incoming = self.incoming.0.clone();
-        let name = language.to_owned();
+        let name = key.clone();
         std::thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
             while let Some(message) = read_message(&mut reader) {
@@ -273,7 +277,7 @@ impl Lsp {
         });
         let _ = writer.send(Outgoing::Message(initialize(root)));
         self.clients.insert(
-            language.to_owned(),
+            key.clone(),
             Client {
                 process,
                 writer,
@@ -289,7 +293,7 @@ impl Lsp {
     }
     /// Starts servers and tells them about documents. With `now`, sends
     /// edits that are still settling. Returns an error to show, if any.
-    pub fn sync(&mut self, app: &Application, root: &Path, now: bool) -> Option<String> {
+    pub fn sync(&mut self, app: &Application, now: bool) -> Option<String> {
         if !self.enabled {
             return None;
         }
@@ -301,17 +305,18 @@ impl Lsp {
             };
             let model = workspace.editor(document).unwrap().model().document();
             let language = model.language().profile().id.clone();
-            if !self.servers.contains_key(&language) || self.failed.contains(&language) {
+            let key = (language.clone(), app.server_root_of(document));
+            if !self.servers.contains_key(&language) || self.failed.contains(&key) {
                 continue;
             }
-            if !self.clients.contains_key(&language)
-                && let Err(error) = self.start(&language, root)
+            if !self.clients.contains_key(&key)
+                && let Err(error) = self.start(&key)
             {
-                self.failed.push(language);
+                self.failed.push(key);
                 failure = Some(error);
                 continue;
             }
-            let client = self.clients.get_mut(&language).unwrap();
+            let client = self.clients.get_mut(&key).unwrap();
             let snapshot = model.snapshot();
             let version = snapshot.version();
             let Some(opened) = client.opened.get_mut(&document) else {
@@ -347,11 +352,17 @@ impl Lsp {
                 });
             }
         }
-        for client in self.clients.values_mut() {
+        for (key, client) in &mut self.clients {
+            // Gone, or now with another server.
             let closed: Vec<_> = client
                 .opened
                 .keys()
-                .filter(|document| workspace.editor(**document).is_none())
+                .filter(|document| {
+                    workspace.editor(**document).is_none_or(|editor| {
+                        *editor.model().document().language().profile().id != key.0
+                            || app.server_root_of(**document) != key.1
+                    })
+                })
                 .copied()
                 .collect();
             for document in closed {
@@ -365,8 +376,8 @@ impl Lsp {
         }
         failure
     }
-    pub fn request(&mut self, language: &str, method: &str, params: Value, function: u64) -> bool {
-        let Some(client) = self.clients.get_mut(language) else {
+    pub fn request(&mut self, key: &Key, method: &str, params: Value, function: u64) -> bool {
+        let Some(client) = self.clients.get_mut(key) else {
             return false;
         };
         let id = client.next;
@@ -377,8 +388,8 @@ impl Lsp {
         })));
         true
     }
-    pub fn notify(&mut self, language: &str, method: &str, params: Value) -> bool {
-        let Some(client) = self.clients.get_mut(language) else {
+    pub fn notify(&mut self, key: &Key, method: &str, params: Value) -> bool {
+        let Some(client) = self.clients.get_mut(key) else {
             return false;
         };
         client.send(Outgoing::Message(json!({
@@ -393,21 +404,21 @@ impl Lsp {
         let mut failure = None;
         while let Ok(incoming) = self.incoming.1.try_recv() {
             match incoming {
-                Incoming::Closed(language) => {
-                    if self.clients.remove(&language).is_some() {
-                        failure = Some(format!("language server for {language} exited"));
-                        self.failed.push(language);
+                Incoming::Closed(key) => {
+                    if self.clients.remove(&key).is_some() {
+                        failure = Some(format!("language server for {} exited", key.0));
+                        self.failed.push(key);
                     }
                 }
-                Incoming::Message(language, message) => {
-                    self.message(&language, message, &mut deliveries);
+                Incoming::Message(key, message) => {
+                    self.message(&key, message, &mut deliveries);
                 }
             }
         }
         (deliveries, failure)
     }
-    fn message(&mut self, language: &str, message: Value, out: &mut Vec<Delivery>) {
-        let Some(client) = self.clients.get_mut(language) else {
+    fn message(&mut self, key: &Key, message: Value, out: &mut Vec<Delivery>) {
+        let Some(client) = self.clients.get_mut(key) else {
             return;
         };
         let id = message.get("id").cloned();

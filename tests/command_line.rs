@@ -89,14 +89,14 @@ fn choosing_a_command_continues_with_its_arguments() {
 fn path_slots_browse_directories_and_backspace_removes_one() {
     let root = tree();
     let mut r = runtime(root.path());
-    r.command(Command::Named("open".into()));
+    r.command(Command::Ex("open ".into()));
     r.input(UserInput::Paste("s".into()));
     wait(&mut r, |r| rows(r) == ["src/"]);
     keys(&mut r, "<tab>");
     assert_eq!(text(&r), "open src/");
-    wait(&mut r, |r| rows(r) == ["../", "sub/", "main.cpp"]);
+    wait(&mut r, |r| rows(r) == ["sub/", "main.cpp"]);
     // Enter on an explicitly selected directory descends instead of opening.
-    keys(&mut r, "<down><ret>");
+    keys(&mut r, "<down><up><ret>");
     assert_eq!(text(&r), "open src/sub/");
     wait(&mut r, |r| rows(r).contains(&"a.h".to_owned()));
     keys(&mut r, "<bs>");
@@ -190,7 +190,7 @@ fn save_as_prefills_the_current_path() {
         })
     });
     r.command(Command::Named("saveas".into()));
-    assert_eq!(text(&r), "saveas src/main.cpp");
+    assert_eq!(text(&r), "saveas main.cpp");
 }
 
 #[test]

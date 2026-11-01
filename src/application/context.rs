@@ -1,0 +1,210 @@
+//! Where a document stands. Paths typed by hand are relative to its
+//! directory; tools that cover a project work from its project. Neither
+//! depends on where the editor was started, which only seeds the directory
+//! of documents that have nothing else to go by.
+//!
+//! A project is found by walking up from a file, as Emacs's `project.el`
+//! does, at the moment the document gets a path. A file with no project of
+//! its own, such as a system header, keeps the one it was reached from when
+//! it was opened by a jump. Its language server is the one that was in use
+//! there even if it has a project of its own: only that server has the
+//! compile flags, so a header of another repository stays with it.
+use super::Application;
+use crate::editor::DocumentId;
+use std::path::{Path, PathBuf};
+
+const MARKERS: [&str; 3] = [".jj", ".hg", ".svn"];
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct Context {
+    directory: PathBuf,
+    project: Option<PathBuf>,
+    /// The root of the language server this document was reached through.
+    server: Option<PathBuf>,
+}
+/// What a jump carries from where it started.
+#[derive(Clone, Debug)]
+pub(super) struct Reached {
+    project: Option<PathBuf>,
+    server: PathBuf,
+}
+
+/// Whether `directory` holds a repository. A submodule belongs to the
+/// repository around it; a linked worktree stands alone.
+fn is_repository(directory: &Path) -> bool {
+    if MARKERS.iter().any(|name| directory.join(name).exists()) {
+        return true;
+    }
+    let git = directory.join(".git");
+    if git.is_dir() {
+        return true;
+    }
+    std::fs::read_to_string(git).is_ok_and(|link| !link.contains("/modules/"))
+}
+
+impl Application {
+    /// Sets the directory of documents that have nothing else to go by.
+    pub fn set_start(&mut self, directory: PathBuf) {
+        self.start = directory;
+    }
+    /// Makes `directory` a project whatever it holds.
+    pub fn add_project(&mut self, directory: PathBuf) {
+        if !self.projects.contains(&directory) {
+            self.projects.push(directory);
+        }
+    }
+    /// The nearest project around `directory`. Home and the file system
+    /// root are never one by their markers alone: a home kept in Git would
+    /// otherwise claim every file below it.
+    fn find_project(&self, directory: &Path) -> Option<PathBuf> {
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        for ancestor in directory.ancestors() {
+            if self.projects.iter().any(|root| root == ancestor) {
+                return Some(ancestor.to_owned());
+            }
+            if home.as_deref() == Some(ancestor) || ancestor.parent().is_none() {
+                continue;
+            }
+            if is_repository(ancestor) {
+                return Some(ancestor.to_owned());
+            }
+        }
+        None
+    }
+    fn active_context(&self) -> Context {
+        self.active_document()
+            .and_then(|document| self.contexts.get(&document))
+            .cloned()
+            .unwrap_or_else(|| Context {
+                directory: self.start.clone(),
+                project: self.find_project(&self.start),
+                server: None,
+            })
+    }
+    fn active_document(&self) -> Option<DocumentId> {
+        self.active_view()
+            .and_then(|view| self.view(view))
+            .map(|view| view.document_id)
+    }
+    /// A document without a file stands where the active one does.
+    pub(super) fn adopt(&mut self, document: DocumentId) {
+        let context = self.active_context();
+        self.contexts.insert(document, context);
+    }
+    /// A document that lists results of `directory`, whose relative paths
+    /// mean that directory for as long as the list lasts.
+    pub(super) fn adopt_at(&mut self, document: DocumentId, directory: PathBuf) {
+        let project = self
+            .find_project(&directory)
+            .or(self.active_context().project);
+        let server = self.active_context().server;
+        self.contexts.insert(
+            document,
+            Context {
+                directory,
+                project,
+                server,
+            },
+        );
+    }
+    /// Places a document that has a path, as reached by a jump or not.
+    pub(super) fn settle(&mut self, document: DocumentId, reached: Option<Reached>) {
+        let Some(directory) = self
+            .workspace
+            .file(document)
+            .and_then(|file| file.path())
+            .and_then(Path::parent)
+            .map(Path::to_owned)
+        else {
+            return;
+        };
+        let held = self.contexts.get(&document).cloned().unwrap_or_default();
+        let (reached_project, reached_server) = reached.map_or((None, None), |reached| {
+            (reached.project, Some(reached.server))
+        });
+        let project = self
+            .find_project(&directory)
+            .or(reached_project)
+            .or(held.project);
+        let server = reached_server.or(held.server);
+        self.contexts.insert(
+            document,
+            Context {
+                directory,
+                project,
+                server,
+            },
+        );
+    }
+    /// A jump landed on a document already open. One with no project joins
+    /// the place it was reached from; any other keeps what it has.
+    pub(super) fn reach(&mut self, document: DocumentId, reached: Reached) {
+        if self
+            .contexts
+            .get(&document)
+            .is_none_or(|context| context.project.is_none())
+        {
+            self.settle(document, Some(reached));
+        }
+    }
+    /// What a jump from the active document carries.
+    pub(super) fn reached(&self) -> Reached {
+        let context = self.active_context();
+        let server = context
+            .server
+            .clone()
+            .or_else(|| context.project.clone())
+            .unwrap_or(context.directory);
+        Reached {
+            project: context.project,
+            server,
+        }
+    }
+    /// Makes `directory` the project of the active document and of files
+    /// below it.
+    pub(super) fn set_project(&mut self, directory: PathBuf) {
+        self.add_project(directory.clone());
+        if let Some(document) = self.active_document() {
+            let mut context = self.active_context();
+            context.project = Some(directory);
+            self.contexts.insert(document, context);
+        }
+    }
+    /// What paths typed in the active document are relative to.
+    pub fn directory(&self) -> PathBuf {
+        self.active_context().directory
+    }
+    /// The project of the active document, if it has one.
+    pub fn project(&self) -> Option<PathBuf> {
+        self.active_context().project
+    }
+    /// Where project-wide tools work for the active document: its project,
+    /// or else its directory.
+    pub fn root(&self) -> PathBuf {
+        let context = self.active_context();
+        context.project.unwrap_or(context.directory)
+    }
+    /// The root of the language server for a document.
+    pub fn server_root_of(&self, document: DocumentId) -> PathBuf {
+        match self.contexts.get(&document) {
+            Some(Context {
+                server: Some(server),
+                ..
+            }) => server.clone(),
+            _ => self.root_of(document),
+        }
+    }
+    /// A document's directory.
+    pub fn directory_of(&self, document: DocumentId) -> PathBuf {
+        self.contexts
+            .get(&document)
+            .map_or_else(|| self.start.clone(), |c| c.directory.clone())
+    }
+    /// A document's project, or else its directory.
+    pub fn root_of(&self, document: DocumentId) -> PathBuf {
+        self.contexts.get(&document).map_or_else(
+            || self.start.clone(),
+            |c| c.project.clone().unwrap_or_else(|| c.directory.clone()),
+        )
+    }
+}

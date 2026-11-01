@@ -17,7 +17,7 @@ fn main() -> ExitCode {
         }
         [arg] if arg == "--help" || arg == "-h" => {
             println!(
-                "Usage: soda [--no-config] [FILE]\n\n{}",
+                "Usage: soda [--no-config] [FILE | DIRECTORY]\n\n{}",
                 soda::interaction::help::default_text()
             );
             return ExitCode::SUCCESS;

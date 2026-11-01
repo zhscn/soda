@@ -70,6 +70,8 @@ pub struct CommandLine {
     input: TextInput,
     catalog: Vec<CommandInfo>,
     root: PathBuf,
+    /// What a typed path is relative to.
+    base: PathBuf,
     home: Option<PathBuf>,
     view: Option<ViewId>,
     rows: Vec<MatchedCandidate<Completion>>,
@@ -149,11 +151,18 @@ fn printable(text: &str) -> String {
 }
 
 impl CommandLine {
-    pub fn new(text: &str, catalog: Vec<CommandInfo>, root: PathBuf, app: &Application) -> Self {
+    pub fn new(
+        text: &str,
+        catalog: Vec<CommandInfo>,
+        root: PathBuf,
+        base: PathBuf,
+        app: &Application,
+    ) -> Self {
         Self {
             input: TextInput::new(text),
             catalog,
             root,
+            base,
             home: std::env::var_os("HOME")
                 .map(PathBuf::from)
                 .filter(|p| p.is_absolute()),
@@ -371,7 +380,7 @@ impl CommandLine {
     fn paths(&mut self, text: &str, response: &mut Response) -> Vec<MatchedCandidate<Completion>> {
         let (parent, prefix) = split_path(text);
         let path = match resolve_path(
-            &self.root,
+            &self.base,
             self.home.as_deref(),
             std::path::Path::new(parent),
         ) {
@@ -401,14 +410,7 @@ impl CommandLine {
         entries
             .iter()
             .enumerate()
-            .filter(|(_, entry)| {
-                let name = entry.name.to_string_lossy();
-                if name == ".." {
-                    prefix.is_empty()
-                } else {
-                    name.starts_with(prefix)
-                }
-            })
+            .filter(|(_, entry)| entry.name.to_string_lossy().starts_with(prefix))
             .map(|(index, entry)| {
                 let slash = if entry.directory { "/" } else { "" };
                 let replacement = entry

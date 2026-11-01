@@ -41,6 +41,7 @@ while True:
     method = message.get("method", "")
     params = message.get("params", {})
     if method == "initialize":
+        log.write("initialize %s\n" % params["rootUri"])
         # A question first, as real servers ask, to see that it is answered.
         write({"jsonrpc": "2.0", "id": "q", "method": "window/workDoneProgress/create"})
         answer(message, {"capabilities": {"positionEncoding": "utf-16"}})

@@ -350,7 +350,7 @@ impl Host {
                         runtime.layers.expect_jump();
                         let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
                         let path = crate::interaction::path::resolve_path(
-                            &runtime.file_root,
+                            &runtime.app.root(),
                             home.as_deref(),
                             std::path::Path::new(&path),
                         )
@@ -384,7 +384,7 @@ impl Host {
                         let id = self.keep(function)?;
                         let (root, view) = {
                             let runtime = runtime.borrow();
-                            (runtime.file_root.clone(), runtime.app.active_view())
+                            (runtime.app.root(), runtime.app.active_view())
                         };
                         let sender = self.jobs.0.clone();
                         std::thread::spawn(move || {
@@ -426,13 +426,12 @@ impl Host {
                         let params: serde_json::Value = lua.from_value(params)?;
                         let id = self.keep(function)?;
                         let mut runtime = runtime.borrow_mut();
-                        let Some(language) = runtime.current_language() else {
+                        let Some(key) = runtime.lsp_key() else {
                             return Ok(false);
                         };
-                        let root = runtime.file_root.clone();
                         let Runtime { lsp, app, .. } = &mut **runtime;
-                        lsp.sync(app, &root, true);
-                        Ok(lsp.request(&language, &method, params, id))
+                        lsp.sync(app, true);
+                        Ok(lsp.request(&key, &method, params, id))
                     },
                 )?,
             )?;
@@ -441,10 +440,10 @@ impl Host {
                 scope.create_function(|lua, (method, params): (String, Value)| {
                     let params: serde_json::Value = lua.from_value(params)?;
                     let mut runtime = runtime.borrow_mut();
-                    let Some(language) = runtime.current_language() else {
+                    let Some(key) = runtime.lsp_key() else {
                         return Ok(false);
                     };
-                    Ok(runtime.lsp.notify(&language, &method, params))
+                    Ok(runtime.lsp.notify(&key, &method, params))
                 })?,
             )?;
             soda.set(
@@ -470,10 +469,10 @@ impl Host {
                 "lsp_info",
                 scope.create_function(|lua, ()| {
                     let runtime = runtime.borrow();
-                    let Some(language) = runtime.current_language() else {
+                    let Some(key) = runtime.lsp_key() else {
                         return Ok(Value::Nil);
                     };
-                    let Some((encoding, capabilities)) = runtime.lsp.client_of(&language) else {
+                    let Some((encoding, capabilities)) = runtime.lsp.client_of(&key) else {
                         return Ok(Value::Nil);
                     };
                     let info = lua.create_table()?;
@@ -486,8 +485,8 @@ impl Host {
                 "lsp_restart",
                 scope.create_function(|_, ()| {
                     let mut runtime = runtime.borrow_mut();
-                    if let Some(language) = runtime.current_language() {
-                        runtime.lsp.restart(&language);
+                    if let Some(key) = runtime.lsp_key() {
+                        runtime.lsp.restart(&key);
                     }
                     Ok(())
                 })?,
@@ -561,7 +560,7 @@ fn item(table: &Table) -> mlua::Result<Item> {
 fn expand(runtime: &Runtime, text: &str) -> mlua::Result<String> {
     runtime
         .layers
-        .expand(text, &runtime.app, &runtime.file_root)
+        .expand(text, &runtime.app, &runtime.app.root())
         .map_err(mlua::Error::runtime)
 }
 /// Runs a process to its end, in the project root.
@@ -734,8 +733,7 @@ impl Runtime {
     }
     /// Starts servers, sends edits and takes what servers said.
     pub(super) fn poll_lsp(&mut self) {
-        let root = self.file_root.clone();
-        let failure = self.lsp.sync(&self.app, &root, false);
+        let failure = self.lsp.sync(&self.app, false);
         let (deliveries, closed) = self.lsp.poll();
         if let Some(error) = failure.or(closed) {
             self.report(error);
@@ -747,10 +745,12 @@ impl Runtime {
             self.run_lua();
         }
     }
-    fn current_language(&self) -> Option<String> {
+    /// The server of the current document: its language and root.
+    fn lsp_key(&self) -> Option<super::lsp::Key> {
         let document = self.document().ok()?;
         let editor = self.app.workspace().editor(document)?;
-        Some(editor.model().document().language().profile().id.clone())
+        let language = editor.model().document().language().profile().id.clone();
+        Some((language, self.app.server_root_of(document)))
     }
     /// The current document, for Lua functions acting on it.
     fn document(&self) -> Result<crate::editor::DocumentId, String> {

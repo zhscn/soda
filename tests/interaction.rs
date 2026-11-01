@@ -250,6 +250,7 @@ fn modal_routing_blocks_unknown_input_and_requires_explicit_discard() {
                 "open ",
                 soda::interaction::Registry::default().commands(),
                 std::env::current_dir().unwrap(),
+                std::env::current_dir().unwrap(),
                 &app,
             ))),
             &app,
@@ -397,6 +398,7 @@ fn command_line_closes_when_its_view_closes() {
                     "saveas file.txt",
                     soda::interaction::Registry::default().commands(),
                     std::env::current_dir().unwrap(),
+                    std::env::current_dir().unwrap(),
                     &app,
                 ))),
                 &app,
@@ -431,6 +433,7 @@ fn prompt_navigation_and_filtered_paste_do_not_generate_file_commands() {
                 Layer::CommandLine(Box::new(soda::interaction::CommandLine::new(
                     "open 路径/a.cpp",
                     soda::interaction::Registry::default().commands(),
+                    std::env::current_dir().unwrap(),
                     std::env::current_dir().unwrap(),
                     &app,
                 ))),
@@ -481,6 +484,7 @@ fn all_builtin_sessions_share_the_cancel_lifecycle_contract() {
         Layer::CommandLine(Box::new(soda::interaction::CommandLine::new(
             "project ",
             soda::interaction::Registry::default().commands(),
+            std::env::current_dir().unwrap(),
             std::env::current_dir().unwrap(),
             &app,
         ))),

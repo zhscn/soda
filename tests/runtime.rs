@@ -112,8 +112,6 @@ fn path_completion_opens_existing_files_and_saves_new_names() {
     wait(&mut runtime, |r| {
         rows(r).iter().any(|row| row == "main.cpp")
     });
-    // Parent is first; selecting the file does not modify the input until Tab.
-    runtime.input(UserInput::Key(KeyStroke::plain(Key::Down)));
     runtime.input(UserInput::Key(KeyStroke::plain(Key::Tab)));
     assert!(
         matches!(runtime.layer(), Some(Layer::CommandLine(l)) if l.input().text() == "open src/main.cpp")
@@ -126,7 +124,7 @@ fn path_completion_opens_existing_files_and_saves_new_names() {
     });
     runtime.command(Command::Save { choose_path: true });
     assert!(
-        matches!(runtime.layer(), Some(Layer::CommandLine(l)) if l.input().text() == "saveas src/main.cpp")
+        matches!(runtime.layer(), Some(Layer::CommandLine(l)) if l.input().text() == "saveas main.cpp")
     );
     let target = directory.path().join("new.cpp");
     runtime.input(UserInput::Key(KeyStroke {

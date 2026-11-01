@@ -15,6 +15,7 @@
 //! view state after an error reveals the current document and reservation state.
 //! Path/configuration preflight and explicit Reload currently run synchronously.
 mod clipboard;
+mod context;
 pub use clipboard::ClipboardAction;
 mod display;
 mod flags;
@@ -104,16 +105,19 @@ pub enum Event {
         column: usize,
     },
     /// Replaces the text of a scratch document, creating it if needed,
-    /// and shows it.
+    /// and shows it. Relative paths in it mean `directory`.
     Scratch {
         name: String,
         text: String,
+        directory: PathBuf,
     },
-    /// Sets where documents of a kind are shown.
+    /// Makes a directory the project of the active document.
+    SetProject(PathBuf),
     /// `kind` is a list of results; see `Rules::results`.
     ResultsDisplay {
         kind: String,
     },
+    /// Sets where documents of a kind are shown.
     SetDisplay {
         kind: String,
         placement: Placement,
@@ -311,11 +315,13 @@ impl std::error::Error for Error {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct OpenIntent {
     focus_revision: u64,
     open_revision: u64,
     position: Option<(usize, usize)>,
+    /// Where a jump came from.
+    reached: Option<context::Reached>,
 }
 #[derive(Default)]
 pub struct Application {
@@ -337,6 +343,11 @@ pub struct Application {
     recent: Vec<ViewId>,
     rules: display::Rules,
     area: windows::Area,
+    contexts: BTreeMap<DocumentId, context::Context>,
+    /// Where the editor was started; see `context`.
+    start: PathBuf,
+    /// Directories named as projects.
+    projects: Vec<PathBuf>,
     options: crate::options::Options,
     context: Option<ViewId>,
     /// What was edited since each file was loaded or saved.
@@ -672,6 +683,9 @@ impl Application {
                         id
                     }
                 };
+                if position.is_some() {
+                    self.reach(document, self.reached());
+                }
                 self.focus(Some(view));
                 if let Some(position) = position {
                     self.place_caret(view, position, update)?;
@@ -684,6 +698,7 @@ impl Application {
                         focus_revision: self.focus_revision,
                         open_revision: self.open_revision,
                         position,
+                        reached: position.map(|_| self.reached()),
                     },
                 );
                 update.effects.push(Effect::Open(request));
@@ -720,11 +735,18 @@ impl Application {
             update,
         )
     }
-    fn scratch(&mut self, name: &str, text: String, update: &mut Update) -> Result<(), Error> {
+    fn scratch(
+        &mut self,
+        name: &str,
+        text: String,
+        directory: PathBuf,
+        update: &mut Update,
+    ) -> Result<(), Error> {
         let document = match self.workspace.scratch(name) {
             Some(document) => document,
             None => {
                 let document = self.workspace.new_scratch(name);
+                self.adopt(document);
                 // Grouped results carry the numbers that matter.
                 if crate::interaction::grep::results_kind(name) == Some(true) {
                     self.options.set(
@@ -737,6 +759,7 @@ impl Application {
                 document
             }
         };
+        self.adopt_at(document, directory);
         let view = self
             .views
             .values()
@@ -910,6 +933,7 @@ impl Application {
         match event {
             Event::NewDocument(language) => {
                 let document = self.workspace.new_document(language);
+                self.adopt(document);
                 self.apply_options(document, &mut update);
                 let view = self.add_view(document)?;
                 update.changed_views.push(view);
@@ -942,6 +966,7 @@ impl Application {
                 } else {
                     self.workspace.close(document)?;
                 }
+                self.contexts.remove(&document);
                 let ids: Vec<_> = self
                     .views
                     .values()
@@ -1045,7 +1070,12 @@ impl Application {
             Event::OpenAt { path, line, column } => {
                 self.open(path, Some((line, column)), &mut update)?
             }
-            Event::Scratch { name, text } => self.scratch(&name, text, &mut update)?,
+            Event::Scratch {
+                name,
+                text,
+                directory,
+            } => self.scratch(&name, text, directory, &mut update)?,
+            Event::SetProject(directory) => self.set_project(directory),
             Event::SetDisplay { kind, placement } => self.rules.set(kind, placement),
             Event::ResultsDisplay { kind } => self.rules.results(kind),
             Event::SetOption { scope, name, value } => {
@@ -1079,6 +1109,10 @@ impl Application {
             Event::OpenFinished(completion) => {
                 let revision = self.pending_opens.remove(&completion.id());
                 let document = self.workspace.finish_open(completion)?;
+                self.settle(
+                    document,
+                    revision.as_ref().and_then(|intent| intent.reached.clone()),
+                );
                 self.apply_options(document, &mut update);
                 let view = self.add_view(document)?;
                 update.changed_views.push(view);
@@ -1105,6 +1139,7 @@ impl Application {
             Event::SaveFinished(completion) => {
                 let request = completion.id();
                 let file = self.workspace.finish_save(completion)?;
+                self.settle(file.document_id, None);
                 self.accept_file(file, Some(request), &mut update);
             }
             Event::Reload { view, discard } => {

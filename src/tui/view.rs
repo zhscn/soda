@@ -481,7 +481,7 @@ fn file_label(runtime: &Runtime, document: crate::editor::DocumentId, full: bool
     }
     match app.workspace().file(document).and_then(|file| file.path()) {
         Some(path) if full => path
-            .strip_prefix(runtime.file_root())
+            .strip_prefix(app.root_of(document))
             .unwrap_or(path)
             .display()
             .to_string(),

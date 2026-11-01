@@ -20,12 +20,15 @@ const LINE_LIMIT: usize = 400;
 pub struct GrepCompletion {
     pub pattern: String,
     pub regex: regex::Regex,
+    /// What the paths in the result are relative to.
+    pub root: std::path::PathBuf,
     /// Result lines and the match count, or why the search failed.
     pub result: Result<(String, usize, bool), String>,
 }
 struct Running {
     pattern: String,
     regex: regex::Regex,
+    root: std::path::PathBuf,
     cancel: Arc<AtomicBool>,
     result: Receiver<Result<(String, usize, bool), String>>,
 }
@@ -51,12 +54,14 @@ impl GrepRunner {
         let (sender, result) = mpsc::channel();
         let stop = cancel.clone();
         let searched = regex.clone();
+        let root = request.root.clone();
         std::thread::spawn(move || {
             let _ = sender.send(search(&request.root, &searched, &stop));
         });
         self.running = Some(Running {
             pattern: request.pattern,
             regex,
+            root,
             cancel,
             result,
         });
@@ -81,6 +86,7 @@ impl GrepRunner {
         Some(GrepCompletion {
             pattern: running.pattern,
             regex: running.regex,
+            root: running.root,
             result,
         })
     }

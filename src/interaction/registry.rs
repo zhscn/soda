@@ -333,13 +333,13 @@ pub static BUILTINS: &[Builtin] = &[
         "open" | "o",
         [PATH],
         "Open a file; a new file is created when saved",
-        |a| { Ok(path_or(a, Command::OpenPath, interactive("open"))) }
+        |a| { Ok(path_or(a, Command::OpenPath, Command::OpenPrompt)) }
     ),
     builtin!(
         "recent",
         [slot("FILE", SlotKind::Recent)],
         "Open a recently used file",
-        |a| { Ok(path_or(a, Command::OpenPath, interactive("recent"))) }
+        |a| { Ok(path_or(a, Command::OpenProjectFile, interactive("recent"))) }
     ),
     builtin!(
         "write" | "w",
@@ -446,10 +446,16 @@ pub static BUILTINS: &[Builtin] = &[
         Command::Window(WindowCommand::Cycle { backward: true })
     ),
     builtin!(
+        "project-root",
+        [OPTIONAL_PATH],
+        "Show the project, or make a directory the project of this document",
+        |a| { Ok(Command::ProjectRoot((!a.is_empty()).then(|| a.into()))) }
+    ),
+    builtin!(
         "project",
         [slot("FILE", SlotKind::File)],
         "Open a project file",
-        |a| { Ok(path_or(a, Command::OpenPath, interactive("project"))) }
+        |a| { Ok(path_or(a, Command::OpenProjectFile, interactive("project"))) }
     ),
     builtin!("search", "Search the document", Command::Search),
     builtin!(

@@ -313,15 +313,10 @@ impl Layers {
     }
     /// Brings completion in line with the caret; call after input settles.
     /// Returns a request for sources, and whether to redraw.
-    pub fn completion_sync(
-        &mut self,
-        app: &Application,
-        file_root: &std::path::Path,
-    ) -> (Option<completion::Request>, bool) {
+    pub fn completion_sync(&mut self, app: &Application) -> (Option<completion::Request>, bool) {
         let editing = self.mode == EditMode::Insert && self.active.is_none();
         self.snippet.sync(app, editing);
-        self.completion
-            .sync(app, self.mode, self.active.is_some(), file_root)
+        self.completion.sync(app, self.mode, self.active.is_some())
     }
     pub fn completion_results(
         &mut self,
