@@ -15,7 +15,7 @@ use crate::{
     application::{Event, ViewId},
     core::{ByteOffset, Change, Selection, Snapshot, Transaction},
     editor::{Command, DocumentId},
-    language::IndentAdvice,
+    language::{IndentAdvice, Side},
 };
 use mlua::{Lua, Scope, Table};
 use std::cell::RefCell;
@@ -29,11 +29,16 @@ pub(super) const METHODS: &[&str] = &[
     "revision",
     "selection",
     "set_selection",
+    "select",
     "edit",
     "indent",
     "line_comment",
     "offset",
     "point",
+    "enclosing",
+    "next_item",
+    "prev_item",
+    "in_literal",
 ];
 
 /// Documents a request edited, with the undo depth each had before its
@@ -218,6 +223,21 @@ pub(super) fn register<'scope, 'r: 'scope>(
         })?,
     )?;
     soda.set(
+        "buffer_select",
+        scope.create_function(|_, (number, anchor, head): (u64, Table, Table)| {
+            let mut runtime = runtime.borrow_mut();
+            let document = document(&runtime, number)?;
+            let snapshot = snapshot(&runtime, document);
+            let anchor = offset(snapshot, &anchor)?;
+            let head = offset(snapshot, &head)?;
+            runtime.failed = false;
+            runtime.command(crate::interaction::Command::Vim(
+                crate::interaction::vim::VimCommand::VisualRange { anchor, head },
+            ));
+            Ok(())
+        })?,
+    )?;
+    soda.set(
         "buffer_edit",
         scope.create_function(
             |_, (number, changes, revision): (u64, Table, Option<u64>)| {
@@ -311,6 +331,66 @@ pub(super) fn register<'scope, 'r: 'scope>(
                 return Err(error(format!("offset {} is inside a character", at + 1)));
             }
             position(lua, snapshot, at)
+        })?,
+    )?;
+    soda.set(
+        "buffer_enclosing",
+        scope.create_function(|lua, (number, at): (u64, Table)| {
+            let mut runtime = runtime.borrow_mut();
+            let document = document(&runtime, number)?;
+            let at = offset(snapshot(&runtime, document), &at)?;
+            let group = runtime
+                .app
+                .with_editor(document, |editor| editor.enclosing(at))
+                .map_err(|e| error(e.to_string()))?;
+            let Some(group) = group else {
+                return Ok(None);
+            };
+            let snapshot = snapshot(&runtime, document);
+            let table = lua.create_table()?;
+            table.set("from", position(lua, snapshot, group.open.start)?)?;
+            table.set("inner_from", position(lua, snapshot, group.open.end)?)?;
+            table.set("inner_to", position(lua, snapshot, group.close.start)?)?;
+            table.set("to", position(lua, snapshot, group.close.end)?)?;
+            Ok(Some(table))
+        })?,
+    )?;
+    for (name, side) in [
+        ("buffer_next_item", Side::After),
+        ("buffer_prev_item", Side::Before),
+    ] {
+        soda.set(
+            name,
+            scope.create_function(move |lua, (number, at): (u64, Table)| {
+                let mut runtime = runtime.borrow_mut();
+                let document = document(&runtime, number)?;
+                let at = offset(snapshot(&runtime, document), &at)?;
+                let item = runtime
+                    .app
+                    .with_editor(document, |editor| editor.item(at, side))
+                    .map_err(|e| error(e.to_string()))?;
+                let Some(item) = item else {
+                    return Ok(None);
+                };
+                let snapshot = snapshot(&runtime, document);
+                let table = lua.create_table()?;
+                table.set("from", position(lua, snapshot, item.range.start)?)?;
+                table.set("to", position(lua, snapshot, item.range.end)?)?;
+                table.set("kind", item.kind.name())?;
+                Ok(Some(table))
+            })?,
+        )?;
+    }
+    soda.set(
+        "buffer_in_literal",
+        scope.create_function(|_, (number, at): (u64, Table)| {
+            let mut runtime = runtime.borrow_mut();
+            let document = document(&runtime, number)?;
+            let at = offset(snapshot(&runtime, document), &at)?;
+            runtime
+                .app
+                .with_editor(document, |editor| editor.in_literal(at))
+                .map_err(|e| error(e.to_string()))
         })?,
     )?;
     Ok(())

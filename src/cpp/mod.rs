@@ -7,6 +7,7 @@ mod parser;
 mod preprocessor;
 mod rules;
 mod service;
+mod structure;
 mod style;
 mod syntax;
 

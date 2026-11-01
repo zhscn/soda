@@ -1,11 +1,7 @@
 -- Toggles line comments on the caret's line, or on the lines of a Visual
 -- selection: if every line with text is a comment they stop being comments,
 -- otherwise all become comments at the shallowest indentation among them.
--- Copy to ~/.config/soda/lua/ and add to init.lua:
---
---   require("comment")
---   soda.command("map normal gc comment")
---   soda.command("map visual gc comment")
+-- Built in: gc in Normal and Visual.
 
 local function selected_lines(buf)
   local anchor, head = buf:selection()
@@ -57,3 +53,6 @@ soda.define_command("comment", function()
   end
   buf:edit(changes)
 end)
+
+soda.command("map normal gc comment")
+soda.command("map visual gc comment")

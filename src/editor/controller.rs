@@ -5,7 +5,10 @@ use super::{
     operations,
     search::SearchQuery,
 };
-use crate::core::{Change, EditError, EditorState, Selection, Transaction, UserEvent};
+use crate::{
+    core::{Change, EditError, EditorState, Selection, Transaction, UserEvent},
+    language::{Group, Item, Side},
+};
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Debug)]
@@ -115,6 +118,15 @@ impl Editor {
     }
     pub fn indentation(&mut self, line: usize) -> Result<crate::language::IndentAdvice, EditError> {
         self.model.indentation(line)
+    }
+    pub fn enclosing(&mut self, at: usize) -> Result<Option<Group>, EditError> {
+        self.model.enclosing(at)
+    }
+    pub fn item(&mut self, at: usize, side: Side) -> Result<Option<Item>, EditError> {
+        self.model.item(at, side)
+    }
+    pub fn in_literal(&mut self, at: usize) -> Result<bool, EditError> {
+        self.model.in_literal(at)
     }
     pub fn execute(&mut self, command: Command) -> Result<EditorUpdate, EditError> {
         self.execute_for(self.model.default_session(), command)

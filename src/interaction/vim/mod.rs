@@ -64,6 +64,12 @@ pub enum VimCommand {
     Visual {
         linewise: bool,
     },
+    /// Selects a range in Visual mode: `anchor` and `head` are between
+    /// characters, as in a `Selection`, and `head` may come first.
+    VisualRange {
+        anchor: usize,
+        head: usize,
+    },
     /// Swaps the Visual anchor and head.
     VisualOther,
     Search {

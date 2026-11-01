@@ -1,9 +1,7 @@
 -- Formats the buffer with clang-format, or the lines of a Visual selection.
 -- Only lines that change are replaced, so the caret stays where it was. If
 -- the buffer changes while clang-format runs, the output is dropped.
--- Copy to ~/.config/soda/lua/ and add to init.lua:
---
---   require("clang-format")
+-- Built in as the clang-format command.
 
 local function lines(text)
   local list = {}

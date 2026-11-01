@@ -7,7 +7,9 @@ use super::{
 };
 use crate::{
     core::{EditError, Snapshot},
-    language::{EnterAdvice, IndentAdvice, IndentRequest, IndentTrigger, NewlineIndent},
+    language::{
+        EnterAdvice, Group, IndentAdvice, IndentRequest, IndentTrigger, Item, NewlineIndent, Side,
+    },
 };
 use std::sync::Arc;
 
@@ -170,6 +172,12 @@ impl CppSession {
                 }
                 _ => false,
             }))
+    }
+    pub fn enclosing(&mut self, snapshot: &Snapshot, at: usize) -> Option<Group> {
+        self.analyze(snapshot).enclosing(at)
+    }
+    pub fn item(&mut self, snapshot: &Snapshot, at: usize, side: Side) -> Option<Item> {
+        self.analyze(snapshot).item(at, side)
     }
     pub fn enter_advice(
         &mut self,

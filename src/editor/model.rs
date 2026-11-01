@@ -4,7 +4,7 @@ use super::{
 };
 use crate::{
     core::{EditError, EditorState, Selection},
-    language::{IndentAdvice, IndentRequest, IndentTrigger},
+    language::{Group, IndentAdvice, IndentRequest, IndentTrigger, Item, Side},
 };
 use std::collections::BTreeMap;
 
@@ -93,6 +93,24 @@ impl EditorModel {
                 trigger: IndentTrigger::Reindent,
             },
         )
+    }
+    pub fn enclosing(&mut self, at: usize) -> Result<Option<Group>, EditError> {
+        let snapshot = self.document.snapshot().clone();
+        if !snapshot.is_char_boundary(at) {
+            return Err(EditError::InvalidRange);
+        }
+        Ok(self.document.language.enclosing(&snapshot, at))
+    }
+    pub fn item(&mut self, at: usize, side: Side) -> Result<Option<Item>, EditError> {
+        let snapshot = self.document.snapshot().clone();
+        if !snapshot.is_char_boundary(at) {
+            return Err(EditError::InvalidRange);
+        }
+        Ok(self.document.language.item(&snapshot, at, side))
+    }
+    pub fn in_literal(&mut self, at: usize) -> Result<bool, EditError> {
+        let snapshot = self.document.snapshot().clone();
+        self.document.language.in_literal(&snapshot, at)
     }
     pub(super) fn add_session(&mut self, selection: Selection) -> Result<SessionId, EditError> {
         let state = EditorState::from_snapshot(self.document.snapshot().clone(), selection)?;

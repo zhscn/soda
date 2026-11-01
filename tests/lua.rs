@@ -652,3 +652,40 @@ fn git_changes_extension_lists_each_hunk() {
     wait(&mut r, |r| active_name(r).ends_with("a.txt"));
     assert_eq!(caret(&r), 2);
 }
+
+mod bundled {
+    use super::*;
+
+    #[test]
+    fn startup_modules_add_their_commands_and_keys() {
+        let mut r = runtime();
+        r.load_startup_lua();
+        assert_eq!(r.message(), "");
+        for name in ["comment", "surround", "clang-format", "git-changes"] {
+            lua(&mut r, &format!("assert(package.loaded[{name:?}])"));
+        }
+        lua(
+            &mut r,
+            r#"assert(not package.loaded["git-flags"])
+            assert(require("git-flags"))"#,
+        );
+    }
+    #[test]
+    fn a_file_of_the_same_name_replaces_a_module() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("comment.lua"), "return 'mine'").unwrap();
+        let mut r = runtime();
+        r.add_lua_modules(directory.path());
+        r.load_startup_lua();
+        lua(&mut r, "assert(require('comment') == 'mine')");
+    }
+    #[test]
+    fn modules_do_not_load_from_the_working_directory() {
+        let mut r = runtime();
+        lua(
+            &mut r,
+            r#"assert(not package.path:find("./?", 1, true))
+            assert(not package.cpath:find("./?", 1, true))"#,
+        );
+    }
+}

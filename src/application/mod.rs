@@ -363,6 +363,18 @@ impl Application {
             .ok_or(FileError::UnknownDocument)?;
         Ok(editor.indentation(line)?)
     }
+    /// Asks a document's language about its text; analysis stays cached.
+    pub fn with_editor<T>(
+        &mut self,
+        document: DocumentId,
+        ask: impl FnOnce(&mut crate::files::Editing<'_>) -> Result<T, crate::core::EditError>,
+    ) -> Result<T, Error> {
+        let mut editor = self
+            .workspace
+            .editor_mut(document)
+            .ok_or(FileError::UnknownDocument)?;
+        Ok(ask(&mut editor)?)
+    }
     pub fn views(&self) -> impl Iterator<Item = &View> {
         self.views.values()
     }

@@ -130,6 +130,22 @@ Insert 中按选项 `auto-pairs`（默认开）成对输入括号，与 Emacs �
 - 引号按语言配对：C++ 配对 `"` 和 `'`，其他语言取语言配置的 `autoClosingPairs`（Rust 没有 `'`，因为它也是生命周期），纯文本不配对。前一个字符是字母、数字、`_` 或引号时不配对（`don't`、`x'`）；字符串内输入同一个引号会越过结尾的引号。注释和字符串内不配对任何字符；这由 C++ 词法或 TextMate 结果判断，纯文本没有这一层。
 - 粘贴不配对。
 
+### 结构化编辑
+
+内置模块 `pairs` 提供与 Emacs 的 puni 相同的操作，用的是 `buf:enclosing`、`buf:next_item` 和 `buf:prev_item`，所以所有语言都能用；结构不明确时（未闭合的分组、被 `#if` 拆开的分组）退回普通命令的行为。这些移动不进入跳转历史。
+
+| 键 | 命令 | 作用 |
+| --- | --- | --- |
+| Normal、Visual `<a-f>` / `<a-b>` | `sexp-forward` / `sexp-backward` | 越过一个表达式，停在分组边界 |
+| Normal、Visual `<a-u>` | `sexp-up` | 到包围它的括号 |
+| Normal、Visual `<a-o>` | `sexp-expand` | 选中光标处或包围它的分组，再按扩大一层 |
+| Normal、Insert `<c-k>` | `sexp-kill` | 剪切到行尾；有表达式越过行尾时剪切到它结束，遇到所在分组的闭括号时停在它之前 |
+| Normal、Insert `<c-s-right>` / `<c-s-left>` | `sexp-slurp` / `sexp-barf` | 把闭括号移到下一个表达式之后 / 最后一个表达式之前 |
+| Insert `<bs>`、`<c-h>` | `soft-backspace` | 删除会破坏配对时只移动光标；空的一对整个删除 |
+| Insert `<c-w>`、`<c-bs>`、`<a-bs>` | `soft-delete-word` | 标点删到最近的括号为止，紧邻括号时同 `soft-backspace` |
+
+`foo(a,⏎ b);` 行首的 `<c-k>` 留下 `;`，`if (x) {⏎} else {⏎}` 行首的留下 `else {⏎}`，这与 puni 的 `beyond` 相同。Insert 的 `<a-f>`、`<a-b>` 仍是按词移动。用 `unmap insert <bs>` 这样的命令恢复内置行为。
+
 ### 按键记法
 
 单个字符直接书写；带修饰键或特殊键写在尖括号中，大小写不敏感：`<c-x>`、`<a-f>`（`<m-f>` 同义）、`<s-tab>`、`<c-s-left>`。特殊键名为 `esc`、`ret`（`cr`、`enter`）、`tab`、`backtab`、`bs`（`backspace`）、`del`、`space`、`lt`、`left`、`right`、`up`、`down`、`home`、`end`、`pageup`、`pagedown` 和 `f1` 到 `f12`。序列直接拼接，例如 `<space>f`、`<c-x><c-s>`。帮助和前缀提示使用同一记法输出。

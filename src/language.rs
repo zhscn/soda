@@ -1,9 +1,12 @@
 //! What languages are, and language-neutral suggestions in the request
 //! snapshot's UTF-8 coordinates.
 mod profile;
+mod structure;
 mod whitespace;
 use crate::core::Change;
 pub use profile::{Analyzer, Catalog, Profile, catalog};
+pub(crate) use structure::Scanner;
+pub use structure::{Group, Item, ItemKind, Side};
 pub use whitespace::{TabPolicy, WhitespacePolicy, materialize};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -274,9 +274,17 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
     let mut catching_up = false;
     let mut runtime = Runtime::new(std::env::current_dir()?)?;
     runtime.set_system_clipboard(Box::new(clipboard::Clipboard::detect()));
-    // Configuration comes first so that its hooks see the first document:
-    // the command file, then init.lua beside it.
-    if let Some(config) = config.then(config_path).flatten() {
+    // Built-in modules come first so that configuration can replace their
+    // commands and keys; modules in the lua directory beside the command
+    // file replace them outright.
+    let config = config.then(config_path).flatten();
+    if let Some(config) = &config {
+        runtime.add_lua_modules(&config.with_file_name("lua"));
+    }
+    runtime.load_startup_lua();
+    // Configuration comes before the first document so that its hooks see
+    // it: the command file, then init.lua beside it.
+    if let Some(config) = config {
         match std::fs::read_to_string(&config) {
             Ok(text) => {
                 runtime.source(&config.display().to_string(), &text);
@@ -285,15 +293,6 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
             Err(error) => runtime.report(format!("{}: {error}", config.display())),
         }
         let script = config.with_extension("lua");
-        // Modules in the lua directory beside it can be required.
-        let modules = config.with_file_name("lua").join("?.lua");
-        let _ = runtime.source_lua(
-            "package.path",
-            &format!(
-                "package.path = [==[{}]==] .. ';' .. package.path",
-                modules.display()
-            ),
-        );
         match std::fs::read_to_string(&script) {
             Ok(code) => {
                 let _ = runtime.source_lua(&script.display().to_string(), &code);

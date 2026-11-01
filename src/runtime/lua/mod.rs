@@ -9,6 +9,7 @@
 //! until the request returns.
 use super::Runtime;
 mod buffer;
+mod bundled;
 use crate::interaction::{Command, LuaRequest};
 use mlua::{Function, Lua, Table, Value};
 use std::{
@@ -30,9 +31,29 @@ const FUNCTIONS: &[&str] = &[
     "spawn",
     "results",
     "open",
+    "clipboard",
 ];
 const PRELUDE: &str = r#"
-local current, names, methods = ...
+local current, names, methods, bundled = ...
+-- Modules come from the configuration and the system, never from wherever
+-- the editor was started: startup requires them by name.
+local function outside_project(path)
+  local kept = {}
+  for entry in path:gmatch("[^;]+") do
+    if entry:sub(1, 2) ~= "./" then
+      table.insert(kept, entry)
+    end
+  end
+  return table.concat(kept, ";")
+end
+package.path = outside_project(package.path)
+package.cpath = outside_project(package.cpath)
+table.insert(package.searchers, function(name)
+  local code = bundled[name]
+  if code then
+    return assert(load(code, "@soda/" .. name .. ".lua", "t"))
+  end
+end)
 local function lent(name)
   local implementation = current()
   if not implementation then
@@ -103,6 +124,7 @@ impl Host {
             current,
             FUNCTIONS,
             buffer::METHODS,
+            lua.create_table_from(bundled::MODULES.iter().copied())?,
         ))?;
         Ok(Self {
             lua,
@@ -259,6 +281,17 @@ impl Host {
                 )?,
             )?;
             soda.set(
+                "clipboard",
+                scope.create_function(|_, text: String| {
+                    runtime
+                        .borrow_mut()
+                        .edit_event(crate::application::Event::SetClipboard {
+                            text,
+                            linewise: false,
+                        })
+                })?,
+            )?;
+            soda.set(
                 "spawn",
                 scope.create_function(
                     |_, (argv, function, input): (Vec<String>, Function, Option<String>)| {
@@ -360,6 +393,23 @@ impl Runtime {
         match self.run_lua() {
             Some(error) => Err(error),
             None => Ok(()),
+        }
+    }
+    /// Makes a directory's `?.lua` modules take precedence in `require`.
+    pub fn add_lua_modules(&mut self, directory: &std::path::Path) {
+        let _ = self.source_lua(
+            "package.path",
+            &format!(
+                "package.path = [==[{}]==] .. ';' .. package.path",
+                directory.join("?.lua").display()
+            ),
+        );
+    }
+    /// Loads the built-in modules that start with the editor, each on its
+    /// own, so that one replaced by a broken file costs only itself.
+    pub fn load_startup_lua(&mut self) {
+        for name in bundled::STARTUP {
+            let _ = self.source_lua("startup", &format!("require({name:?})"));
         }
     }
     /// Runs queued Lua unless Lua is running already, in which case it

@@ -253,6 +253,26 @@ impl Layers {
                         ))));
                 }
             }
+            VimCommand::VisualRange { anchor, head } => {
+                // Visual mode holds the characters at its two ends.
+                let ends = if head >= anchor {
+                    (anchor, motion::prev(text, head).max(anchor))
+                } else {
+                    (motion::prev(text, anchor).max(head), head)
+                };
+                if !matches!(self.mode, EditMode::Visual | EditMode::VisualLine) {
+                    self.mode = EditMode::Visual;
+                }
+                self.vim.visual = Some(ends);
+                response
+                    .events
+                    .push(event(Edit::SetSelection(visual_selection(
+                        text,
+                        ends.0,
+                        ends.1,
+                        self.mode == EditMode::VisualLine,
+                    ))));
+            }
             VimCommand::Operate(op, target, count) => {
                 let (mut operated, linewise) = if self.vim.visual.is_some() {
                     (selection.range(), self.mode == EditMode::VisualLine)

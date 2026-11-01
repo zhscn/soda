@@ -1,7 +1,7 @@
 use crate::{
     core::{EditError, EditorState, Selection},
     editor::{Command, Editor, EditorModel, EditorUpdate, SessionId},
-    language::IndentAdvice,
+    language::{Group, IndentAdvice, Item, Side},
 };
 
 /// Editing capability for a registered document. It cannot replace the owned
@@ -52,5 +52,14 @@ impl Editing<'_> {
     }
     pub fn indentation(&mut self, line: usize) -> Result<IndentAdvice, EditError> {
         self.editor.indentation(line)
+    }
+    pub fn enclosing(&mut self, at: usize) -> Result<Option<Group>, EditError> {
+        self.editor.enclosing(at)
+    }
+    pub fn item(&mut self, at: usize, side: Side) -> Result<Option<Item>, EditError> {
+        self.editor.item(at, side)
+    }
+    pub fn in_literal(&mut self, at: usize) -> Result<bool, EditError> {
+        self.editor.in_literal(at)
     }
 }

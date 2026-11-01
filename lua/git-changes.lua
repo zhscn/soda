@@ -1,12 +1,10 @@
 -- Lists the places that differ from what git has staged in *changes*, one
 -- per hunk, for Enter, ]q and [q. `git diff` output has no `path:line:` of
 -- its own, so this turns its hunk headers into locations.
--- Copy to ~/.config/soda/lua/ and add to init.lua:
---
---   require("git-changes")
---   soda.command("map normal <space>g git-changes")
+-- Built in: <space>g.
 
 soda.command("display changes bottom")
+soda.command("map normal <space>g git-changes")
 
 local function locations(diff)
   local list, path = {}, nil

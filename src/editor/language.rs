@@ -2,11 +2,14 @@ use crate::{
     core::{EditError, Snapshot},
     cpp::{CppRules, CppSession},
     language::{
-        Analyzer, EnterAdvice, IndentAdvice, IndentRequest, Profile, WhitespacePolicy, catalog,
+        Analyzer, EnterAdvice, Group, IndentAdvice, IndentRequest, Item, ItemKind, Profile,
+        Scanner, Side, WhitespacePolicy, catalog,
     },
     syntax::Tokens,
 };
 use std::sync::Arc;
+
+type Literals = Vec<(std::ops::Range<usize>, ItemKind)>;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum Language {
@@ -160,6 +163,37 @@ impl LanguageSession {
                 Ok(tokens.in_literal(snapshot, position))
             }
             Session::PlainText(_) => Ok(false),
+        }
+    }
+    /// Calls `ask` on a scanner of the text, in languages with no parser.
+    fn scanned<T>(
+        &self,
+        snapshot: &Snapshot,
+        ask: impl FnOnce(&mut Scanner<'_, Box<dyn FnMut(usize) -> Literals + '_>>) -> T,
+    ) -> T {
+        let brackets = self.profile().round_brackets();
+        let tokens = self.tokens();
+        let literals: Box<dyn FnMut(usize) -> Literals + '_> =
+            Box::new(move |line| tokens.map_or(vec![], |tokens| tokens.literals(snapshot, line)));
+        ask(&mut Scanner {
+            snapshot,
+            brackets: &brackets,
+            literals,
+        })
+    }
+    /// The innermost balanced group around a position.
+    pub fn enclosing(&mut self, snapshot: &Snapshot, at: usize) -> Option<Group> {
+        match &mut self.inner {
+            Session::Cpp(session) => session.enclosing(snapshot, at),
+            _ => self.scanned(snapshot, |scanner| scanner.enclosing(at)),
+        }
+    }
+    /// The item next to a position, within the group around it; `None` at
+    /// the group's end or where a delimiter has no partner.
+    pub fn item(&mut self, snapshot: &Snapshot, at: usize, side: Side) -> Option<Item> {
+        match &mut self.inner {
+            Session::Cpp(session) => session.item(snapshot, at, side),
+            _ => self.scanned(snapshot, |scanner| scanner.item(at, side)),
         }
     }
     pub fn triggers(&self, ch: char) -> bool {

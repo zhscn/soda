@@ -1,11 +1,7 @@
 -- Puts a pair around the Visual selection: `surround (`, `surround "`, or
 -- two words for any pair, as in `surround <b> </b>`. An opening bracket
 -- brings its closing one; any other single argument goes on both sides.
--- Copy to ~/.config/soda/lua/ and add to init.lua:
---
---   require("surround")
---   soda.command("map visual S( surround (")
---   soda.command('map visual S" surround "')
+-- Built in: S followed by a bracket or quote in Visual.
 
 local closing = { ["("] = ")", ["["] = "]", ["{"] = "}", ["<"] = ">" }
 
@@ -31,3 +27,7 @@ soda.define_command("surround", function(argument)
   end
   buf:edit({ { from, from, open }, { to, to, close } })
 end)
+
+for _, key in ipairs({ "(", "[", "{", '"', "'", "`" }) do
+  soda.command("map visual S" .. key .. " surround " .. key)
+end

@@ -28,6 +28,22 @@ pub struct Profile {
     pub quotes: Vec<char>,
     pub analyzer: Analyzer,
 }
+impl Profile {
+    /// The brackets structure follows. `<` is left out: only a parser can
+    /// tell it from a comparison.
+    pub fn round_brackets(&self) -> Vec<(char, char)> {
+        self.brackets
+            .iter()
+            .filter(|(open, close)| {
+                matches!(
+                    (open.as_str(), close.as_str()),
+                    ("(", ")") | ("[", "]") | ("{", "}")
+                )
+            })
+            .filter_map(|(open, close)| Some((open.chars().next()?, close.chars().next()?)))
+            .collect()
+    }
+}
 struct Entry {
     profile: Arc<Profile>,
     extensions: Vec<String>,

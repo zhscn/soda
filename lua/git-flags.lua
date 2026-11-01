@@ -1,6 +1,6 @@
 -- Flags lines that differ from what git has staged: + for added lines,
 -- ~ for changed ones and _ under the place where lines were removed.
--- Copy to ~/.config/soda/lua/ and add to init.lua:
+-- Not started by default; add to init.lua:
 --
 --   require("git-flags")
 

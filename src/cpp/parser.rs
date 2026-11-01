@@ -962,6 +962,7 @@ impl Parser {
             .any(|name| name == self.text(self.pos));
         let mut prev = K::EndOfFile;
         let mut has_question = false;
+        let mut expression = false;
         let mut terminated = false;
         let mut body_candidate = false;
         // A lambda introducer seen in expression position; its body is a
@@ -1068,13 +1069,18 @@ impl Parser {
                 terminated = true;
                 break;
             }
-            if k == K::Less && matches!(prev, K::Identifier | K::TemplateKw) && self.template_args()
+            if k == K::Less
+                && matches!(prev, K::Identifier | K::TemplateKw)
+                && self.template_args_in(expression)
             {
                 label_candidate = false;
                 prev = K::Greater;
                 continue;
             }
             has_question |= k == K::Question;
+            // After these an `<` may be a comparison; before them it opens
+            // the arguments of a declaration's type.
+            expression |= matches!(k, K::ReturnKw | K::Equals);
             body_candidate &= Self::suffix(k);
             lambda &= Self::suffix(k);
             let first = prev == K::EndOfFile && k == K::Identifier;
