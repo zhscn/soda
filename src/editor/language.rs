@@ -2,8 +2,8 @@ use crate::{
     core::{EditError, Snapshot},
     cpp::{CppRules, CppSession},
     language::{
-        Analyzer, EnterAdvice, Group, IndentAdvice, IndentRequest, Item, ItemKind, Profile,
-        Scanner, Side, WhitespacePolicy, catalog,
+        Analyzer, EnterAdvice, Group, IndentAdvice, IndentRequest, IndentTrigger, Item, ItemKind,
+        Profile, Scanner, Side, WhitespacePolicy, catalog, materialize,
     },
     syntax::Tokens,
 };
@@ -196,6 +196,91 @@ impl LanguageSession {
             _ => self.scanned(snapshot, |scanner| scanner.item(at, side)),
         }
     }
+    /// The closer of a bracket that ends the text of a line up to `end`,
+    /// outside literals.
+    fn opens(&self, snapshot: &Snapshot, line: usize, end: usize) -> Option<char> {
+        let tokens = self.tokens()?;
+        let start = snapshot.line_start(line)?;
+        let text = snapshot.byte_slice(start..end)?.to_string();
+        let text = text.trim_end();
+        let open = text.chars().next_back()?;
+        let at = start + text.len() - open.len_utf8();
+        let brackets = self.profile().round_brackets();
+        let (_, close) = brackets.iter().find(|(bracket, _)| *bracket == open)?;
+        (!tokens.in_literal(snapshot, at)).then_some(*close)
+    }
+    fn opens_line(&self, snapshot: &Snapshot, line: usize) -> Option<char> {
+        self.opens(snapshot, line, snapshot.line_content_range(line)?.end)
+    }
+    /// Whether a position has an opening bracket before it and its closer
+    /// after it, with only spaces between them.
+    fn between_pair(&self, snapshot: &Snapshot, position: usize) -> bool {
+        let line = snapshot.line_of(position).unwrap();
+        let (Some(close), Some(content)) = (
+            self.opens(snapshot, line, position),
+            snapshot.line_content_range(line),
+        ) else {
+            return false;
+        };
+        let after = snapshot.byte_slice(position..content.end).unwrap();
+        after.to_string().trim_start().starts_with(close)
+    }
+    /// Languages without a parser get what brackets say and no more: a level
+    /// after a line that ends in an opening bracket, and the closer of a
+    /// split pair back at the level of its opener. Otherwise lines inherit.
+    fn bracket_indent(&self, snapshot: &Snapshot, request: IndentRequest) -> IndentAdvice {
+        let set = |prefix| IndentAdvice::Set {
+            prefix,
+            auxiliary: None,
+        };
+        let indent = |line| snapshot.leading_whitespace(line).map(|w| w.to_string());
+        let Some(previous) = request.line.checked_sub(1) else {
+            return IndentAdvice::Unavailable;
+        };
+        match request.trigger {
+            IndentTrigger::Enter if self.opens_line(snapshot, previous).is_some() => {
+                let style = self.whitespace();
+                let width = style.tab_width.get();
+                let column = indent(previous)
+                    .unwrap_or_default()
+                    .chars()
+                    .fold(0, |column, ch| {
+                        if ch == '\t' {
+                            column + width - column % width
+                        } else {
+                            column + 1
+                        }
+                    });
+                let target = column + style.indent_width;
+                set(materialize(target, 0, target, &style))
+            }
+            IndentTrigger::Reindent => {
+                let closer = snapshot
+                    .line_content_range(request.line)
+                    .and_then(|range| snapshot.byte_slice(range))
+                    .and_then(|text| text.to_string().trim_start().chars().next());
+                let blank = snapshot.line_content_range(previous).is_some_and(|range| {
+                    snapshot
+                        .byte_slice(range)
+                        .unwrap()
+                        .to_string()
+                        .trim()
+                        .is_empty()
+                });
+                match previous.checked_sub(1) {
+                    Some(opener)
+                        if blank
+                            && closer.is_some()
+                            && self.opens_line(snapshot, opener) == closer =>
+                    {
+                        indent(opener).map_or(IndentAdvice::Unavailable, set)
+                    }
+                    _ => IndentAdvice::Unavailable,
+                }
+            }
+            _ => IndentAdvice::Unavailable,
+        }
+    }
     pub fn triggers(&self, ch: char) -> bool {
         match &self.inner {
             Session::Cpp(session) => session.triggers(ch),
@@ -209,7 +294,10 @@ impl LanguageSession {
     ) -> Result<EnterAdvice, EditError> {
         match &mut self.inner {
             Session::Cpp(session) => session.enter_advice(snapshot, position),
-            _ => Ok(EnterAdvice::default()),
+            _ => Ok(EnterAdvice {
+                expand_pair: self.between_pair(snapshot, position),
+                ..EnterAdvice::default()
+            }),
         }
     }
     pub fn indent(
@@ -219,7 +307,7 @@ impl LanguageSession {
     ) -> Result<IndentAdvice, EditError> {
         match &mut self.inner {
             Session::Cpp(session) => session.indent(snapshot, request),
-            _ => Ok(IndentAdvice::Unavailable),
+            _ => Ok(self.bracket_indent(snapshot, request)),
         }
     }
 }

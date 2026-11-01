@@ -87,7 +87,7 @@ TextMate token 带一串作用域（从外到内）。从最内层开始，取�
 ```
 grammars/rust/
   grammar.json                 TextMate 语法
-  language-configuration.json  注释、括号、缩进与回车规则
+  language-configuration.json  注释与括号
   language.json                语言名、作用域名、扩展名、文件名
 ```
 
@@ -109,7 +109,7 @@ grammars/rust/
 
 - **文件内符号**：TextMate 语言从 `entity.name.function`、`entity.name.type`、`entity.name.class`、`entity.name.namespace` 等作用域收集名字和位置，作为大纲和“跳到本文件符号”的数据源（Sublime Text 的符号列表也是这样得到的）；C++ 从结构分析得到。
 - **LSP**：跳转到定义、查找引用、工作区符号和 semantic tokens。没有服务器时，跨文件导航退回单词级查找。
-- **缩进与编辑规则**：`language-configuration.json` 的 `indentationRules`、`onEnterRules`、注释与括号对，给 C++ 以外的语言提供通用的回车缩进与注释切换。
+- **缩进与编辑规则**：`language-configuration.json` 的注释与括号对用于注释切换和括号配对。`indentationRules`、`onEnterRules` 不使用：有 TextMate grammar 的语言只按括号缩进，回车时，上一行以开括号结尾（不在字符串或注释里）就多缩进一层，其余沿用上一行；Python 行尾的 `:` 这类规则不做。
 
 ## 实施顺序
 
