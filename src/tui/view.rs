@@ -42,7 +42,15 @@ impl Areas {
     pub fn new(runtime: &Runtime, width: u16, height: u16) -> Self {
         let message = Rect::new(0, height.saturating_sub(1), width, height.min(1));
         let status = (height >= 2).then(|| Rect::new(0, height - 2, width, 1));
-        let tabs = (height >= 4).then(|| Rect::new(0, 0, width, 1));
+        let options = runtime.app().options();
+        let several = runtime.app().windows().views().len() > 1;
+        let tab_bar = match options.choice(None, "tab-bar") {
+            "on" => true,
+            "off" => false,
+            _ => !several,
+        };
+        let tabs = (height >= 4 && tab_bar).then(|| Rect::new(0, 0, width, 1));
+        let titled = several && options.bool(None, "window-title");
         let top = u16::from(tabs.is_some());
         let bottom = height.saturating_sub(if status.is_some() { 2 } else { 1 });
         let editor = Rect::new(0, top, width, bottom.saturating_sub(top));
@@ -53,12 +61,11 @@ impl Areas {
             width: editor.width,
             height: editor.height,
         });
-        let several = layout.len() > 1;
         let windows = layout
             .into_iter()
             .map(|(view, area)| {
                 let area = Rect::new(area.x, area.y, area.width, area.height);
-                let header = (several && area.height >= 2).then_some(Rect { height: 1, ..area });
+                let header = (titled && area.height >= 2).then_some(Rect { height: 1, ..area });
                 let body = match header {
                     Some(_) => Rect {
                         y: area.y + 1,
@@ -879,6 +886,37 @@ mod tests {
         }
     }
 
+    #[test]
+    fn options_choose_the_tab_bar_and_the_window_titles() {
+        let root = tempfile::tempdir().unwrap();
+        let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.start(None);
+        r.command(Command::Edit(crate::editor::Command::InsertText(
+            "first\n".into(),
+        )));
+        r.command(Command::SetMode(EditMode::Normal));
+        let top = |r: &mut Runtime| -> (bool, bool, usize) {
+            let text = screen(r, 60, 14);
+            let rows: Vec<_> = text.lines().collect();
+            let tabs = rows[0].contains('●') && !rows[0].contains('│');
+            let first = rows.iter().position(|row| row.contains("first")).unwrap();
+            (tabs, first > usize::from(tabs), first)
+        };
+        // A single window has its tabs and no title.
+        assert_eq!(top(&mut r), (true, false, 1));
+        r.command(Command::Named("vsplit".into()));
+        // By default a title takes the row of the tabs.
+        assert_eq!(top(&mut r), (false, true, 1));
+        r.command(Command::Named("set tab-bar on".into()));
+        assert_eq!(top(&mut r), (true, true, 2));
+        r.command(Command::Named("set window-title off".into()));
+        assert_eq!(top(&mut r), (true, false, 1));
+        r.command(Command::Named("set tab-bar auto".into()));
+        assert_eq!(top(&mut r), (false, false, 0));
+        r.command(Command::Named("set tab-bar off".into()));
+        r.command(Command::Named("only".into()));
+        assert_eq!(top(&mut r), (false, false, 0));
+    }
     #[test]
     fn screens_compose_tabs_gutter_status_and_panels() {
         let root = tempfile::tempdir().unwrap();

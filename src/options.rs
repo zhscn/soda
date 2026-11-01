@@ -108,6 +108,18 @@ pub const OPTIONS: &[OptionInfo] = &[
         doc: "Line numbers in the gutter: absolute, relative to the caret line, or off",
     },
     OptionInfo {
+        name: "tab-bar",
+        kind: Kind::Choice(&["auto", "on", "off"]),
+        default: Value::Choice("auto"),
+        doc: "The row of document tabs: auto shows it with a single window",
+    },
+    OptionInfo {
+        name: "window-title",
+        kind: Kind::Bool,
+        default: Value::Bool(true),
+        doc: "Show a title row on each window when there are several",
+    },
+    OptionInfo {
         name: "wrap",
         kind: Kind::Bool,
         default: Value::Bool(false),
