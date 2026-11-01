@@ -116,6 +116,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `pairs` | 结构化编辑，见[交互层](interaction.md#结构化编辑) | 见交互层 |
 | `comment` | 切换行注释 | Normal、Visual 的 `gc`、`<a-;>` |
 | `emacs` | Emacs 的单词大小写、对调和空白命令，见[交互层](interaction.md#emacs-键位) | 见交互层 |
+| `snippets` | 按语言注册 snippet，作为补全候选，见[补全](completion.md#snippet) | 无 |
 | `surround` | 在 Visual 选区两侧加上成对的文本 | Visual 的 `S` 加括号或引号 |
 | `clang-format` | 用 clang-format 格式化文档或 Visual 选中的行，只替换有变化的行 | 无 |
 | `git-changes` | 把 `git diff` 的每个改动块列入 `*changes*` | `<space>g` |

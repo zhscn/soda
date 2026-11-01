@@ -219,3 +219,173 @@ fn repeating_types_what_was_taken() {
     assert_eq!(text(&r).matches("wonder").count(), 3, "{}", text(&r));
     assert!(labels(&r).is_empty());
 }
+
+fn lua(r: &mut Runtime, code: &str) {
+    r.source_lua("test", code).unwrap();
+}
+#[test]
+fn lua_sources_are_asked_with_the_words() {
+    let (_dir, mut r) = open("wonder\n|\n");
+    lua(
+        &mut r,
+        r#"soda.completion.register({
+          complete = function(context, sink)
+            sink:add({ { label = "work", detail = context.prefix .. context.line } })
+            sink:done()
+          end,
+        })"#,
+    );
+    keys(&mut r, "wo");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while labels(&r).len() < 2 {
+        assert!(Instant::now() < deadline);
+        r.poll();
+    }
+    assert_eq!(labels(&r), ["work", "wonder"]);
+    assert_eq!(r.completion_popup().unwrap().rows[0].detail, "wo2");
+}
+#[test]
+fn a_source_can_answer_later() {
+    let (_dir, mut r) = open("|\n");
+    lua(
+        &mut r,
+        r#"soda.completion.register({
+          complete = function(context, sink)
+            soda.spawn({ "echo", "late" }, function(_, out)
+              sink:add({ { label = out:match("%S+") } })
+              sink:done()
+            end)
+          end,
+        })"#,
+    );
+    keys(&mut r, "la");
+    assert_eq!(listed(&mut r), ["late"]);
+}
+#[test]
+fn a_trigger_character_asks_only_its_sources() {
+    let (_dir, mut r) = open("member\n|\n");
+    lua(
+        &mut r,
+        r#"soda.completion.register({
+          triggers = { "." },
+          complete = function(context, sink)
+            sink:add({ { label = "field", detail = context.trigger } })
+            sink:done()
+          end,
+        })"#,
+    );
+    keys(&mut r, "x.");
+    assert_eq!(listed(&mut r), ["field"]);
+    assert_eq!(r.completion_popup().unwrap().rows[0].detail, ".");
+    keys(&mut r, "<tab>");
+    assert_eq!(shown(&r), "member\nx.field|\n");
+}
+#[test]
+fn an_incomplete_source_is_asked_again() {
+    let (_dir, mut r) = open("|\n");
+    lua(
+        &mut r,
+        r#"soda.completion.register({
+          complete = function(context, sink)
+            sink:add({ { label = "aa" .. context.prefix } })
+            sink:done({ incomplete = true })
+          end,
+        })"#,
+    );
+    keys(&mut r, "aa");
+    assert_eq!(listed(&mut r), ["aaaa"]);
+    keys(&mut r, "x");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while labels(&r) != ["aaaax"] {
+        assert!(Instant::now() < deadline, "{:?}", labels(&r));
+        r.poll();
+    }
+}
+#[test]
+fn a_late_answer_for_an_old_list_is_dropped() {
+    let (_dir, mut r) = open("|\n");
+    lua(
+        &mut r,
+        r#"saved = {}
+        soda.completion.register({
+          complete = function(context, sink)
+            table.insert(saved, sink)
+          end,
+        })"#,
+    );
+    keys(&mut r, "ab ");
+    keys(&mut r, "cd");
+    lua(&mut r, r#"saved[1]:add({ { label = "cde" } })"#);
+    r.poll();
+    assert!(labels(&r).is_empty());
+    lua(&mut r, r#"saved[2]:add({ { label = "cde" } })"#);
+    r.poll();
+    assert_eq!(labels(&r), ["cde"]);
+}
+
+fn snippet_source(r: &mut Runtime, body: &str) {
+    lua(
+        r,
+        &format!(r#"require("snippets").add("*", {{ fori = [==[{body}]==] }})"#),
+    );
+}
+fn bundled(marked: &str) -> (tempfile::TempDir, Runtime) {
+    let (dir, mut r) = open(marked);
+    r.load_startup_lua();
+    assert_eq!(r.message(), "");
+    (dir, r)
+}
+#[test]
+fn a_snippet_goes_through_its_places_with_tab() {
+    let (_dir, mut r) = bundled("|\n");
+    snippet_source(&mut r, "for (${1:i}; ${2:n}) $0;");
+    keys(&mut r, "fo");
+    assert_eq!(listed(&mut r), ["fori"]);
+    keys(&mut r, "<tab>");
+    assert_eq!(text(&r), "for (i; n) ;\n");
+    keys(&mut r, "x");
+    assert_eq!(shown(&r), "for (x|; n) ;\n");
+    keys(&mut r, "y<tab>");
+    keys(&mut r, "k");
+    assert_eq!(shown(&r), "for (xy; k|) ;\n");
+    keys(&mut r, "<backtab>z<tab><tab>");
+    assert_eq!(shown(&r), "for (z; k) |;\n");
+    keys(&mut r, "<tab>");
+    assert_eq!(text(&r), "for (z; k)  ;\n");
+}
+#[test]
+fn leaving_a_snippet_ends_it() {
+    let (_dir, mut r) = bundled("|\nnext\n");
+    r.command(Command::Named("snippet a${1:b} ${2:c}".into()));
+    keys(&mut r, "<down><tab>");
+    // Tab no longer belongs to the snippet: it goes in where the caret is.
+    assert_eq!(text(&r).lines().next().unwrap(), "ab c");
+    assert_ne!(text(&r).lines().nth(1).unwrap(), "next");
+}
+#[test]
+fn going_to_normal_ends_a_snippet() {
+    let (_dir, mut r) = bundled("|\n");
+    r.command(Command::Named("snippet ${1:a} ${2:b}".into()));
+    keys(&mut r, "<esc>i<tab>");
+    assert!(text(&r).contains("    "), "{}", text(&r));
+}
+#[test]
+fn a_snippet_is_one_undo_step_and_takes_the_line_indentation() {
+    let (_dir, mut r) = bundled("  |\n");
+    r.command(Command::Named("snippet if {\n\t${1:x}\n}".into()));
+    assert_eq!(text(&r), "  if {\n      x\n  }\n");
+    keys(&mut r, "<esc>u");
+    assert_eq!(text(&r), "  \n");
+}
+#[test]
+fn the_list_takes_tab_before_the_snippet() {
+    let (_dir, mut r) = bundled("wonder\n|\n");
+    r.command(Command::Named("snippet ${1:a} ${2:b}".into()));
+    keys(&mut r, "wo");
+    listed(&mut r);
+    keys(&mut r, "<tab>");
+    assert_eq!(shown(&r), "wonder\nwonder| b\n");
+    keys(&mut r, "<tab>");
+    keys(&mut r, "c");
+    assert_eq!(shown(&r), "wonder\nwonder c|\n");
+}

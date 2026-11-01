@@ -5,7 +5,7 @@
 //! out of the document until one is accepted. See `docs/completion.md`.
 use crate::{
     application::{Application, ViewId},
-    core::{Association, ByteOffset, Change, Selection, Snapshot, Transaction},
+    core::{Association, ByteOffset, Snapshot},
     editor::DocumentPosition,
     interaction::{EditMode, picker::fuzzy_match},
 };
@@ -36,16 +36,60 @@ pub enum Action {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Item {
     pub label: String,
+    /// What typing matches against, when it is not the label.
+    pub filter: String,
     pub text: String,
-    pub detail: &'static str,
+    /// `text` is a snippet, not plain text.
+    pub snippet: bool,
+    pub detail: String,
     /// Bytes before the anchor that this candidate also replaces: a file
     /// name holds more than the word at the caret.
     pub back: usize,
+    /// Who gave it, filled in on arrival.
+    pub source: u64,
+}
+impl Item {
+    pub fn plain(label: impl Into<String>, detail: impl Into<String>, back: usize) -> Self {
+        let label = label.into();
+        Self {
+            filter: label.clone(),
+            text: label.clone(),
+            label,
+            snippet: false,
+            detail: detail.into(),
+            back,
+            source: BUILTIN,
+        }
+    }
+}
+
+/// The built-in sources, among the sources a request names.
+pub const BUILTIN: u64 = 0;
+/// A source of candidates registered from Lua.
+struct Source {
+    id: u64,
+    triggers: Vec<char>,
+}
+/// Who to ask about a position.
+pub struct Asked {
+    pub generation: u64,
+    /// Run the built-in sources.
+    pub builtin: bool,
+    /// Lua sources.
+    pub sources: Vec<u64>,
+    pub view: ViewId,
+    pub prefix: String,
+    /// The character that started this, outside a word.
+    pub trigger: Option<char>,
+    pub language: String,
+    /// One-based, as Lua counts.
+    pub line: usize,
+    pub column: usize,
 }
 
 /// What sources need to answer, taken on the owner thread.
 pub struct Request {
-    pub generation: u64,
+    pub asked: Asked,
     pub snapshot: Snapshot,
     pub caret: usize,
     /// The word at the caret, which is not a candidate for itself.
@@ -61,7 +105,7 @@ pub struct Directory {
 
 pub struct Row {
     pub label: String,
-    pub detail: &'static str,
+    pub detail: String,
     /// The ranges of `label` that match what is typed.
     pub matched: Vec<std::ops::Range<usize>>,
     pub selected: bool,
@@ -82,6 +126,12 @@ struct Session {
     /// Into `matches`; none until the user chooses, so Enter stays Enter.
     selected: Option<usize>,
     top: usize,
+    /// The latest question to each source; other answers are stale.
+    asked: Vec<(u64, u64)>,
+    /// Sources to ask again when the prefix changes.
+    incomplete: Vec<u64>,
+    /// Sources whose earlier answer goes when their next one comes.
+    replacing: Vec<u64>,
 }
 
 pub struct State {
@@ -92,6 +142,7 @@ pub struct State {
     manual: bool,
     /// The start of a word the user closed the list on.
     dismissed: Option<usize>,
+    sources: Vec<Source>,
     matcher: Matcher,
 }
 impl Default for State {
@@ -102,6 +153,7 @@ impl Default for State {
             typed: false,
             manual: false,
             dismissed: None,
+            sources: vec![],
             matcher: Matcher::new(Config::DEFAULT),
         }
     }
@@ -153,6 +205,9 @@ impl State {
     }
     pub(super) fn selected(&self) -> bool {
         self.session.as_ref().is_some_and(|s| s.selected.is_some())
+    }
+    pub(super) fn register(&mut self, id: u64, triggers: Vec<char>) {
+        self.sources.push(Source { id, triggers });
     }
     pub(super) fn trigger(&mut self) {
         self.manual = true;
@@ -211,8 +266,30 @@ impl State {
                 self.session = None;
             } else {
                 let query = text[offset..caret].to_owned();
-                self.filter(query, text, caret);
-                return (None, true);
+                let changed = self.session.as_ref().unwrap().query != query;
+                self.filter(query.clone(), text, caret);
+                let session = self.session.as_mut().unwrap();
+                if !changed || session.incomplete.is_empty() {
+                    return (None, true);
+                }
+                self.generation += 1;
+                let session = self.session.as_mut().unwrap();
+                let sources = std::mem::take(&mut session.incomplete);
+                for source in &sources {
+                    session.asked.retain(|(asked, _)| asked != source);
+                    session.asked.push((*source, self.generation));
+                }
+                session.replacing.extend(&sources);
+                let asked = self.asked(app, sources, false, query, None, caret, &snapshot);
+                let request = Request {
+                    asked,
+                    word: offset..word_end(text, caret),
+                    caret,
+                    snapshot: snapshot.clone(),
+                    others: vec![],
+                    directory: None,
+                };
+                return (Some(request), true);
             }
         }
         if !typed && !manual {
@@ -231,9 +308,13 @@ impl State {
         let long_enough =
             caret - start >= options.int(Some(document), "completion-min-prefix") as usize;
         let after_slash = directory.as_ref().is_some_and(|d| d.back == 0);
+        let trigger = text[..caret]
+            .chars()
+            .next_back()
+            .filter(|ch| self.sources.iter().any(|s| s.triggers.contains(ch)));
         let wanted = options.bool(Some(document), "completion")
             && self.dismissed.is_none()
-            && (long_enough || after_slash);
+            && (long_enough || after_slash || trigger.is_some());
         if !manual && !wanted {
             return (None, shown);
         }
@@ -255,6 +336,9 @@ impl State {
             matches: vec![],
             selected: None,
             top: 0,
+            asked: vec![],
+            incomplete: vec![],
+            replacing: vec![],
         });
         let others = workspace
             .documents()
@@ -270,8 +354,25 @@ impl State {
                 )
             })
             .collect();
+        // A character that starts a member list says what is wanted: words
+        // are no answer, nor are sources that do not take it.
+        let by_trigger = trigger.filter(|_| !manual);
+        let sources: Vec<u64> = self
+            .sources
+            .iter()
+            .filter(|s| by_trigger.is_none_or(|ch| s.triggers.contains(&ch)))
+            .map(|s| s.id)
+            .collect();
+        let builtin = by_trigger.is_none() || after_slash;
+        let session = self.session.as_mut().unwrap();
+        session.asked = sources.iter().map(|id| (*id, self.generation)).collect();
+        if builtin {
+            session.asked.push((BUILTIN, self.generation));
+        }
+        let prefix = text[start..caret].to_owned();
+        let asked = self.asked(app, sources, builtin, prefix, by_trigger, caret, &snapshot);
         let request = Request {
-            generation: self.generation,
+            asked,
             word: start..word_end(text, caret),
             caret,
             snapshot: snapshot.clone(),
@@ -280,16 +381,63 @@ impl State {
         };
         (Some(request), shown)
     }
-    /// Takes what sources found; a stale answer is dropped.
-    pub(super) fn results(&mut self, generation: u64, items: Vec<Item>, app: &Application) -> bool {
-        if generation != self.generation || self.session.is_none() {
+    #[allow(clippy::too_many_arguments)]
+    fn asked(
+        &self,
+        app: &Application,
+        sources: Vec<u64>,
+        builtin: bool,
+        prefix: String,
+        trigger: Option<char>,
+        caret: usize,
+        snapshot: &Snapshot,
+    ) -> Asked {
+        let view = app.view(app.active_view().unwrap()).unwrap();
+        let editor = app.workspace().editor(view.document_id).unwrap();
+        let line = snapshot.line_of(caret).unwrap_or(0);
+        let start = snapshot.line_start(line).unwrap_or(0);
+        Asked {
+            generation: self.generation,
+            builtin,
+            sources,
+            view: view.id,
+            prefix,
+            trigger,
+            language: editor.model().document().language().profile().id.clone(),
+            line: line + 1,
+            column: caret - start + 1,
+        }
+    }
+    /// Takes what a source found; a stale answer is dropped.
+    pub(super) fn results(
+        &mut self,
+        generation: u64,
+        source: u64,
+        items: Vec<Item>,
+        incomplete: bool,
+        app: &Application,
+    ) -> bool {
+        let current = self
+            .session
+            .as_ref()
+            .is_some_and(|s| s.asked.contains(&(source, generation)));
+        if !current {
             return false;
         }
         let Some((snapshot, caret)) = at_caret(app) else {
             return false;
         };
         let session = self.session.as_mut().unwrap();
-        session.items.extend(items);
+        if session.replacing.contains(&source) {
+            session.replacing.retain(|replacing| *replacing != source);
+            session.items.retain(|item| item.source != source);
+        }
+        if incomplete && !session.incomplete.contains(&source) {
+            session.incomplete.push(source);
+        }
+        session
+            .items
+            .extend(items.into_iter().map(|item| Item { source, ..item }));
         let query = std::mem::take(&mut session.query);
         session.matches.clear();
         self.filter(query, snapshot.text(), caret);
@@ -301,7 +449,8 @@ impl State {
         };
         let chosen = session
             .selected
-            .and_then(|at| session.matches.get(at).copied());
+            .and_then(|at| session.matches.get(at))
+            .map(|index| session.items[*index].label.clone());
         // One more letter can only remove matches.
         let narrowing = query.starts_with(&session.query)
             && !session.matches.is_empty()
@@ -326,7 +475,7 @@ impl State {
         };
         let mut atoms: Vec<(usize, Atom)> = vec![];
         let mut chars = vec![];
-        let mut ranked: Vec<(bool, u16, usize)> = vec![];
+        let mut ranked: Vec<(bool, bool, u16, usize)> = vec![];
         for index in pool {
             let item = &session.items[index];
             let Some(from) = offset.checked_sub(item.back) else {
@@ -340,21 +489,23 @@ impl State {
             let score = if typed.is_empty() {
                 Some(0)
             } else {
-                pattern.score(Utf32Str::new(&item.label, &mut chars), &mut self.matcher)
+                pattern.score(Utf32Str::new(&item.filter, &mut chars), &mut self.matcher)
             };
             if let Some(score) = score {
-                ranked.push((item.label.starts_with(typed), score, index));
+                let prefix = item.filter.starts_with(typed);
+                ranked.push((!prefix, item.source == BUILTIN, u16::MAX - score, index));
             }
         }
         // Sources give the nearest first; that order breaks ties.
-        ranked.sort_by_key(|(prefix, score, index)| (!prefix, u16::MAX - score, *index));
+        ranked.sort_unstable();
         session.matches = ranked.into_iter().map(|(.., index)| index).collect();
         session.query = query;
-        session.selected = chosen.map(|item| {
+        session.selected = chosen.map(|label| {
+            let items = &session.items;
             session
                 .matches
                 .iter()
-                .position(|index| *index == item)
+                .position(|index| items[*index].label == label)
                 .unwrap_or(0)
         });
         session.top = 0;
@@ -376,13 +527,8 @@ impl State {
         });
         session.follow();
     }
-    /// The edit that accepts a candidate, and the keys that would have
-    /// typed it, for `.` and macros: their replays do not complete.
-    pub(super) fn accept(
-        &mut self,
-        replace: bool,
-        app: &Application,
-    ) -> Option<(ViewId, Transaction, Replayed)> {
+    /// What accepting a candidate replaces, and with what.
+    pub(super) fn accept(&mut self, replace: bool, app: &Application) -> Option<Accepted> {
         let (snapshot, caret) = at_caret(app)?;
         let session = self.session.take()?;
         let at = session.selected.or(replace.then_some(0))?;
@@ -394,17 +540,13 @@ impl State {
         } else {
             caret
         };
-        let replay = Replayed {
-            before: text[from..caret].chars().count(),
-            after: text[caret..to].chars().count(),
+        Some(Accepted {
+            view: session.view,
+            range: from..to,
+            caret,
             text: item.text.clone(),
-        };
-        let mut tx = Transaction::new(
-            snapshot.version(),
-            vec![Change::new(from..to, item.text.clone())],
-        );
-        tx.selection = Some(Selection::caret(from + item.text.len()));
-        Some((session.view, tx, replay))
+            snippet: item.snippet,
+        })
     }
     pub(super) fn popup(&self) -> Option<Popup> {
         let session = self.session.as_ref().filter(|s| s.shown())?;
@@ -421,7 +563,7 @@ impl State {
                     .map_or(vec![], |(_, ranges)| ranges);
                 Row {
                     label: item.label.clone(),
-                    detail: item.detail,
+                    detail: item.detail.clone(),
                     matched,
                     selected: session.selected == Some(at),
                 }
@@ -452,11 +594,13 @@ impl Session {
         }
     }
 }
-/// What a replay types instead of choosing from a list.
-pub(super) struct Replayed {
-    pub before: usize,
-    pub after: usize,
+/// A candidate on its way into the document.
+pub(super) struct Accepted {
+    pub view: ViewId,
+    pub range: std::ops::Range<usize>,
+    pub caret: usize,
     pub text: String,
+    pub snippet: bool,
 }
 fn at_caret(app: &Application) -> Option<(Snapshot, usize)> {
     let view = app.view(app.active_view()?)?;

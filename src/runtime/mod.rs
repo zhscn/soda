@@ -306,7 +306,10 @@ impl Runtime {
     fn complete(&mut self) {
         let (request, changed) = self.layers.completion_sync(&self.app, &self.file_root);
         if let Some(request) = request {
-            self.completions.request(request);
+            self.ask_lua_sources(&request.asked);
+            if request.asked.builtin {
+                self.completions.request(request);
+            }
         }
         self.dirty |= changed;
     }
@@ -903,7 +906,13 @@ impl Runtime {
             self.respond(response, self.epoch.elapsed());
         }
         if let Some((generation, items)) = self.completions.poll() {
-            self.dirty |= self.layers.completion_results(generation, items, &self.app);
+            self.dirty |= self.layers.completion_results(
+                generation,
+                crate::interaction::completion::BUILTIN,
+                items,
+                false,
+                &self.app,
+            );
         }
         if let Some(completion) = self.shell.poll() {
             self.shell_finished(completion);

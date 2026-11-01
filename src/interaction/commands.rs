@@ -161,6 +161,11 @@ pub enum Command {
     },
     Search,
     Completion(super::completion::Action),
+    /// Inserts a snippet at the caret.
+    Snippet(String),
+    SnippetStep {
+        backward: bool,
+    },
     Replace,
 }
 #[derive(Clone, Debug)]
@@ -603,22 +608,33 @@ impl Layers {
                     Action::Move { backward } => self.completion.step(backward),
                     Action::Accept | Action::Replace => {
                         let replace = action == Action::Replace;
-                        if let Some((view, tx, replay)) = self.completion.accept(replace, app) {
-                            use super::{Key, KeyStroke, UserInput};
-                            for key in std::iter::repeat_n(Key::Backspace, replay.before)
-                                .chain(std::iter::repeat_n(Key::Delete, replay.after))
-                            {
-                                let key = KeyStroke::plain(key);
-                                self.vim.replay.record(UserInput::Key(key));
-                            }
-                            self.vim.replay.record(UserInput::Paste(replay.text));
-                            response.events.push(Event::Edit {
-                                view,
-                                command: EditCommand::Apply(tx),
-                                time,
-                            });
+                        if let Some(accepted) = self.completion.accept(replace, app) {
+                            self.accept(accepted, app, time, &mut response);
                         }
                     }
+                }
+            }
+            Command::Snippet(body) => {
+                if let Some(view) = app.active_view()
+                    && let Some(session) = app.view(view)
+                {
+                    let editor = app.workspace().editor(session.document_id).unwrap();
+                    let selection = editor
+                        .model()
+                        .session(session.session_id)
+                        .unwrap()
+                        .selection();
+                    let range = selection.range();
+                    self.expand_snippet(view, range, &body, app, time, &mut response);
+                }
+            }
+            Command::SnippetStep { backward } => {
+                if let Some((view, selection)) = self.snippet.step(backward) {
+                    response.events.push(Event::Edit {
+                        view,
+                        command: EditCommand::SetSelection(selection),
+                        time,
+                    });
                 }
             }
             Command::Edit(command) => {
@@ -1125,4 +1141,107 @@ pub(super) fn show(app: &Application, document: crate::editor::DocumentId) -> Ev
         .filter(|v| v.document_id == document);
     let view = active.or_else(|| app.views().find(|v| v.document_id == document));
     view.map_or(Event::AddView(document), |v| Event::Focus(v.id))
+}
+
+impl Layers {
+    /// Puts a candidate in the document, and records for `.` and macros the
+    /// keys that would have typed it: their replays do not complete.
+    fn accept(
+        &mut self,
+        accepted: super::completion::Accepted,
+        app: &Application,
+        time: Duration,
+        response: &mut Response,
+    ) {
+        use super::{Key, KeyStroke, UserInput};
+        use crate::core::{Change, Selection, Transaction};
+        let super::completion::Accepted {
+            view,
+            range,
+            caret,
+            text,
+            snippet,
+        } = accepted;
+        let document = app.view(view).unwrap().document_id;
+        let editor = app.workspace().editor(document).unwrap();
+        let snapshot = editor.model().document().snapshot();
+        let whole = snapshot.text();
+        let before = whole[range.start..caret].chars().count();
+        let after = whole[caret..range.end].chars().count();
+        for key in std::iter::repeat_n(Key::Backspace, before)
+            .chain(std::iter::repeat_n(Key::Delete, after))
+        {
+            self.vim
+                .replay
+                .record(UserInput::Key(KeyStroke::plain(key)));
+        }
+        let typed = if snippet {
+            self.expand_snippet(view, range, &text, app, time, response)
+        } else {
+            let start = range.start;
+            let mut tx =
+                Transaction::new(snapshot.version(), vec![Change::new(range, text.clone())]);
+            tx.selection = Some(Selection::caret(start + text.len()));
+            response.events.push(Event::Edit {
+                view,
+                command: EditCommand::Apply(tx),
+                time,
+            });
+            text
+        };
+        self.vim.replay.record(UserInput::Paste(typed));
+    }
+    /// Expands a snippet in place of a range as one undoable step; returns
+    /// its text. Lines after the first get the language's indentation.
+    fn expand_snippet(
+        &mut self,
+        view: crate::application::ViewId,
+        range: std::ops::Range<usize>,
+        body: &str,
+        app: &Application,
+        time: Duration,
+        response: &mut Response,
+    ) -> String {
+        use crate::core::{Change, Selection, Transaction};
+        let document = app.view(view).unwrap().document_id;
+        let model = app.workspace().editor(document).unwrap().model().document();
+        let snapshot = model.snapshot();
+        let line = snapshot.line_of(range.start).unwrap();
+        let indent = snapshot.leading_whitespace(line).unwrap().to_string();
+        let style = model.whitespace();
+        let unit = crate::language::materialize(style.indent_width, 0, style.indent_width, &style);
+        let parsed = super::snippet::parse(body).indented(&indent, &unit);
+        let depth = model.history_depth();
+        let first = parsed.stops[0].clone();
+        let mut tx = Transaction::new(
+            snapshot.version(),
+            vec![Change::new(range.clone(), parsed.text.clone())],
+        );
+        tx.selection = Some(Selection {
+            anchor: range.start + first.start,
+            head: range.start + first.end,
+        });
+        let lines = parsed.lines();
+        let event = |command| Event::Edit {
+            view,
+            command,
+            time,
+        };
+        response.events.push(event(EditCommand::Apply(tx)));
+        if lines > 0 {
+            for line in line..=line + lines {
+                response.events.push(event(EditCommand::Reindent(line)));
+            }
+            response
+                .events
+                .push(event(EditCommand::SquashHistory(depth)));
+        }
+        self.snippet.pending = Some(super::snippet::Pending {
+            view,
+            document,
+            offset: range.start,
+            stops: parsed.stops,
+        });
+        parsed.text
+    }
 }

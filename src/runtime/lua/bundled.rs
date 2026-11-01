@@ -13,6 +13,7 @@ pub(super) const MODULES: &[(&str, &str)] = &[
     ("git-changes", include_str!("../../../lua/git-changes.lua")),
     ("git-flags", include_str!("../../../lua/git-flags.lua")),
     ("pairs", include_str!("../../../lua/pairs.lua")),
+    ("snippets", include_str!("../../../lua/snippets.lua")),
     ("surround", include_str!("../../../lua/surround.lua")),
 ];
 /// Modules loaded at startup. They add commands and keys, and do nothing
@@ -24,5 +25,6 @@ pub(super) const STARTUP: &[&str] = &[
     "emacs",
     "git-changes",
     "pairs",
+    "snippets",
     "surround",
 ];

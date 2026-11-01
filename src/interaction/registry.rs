@@ -82,6 +82,7 @@ const MODE: Slot = slot(
         word("visual", "Visual mode keys"),
         word("insert", "Insert mode keys"),
         word("completion", "Keys while the completion list shows"),
+        word("snippet", "Keys while a snippet has places left"),
         word("prompt", "Command line and prompt keys"),
     ]),
 );
@@ -518,6 +519,22 @@ pub static BUILTINS: &[Builtin] = &[
         "completion-replace",
         "Take the selected or first candidate, replacing to the end of the word",
         Command::Completion(super::completion::Action::Replace)
+    ),
+    builtin!(
+        "snippet",
+        [slot("BODY", SlotKind::Rest)],
+        "Insert a snippet at the caret; $1, ${1:text} and $0 are its places",
+        |a| Ok(Command::Snippet(required(a)?))
+    ),
+    builtin!(
+        "snippet-next",
+        "Go to the next place of the snippet",
+        Command::SnippetStep { backward: false }
+    ),
+    builtin!(
+        "snippet-previous",
+        "Go to the previous place of the snippet",
+        Command::SnippetStep { backward: true }
     ),
     builtin!(
         "recenter",

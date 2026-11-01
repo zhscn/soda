@@ -16,14 +16,17 @@ pub enum Context {
     Insert,
     /// Insert while the completion list shows; other keys go to Insert.
     Completion,
+    /// Insert while a snippet has places left; below `Completion`.
+    Snippet,
     Prompt,
 }
 impl Context {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Normal,
         Self::Visual,
         Self::Insert,
         Self::Completion,
+        Self::Snippet,
         Self::Prompt,
     ];
     pub fn name(self) -> &'static str {
@@ -32,6 +35,7 @@ impl Context {
             Self::Visual => "visual",
             Self::Insert => "insert",
             Self::Completion => "completion",
+            Self::Snippet => "snippet",
             Self::Prompt => "prompt",
         }
     }
@@ -394,6 +398,12 @@ const COMPLETION: &[(&str, &str)] = &[
     ("<up>", "completion-previous"),
     ("<c-g>", "completion-dismiss"),
 ];
+const SNIPPET: &[(&str, &str)] = &[
+    ("<tab>", "snippet-next"),
+    ("<backtab>", "snippet-previous"),
+    ("<s-backtab>", "snippet-previous"),
+    ("<s-tab>", "snippet-previous"),
+];
 const INSERT: &[(&str, &str)] = &[
     ("<a-/>", "completion-trigger"),
     ("<up>", "move-up"),
@@ -589,7 +599,7 @@ fn sequence(keys: &[KeyStroke]) -> Result<Vec<KeyStroke>, BindingError> {
 }
 
 pub struct Keymap {
-    edit: [Layer<Command>; 4],
+    edit: [Layer<Command>; 5],
     prompt: Layer<Input>,
 }
 impl Default for Keymap {
@@ -609,6 +619,7 @@ impl Default for Keymap {
             (Context::Insert, READLINE),
             (Context::Insert, EMACS),
             (Context::Completion, COMPLETION),
+            (Context::Snippet, SNIPPET),
         ] {
             for (keys, line) in table {
                 let target = registry.parse_builtin(line).unwrap();
@@ -656,10 +667,10 @@ impl Keymap {
             context => self.edit[context as usize].unbind(keys),
         }
     }
-    /// The command of a key while the completion list shows, if it has one.
-    pub(super) fn completion(&self, key: KeyStroke) -> Option<Command> {
+    /// The command of a key in a context that takes single keys over Insert.
+    pub(super) fn over_insert(&self, context: Context, key: KeyStroke) -> Option<Command> {
         let key = canonical(key).ok()?;
-        match self.resolve(Context::Completion, &[key]) {
+        match self.resolve(context, &[key]) {
             Resolution::Complete(command) => Some(command),
             _ => None,
         }

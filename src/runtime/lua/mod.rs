@@ -10,11 +10,17 @@
 use super::Runtime;
 mod buffer;
 mod bundled;
-use crate::interaction::{Command, LuaRequest};
+use crate::interaction::{
+    Command, LuaRequest,
+    completion::{Asked, Item},
+};
 use mlua::{Function, Lua, Table, Value};
 use std::{
     cell::{Cell, RefCell},
-    sync::mpsc::{Receiver, Sender, channel},
+    sync::{
+        Arc,
+        mpsc::{Receiver, Sender, channel},
+    },
 };
 
 /// Functions of the `soda` table; each forwards to the implementation lent
@@ -32,6 +38,7 @@ const FUNCTIONS: &[&str] = &[
     "results",
     "open",
     "clipboard",
+    "completion_source",
 ];
 const PRELUDE: &str = r#"
 local current, names, methods, bundled = ...
@@ -82,6 +89,16 @@ end
 function soda.buffer()
   return setmetatable({ id = lent("soda.buffer").buffer() }, Buffer)
 end
+local completion_source = soda.completion_source
+soda.completion_source = nil
+soda.completion = {}
+function soda.completion.register(source)
+  local triggers = source.triggers or {}
+  if type(source.complete) ~= "function" then
+    error("a completion source needs a complete function", 2)
+  end
+  completion_source(table.concat(triggers), source.complete)
+end
 "#;
 const IMPLEMENTATION: &str = "soda.implementation";
 const CALLBACKS: &str = "soda.callbacks";
@@ -99,6 +116,14 @@ pub(super) enum Request {
     Chunk { origin: String, code: String },
     Call { id: u64, argument: String },
     Done(Job),
+    Complete { source: u64, asked: Arc<Asked> },
+}
+/// What a source answered, whenever it does.
+struct Answer {
+    generation: u64,
+    source: u64,
+    items: Vec<Item>,
+    incomplete: bool,
 }
 impl From<LuaRequest> for Request {
     fn from(request: LuaRequest) -> Self {
@@ -113,6 +138,7 @@ pub(super) struct Host {
     /// The id the next registered function gets.
     next: Cell<u64>,
     jobs: (Sender<Job>, Receiver<Job>),
+    answers: (Sender<Answer>, Receiver<Answer>),
 }
 impl Host {
     fn new() -> mlua::Result<Self> {
@@ -130,7 +156,50 @@ impl Host {
             lua,
             next: Cell::new(1),
             jobs: channel(),
+            answers: channel(),
         })
+    }
+    /// Calls a source with what it is asked and a sink for its answer. The
+    /// sink outlives the call: a source that runs a process fills it later.
+    fn complete(&self, source: u64, asked: &Asked) -> mlua::Result<()> {
+        let lua = &self.lua;
+        let context = lua.create_table()?;
+        context.set("prefix", asked.prefix.as_str())?;
+        context.set("language", asked.language.as_str())?;
+        context.set("line", asked.line)?;
+        context.set("column", asked.column)?;
+        context.set("trigger", asked.trigger.map(String::from))?;
+        let generation = asked.generation;
+        let answer = move |items, incomplete| Answer {
+            generation,
+            source,
+            items,
+            incomplete,
+        };
+        let sink = lua.create_table()?;
+        let sender = self.answers.0.clone();
+        sink.set(
+            "add",
+            lua.create_function(move |_, (_, items): (Table, Vec<Table>)| {
+                let items = items.iter().map(item).collect::<mlua::Result<_>>()?;
+                let _ = sender.send(answer(items, false));
+                Ok(())
+            })?,
+        )?;
+        let sender = self.answers.0.clone();
+        sink.set(
+            "done",
+            lua.create_function(move |_, (_, options): (Table, Option<Table>)| {
+                let incomplete = options.is_some_and(|o| {
+                    o.get::<Option<bool>>("incomplete").ok().flatten() == Some(true)
+                });
+                let _ = sender.send(answer(vec![], incomplete));
+                Ok(())
+            })?,
+        )?;
+        self.callbacks()?
+            .get::<Function>(source)?
+            .call::<()>((context, sink))
     }
     fn callbacks(&self) -> mlua::Result<Table> {
         self.lua.named_registry_value(CALLBACKS)
@@ -313,6 +382,17 @@ impl Host {
                     },
                 )?,
             )?;
+            soda.set(
+                "completion_source",
+                scope.create_function(|_, (triggers, function): (String, Function)| {
+                    let id = self.keep(function)?;
+                    runtime
+                        .borrow_mut()
+                        .layers
+                        .completion_source(id, triggers.chars().collect());
+                    Ok(())
+                })?,
+            )?;
             lua.set_named_registry_value(IMPLEMENTATION, soda)?;
             let result = match request {
                 Request::Chunk { origin, code } => lua.load(code).set_name(origin).exec(),
@@ -325,6 +405,7 @@ impl Host {
                     callbacks.set(job.id, Value::Nil)?;
                     function.call::<()>((job.code, job.stdout, job.stderr))
                 }
+                Request::Complete { source, asked } => self.complete(source, &asked),
             };
             lua.set_named_registry_value(IMPLEMENTATION, Value::Nil)?;
             result
@@ -332,6 +413,27 @@ impl Host {
         buffer::squash(runtime.into_inner(), edited.into_inner());
         result
     }
+}
+/// A candidate from the table a source gives.
+fn item(table: &Table) -> mlua::Result<Item> {
+    let label: String = table.get("label")?;
+    let snippet: Option<String> = table.get("snippet")?;
+    let mut item = Item::plain(
+        label,
+        table.get::<Option<String>>("detail")?.unwrap_or_default(),
+        table.get::<Option<usize>>("back")?.unwrap_or(0),
+    );
+    if let Some(filter) = table.get("filter")? {
+        item.filter = filter;
+    }
+    if let Some(text) = table.get("text")? {
+        item.text = text;
+    }
+    if let Some(snippet) = snippet {
+        item.text = snippet;
+        item.snippet = true;
+    }
+    Ok(item)
 }
 fn expand(runtime: &Runtime, text: &str) -> mlua::Result<String> {
     runtime
@@ -456,8 +558,40 @@ impl Runtime {
         self.message = error;
         self.dirty = true;
     }
+    /// Asks the Lua sources a request names.
+    pub(super) fn ask_lua_sources(&mut self, asked: &Asked) {
+        let shared = Arc::new(Asked {
+            sources: vec![],
+            prefix: asked.prefix.clone(),
+            language: asked.language.clone(),
+            ..*asked
+        });
+        for source in &asked.sources {
+            let request = Request::Complete {
+                source: *source,
+                asked: shared.clone(),
+            };
+            self.lua_queue.push_back((request, Some(asked.view)));
+        }
+        if !asked.sources.is_empty() {
+            self.run_lua();
+        }
+    }
     /// Collects finished processes and calls their functions.
     pub(super) fn poll_lua(&mut self) {
+        let Some(host) = &self.lua else {
+            return;
+        };
+        let answers: Vec<_> = host.answers.1.try_iter().collect();
+        for answer in answers {
+            self.dirty |= self.layers.completion_results(
+                answer.generation,
+                answer.source,
+                answer.items,
+                answer.incomplete,
+                &self.app,
+            );
+        }
         let Some(host) = &self.lua else {
             return;
         };

@@ -5,6 +5,7 @@ mod command_line;
 pub use command_line::{CommandLine, Completion};
 mod commands;
 pub mod completion;
+pub mod snippet;
 pub mod vim;
 pub use commands::{Command, Departure, Sourced, WindowCommand};
 mod departure;
@@ -159,6 +160,7 @@ pub struct Layers {
     keymap: Keymap,
     vim: vim::State,
     completion: completion::State,
+    snippet: snippet::State,
     /// The input being routed comes from `.` or a macro.
     replaying: bool,
     jumps: jumps::Jumps,
@@ -312,16 +314,25 @@ impl Layers {
         app: &Application,
         file_root: &std::path::Path,
     ) -> (Option<completion::Request>, bool) {
+        let editing = self.mode == EditMode::Insert && self.active.is_none();
+        self.snippet.sync(app, editing);
         self.completion
             .sync(app, self.mode, self.active.is_some(), file_root)
     }
     pub fn completion_results(
         &mut self,
         generation: u64,
+        source: u64,
         items: Vec<completion::Item>,
+        incomplete: bool,
         app: &Application,
     ) -> bool {
-        self.completion.results(generation, items, app)
+        self.completion
+            .results(generation, source, items, incomplete, app)
+    }
+    /// Adds a source of candidates, asked also after these characters.
+    pub fn completion_source(&mut self, id: u64, triggers: Vec<char>) {
+        self.completion.register(id, triggers);
     }
     /// The list to show under the caret.
     pub fn completion_popup(&self) -> Option<completion::Popup> {
@@ -454,6 +465,7 @@ impl Layers {
     ) -> Result<Response, EditError> {
         self.vim.marks.observe(update);
         self.completion.observe(update);
+        self.snippet.observe(app, update);
         let searching = matches!(self.active, Some(Layer::Search { .. }));
         self.jumps.observe(app, update, searching);
         let group_end = if update.active_changed {

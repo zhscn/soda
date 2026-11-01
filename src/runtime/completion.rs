@@ -22,7 +22,7 @@ pub(super) struct Completions {
 impl Completions {
     pub fn request(&mut self, request: Request) {
         let (sender, receiver) = mpsc::channel();
-        self.result = Some((request.generation, receiver));
+        self.result = Some((request.asked.generation, receiver));
         std::thread::spawn(move || {
             let mut items = files(&request);
             items.extend(words(&request));
@@ -87,12 +87,7 @@ fn words(request: &Request) -> Vec<Item> {
         .into_iter()
         .chain(others)
         .take(LIMIT)
-        .map(|(_, word)| Item {
-            label: word.to_owned(),
-            text: word.to_owned(),
-            detail: "word",
-            back: 0,
-        })
+        .map(|(_, word)| Item::plain(word, "word", 0))
         .collect()
 }
 /// Entries of the directory the caret's path names, directories first.
@@ -121,12 +116,8 @@ fn files(request: &Request) -> Vec<Item> {
             } else {
                 format!("{name}/")
             };
-            Item {
-                label: text.clone(),
-                text,
-                detail: if file { "file" } else { "directory" },
-                back: directory.back,
-            }
+            let detail = if file { "file" } else { "directory" };
+            Item::plain(text, detail, directory.back)
         })
         .collect()
 }

@@ -334,16 +334,29 @@ impl Layers {
             }
             _ => return Ok(InputResult::Blocked),
         };
-        if self.mode == EditMode::Insert
-            && self.completion.visible()
-            && !self.sequence.active()
-            && let Some(command) = self.keymap.completion(key)
-            // Enter is a line break until a candidate is chosen.
-            && (self.completion.selected()
-                || !matches!(command, Command::Completion(super::completion::Action::Accept)))
-        {
-            self.vim.replay.unrecord();
-            return self.execute(command, app, time, file_root);
+        if self.mode == EditMode::Insert && !self.sequence.active() {
+            let list = self.completion.visible();
+            let command = list
+                .then(|| self.keymap.over_insert(keymap::Context::Completion, key))
+                .flatten()
+                // Enter is a line break until a candidate is chosen.
+                .filter(|command| {
+                    self.completion.selected()
+                        || !matches!(
+                            command,
+                            Command::Completion(super::completion::Action::Accept)
+                        )
+                })
+                .or_else(|| {
+                    self.snippet
+                        .active()
+                        .then(|| self.keymap.over_insert(keymap::Context::Snippet, key))
+                        .flatten()
+                });
+            if let Some(command) = command {
+                self.vim.replay.unrecord();
+                return self.execute(command, app, time, file_root);
+            }
         }
         let cancel = keymap::is_cancel(&key)
             && !self.sequence.continues(key, self.mode.into(), &self.keymap);

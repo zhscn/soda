@@ -277,7 +277,7 @@ fn completions(
         buf.set_stringn(
             x + wide - detail as u16 - 1,
             y,
-            candidate.detail,
+            &candidate.detail,
             detail,
             style,
         );
