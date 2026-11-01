@@ -14,7 +14,7 @@ use crate::interaction::{
     Command, LuaRequest,
     completion::{Asked, Item},
 };
-use mlua::{Function, Lua, Table, Value};
+use mlua::{Function, Lua, LuaSerdeExt, SerializeOptions, Table, Value};
 use std::{
     cell::{Cell, RefCell},
     sync::{
@@ -39,6 +39,13 @@ const FUNCTIONS: &[&str] = &[
     "open",
     "clipboard",
     "completion_source",
+    "lsp_server",
+    "lsp_request",
+    "lsp_notify",
+    "lsp_on",
+    "lsp_uri",
+    "lsp_info",
+    "lsp_restart",
 ];
 const PRELUDE: &str = r#"
 local current, names, methods, bundled = ...
@@ -92,6 +99,11 @@ end
 local completion_source = soda.completion_source
 soda.completion_source = nil
 soda.completion = {}
+soda.lsp = {}
+for _, name in ipairs({ "server", "request", "notify", "on", "uri", "info", "restart" }) do
+  soda.lsp[name] = soda["lsp_" .. name]
+  soda["lsp_" .. name] = nil
+end
 function soda.completion.register(source)
   local triggers = source.triggers or {}
   if type(source.complete) ~= "function" then
@@ -117,6 +129,7 @@ pub(super) enum Request {
     Call { id: u64, argument: String },
     Done(Job),
     Complete { source: u64, asked: Arc<Asked> },
+    Lsp(super::lsp::Delivery),
 }
 /// What a source answered, whenever it does.
 struct Answer {
@@ -334,6 +347,7 @@ impl Host {
                             )));
                         }
                         let mut runtime = runtime.borrow_mut();
+                        runtime.layers.expect_jump();
                         let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
                         let path = crate::interaction::path::resolve_path(
                             &runtime.file_root,
@@ -393,6 +407,91 @@ impl Host {
                     Ok(())
                 })?,
             )?;
+            soda.set(
+                "lsp_server",
+                scope.create_function(
+                    |_, (language, command): (String, Option<Vec<String>>)| {
+                        if command.as_ref().is_some_and(Vec::is_empty) {
+                            return Err(mlua::Error::runtime("a language server needs a program"));
+                        }
+                        runtime.borrow_mut().lsp.set_server(language, command);
+                        Ok(())
+                    },
+                )?,
+            )?;
+            soda.set(
+                "lsp_request",
+                scope.create_function(
+                    |lua, (method, params, function): (String, Value, Function)| {
+                        let params: serde_json::Value = lua.from_value(params)?;
+                        let id = self.keep(function)?;
+                        let mut runtime = runtime.borrow_mut();
+                        let Some(language) = runtime.current_language() else {
+                            return Ok(false);
+                        };
+                        let root = runtime.file_root.clone();
+                        let Runtime { lsp, app, .. } = &mut **runtime;
+                        lsp.sync(app, &root, true);
+                        Ok(lsp.request(&language, &method, params, id))
+                    },
+                )?,
+            )?;
+            soda.set(
+                "lsp_notify",
+                scope.create_function(|lua, (method, params): (String, Value)| {
+                    let params: serde_json::Value = lua.from_value(params)?;
+                    let mut runtime = runtime.borrow_mut();
+                    let Some(language) = runtime.current_language() else {
+                        return Ok(false);
+                    };
+                    Ok(runtime.lsp.notify(&language, &method, params))
+                })?,
+            )?;
+            soda.set(
+                "lsp_on",
+                scope.create_function(|_, (method, function): (String, Function)| {
+                    let id = self.keep(function)?;
+                    runtime.borrow_mut().lsp.on(method, id);
+                    Ok(())
+                })?,
+            )?;
+            soda.set(
+                "lsp_uri",
+                scope.create_function(|_, ()| {
+                    let runtime = runtime.borrow();
+                    let document = runtime.document().ok();
+                    let path = document
+                        .and_then(|document| runtime.app.workspace().file(document))
+                        .and_then(|file| file.path());
+                    Ok(path.map(super::lsp::uri))
+                })?,
+            )?;
+            soda.set(
+                "lsp_info",
+                scope.create_function(|lua, ()| {
+                    let runtime = runtime.borrow();
+                    let Some(language) = runtime.current_language() else {
+                        return Ok(Value::Nil);
+                    };
+                    let Some((encoding, capabilities)) = runtime.lsp.client_of(&language) else {
+                        return Ok(Value::Nil);
+                    };
+                    let info = lua.create_table()?;
+                    info.set("encoding", encoding)?;
+                    info.set("capabilities", to_lua(lua, capabilities)?)?;
+                    Ok(Value::Table(info))
+                })?,
+            )?;
+            soda.set(
+                "lsp_restart",
+                scope.create_function(|_, ()| {
+                    let mut runtime = runtime.borrow_mut();
+                    if let Some(language) = runtime.current_language() {
+                        runtime.lsp.restart(&language);
+                    }
+                    Ok(())
+                })?,
+            )?;
             lua.set_named_registry_value(IMPLEMENTATION, soda)?;
             let result = match request {
                 Request::Chunk { origin, code } => lua.load(code).set_name(origin).exec(),
@@ -406,6 +505,20 @@ impl Host {
                     function.call::<()>((job.code, job.stdout, job.stderr))
                 }
                 Request::Complete { source, asked } => self.complete(source, &asked),
+                Request::Lsp(super::lsp::Delivery::Answer {
+                    function,
+                    result,
+                    error,
+                }) => {
+                    let callbacks = self.callbacks()?;
+                    let call = callbacks.get::<Function>(function)?;
+                    callbacks.set(function, Value::Nil)?;
+                    call.call::<()>((to_lua(lua, &result)?, to_lua(lua, &error)?))
+                }
+                Request::Lsp(super::lsp::Delivery::Notification { function, params }) => self
+                    .callbacks()?
+                    .get::<Function>(function)?
+                    .call::<()>(to_lua(lua, &params)?),
             };
             lua.set_named_registry_value(IMPLEMENTATION, Value::Nil)?;
             result
@@ -413,6 +526,16 @@ impl Host {
         buffer::squash(runtime.into_inner(), edited.into_inner());
         result
     }
+}
+/// JSON as Lua sees it: `null` is `nil`, so a field left out and a field
+/// set to null read alike.
+fn to_lua(lua: &Lua, value: &serde_json::Value) -> mlua::Result<Value> {
+    lua.to_value_with(
+        value,
+        SerializeOptions::new()
+            .serialize_none_to_null(false)
+            .serialize_unit_to_null(false),
+    )
 }
 /// A candidate from the table a source gives.
 fn item(table: &Table) -> mlua::Result<Item> {
@@ -608,6 +731,26 @@ impl Runtime {
             self.lua_queue.extend(done);
             self.run_lua();
         }
+    }
+    /// Starts servers, sends edits and takes what servers said.
+    pub(super) fn poll_lsp(&mut self) {
+        let root = self.file_root.clone();
+        let failure = self.lsp.sync(&self.app, &root, false);
+        let (deliveries, closed) = self.lsp.poll();
+        if let Some(error) = failure.or(closed) {
+            self.report(error);
+        }
+        if !deliveries.is_empty() {
+            let view = self.app.active_view();
+            self.lua_queue
+                .extend(deliveries.into_iter().map(|d| (Request::Lsp(d), view)));
+            self.run_lua();
+        }
+    }
+    fn current_language(&self) -> Option<String> {
+        let document = self.document().ok()?;
+        let editor = self.app.workspace().editor(document)?;
+        Some(editor.model().document().language().profile().id.clone())
     }
     /// The current document, for Lua functions acting on it.
     fn document(&self) -> Result<crate::editor::DocumentId, String> {

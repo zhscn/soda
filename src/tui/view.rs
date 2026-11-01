@@ -272,7 +272,7 @@ fn completions(
         } else {
             theme.panel
         };
-        buf.set_style(Rect::new(x, y, wide, 1), style);
+        buf.set_string(x, y, " ".repeat(wide.into()), style);
         buf.set_stringn(x + 1, y, &candidate.label, name, style);
         for range in &candidate.matched {
             let column = width(&candidate.label[..range.start]);

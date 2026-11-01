@@ -282,6 +282,7 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
         runtime.add_lua_modules(&config.with_file_name("lua"));
     }
     runtime.load_startup_lua();
+    runtime.enable_lsp();
     // Configuration comes before the first document so that its hooks see
     // it: the command file, then init.lua beside it.
     if let Some(config) = config {

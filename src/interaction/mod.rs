@@ -307,6 +307,10 @@ impl Layers {
             })
             .collect()
     }
+    /// The next move is a jump, for `jump-back`.
+    pub fn expect_jump(&mut self) {
+        self.jumps.expect();
+    }
     /// Brings completion in line with the caret; call after input settles.
     /// Returns a request for sources, and whether to redraw.
     pub fn completion_sync(

@@ -17,6 +17,7 @@ use std::{
 
 mod completion;
 mod grep;
+mod lsp;
 mod lua;
 mod process;
 mod run;
@@ -43,6 +44,7 @@ pub struct Runtime {
     shell: shell::ShellRunner,
     grep: grep::GrepRunner,
     completions: completion::Completions,
+    lsp: lsp::Lsp,
     run: run::RunRunner,
     picker: PickerRunner,
     paths: PathRunner,
@@ -98,6 +100,7 @@ impl Runtime {
             shell: shell::ShellRunner::default(),
             grep: grep::GrepRunner::default(),
             completions: completion::Completions::default(),
+            lsp: lsp::Lsp::default(),
             run: run::RunRunner::default(),
             picker: PickerRunner::new()?,
             paths: PathRunner::new()?,
@@ -316,6 +319,10 @@ impl Runtime {
             }
         }
         self.dirty |= changed;
+    }
+    /// Lets documents start language servers.
+    pub fn enable_lsp(&mut self) {
+        self.lsp.enable();
     }
     /// The list of candidates to show under the caret.
     pub fn completion_popup(&self) -> Option<crate::interaction::completion::Popup> {
@@ -864,6 +871,7 @@ impl Runtime {
     /// Bounded completion reduction prevents workers from monopolizing input.
     pub fn poll(&mut self) {
         self.poll_lua();
+        self.poll_lsp();
         for _ in 0..8 {
             match self.files.poll() {
                 Ok(Some(FileCompletion::Open(completion))) => {

@@ -115,6 +115,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 
 | 模块 | 内容 | 键位 |
 | --- | --- | --- |
+| `lsp` | 跳转、引用、调用层级、hover、诊断和补全，见[语言服务器](lsp.md) | `<a-.>`、`<a-?>`、`K`、`<space>c`、`<space>C` |
 | `pairs` | 结构化编辑，见[交互层](interaction.md#结构化编辑) | 见交互层 |
 | `comment` | 切换行注释 | Normal、Visual 的 `gc`、`<a-;>` |
 | `emacs` | Emacs 的单词大小写、对调和空白命令，见[交互层](interaction.md#emacs-键位) | 见交互层 |
