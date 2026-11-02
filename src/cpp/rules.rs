@@ -31,6 +31,7 @@ pub struct ExpressionPolicy {
     pub align_parentheses: bool,
     pub operand_alignment: OperandAlignment,
     pub anchor_ternary_before_operator: bool,
+    pub inheritance_before_comma: bool,
 }
 /// Extern bodies can follow namespace behavior for editor-authored styles.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -164,6 +165,7 @@ impl CppStyle {
                 align_parentheses: self.align_open_bracket,
                 operand_alignment: self.operand_alignment,
                 anchor_ternary_before_operator: self.break_before_ternary,
+                inheritance_before_comma: self.inheritance_before_comma,
             },
             initializer: InitializerPolicy {
                 width: if self.brace_init_continuation {

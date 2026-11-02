@@ -1414,6 +1414,150 @@
       "expected": "void f() {\n  FOREACH(x)\n    work(x);\n  CALL(a,\n       b);\n}\n"
     },
     {
+      "name": "wrapped-names-True",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "IndentWrappedFunctionNames": true
+      },
+      "expected": "static inline struct tm\n    get(int x) {\n  return {};\n}\nstatic cl::opt<bool>\n    Flag(\"flag\", cl::Hidden);\nA::B::\n    B(int x) {\n}\nA::operator int() const {\n  return 0;\n}\nstd::handle<>\n    socket<\n        T>::\n        connect(int x) {\n}\n[[nodiscard]]\nstatic int g();\n"
+    },
+    {
+      "name": "wrapped-names-False",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "IndentWrappedFunctionNames": false
+      },
+      "expected": "static inline struct tm\nget(int x) {\n  return {};\n}\nstatic cl::opt<bool>\n    Flag(\"flag\", cl::Hidden);\nA::B::\n    B(int x) {\n}\nA::operator int() const {\n  return 0;\n}\nstd::handle<>\nsocket<\n    T>::\n    connect(int x) {\n}\n[[nodiscard]]\nstatic int g();\n"
+    },
+    {
+      "name": "inheritance-BeforeColon",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "BreakInheritanceList": "BeforeColon"
+      },
+      "expected": "struct A : public B,\n           public C {\n  int x;\n};\nclass D : private E<\n              int,\n              long>,\n          F {};\nclass G\n    : H,\n      I {};\n"
+    },
+    {
+      "name": "inheritance-BeforeComma",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "BreakInheritanceList": "BeforeComma"
+      },
+      "expected": "struct A : public B\n    , public C {\n  int x;\n};\nclass D : private E<int, long>\n    , F {};\nclass G\n    : H\n    , I {};\n"
+    },
+    {
+      "name": "inheritance-AfterColon",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "BreakInheritanceList": "AfterColon"
+      },
+      "expected": "struct A : public B, public C {\n  int x;\n};\nclass D : private E<int, long>, F {};\nclass G : H, I {};\n"
+    },
+    {
+      "name": "inheritance-AfterComma",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "BreakInheritanceList": "AfterComma"
+      },
+      "expected": "struct A : public B,\n           public C {\n  int x;\n};\nclass D : private E<\n              int,\n              long>,\n          F {};\nclass G\n    : H,\n      I {};\n"
+    },
+    {
+      "name": "template-arguments-Align",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "AlignAfterOpenBracket": "Align"
+      },
+      "expected": "using P = std::optional<std::pair<\n    CharUnits, CharUnits>>;\nusing Conversion =\n    std::enable_if_t<A<int> &&\n                     B<long>>;\nusing Q = std::conditional_t<A<int>,\n                             B<long>>;\nvoid g() {\n  static_assert(IsSpan<\n                volatile Span<int>>::value);\n}\nstruct S {\n  auto With(int a) & -> Policy<\n      int, long> {\n    return 1;\n  }\n};\n"
+    },
+    {
+      "name": "expression-template-arguments-Align",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "AlignAfterOpenBracket": "Align"
+      },
+      "expected": "void g() {\n  EXPECT_TRUE((std::is_same_v<P<K, XC{}>,\n                              Q<K>>));\n}\n"
+    },
+    {
+      "name": "template-arguments-DontAlign",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "AlignAfterOpenBracket": "DontAlign"
+      },
+      "expected": "using P = std::optional<std::pair<\n    CharUnits, CharUnits>>;\nusing Conversion =\n    std::enable_if_t<A<int> &&\n                     B<long>>;\nusing Q = std::conditional_t<A<int>,\n    B<long>>;\nvoid g() {\n  static_assert(IsSpan<\n      volatile Span<int>>::value);\n}\nstruct S {\n  auto With(int a) & -> Policy<\n      int, long> {\n    return 1;\n  }\n};\n"
+    },
+    {
+      "name": "expression-template-arguments-DontAlign",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "AlignAfterOpenBracket": "DontAlign"
+      },
+      "expected": "void g() {\n  EXPECT_TRUE((std::is_same_v<P<K, XC{}>,\n      Q<K>>));\n}\n"
+    },
+    {
+      "name": "macro-parameters-Align",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "AlignAfterOpenBracket": "Align"
+      },
+      "expected": "#define TYPE(Name, Id,   \\\n             ElBits, NF) \\\n  use(Name, Id);\nint x;\n"
+    },
+    {
+      "name": "macro-parameters-DontAlign",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "AlignAfterOpenBracket": "DontAlign"
+      },
+      "expected": "#define TYPE(Name, Id, \\\n    ElBits, NF)        \\\n  use(Name, Id);\nint x;\n"
+    },
+    {
       "name": "goto-labels-NoIndent",
       "options": {
         "ColumnLimit": 0,

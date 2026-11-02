@@ -62,7 +62,8 @@ Rust 内置模块通过 `CppStyle::compile` 生成同一策略表示，返回 `R
 | `RequiresExpressionIndentation` | OuterScope 时 requires 表达式的体像 lambda 体一样以所在语句（或括号内的嵌套块基准）缩进一级，Keyword 时以 `requires` 所在列缩进一级，`}` 回到该列 |
 | `IndentExportBlock` | `export { … }` 内的声明是否缩进一级；`export namespace` 仍按 NamespaceIndentation，export 块内的 namespace 算作内层 |
 | `IndentCaseBlocks` | 关闭时 case 标签直接打开的块与标签同级（`BraceWrapping.AfterCaseLabel` 时 `{` 独占一行，标签与 `{` 之间有独占一行的注释时按普通块处理），开启时它是 case 的一条普通语句 |
-| `IndentWrappedFunctionNames` | 换行后的函数声明名称缩进；兼容旧字段 IndentFunctionDeclarationAfterType |
+| `IndentWrappedFunctionNames` | 返回类型之后换行的函数名（含 `A::B<…>::` 限定和 `operator`）的缩进；兼容旧字段 IndentFunctionDeclarationAfterType。名字按 clang-format 的办法区分函数和变量：有函数体，或括号内是声明（空、类型名、`const`、带名字的参数、`...`）的是函数；括号内是实参（字面量、`{`）的是变量，变量名按续行缩进。`[[…]]` 属性独占一行时，下一行是声明的开头 |
+| `BreakInheritanceList` | 基类列表：逗号之后的基类与第一个基类对齐，冒号在行尾时下一行按续行缩进；BeforeComma 时以逗号开头的行在续行缩进处。基类的模板实参从该基类的起始列续行 |
 | `AlignAfterOpenBracket` | 兼容 bool 和旧版枚举，控制用户已经选定换行位置的参数对齐 |
 | `AlignOperands`、`BreakBeforeTernaryOperators` | 操作数和三元表达式续行；AlignAfterOperator 时，`=` 或 `return` 之后的表达式中以运算符开头的续行左移运算符的宽度，使操作数对齐 |
 | `Cpp11BracedListStyle`、`BracedInitializerIndentWidth` | 区分块式与函数参数式初始化列表及独立宽度；Block 与 AlignFirstComment（包括旧 true 写法）把 `{` 之后紧跟的行注释当作第一个元素，下面的元素与注释对齐，FunctionCall 在 `{` 之后换行 |

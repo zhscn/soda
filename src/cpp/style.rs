@@ -75,6 +75,9 @@ pub struct CppStyle {
     pub indent_wrapped_function_names: bool,
     pub operand_alignment: super::OperandAlignment,
     pub break_before_ternary: bool,
+    /// `BreakInheritanceList: BeforeComma`: a line of a base list starts
+    /// with the comma, at the continuation indent.
+    pub inheritance_before_comma: bool,
     pub namespace_indentation: NamespaceIndentation,
     pub indent_type_body: bool,
     pub indent_case_label: bool,
@@ -121,6 +124,7 @@ impl Default for CppStyle {
             indent_wrapped_function_names: true,
             operand_alignment: super::OperandAlignment::FirstOperand,
             break_before_ternary: true,
+            inheritance_before_comma: false,
             namespace_indentation: NamespaceIndentation::None,
             indent_type_body: true,
             indent_case_label: false,

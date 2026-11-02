@@ -83,6 +83,9 @@ struct Parser {
     pos: usize,
     stack: Vec<usize>,
     enum_body: bool,
+    /// In a class head or after `using T =`, where `<` always opens
+    /// template arguments.
+    type_context: bool,
     pp: Vec<PPFrame>,
     phantoms: Vec<ReopenedScope>,
     unwind: Option<usize>,
@@ -102,6 +105,7 @@ impl Parser {
             pos: 0,
             stack: vec![],
             enum_body: false,
+            type_context: false,
             pp: vec![],
             phantoms: vec![],
             unwind: None,
@@ -303,8 +307,47 @@ impl Parser {
                 self.close(id);
             }
             K::RBrace | K::EndOfFile => {}
+            _ if self.record_after_specifiers().is_some() => self.class(),
             _ => self.generic(),
         }
+    }
+    /// The record keyword after declaration specifiers, as in `static inline
+    /// struct tm f()` or `typedef struct {...} T;`.
+    fn record_after_specifiers(&self) -> Option<K> {
+        let mut skipped = false;
+        for (i, t) in self.tree.tokens.iter().enumerate().skip(self.pos) {
+            if t.kind.is_trivia() {
+                continue;
+            }
+            if self.tree.macro_blocks[i].is_some() {
+                return None;
+            }
+            match t.kind {
+                K::ClassKw | K::StructKw | K::EnumKw | K::UnionKw if skipped => {
+                    return Some(t.kind);
+                }
+                K::Identifier
+                    if matches!(
+                        self.text(i),
+                        "static"
+                            | "inline"
+                            | "extern"
+                            | "const"
+                            | "volatile"
+                            | "constexpr"
+                            | "typedef"
+                            | "thread_local"
+                            | "friend"
+                            | "mutable"
+                            | "register"
+                    ) =>
+                {
+                    skipped = true;
+                }
+                _ => return None,
+            }
+        }
+        None
     }
     fn line_start(&self) -> bool {
         for t in self.tree.tokens[..self.pos].iter().rev() {
@@ -571,7 +614,10 @@ impl Parser {
     }
     fn class(&mut self) {
         let id = self.open(N::ClassDecl);
-        let is_enum = self.at(K::EnumKw);
+        let is_enum = self.record_after_specifiers().unwrap_or(self.kind()) == K::EnumKw;
+        while self.record_after_specifiers().is_some() {
+            self.advance();
+        }
         self.advance();
         let mut equals = false;
         // Parameters just before the brace: `struct tm f(int x) {` defines
@@ -585,7 +631,10 @@ impl Parser {
                 self.group(K::LParen);
                 function = true;
             } else if self.at(K::Less) {
-                if !self.template_args() {
+                self.type_context = true;
+                let args = self.template_args();
+                self.type_context = false;
+                if !args {
                     self.advance();
                 }
                 function = false;
@@ -599,7 +648,7 @@ impl Parser {
             }
         }
         if self.at(K::LBrace) && function && !equals {
-            self.tree.nodes[id].kind = N::OpaqueDeclaration;
+            self.tree.nodes[id].kind = N::FunctionDefinition;
             self.body(N::CompoundStatement);
             self.close(id);
             return;
@@ -859,7 +908,9 @@ impl Parser {
         self.advance();
         while self.pos < end {
             match self.kind() {
-                k @ (K::LParen | K::LBracket) if self.stack.len() < MAX_NESTING => self.group(k),
+                k @ (K::LParen | K::LBracket | K::LBrace) if self.stack.len() < MAX_NESTING => {
+                    self.group(k)
+                }
                 K::Less if self.stack.len() < MAX_NESTING => match self.template_end(false) {
                     Some(inner) if inner <= end => self.template_group(inner),
                     _ => self.advance(),
@@ -881,22 +932,26 @@ impl Parser {
     /// The token index after the `>` closing the argument list at the cursor.
     fn template_end(&mut self, expression: bool) -> Option<usize> {
         self.skip();
-        let named = self.tree.tokens[..self.pos]
-            .iter()
-            .rposition(|t| !t.kind.is_trivia())
-            .is_some_and(|before| {
-                self.tree.tokens[before].kind == K::Identifier
-                    && self
-                        .tree
-                        .parser_options
-                        .template_names
-                        .iter()
-                        .any(|name| name == self.text(before))
-            });
+        let named = self.type_context
+            || self.tree.tokens[..self.pos]
+                .iter()
+                .rposition(|t| !t.kind.is_trivia())
+                .is_some_and(|before| {
+                    self.tree.tokens[before].kind == K::Identifier
+                        && self
+                            .tree
+                            .parser_options
+                            .template_names
+                            .iter()
+                            .any(|name| name == self.text(before))
+                });
         let expression = expression && !named;
         let mut angle = 0isize;
         let mut paren = 0;
         let mut bracket = 0;
+        // Braced initializers of arguments, `T<X{}, Y{}>`.
+        let mut brace = 0;
+        let mut previous = K::Less;
         let mut count = 0;
         let mut end = None;
         let mut logical = false;
@@ -911,7 +966,10 @@ impl Parser {
             if count > TEMPLATE_LOOKAHEAD {
                 break;
             }
+            let before = std::mem::replace(&mut previous, k);
             match k {
+                K::LBrace if matches!(before, K::Identifier | K::Greater) => brace += 1,
+                K::RBrace if brace > 0 => brace -= 1,
                 K::Less => angle += 1,
                 K::Greater => {
                     angle -= 1;
@@ -1140,6 +1198,8 @@ impl Parser {
         let mut prev = K::EndOfFile;
         let mut has_question = false;
         let mut expression = false;
+        // `using T = ...` names a type after its `=`.
+        let mut alias = false;
         let mut terminated = false;
         let mut body_candidate = false;
         // A lambda introducer seen in expression position; its body is a
@@ -1276,10 +1336,12 @@ impl Parser {
                 terminated = true;
                 break;
             }
-            if k == K::Less
-                && matches!(prev, K::Identifier | K::TemplateKw)
-                && self.template_args_in(expression)
-            {
+            if k == K::Less && matches!(prev, K::Identifier | K::TemplateKw) && {
+                self.type_context = alias;
+                let args = self.template_args_in(expression);
+                self.type_context = false;
+                args
+            } {
                 label_candidate = false;
                 prev = K::Greater;
                 continue;
@@ -1287,7 +1349,7 @@ impl Parser {
             has_question |= k == K::Question;
             // After these an `<` may be a comparison; before them it opens
             // the arguments of a declaration's type.
-            expression |= matches!(k, K::ReturnKw | K::Equals);
+            expression |= k == K::ReturnKw || (k == K::Equals && !alias);
             body_candidate &= Self::suffix(k);
             lambda &= Self::suffix(k);
             let first = prev == K::EndOfFile && k == K::Identifier;
@@ -1295,6 +1357,7 @@ impl Parser {
             let spelling_len = spelling.len();
             standalone_macro = first && self.statement_macro(spelling);
             label_candidate = first;
+            alias |= first && spelling == "using";
             linkage = if first && self.text(self.pos) == "extern" {
                 LinkageHead::Extern
             } else if first && self.text(self.pos) == "export" {

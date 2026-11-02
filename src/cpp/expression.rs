@@ -28,6 +28,8 @@ struct Sim {
     question: bool,
     colon: bool,
     ctor: bool,
+    /// The colon before a class's base list.
+    inherit: bool,
     member: bool,
     shift: bool,
     fake_left: Vec<i32>,
@@ -54,6 +56,7 @@ impl Sim {
             question: false,
             colon: false,
             ctor: false,
+            inherit: false,
             member: false,
             shift: false,
             fake_left: vec![],
@@ -273,6 +276,9 @@ struct Frame {
     /// or `return`: a line its operator starts moves left by the operator,
     /// so that the operands line up.
     unindent: bool,
+    /// Where a comma that starts a line of a base list goes, as
+    /// clang-format's BreakInheritanceList BeforeComma lays it out.
+    inherit: i64,
 }
 struct Replay<'a> {
     stack: Vec<Frame>,
@@ -316,7 +322,12 @@ impl Replay<'_> {
                     .map_or(p.column, |p2| p2.column);
                 self.top_mut().variable = variable;
             }
-            if self.style.expression.align_parentheses && p.scope == 1 && !p.block {
+            // Template arguments line up after their `<` only as a list.
+            if self.style.expression.align_parentheses
+                && p.scope == 1
+                && !p.block
+                && p.kind != K::Less
+            {
                 self.top_mut().indent = col;
                 self.top_mut().aligned = true;
             }
@@ -328,6 +339,7 @@ impl Replay<'_> {
                 || p.question
                 || p.colon
                 || p.ctor
+                || p.inherit
                 || (p.binary
                     && ((p.precedence != 2
                         && (!p.shift || p.operator_index != 0 || p.next_operator))
@@ -373,6 +385,20 @@ impl Replay<'_> {
                 };
             self.top_mut().indent = indent;
             self.top_mut().nested = indent;
+        }
+        // Bases line up with the first; one after a colon that ends its
+        // line takes the continuation indent.
+        if t.inherit {
+            let wrapped = self.first + self.style.expression.continuation_width as i64;
+            let indent = if next.is_some_and(|n| !n.newline) {
+                col + 2
+            } else {
+                wrapped
+            };
+            let f = self.top_mut();
+            f.inherit = wrapped;
+            f.indent = indent;
+            f.nested = indent;
         }
         if (t.binary || t.question || t.colon) && t.newline {
             self.top_mut().nested = col + t.length + 1;
@@ -516,6 +542,15 @@ impl Replay<'_> {
             }
             return f.question;
         }
+        // With BeforeComma, a line in a base list that does not follow a
+        // comma starts with one.
+        if f.inherit != 0
+            && (t.kind == K::Comma
+                || (self.style.expression.inheritance_before_comma
+                    && prev.is_some_and(|p| p.kind != K::Comma && !p.inherit)))
+        {
+            return f.inherit;
+        }
         if prev.is_some_and(|p| p.kind == K::Comma) && f.variable != 0 {
             return f.variable;
         }
@@ -559,6 +594,21 @@ impl Replay<'_> {
         }
         f.indent
     }
+}
+/// `&` or `&&` after a member function's parameters, `f() & -> T`.
+fn ref_qualifier(snapshot: &Snapshot, tree: &SyntaxTree, i: usize, prev: Option<&Sim>) -> bool {
+    let tokens = &tree.tokens;
+    matches!(tokens[i].kind, K::Amp | K::AmpAmp)
+        && prev.is_some_and(|p| p.kind == K::RParen)
+        && super::lexer::significant_after(tokens, tokens[i].range.end).is_some_and(|next| {
+            matches!(
+                tokens[next].kind,
+                K::Arrow | K::LBrace | K::Semicolon | K::Equals
+            ) || matches!(
+                snapshot.text().get(tokens[next].range.clone()),
+                Some("const" | "noexcept" | "override" | "final")
+            )
+        })
 }
 pub(super) struct ContinuationColumn {
     pub target: usize,
@@ -742,6 +792,12 @@ pub(super) fn continuation(
             if t.kind == K::Colon {
                 if tree.is_constructor_colon(i) {
                     s.ctor = true;
+                } else if n.kind == N::ClassDecl
+                    && !n.children.iter().any(|&c| {
+                        tree.nodes[c].kind == N::ClassBody && tree.nodes[c].tokens.start < i
+                    })
+                {
+                    s.inherit = true;
                 } else if questions.pop().is_some() {
                     s.colon = true;
                 }
@@ -764,7 +820,11 @@ pub(super) fn continuation(
                 } else if prec == 2 {
                     s.binary = true;
                     s.precedence = 2;
-                } else if prec > 0 && operand && (!ambiguous || (before && after)) {
+                } else if prec > 0
+                    && operand
+                    && (!ambiguous || (before && after))
+                    && !ref_qualifier(snapshot, tree, i, prev)
+                {
                     s.binary = true;
                     s.precedence = prec;
                     s.shift = t.kind == K::LessLess;

@@ -70,7 +70,7 @@ BreakConstructorInitializers,BreakConstructorInitializersStyle,interactive
 BreakConstructorInitializersBeforeComma,bool,interactive
 BreakFunctionDeclarationParameters,bool,retained; formatter option
 BreakFunctionDefinitionParameters,bool,retained; formatter option
-BreakInheritanceList,BreakInheritanceListStyle,retained; formatter option
+BreakInheritanceList,BreakInheritanceListStyle,interactive
 BreakStringLiterals,bool,retained; formatter option
 BreakTemplateDeclarations,BreakTemplateDeclarationsStyle,retained; formatter option
 ColumnLimit,unsigned,retained; formatter option

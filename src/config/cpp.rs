@@ -140,6 +140,12 @@ pub(super) fn to_rules(v: &Map<String, Value>, doc: usize) -> Result<CppRules, C
         doc,
         "BreakBeforeTernaryOperators",
     )?;
+    policy.expression.inheritance_before_comma = choice(
+        get!("BreakInheritanceList"),
+        doc,
+        "BreakInheritanceList",
+        &["BeforeColon", "BeforeComma", "AfterColon", "AfterComma"],
+    )? == "BeforeComma";
     policy.expression.operand_alignment = match get!("AlignOperands") {
         value if boolean(value, doc, "AlignOperands").is_ok() => {
             if boolean(value, doc, "AlignOperands")? {

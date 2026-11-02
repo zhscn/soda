@@ -979,6 +979,8 @@ impl Computer<'_> {
                 });
                 if let Some(list) = list.filter(|_| !body) {
                     self.ctor(list)
+                } else if self.after_attributes(id) {
+                    fixed(IndentRole::Opaque, base)
                 } else if offset(self.style, S::WrappedFunctionName).columns == 0
                     && self.wrapped_name(id)
                 {
@@ -1050,6 +1052,7 @@ impl Computer<'_> {
                 d.fallback = true;
                 d
             }
+            _ if self.after_attributes(id) => fixed(IndentRole::Opaque, base),
             _ => {
                 if offset(self.style, S::WrappedFunctionName).columns == 0 && self.wrapped_name(id)
                 {
@@ -1084,6 +1087,36 @@ impl Computer<'_> {
         }
         result
     }
+    /// Whether only attributes, `[[nodiscard]]` on lines of their own, come
+    /// before the line in its declaration: the declaration starts there.
+    fn after_attributes(&self, id: usize) -> bool {
+        let node = &self.tree.nodes[id];
+        if !matches!(node.kind, N::FunctionDefinition | N::OpaqueDeclaration) {
+            return false;
+        }
+        let tokens = &self.tree.tokens;
+        let mut i = node.tokens.start;
+        let mut seen = false;
+        while i < node.tokens.end && self.line_of(tokens[i].range.start) < self.line {
+            match node
+                .children
+                .iter()
+                .find(|&&c| self.tree.nodes[c].tokens.start == i)
+            {
+                Some(&c) if self.tree.nodes[c].kind == N::BracketGroup => {
+                    i = self.tree.nodes[c].tokens.end;
+                    seen = true;
+                }
+                _ if tokens[i].kind.is_trivia() => i += 1,
+                _ => return false,
+            }
+        }
+        seen
+    }
+    /// Whether the line starts the name of a function declared at file,
+    /// namespace or class scope after its return type, like clang-format's
+    /// TT_FunctionDeclarationName. A variable's name wrapped after its type
+    /// continues the declaration instead.
     fn wrapped_name(&self, id: usize) -> bool {
         let node = &self.tree.nodes[id];
         if !matches!(node.kind, N::FunctionDefinition | N::OpaqueDeclaration)
@@ -1096,53 +1129,161 @@ impl Computer<'_> {
         {
             return false;
         }
-        let Some(&params) = node
-            .children
-            .iter()
-            .find(|&&child| self.tree.nodes[child].kind == N::ParenGroup)
+        let tokens = &self.tree.tokens;
+        let child_at = |i: usize| {
+            node.children
+                .iter()
+                .copied()
+                .find(|&c| self.tree.nodes[c].tokens.start == i)
+        };
+        let Some(first) = node.tokens.clone().find(|&i| {
+            !tokens[i].kind.is_trivia() && self.line_of(tokens[i].range.start) == self.line
+        }) else {
+            return false;
+        };
+        // The type ends just before the line.
+        let Some(before) = (node.tokens.start..first)
+            .rev()
+            .find(|&i| !tokens[i].kind.is_trivia())
         else {
             return false;
         };
-        let open = self.tree.nodes[params].tokens.start;
-        if self.line_of(self.tree.tokens[open].range.start) != self.line {
+        // clang-format keeps an `operator` name with its class, `A::\noperator T()`.
+        if !matches!(
+            tokens[before].kind,
+            K::Identifier | K::Greater | K::GreaterGreater | K::Star | K::Amp | K::AmpAmp
+        ) && !(tokens[before].kind == K::ColonColon && tokens[first].kind == K::OperatorKw)
+        {
             return false;
         }
+        // The name runs from the line to the parameters.
         let mut prev = K::EndOfFile;
-        let mut i = node.tokens.start;
-        while i < open {
-            if let Some(&child) = node.children.iter().find(|&&c| {
-                self.tree.nodes[c].tokens.contains(&i)
-                    && matches!(
-                        self.tree.nodes[c].kind,
-                        N::TemplateArgumentList | N::BracketGroup
-                    )
-            }) {
+        let mut i = first;
+        let params = loop {
+            if i >= node.tokens.end {
+                return false;
+            }
+            if let Some(child) = child_at(i) {
+                match self.tree.nodes[child].kind {
+                    N::ParenGroup if prev == K::OperatorKw => prev = K::RParen,
+                    N::ParenGroup => break child,
+                    N::TemplateArgumentList => prev = K::Greater,
+                    _ => return false,
+                }
                 i = self.tree.nodes[child].tokens.end;
-                prev = K::Greater;
                 continue;
             }
-            let k = self.tree.tokens[i].kind;
+            let k = tokens[i].kind;
             i += 1;
             if k.is_trivia() {
                 continue;
             }
-            if !matches!(
-                k,
-                K::Identifier
-                    | K::ColonColon
-                    | K::Arrow
-                    | K::OperatorKw
-                    | K::Star
-                    | K::Amp
-                    | K::AmpAmp
-                    | K::Tilde
-            ) && prev != K::OperatorKw
+            if !matches!(k, K::Identifier | K::ColonColon | K::OperatorKw | K::Tilde)
+                && prev != K::OperatorKw
             {
                 return false;
             }
             prev = k;
+        };
+        node.kind == N::FunctionDefinition
+            || node
+                .children
+                .iter()
+                .any(|&c| self.tree.nodes[c].kind == N::CompoundStatement)
+            || self.declares_function(id, params)
+    }
+    /// clang-format's isFunctionDeclarationName for a declaration without a
+    /// body: the parameters hold declarations rather than arguments.
+    fn declares_function(&self, id: usize, params: usize) -> bool {
+        let tokens = &self.tree.tokens;
+        let group = &self.tree.nodes[params];
+        let significant =
+            |range: std::ops::Range<usize>| range.filter(|&i| !tokens[i].kind.is_trivia());
+        let inner = group.tokens.start + 1..group.tokens.end.saturating_sub(1);
+        let Some(head) = significant(inner.clone()).next() else {
+            return true;
+        };
+        if significant(group.tokens.end..self.tree.nodes[id].tokens.end)
+            .next()
+            .is_some_and(|i| {
+                matches!(tokens[i].kind, K::Amp | K::AmpAmp | K::Arrow)
+                    || matches!(
+                        self.snapshot.text().get(tokens[i].range.clone()),
+                        Some("const" | "noexcept" | "override" | "final" | "volatile")
+                    )
+            })
+        {
+            return true;
         }
-        true
+        let ends_with_semicolon = significant(self.tree.nodes[id].tokens.clone())
+            .next_back()
+            .is_some_and(|i| tokens[i].kind == K::Semicolon);
+        if tokens[head].kind == K::Identifier && !ends_with_semicolon {
+            return true;
+        }
+        let mut prev = K::EndOfFile;
+        let mut i = inner.start;
+        while i < inner.end {
+            if let Some(&child) = group
+                .children
+                .iter()
+                .find(|&&c| self.tree.nodes[c].tokens.start == i)
+            {
+                i = self.tree.nodes[child].tokens.end;
+                prev = K::Greater;
+                continue;
+            }
+            let k = tokens[i].kind;
+            i += 1;
+            if k.is_trivia() {
+                continue;
+            }
+            let text = self
+                .snapshot
+                .text()
+                .get(tokens[i - 1].range.clone())
+                .unwrap_or("");
+            let named = matches!(
+                prev,
+                K::Identifier | K::Greater | K::Star | K::Amp | K::AmpAmp
+            );
+            match k {
+                K::Ellipsis => return true,
+                K::Identifier
+                    if matches!(
+                        text,
+                        "const"
+                            | "void"
+                            | "bool"
+                            | "char"
+                            | "short"
+                            | "int"
+                            | "long"
+                            | "float"
+                            | "double"
+                            | "signed"
+                            | "unsigned"
+                            | "auto"
+                            | "wchar_t"
+                            | "char8_t"
+                            | "char16_t"
+                            | "char32_t"
+                    ) =>
+                {
+                    return true;
+                }
+                K::Identifier if named => return true,
+                K::Star | K::Amp | K::AmpAmp if named => return true,
+                K::LBrace
+                | K::Number
+                | K::StringLiteral
+                | K::RawStringLiteral
+                | K::CharacterLiteral => return false,
+                _ => {}
+            }
+            prev = k;
+        }
+        false
     }
     fn pp_level(&self) -> usize {
         if self.style.directive.layout == PPDirectiveIndent::None {
@@ -1354,13 +1495,21 @@ fn macro_body(
         keyword
     };
     let mut body = name + 1;
+    let computer = Computer {
+        snapshot,
+        tree,
+        line,
+        style,
+    };
     // A function-like macro's parameters touch its name.
     if define
         && tokens
             .get(body)
             .is_some_and(|t| t.kind == K::LParen && t.range.start == tokens[name].range.end)
     {
+        let open = body;
         let mut depth = 0;
+        let mut closed = false;
         while body < end {
             match tokens[body].kind {
                 K::LParen => depth += 1,
@@ -1369,8 +1518,33 @@ fn macro_body(
             }
             body += 1;
             if depth == 0 {
+                closed = true;
                 break;
             }
+        }
+        // A wrapped parameter lines up with the first, or continues the
+        // `#define` line.
+        let open_line = snapshot.line_of(tokens[open].range.start)?;
+        let close_line = if closed {
+            snapshot.line_of(tokens[body - 1].range.start)?
+        } else {
+            usize::MAX
+        };
+        if line > open_line && line <= close_line {
+            let column = significant(open + 1)
+                .filter(|&i| {
+                    style.expression.align_parentheses
+                        && snapshot.line_of(tokens[i].range.start) == Some(open_line)
+                })
+                .map_or_else(
+                    || computer.indent(open_line) + style.expression.continuation_width,
+                    |i| computer.column(tokens[i].range.start),
+                );
+            return Some(computer.fixed(
+                IndentRole::ParenContinuation,
+                column,
+                Some(tokens[open].range.start),
+            ));
         }
     }
     let body_start = tokens
@@ -1379,12 +1553,6 @@ fn macro_body(
     // Where a body line goes when nothing is known of the code: one level
     // in from the directive, as the analysis of the whole file has it. The
     // expression of another directive is a statement where the `#` is.
-    let computer = Computer {
-        snapshot,
-        tree,
-        line,
-        style,
-    };
     let base = if define {
         computer.slot_of_directive(hash)
     } else {
@@ -1413,7 +1581,12 @@ fn macro_body(
         let content = content.trim_end_matches(['\n', '\r']);
         let content = content.strip_suffix('\\').unwrap_or(content);
         let line_start = snapshot.line_start(number)?;
-        if number == first_line {
+        if number != first_line && line_start < body_start {
+            // Parameters wrapped onto this line are part of the header.
+            let header = (body_start - line_start).min(content.len());
+            text.push_str(&" ".repeat(column_width(&content[..header], 0, tab)));
+            text.push_str(&content[header..]);
+        } else if number == first_line {
             // The header gives way to blanks as wide, so that what follows
             // it keeps its column. The expression of `#if` starts where the
             // `#` does, as clang-format lays it out: `0 +` stands for the

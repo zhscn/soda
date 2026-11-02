@@ -147,6 +147,35 @@ for names in [[], ['foo']]:
 macros = 'void f() {\nFOREACH(x)\nwork(x);\nCALL(a,\nb);\n}\n'
 for definitions in [[], ['FOREACH(x)=for (auto x : xs)']]:
     profiles.append((f'macros-{len(definitions)}', {'Macros': definitions}, macros))
+# A function's name wrapped after its return type follows
+# IndentWrappedFunctionNames; a variable's name continues the declaration.
+wrapped = ('static inline struct tm\nget(int x) {\nreturn {};\n}\nstatic cl::opt<bool>\nFlag("flag", cl::Hidden);\n'
+           'A::B::\nB(int x) {}\nA::\noperator int() const {\nreturn 0;\n}\nstd::handle<>\nsocket<\nT>::\n'
+           'connect(int x) {}\n[[nodiscard]]\nstatic int g();\n')
+for indent in [True, False]:
+    profiles.append((f'wrapped-names-{indent}', {'IndentWrappedFunctionNames': indent}, wrapped))
+# Bases line up with the first, or with the colon before their comma; a
+# base's template arguments continue from the base.
+bases = ('struct A : public B,\npublic C {\nint x;\n};\nclass D : private E<\nint,\nlong>,\nF {};\n'
+         'class G\n: H,\nI {};\n')
+for breaking in ['BeforeColon', 'BeforeComma', 'AfterColon', 'AfterComma']:
+    profiles.append((f'inheritance-{breaking}', {'BreakInheritanceList': breaking}, bases))
+# Template arguments continue from the line, or from the list they are an
+# element of; they line up after `<` only as a list.
+template_args = ('using P = std::optional<std::pair<\nCharUnits, CharUnits>>;\nusing Conversion =\n'
+                 'std::enable_if_t<A<int> &&\nB<long>>;\nusing Q = std::conditional_t<A<int>,\nB<long>>;\nvoid g() {\nstatic_assert(IsSpan<\n'
+                 'volatile Span<int>>::value);\n}\n'
+                 'struct S {\nauto With(int a) & -> Policy<\nint, long> {\nreturn 1;\n}\n};\n')
+# In an expression, arguments still open read as a comparison until `>`.
+open_args = 'void g() {\nEXPECT_TRUE((std::is_same_v<P<K, XC{}>,\nQ<K>>));\n}\n'
+for align in ['Align', 'DontAlign']:
+    profiles.append((f'template-arguments-{align}', {'AlignAfterOpenBracket': align}, template_args))
+    profiles.append((f'expression-template-arguments-{align}', {'AlignAfterOpenBracket': align}, open_args))
+# Wrapped parameters of a macro line up with the first, or continue the
+# `#define` line.
+macro_parameters = '#define TYPE(Name, Id,\\\nElBits, NF)\\\nuse(Name, Id);\nint x;\n'
+for align in ['Align', 'DontAlign']:
+    profiles.append((f'macro-parameters-{align}', {'AlignAfterOpenBracket': align}, macro_parameters))
 goto = 'int f() {\nif (foo()) {\nlabel1:\nbar();\n}\nlabel2:\nreturn 1;\n}\n'
 for labels in ['NoIndent', 'OuterIndent', 'InnerIndent', 'HalfIndent', True, False]:
     profiles.append((f'goto-labels-{labels}', {'IndentGotoLabels': labels, 'IndentWidth': 4}, goto))
