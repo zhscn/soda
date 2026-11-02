@@ -196,6 +196,7 @@ impl Theme {
         match face {
             crate::application::Face::Todo => self.todo,
             crate::application::Face::Error => self.error,
+            crate::application::Face::Info => self.info,
             crate::application::Face::Mark(n) => self.marks[usize::from(n)],
             crate::application::Face::Note(severity) => {
                 let colour = self.severity(severity).fg.unwrap_or_default();

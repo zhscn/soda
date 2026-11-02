@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 pub enum Face {
     Todo,
     Error,
+    Info,
     /// One of the backgrounds for marked symbols.
     Mark(u8),
     /// The underline of a note.
@@ -18,12 +19,13 @@ pub enum Face {
 }
 pub const MARKS: u8 = 4;
 impl Face {
-    /// `todo`, `error`, `mark1` to `mark4`, or `mark` for the next mark
+    /// `todo`, `error`, `info`, `mark1` to `mark4`, or `mark` for the next mark
     /// colour.
     pub fn parse(name: &str) -> Result<Option<Self>, String> {
         Ok(Some(match name {
             "todo" => Self::Todo,
             "error" => Self::Error,
+            "info" => Self::Info,
             "mark" => return Ok(None),
             _ => match name
                 .strip_prefix("mark")
@@ -33,7 +35,7 @@ impl Face {
                 Some(n) => Self::Mark(n - 1),
                 None => {
                     return Err(format!(
-                        "unknown face {name}: use todo, error, mark or mark1 to mark{MARKS}"
+                        "unknown face {name}: use todo, error, info, mark or mark1 to mark{MARKS}"
                     ));
                 }
             },

@@ -247,7 +247,9 @@ local function flag_current()
   end
   soda.unflag("lsp-error")
   soda.unflag("lsp-warning")
-  local errors, warnings, notes = {}, {}, {}
+  soda.unflag("lsp-info")
+  local notes = {}
+  local lines = { error = {}, warning = {}, info = {} }
   local buf = soda.buffer()
   local info = soda.lsp.info()
   local function place(position)
@@ -257,8 +259,8 @@ local function flag_current()
     return { line, to_byte(text, position.character, info and info.encoding or "utf-8") + 1 }
   end
   for _, diagnostic in ipairs(diagnostics[uri] or {}) do
-    local line = diagnostic.range.start.line + 1
-    table.insert(diagnostic.severity == 1 and errors or warnings, line)
+    local severity = severities[diagnostic.severity] or "info"
+    table.insert(lines[severity], diagnostic.range.start.line + 1)
     local from, to = place(diagnostic.range.start), place(diagnostic.range["end"])
     if from[1] == to[1] and from[2] == to[2] then
       to[2] = to[2] + 1 -- An empty range still marks a cell.
@@ -266,16 +268,20 @@ local function flag_current()
     table.insert(notes, {
       from = from,
       to = to,
-      severity = severities[diagnostic.severity] or "info",
+      severity = severity,
       text = diagnostic.message,
     })
   end
   soda.note("lsp", notes)
-  if #errors > 0 then
-    soda.flag("lsp-error", "error", "E", errors)
+  -- Later groups win a line, so the worst goes last.
+  if #lines.info > 0 then
+    soda.flag("lsp-info", "info", "I", lines.info)
   end
-  if #warnings > 0 then
-    soda.flag("lsp-warning", "todo", "W", warnings)
+  if #lines.warning > 0 then
+    soda.flag("lsp-warning", "todo", "W", lines.warning)
+  end
+  if #lines.error > 0 then
+    soda.flag("lsp-error", "error", "E", lines.error)
   end
 end
 soda.lsp.on("textDocument/publishDiagnostics", function(params)

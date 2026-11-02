@@ -113,6 +113,7 @@ const FACE: Slot = slot(
     SlotKind::Choice(&[
         word("todo", "Bold yellow, for markers such as TODO"),
         word("error", "Red"),
+        word("info", "Blue"),
         word("mark", "The next of the mark backgrounds"),
         word("mark1", "First mark background"),
         word("mark2", "Second mark background"),

@@ -20,7 +20,7 @@ impl Flag {
     /// A flag from a face name and a sign of one narrow character.
     pub fn new(face: &str, sign: &str) -> Result<Self, String> {
         let face = Face::parse(face)?
-            .ok_or_else(|| "flags need a face: todo, error or mark1 to mark4".to_owned())?;
+            .ok_or_else(|| "flags need a face: todo, error, info or mark1 to mark4".to_owned())?;
         let mut cells = unicode_segmentation::UnicodeSegmentation::graphemes(sign, true);
         match (cells.next(), cells.next()) {
             (Some(cell), None) if unicode_width::UnicodeWidthStr::width(cell) == 1 => Ok(Self {
