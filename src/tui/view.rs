@@ -572,6 +572,8 @@ fn status(
     theme: &Theme,
     text: Option<&layout::Frame>,
 ) {
+    // The row may have been pushed up over text, and styling keeps symbols.
+    Clear.render(area, buf);
     buf.set_style(area, theme.status);
     let (badge, style) = match runtime.layer() {
         Some(Layer::CommandLine(_)) => ("COMMAND", theme.mode_prompt),
@@ -978,6 +980,24 @@ mod tests {
         );
         assert!(text.lines().nth(2).unwrap().starts_with("│ Vim editing"));
     }
+    #[test]
+    fn a_status_line_pushed_up_hides_the_text_under_it() {
+        let root = tempfile::tempdir().unwrap();
+        let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.start(None);
+        r.command(Command::Edit(crate::editor::Command::InsertText(
+            format!("{}\n", "x".repeat(50)).repeat(12),
+        )));
+        r.command(Command::SetMode(EditMode::Normal));
+        r.command(Command::Ex("open ".into()));
+        let text = screen(&mut r, 60, 14);
+        let status = text
+            .lines()
+            .find(|row| row.starts_with(" COMMAND "))
+            .unwrap();
+        assert!(!status.contains("xxx"), "{text}");
+    }
+
     #[test]
     fn the_line_after_a_final_newline_is_not_shown() {
         let root = tempfile::tempdir().unwrap();
