@@ -176,6 +176,24 @@ for align in ['Align', 'DontAlign']:
 macro_parameters = '#define TYPE(Name, Id,\\\nElBits, NF)\\\nuse(Name, Id);\nint x;\n'
 for align in ['Align', 'DontAlign']:
     profiles.append((f'macro-parameters-{align}', {'AlignAfterOpenBracket': align}, macro_parameters))
+# Arguments wrapped after an operator continue from its operand, or from
+# the operator itself when lines may start with one.
+operator_calls = 'void f() {\nbool x = first ||\ncall(\nargument);\nbool y = first\n|| call(\nargument);\n}\n'
+for breaking in ['None', 'All']:
+    profiles.append((f'operator-calls-{breaking}', {'BreakBeforeBinaryOperators': breaking}, operator_calls))
+# A lambda's return type wrapped at statement level continues the statement.
+profiles.append(('lambda-return-wrapped', {},
+                 'void f() {\nauto take = [](int &Stack)\n-> std::tuple<int &, int> {\nreturn {};\n};\n}\n'))
+# A lambda's brace on its own line goes where the statement starts, or,
+# among arguments, where a lambda that starts its line does.
+wrapped_lambdas = ('void f() {\nauto take\n= [&](int x) -> int {\nreturn x;\n};\nif (!lookup(\n'
+                   '[&](int s) {\nreturn s;\n}))\nreturn;\n}\n')
+for style in ['GNU', 'Allman', 'Whitesmiths']:
+    profiles.append((f'wrapped-lambda-{style}', {'BreakBeforeBraces': style}, wrapped_lambdas))
+# A comment on a line of its own goes with the brace after it.
+comment_block = 'void f() {\ng();\n// About the block.\n{\nh();\n}\nif (x)\n// About the body.\n{\nk();\n}\n}\n'
+for style in ['Whitesmiths', 'GNU']:
+    profiles.append((f'comment-before-brace-{style}', {'BreakBeforeBraces': style}, comment_block))
 goto = 'int f() {\nif (foo()) {\nlabel1:\nbar();\n}\nlabel2:\nreturn 1;\n}\n'
 for labels in ['NoIndent', 'OuterIndent', 'InnerIndent', 'HalfIndent', True, False]:
     profiles.append((f'goto-labels-{labels}', {'IndentGotoLabels': labels, 'IndentWidth': 4}, goto))

@@ -604,7 +604,16 @@ impl Computer<'_> {
                     {
                         let anchor = Some(self.tree.tokens[introducer].range.start);
                         let scope = self.tree.nodes[id].parent.unwrap();
-                        let column = if self.tree.nodes[scope].kind.is_group() {
+                        let introducer_line =
+                            self.line_of(self.tree.tokens[introducer].range.start);
+                        // At statement level the brace goes where the
+                        // statement starts; among arguments, where a lambda
+                        // that starts its line does, or with the arguments.
+                        let column = if !self.tree.nodes[scope].kind.is_group() {
+                            self.indent(self.line_of(self.tree.range(scope).start))
+                        } else if self.first(introducer_line) == Some(introducer) {
+                            self.indent(introducer_line)
+                        } else {
                             let base = self.indent(self.line_of(self.origin(scope)));
                             self.aligned_slot(
                                 IndentRole::OpeningToken,
@@ -614,8 +623,6 @@ impl Computer<'_> {
                                 anchor,
                             )
                             .target_column
-                        } else {
-                            self.lambda_base(id)
                         };
                         return self.fixed(
                             IndentRole::OpeningToken,
@@ -1365,6 +1372,39 @@ pub fn compute_indent(
                     decision.target_column + shift,
                     decision.anchor,
                 ));
+            }
+        }
+    }
+    // Comments on lines of their own go with the line after them, such a
+    // brace among it.
+    if !decision.preserve
+        && computer.first(line).is_none()
+        && let Some(range) = snapshot.line_content_range(line)
+        && let Some(comment) = tree
+            .tokens()
+            .iter()
+            .position(|t| t.range.start >= range.start && t.kind != K::Whitespace)
+        && matches!(
+            tree.tokens()[comment].kind,
+            K::LineComment | K::BlockComment
+        )
+        && let Some(open) = super::lexer::significant_after(tree.tokens(), range.start)
+        && tree.tokens()[open].kind == K::LBrace
+        && computer.first(computer.line_of(tree.tokens()[open].range.start)) == Some(open)
+    {
+        let block = tree.token_owner(open);
+        if tree.nodes()[block].tokens.start == open
+            && computer.origin(block) == tree.tokens()[open].range.start
+        {
+            let shift = computer.brace_shift(block);
+            if shift > 0 {
+                let mut shifted = computer.fixed(
+                    decision.role,
+                    decision.target_column + shift,
+                    decision.anchor,
+                );
+                shifted.fallback = decision.fallback;
+                return Ok(shifted);
             }
         }
     }

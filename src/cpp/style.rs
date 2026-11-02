@@ -78,6 +78,9 @@ pub struct CppStyle {
     /// `BreakInheritanceList: BeforeComma`: a line of a base list starts
     /// with the comma, at the continuation indent.
     pub inheritance_before_comma: bool,
+    /// `BreakBeforeBinaryOperators` other than None: a line may start with
+    /// an operator, and what follows one continues from the operator.
+    pub break_before_operators: bool,
     pub namespace_indentation: NamespaceIndentation,
     pub indent_type_body: bool,
     pub indent_case_label: bool,
@@ -125,6 +128,7 @@ impl Default for CppStyle {
             operand_alignment: super::OperandAlignment::FirstOperand,
             break_before_ternary: true,
             inheritance_before_comma: false,
+            break_before_operators: false,
             namespace_indentation: NamespaceIndentation::None,
             indent_type_body: true,
             indent_case_label: false,

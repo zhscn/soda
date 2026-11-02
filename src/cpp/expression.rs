@@ -30,6 +30,8 @@ struct Sim {
     ctor: bool,
     /// The colon before a class's base list.
     inherit: bool,
+    /// The `->` before a lambda's return type.
+    trailing: bool,
     member: bool,
     shift: bool,
     fake_left: Vec<i32>,
@@ -57,6 +59,7 @@ impl Sim {
             colon: false,
             ctor: false,
             inherit: false,
+            trailing: false,
             member: false,
             shift: false,
             fake_left: vec![],
@@ -340,7 +343,10 @@ impl Replay<'_> {
                 || p.colon
                 || p.ctor
                 || p.inherit
-                || (p.binary
+                // Operands continue from the operator when lines may start
+                // with one.
+                || (!self.style.expression.break_before_operators
+                    && p.binary
                     && ((p.precedence != 2
                         && (!p.shift || p.operator_index != 0 || p.next_operator))
                         || t.starts_binary))
@@ -542,6 +548,11 @@ impl Replay<'_> {
             }
             return f.question;
         }
+        // A lambda's return type wrapped at statement level continues the
+        // statement, as a function's would.
+        if t.trailing && self.depth == 0 {
+            return self.first + cont;
+        }
         // With BeforeComma, a line in a base list that does not follow a
         // comma starts with one.
         if f.inherit != 0
@@ -593,6 +604,55 @@ impl Replay<'_> {
             return f.indent + cont;
         }
         f.indent
+    }
+}
+/// The `->` of a lambda's trailing return type, after its parameters and
+/// any specifiers, `[](int x) mutable -> T`.
+fn lambda_return(snapshot: &Snapshot, tree: &SyntaxTree, i: usize) -> bool {
+    use super::lexer::significant_before;
+    let tokens = &tree.tokens;
+    let mut at = tokens[i].range.start;
+    let close = loop {
+        let Some(before) = significant_before(tokens, at) else {
+            return false;
+        };
+        match snapshot.text().get(tokens[before].range.clone()) {
+            Some("mutable" | "constexpr" | "consteval" | "noexcept" | "static") => {
+                at = tokens[before].range.start;
+            }
+            _ => break before,
+        }
+    };
+    if tokens[close].kind != K::RParen {
+        return false;
+    }
+    // The group before a token that closes one, `]` or `>`.
+    let opener = |close: usize| {
+        let group = tree.token_owner(close);
+        (tree.nodes[group].tokens.end == close + 1).then(|| tree.nodes[group].tokens.start)
+    };
+    // A lambda introducer, not a subscript.
+    let introducer = |close: usize| {
+        tokens[close].kind == K::RBracket
+            && opener(close).is_some_and(|open| {
+                significant_before(tokens, tokens[open].range.start).is_none_or(|i| {
+                    !matches!(
+                        tokens[i].kind,
+                        K::Identifier | K::RParen | K::RBracket | K::Greater | K::OperatorKw
+                    )
+                })
+            })
+    };
+    let group = tree.token_owner(close);
+    if tree.nodes[group].kind != N::ParenGroup {
+        return false;
+    }
+    match significant_before(tokens, tokens[tree.nodes[group].tokens.start].range.start) {
+        Some(i) if tokens[i].kind == K::Greater => opener(i).is_some_and(|open| {
+            significant_before(tokens, tokens[open].range.start).is_some_and(introducer)
+        }),
+        Some(i) => introducer(i),
+        None => false,
     }
 }
 /// `&` or `&&` after a member function's parameters, `f() & -> T`.
@@ -713,7 +773,9 @@ pub(super) fn continuation(
     for i in first..node.tokens.end {
         let t = &tree.tokens[i];
         let comment = matches!(t.kind, K::LineComment | K::BlockComment);
+        // Directives between the lines of an expression take no part in it.
         if (t.kind.is_trivia() && !comment)
+            || t.preprocessor
             || t.kind == K::EndOfFile
             || t.range.is_empty()
             || interiors.iter().any(|r| r.contains(&i))
@@ -815,7 +877,9 @@ pub(super) fn continuation(
                 let after = bytes.get(t.range.end).is_none_or(u8::is_ascii_whitespace);
                 let ambiguous =
                     matches!(t.kind, K::Star | K::Amp | K::AmpAmp | K::Less | K::Greater);
-                if matches!(t.kind, K::Arrow | K::Period | K::ArrowStar | K::PeriodStar) {
+                if t.kind == K::Arrow && lambda_return(snapshot, tree, i) {
+                    s.trailing = true;
+                } else if matches!(t.kind, K::Arrow | K::Period | K::ArrowStar | K::PeriodStar) {
                     s.member = operand;
                 } else if prec == 2 {
                     s.binary = true;

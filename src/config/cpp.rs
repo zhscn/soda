@@ -140,6 +140,20 @@ pub(super) fn to_rules(v: &Map<String, Value>, doc: usize) -> Result<CppRules, C
         doc,
         "BreakBeforeTernaryOperators",
     )?;
+    // Legacy spellings: true is All, false is None.
+    let operators = get!("BreakBeforeBinaryOperators");
+    policy.expression.break_before_operators =
+        match boolean(operators, doc, "BreakBeforeBinaryOperators") {
+            Ok(value) => value,
+            Err(_) => {
+                choice(
+                    operators,
+                    doc,
+                    "BreakBeforeBinaryOperators",
+                    &["None", "NonAssignment", "All"],
+                )? != "None"
+            }
+        };
     policy.expression.inheritance_before_comma = choice(
         get!("BreakInheritanceList"),
         doc,

@@ -52,7 +52,7 @@ BreakAfterOpenBracketLoop,bool,retained; formatter option
 BreakAfterOpenBracketSwitch,bool,retained; formatter option
 BreakAfterReturnType,ReturnTypeBreakingStyle,retained; formatter option
 BreakArrays,bool,retained; formatter option
-BreakBeforeBinaryOperators,BinaryOperatorStyle,retained; formatter option
+BreakBeforeBinaryOperators,BinaryOperatorStyle,interactive
 BreakBeforeBraces,BraceBreakingStyle,interactive
 BreakBeforeCloseBracketBracedList,bool,retained; formatter option
 BreakBeforeCloseBracketFunction,bool,retained; formatter option

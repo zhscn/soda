@@ -168,11 +168,13 @@ fn reference_layouts_survive_typing_from_scratch() {
         // Likewise a link of a conditional chain whose condition wraps
         // shows that it is a link only when the `?` on the next line comes.
         // So does an operator of lower precedence, or a comma, that comes
-        // after the lines it moves.
+        // after the lines it moves. A comment goes with an indented brace
+        // after it, which is typed later.
         if case["name"] == "wrapped-name-False"
             || case["name"].as_str().is_some_and(|name| {
                 name.starts_with("wrapped-names")
                     || name.starts_with("expression-template-arguments")
+                    || name == "comment-before-brace-Whitesmiths"
             })
             || case["name"] == "conditional-wrapped-link"
             || case["name"]

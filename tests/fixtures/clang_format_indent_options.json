@@ -1558,6 +1558,101 @@
       "expected": "#define TYPE(Name, Id, \\\n    ElBits, NF)        \\\n  use(Name, Id);\nint x;\n"
     },
     {
+      "name": "operator-calls-None",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "BreakBeforeBinaryOperators": "None"
+      },
+      "expected": "void f() {\n  bool x = first ||\n           call(\n               argument);\n  bool y = first || call(\n                        argument);\n}\n"
+    },
+    {
+      "name": "operator-calls-All",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "BreakBeforeBinaryOperators": "All"
+      },
+      "expected": "void f() {\n  bool x = first || call(argument);\n  bool y = first\n           || call(\n               argument);\n}\n"
+    },
+    {
+      "name": "lambda-return-wrapped",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never"
+      },
+      "expected": "void f() {\n  auto take = [](int &Stack)\n      -> std::tuple<int &, int> {\n    return {};\n  };\n}\n"
+    },
+    {
+      "name": "wrapped-lambda-GNU",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "BreakBeforeBraces": "GNU"
+      },
+      "expected": "void f()\n{\n  auto take = [&](int x) -> int\n    {\n      return x;\n    };\n  if (!lookup(\n          [&](int s)\n            {\n              return s;\n            }))\n    return;\n}\n"
+    },
+    {
+      "name": "wrapped-lambda-Allman",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "BreakBeforeBraces": "Allman"
+      },
+      "expected": "void f()\n{\n  auto take = [&](int x) -> int\n  {\n    return x;\n  };\n  if (!lookup(\n          [&](int s)\n          {\n            return s;\n          }))\n    return;\n}\n"
+    },
+    {
+      "name": "wrapped-lambda-Whitesmiths",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "BreakBeforeBraces": "Whitesmiths"
+      },
+      "expected": "void f()\n  {\n  auto take = [&](int x) -> int\n  {\n    return x;\n  };\n  if (!lookup(\n          [&](int s)\n          {\n            return s;\n          }))\n    return;\n  }\n"
+    },
+    {
+      "name": "comment-before-brace-Whitesmiths",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "BreakBeforeBraces": "Whitesmiths"
+      },
+      "expected": "void f()\n  {\n  g();\n    // About the block.\n    {\n    h();\n    }\n  if (x)\n    // About the body.\n    {\n    k();\n    }\n  }\n"
+    },
+    {
+      "name": "comment-before-brace-GNU",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "BreakBeforeBraces": "GNU"
+      },
+      "expected": "void f()\n{\n  g();\n  // About the block.\n  {\n    h();\n  }\n  if (x)\n    // About the body.\n    {\n      k();\n    }\n}\n"
+    },
+    {
       "name": "goto-labels-NoIndent",
       "options": {
         "ColumnLimit": 0,

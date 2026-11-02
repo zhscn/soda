@@ -65,11 +65,12 @@ Rust 内置模块通过 `CppStyle::compile` 生成同一策略表示，返回 `R
 | `IndentWrappedFunctionNames` | 返回类型之后换行的函数名（含 `A::B<…>::` 限定和 `operator`）的缩进；兼容旧字段 IndentFunctionDeclarationAfterType。名字按 clang-format 的办法区分函数和变量：有函数体，或括号内是声明（空、类型名、`const`、带名字的参数、`...`）的是函数；括号内是实参（字面量、`{`）的是变量，变量名按续行缩进。`[[…]]` 属性独占一行时，下一行是声明的开头 |
 | `BreakInheritanceList` | 基类列表：逗号之后的基类与第一个基类对齐，冒号在行尾时下一行按续行缩进；BeforeComma 时以逗号开头的行在续行缩进处。基类的模板实参从该基类的起始列续行 |
 | `AlignAfterOpenBracket` | 兼容 bool 和旧版枚举，控制用户已经选定换行位置的参数对齐 |
+| `BreakBeforeBinaryOperators` | 不为 None 时，二元运算符之后的操作数不另起续行基准，其中换行的括号从运算符所在行的基准续行（clang-format 只在 None 时把基准移到右操作数）；兼容旧的 true（All）和 false（None） |
 | `AlignOperands`、`BreakBeforeTernaryOperators` | 操作数和三元表达式续行；AlignAfterOperator 时，`=` 或 `return` 之后的表达式中以运算符开头的续行左移运算符的宽度，使操作数对齐 |
 | `Cpp11BracedListStyle`、`BracedInitializerIndentWidth` | 区分块式与函数参数式初始化列表及独立宽度；Block 与 AlignFirstComment（包括旧 true 写法）把 `{` 之后紧跟的行注释当作第一个元素，下面的元素与注释对齐，FunctionCall 在 `{` 之后换行 |
 | `ConstructorInitializerIndentWidth`、`BreakConstructorInitializers` | 初始化列表独立宽度、首项与逗号对齐，接受 AfterComma；旧 BeforeComma 开关按 LLVM 的有效布局转换 |
 | `IndentPPDirectives`、`PPIndentWidth` | BeforeHash 调整前导空白；AfterHash 按 UseTab 在 # 后生成缩进；ForIndentation 的 Tab 范围仍由层级乘 IndentWidth 决定，PPIndentWidth 决定目标列；Leave 保留两侧空白；包含 include guard 处理 |
-| `BreakBeforeBraces`、`BraceWrapping.IndentBraces` | 独占一行的花括号缩进一级：GNU 与自定义的 IndentBraces 缩进控制语句、case 块和 lambda 的花括号，块体再相对花括号缩进一级；Whitesmiths 缩进除 lambda 外所有块的花括号，块体与花括号同列。花括号写在行尾时不受影响。lambda 的 `{` 独占一行（BeforeLambdaBody）时，在参数中与参数对齐，否则以 lambda 体的基准为准，体与收尾 `}` 以这个 `{` 所在行为基准 |
+| `BreakBeforeBraces`、`BraceWrapping.IndentBraces` | 独占一行的花括号缩进一级：GNU 与自定义的 IndentBraces 缩进控制语句、case 块和 lambda 的花括号，块体再相对花括号缩进一级；Whitesmiths 缩进除 lambda 外所有块的花括号，块体与花括号同列。花括号写在行尾时不受影响。lambda 的 `{` 独占一行（BeforeLambdaBody）时，语句层级的 lambda 以语句起始行为基准，参数中的 lambda 若 `[` 位于行首则以该行为基准，否则与参数对齐，体与收尾 `}` 以这个 `{` 所在行为基准 |
 | `IndentExternBlock` | 与有效 BraceWrapping.AfterExternBlock 组合决定 extern body 缩进，兼容 true=Indent、false=NoIndent |
 | `DisableFormat` | 保留既有缩进；Enter 沿用已有行首空白 |
 | `ForEachMacros`、`IfMacros`、`NamespaceMacros` | 识别循环、条件和 namespace 结构 |
