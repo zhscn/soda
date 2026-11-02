@@ -1139,6 +1139,10 @@ impl Application {
                     }
                 };
                 self.options.set(scope, name, value);
+                if name == "cpp-fallback-style" {
+                    let style = self.options.choice(None, name).to_owned();
+                    self.workspace.set_fallback_style(&style);
+                }
                 for document in documents {
                     self.apply_options(document, &mut update);
                 }

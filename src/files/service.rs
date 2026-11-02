@@ -3,7 +3,7 @@ use super::request::{
 };
 use super::state::DiskImage;
 use crate::{
-    config::{ConfigError, ConfigOptions, ResolvedConfig, resolve_config},
+    config::{ConfigError, ConfigOptions, ResolvedConfig, fallback_config, resolve_config},
     editor::Language,
     language::{Analyzer, catalog},
 };
@@ -77,6 +77,8 @@ pub struct LoadedFile {
     pub(crate) text: String,
     pub(crate) bom: bool,
     pub(crate) configuration: Option<ResolvedConfig>,
+    /// Why the configuration is the fallback rather than the file's own.
+    pub(crate) config_problem: Option<String>,
 }
 impl LoadedFile {
     pub fn path(&self) -> &Path {
@@ -139,6 +141,24 @@ impl FileService {
             Ok(None)
         }
     }
+    /// The configuration to edit a file with. A broken `.clang-format` is no
+    /// reason to refuse the file, so it gets the fallback and the reason.
+    pub(crate) fn usable_configuration(
+        &self,
+        path: &Path,
+    ) -> (Option<ResolvedConfig>, Option<String>) {
+        match self.configuration(path) {
+            Ok(configuration) => (configuration, None),
+            Err(error) => (
+                fallback_config(path, &self.options).ok(),
+                Some(error.to_string()),
+            ),
+        }
+    }
+    /// The preset for C++ files that have no configuration of their own.
+    pub(crate) fn set_fallback_style(&mut self, style: &str) {
+        self.options.fallback = style.to_owned();
+    }
     /// The language of a file, given what `configuration` found for it.
     pub(crate) fn language(path: &Path, configuration: &Option<ResolvedConfig>) -> Language {
         if let Some(config) = configuration {
@@ -166,12 +186,13 @@ impl FileService {
         let bom = bytes.starts_with(b"\xef\xbb\xbf");
         let text = String::from_utf8(if bom { bytes[3..].to_vec() } else { bytes })
             .map_err(|_| FileError::InvalidUtf8(path.clone()))?;
-        let configuration = self.configuration(&path)?;
+        let (configuration, config_problem) = self.usable_configuration(&path);
         Ok(LoadedFile {
             path,
             text,
             bom,
             configuration,
+            config_problem,
         })
     }
     pub(crate) fn check(

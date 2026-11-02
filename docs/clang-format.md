@@ -32,7 +32,7 @@ Rust 内置模块通过 `CppStyle::compile` 生成同一策略表示，返回 `R
 
 ## 文件查找与继承
 
-`resolve_config` 接受待编辑文件路径，包括尚未创建的文件，从文件所在目录向上查找。同一目录优先选择 `.clang-format`，其次选择 `_clang-format`。匹配配置默认基于 LLVM，找不到配置时使用调用者提供的 fallback 预设。
+`resolve_config` 接受待编辑文件路径，包括尚未创建的文件，从文件所在目录向上查找。同一目录优先选择 `.clang-format`，其次选择 `_clang-format`。匹配配置默认基于 LLVM，找不到配置时使用调用者提供的 fallback 预设，即选项 `cpp-fallback-style`。配置写错时打开文件不受影响，同样使用这个预设。
 
 `BasedOnStyle: InheritParentConfig` 从上一级目录继续查找，并在父配置上应用子配置覆盖。`InheritParentConfig=<directory>` 将查找重定向到指定目录；相对路径以当前配置目录为基准，也支持 `~/`。继承循环、缺失重定向目录和文件读取失败返回错误。普通子配置不自动叠加父配置。
 

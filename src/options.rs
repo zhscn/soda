@@ -120,6 +120,20 @@ pub const OPTIONS: &[OptionInfo] = &[
         doc: "Show a title row on each window when there are several",
     },
     OptionInfo {
+        name: "cpp-fallback-style",
+        kind: Kind::Choice(&[
+            "LLVM",
+            "Google",
+            "Chromium",
+            "Mozilla",
+            "WebKit",
+            "GNU",
+            "Microsoft",
+        ]),
+        default: Value::Choice("LLVM"),
+        doc: "C++ style of files with no usable .clang-format, once opened after this",
+    },
+    OptionInfo {
         name: "inlay-hints",
         kind: Kind::Bool,
         default: Value::Bool(true),

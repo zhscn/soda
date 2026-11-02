@@ -624,6 +624,17 @@ impl Runtime {
     fn accept(&mut self, update: Update, time: Duration) -> bool {
         let response = self.layers.observe(&self.app, &update, time);
         for notice in &update.notices {
+            if let Notice::Opened(view) = notice
+                && let Some(problem) = self
+                    .app
+                    .view(*view)
+                    .and_then(|state| self.app.workspace().file(state.document_id))
+                    .and_then(|file| file.config_problem())
+            {
+                let style = self.app.options().choice(None, "cpp-fallback-style");
+                let first = problem.lines().next().unwrap_or(problem);
+                self.report(format!("Using {style} style: {first}"));
+            }
             let notice = match notice {
                 Notice::Opened(view) => self.app.view(*view).map(|state| {
                     let document = state.document_id;

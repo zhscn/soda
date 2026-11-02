@@ -45,6 +45,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `window-title` | true/false | true | 有多个窗口时在每个窗口顶部显示标题 |
 | `wrap` | true/false | false | 长行折到下一屏幕行，能在空格后断开时在空格后断开 |
 | `show-whitespace` | true/false | false | 用 `»` 标出制表符，用 `·` 标出行尾空格 |
+| `cpp-fallback-style` | LLVM/Google/Chromium/Mozilla/WebKit/GNU/Microsoft | LLVM | 没有可用的 `.clang-format` 时的 C++ 风格；只对之后打开的文档生效，用全局的 `set` 设置 |
 | `ruler` | 0–1000 | 0 | 在这一列之后画竖线；0 不画 |
 | `scroll-lines` | 1–100 | 3 | 鼠标滚轮每格滚动的行数 |
 | `mouse` | true/false | true | 关闭后终端恢复自己的文本选择 |

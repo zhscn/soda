@@ -726,3 +726,51 @@ fn reload_preserves_unmodified_positions_and_failures_leave_state_intact() {
         "prefix new suffix"
     );
 }
+
+#[test]
+fn a_broken_configuration_does_not_stop_a_file_from_opening() {
+    let directory = tempfile::tempdir().unwrap();
+    fs::write(
+        directory.path().join(".clang-format"),
+        "IndentWidth: [broken\n",
+    )
+    .unwrap();
+    let path = directory.path().join("a.cpp");
+    fs::write(&path, "int a;\n").unwrap();
+    let mut workspace = Workspace::default();
+    let id = workspace.open(&path).unwrap();
+    assert!(matches!(
+        workspace.editor(id).unwrap().model().language(),
+        Language::Cpp(_)
+    ));
+    assert!(workspace.file(id).unwrap().config_problem().is_some());
+
+    // A file not on disk yet and saving there are no different.
+    let new = workspace
+        .open_or_create(&directory.path().join("new.cpp"))
+        .unwrap();
+    assert!(workspace.file(new).unwrap().config_problem().is_some());
+    let other = tempfile::tempdir().unwrap();
+    fs::write(other.path().join(".clang-format"), "IndentWidth: [broken\n").unwrap();
+    let target = other.path().join("copy.cpp");
+    workspace.save(id, Some(&target)).unwrap();
+    assert_eq!(fs::read_to_string(target).unwrap(), "int a;\n");
+}
+
+#[test]
+fn rules_that_worked_outlast_a_configuration_broken_later() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = directory.path().join(".clang-format");
+    fs::write(&config, "IndentWidth: 7\n").unwrap();
+    let path = directory.path().join("a.cpp");
+    fs::write(&path, "int a;\n").unwrap();
+    let mut workspace = Workspace::default();
+    let id = workspace.open(&path).unwrap();
+    fs::write(&config, "IndentWidth: [broken\n").unwrap();
+    workspace.reload(id, false).unwrap();
+    let Language::Cpp(rules) = workspace.editor(id).unwrap().model().language() else {
+        panic!("expected C++");
+    };
+    assert_eq!(rules.whitespace().indent_width, 7);
+    assert!(workspace.file(id).unwrap().config_problem().is_some());
+}

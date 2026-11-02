@@ -95,6 +95,11 @@ impl Workspace {
     pub fn is_saving(&self, id: DocumentId) -> bool {
         self.pending.contains_key(&id)
     }
+    /// The preset for C++ files opened from now on that have no
+    /// configuration of their own.
+    pub fn set_fallback_style(&mut self, style: &str) {
+        self.service.set_fallback_style(style);
+    }
     pub fn service(&self) -> &FileService {
         &self.service
     }
@@ -165,13 +170,14 @@ impl Workspace {
     }
     /// Registers an empty, unsaved document bound to a path not on disk yet.
     fn create_named(&mut self, path: PathBuf) -> Result<DocumentId, FileError> {
-        let configuration = self.service.configuration(&path)?;
+        let (configuration, config_problem) = self.service.usable_configuration(&path);
         let editor = Editor::new("", FileService::language(&path, &configuration));
         Ok(self.insert(
             editor,
             FileState {
                 path: Some(path),
                 configuration,
+                config_problem,
                 ..Default::default()
             },
         ))
@@ -219,8 +225,14 @@ impl Workspace {
         {
             return Err(FileError::PathInUse(loaded.path));
         }
-        let language = FileService::language(&loaded.path, &loaded.configuration);
         let document = self.editors.get(&id).unwrap().model().document();
+        // Rules that worked are better than the fallback while the file is
+        // broken.
+        let language = if loaded.config_problem.is_some() {
+            document.language()
+        } else {
+            FileService::language(&loaded.path, &loaded.configuration)
+        };
         if document.language() != language {
             document
                 .config_generation()
@@ -248,6 +260,7 @@ impl Workspace {
                 }),
                 saved_revision: Some(revision),
                 configuration: loaded.configuration,
+                config_problem: loaded.config_problem,
                 scratch: None,
             },
         );
@@ -339,6 +352,7 @@ impl Workspace {
             }),
             saved_revision: Some(0),
             configuration: loaded.configuration,
+            config_problem: loaded.config_problem,
             scratch: None,
         };
         Ok(self.insert(editor, file))
@@ -405,7 +419,7 @@ impl Workspace {
         let configuration = if same_path {
             None
         } else {
-            self.service.configuration(&path)?
+            self.service.usable_configuration(&path).0
         };
         if !same_path && document.language() != FileService::language(&path, &configuration) {
             document

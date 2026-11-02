@@ -187,3 +187,40 @@ fn suspend_is_handed_to_the_frontend_once() {
     assert!(!runtime.take_suspend());
     assert!(!runtime.quit_requested());
 }
+
+#[test]
+fn the_fallback_style_is_an_option_and_a_broken_file_is_reported() {
+    let directory = tempfile::tempdir().unwrap();
+    let plain = directory.path().join("plain");
+    let broken = directory.path().join("broken");
+    std::fs::create_dir_all(&plain).unwrap();
+    std::fs::create_dir_all(&broken).unwrap();
+    std::fs::write(plain.join("a.cpp"), "int a;\n").unwrap();
+    std::fs::write(broken.join("b.cpp"), "int b;\n").unwrap();
+    std::fs::write(broken.join(".clang-format"), "IndentWidth: [broken\n").unwrap();
+    let mut runtime = Runtime::new(directory.path().to_owned()).unwrap();
+    runtime.start(None);
+    runtime.command(Command::Named("set cpp-fallback-style WebKit".into()));
+    let width = |r: &Runtime| {
+        let view = r.app().view(r.app().active_view().unwrap()).unwrap();
+        match r
+            .app()
+            .workspace()
+            .editor(view.document_id)
+            .unwrap()
+            .model()
+            .language()
+        {
+            Language::Cpp(rules) => Some(rules.whitespace().indent_width),
+            _ => None,
+        }
+    };
+    runtime.command(Command::OpenPath(plain.join("a.cpp")));
+    wait(&mut runtime, |r| width(r).is_some());
+    assert_eq!(width(&runtime), Some(4), "WebKit, where LLVM would be 2");
+    runtime.command(Command::OpenPath(broken.join("b.cpp")));
+    wait(&mut runtime, |r| {
+        r.message().starts_with("Using WebKit style: ")
+    });
+    assert_eq!(width(&runtime), Some(4));
+}

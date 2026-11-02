@@ -25,10 +25,15 @@ pub struct FileState {
     pub(crate) saved: Option<DiskImage>,
     pub(crate) saved_revision: Option<u64>,
     pub(crate) configuration: Option<ResolvedConfig>,
+    /// Why `configuration` is the fallback rather than the file's own.
+    pub(crate) config_problem: Option<String>,
     /// The name of a scratch document, which has no file and is never dirty.
     pub(crate) scratch: Option<String>,
 }
 impl FileState {
+    pub fn config_problem(&self) -> Option<&str> {
+        self.config_problem.as_deref()
+    }
     pub fn scratch(&self) -> Option<&str> {
         self.scratch.as_deref()
     }

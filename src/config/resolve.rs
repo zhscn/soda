@@ -148,6 +148,28 @@ impl Resolver<'_> {
         }
     }
 }
+/// What a file gets when its configuration cannot be used: the fallback
+/// preset, as if no file had been found.
+pub fn fallback_config(
+    file: &Path,
+    options: &ConfigOptions,
+) -> Result<ResolvedConfig, ConfigError> {
+    let mut config = preset(&options.fallback)?;
+    let language = if file.extension().and_then(|e| e.to_str()) == Some("c") {
+        "C"
+    } else {
+        "Cpp"
+    };
+    config.values.insert(
+        "Language".into(),
+        serde_json::Value::String(language.into()),
+    );
+    Ok(ResolvedConfig {
+        config,
+        sources: vec![],
+        searched: vec![],
+    })
+}
 /// Resolve for an existing or newly-created file. Search begins at its parent;
 /// .clang-format takes precedence over _clang-format in the same directory.
 pub fn resolve_config(file: &Path, options: &ConfigOptions) -> Result<ResolvedConfig, ConfigError> {
