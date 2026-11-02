@@ -18,13 +18,13 @@ rust-analyzer 默认不开，因为它会运行项目的构建脚本，打开一
 | `<a-.>` | `lsp-definition` | 到定义，有多处时列出；`<a-,>` 回来 |
 | | `lsp-declaration` / `lsp-type-definition` | 到声明 / 到类型的定义 |
 | `<a-?>` | `lsp-references` | 列出引用 |
-| `<space>h` | `lsp-switch` | 在头文件和源文件之间切换，clangd 的扩展 |
-| `<space>s` | `lsp-symbols` | 从当前文档的符号大纲里选一个跳过去 |
-| `<space>S` | `lsp-workspace-symbols [QUERY]` | 在项目里按名字找符号并列出 |
-| `K` | `lsp-hover` | 在光标旁的浮窗里显示光标处的信息，上面列出这一行的诊断；PageUp/PageDown 或 `<a-v>`/`<c-v>` 翻页，其他按键关闭 |
-| `<space>c` / `<space>C` | `lsp-callers` / `lsp-callees` | 列出调用者 / 被调用者，只有一层 |
-| `<space>R` | `lsp-rename [NAME]` | 重命名光标处的符号；没给名字时打开命令行，预填光标处的词 |
-| `<space>a` | `lsp-code-action` | 列出光标或选区处的代码动作，选一个执行 |
+| `SPC h` | `lsp-switch` | 在头文件和源文件之间切换，clangd 的扩展 |
+| `SPC s` | `lsp-symbols` | 从当前文档的符号大纲里选一个跳过去 |
+| `SPC S` | `lsp-workspace-symbols [QUERY]` | 在项目里按名字找符号并列出 |
+| `SPC k` | `lsp-hover` | 在光标旁的浮窗里显示光标处的信息，上面列出这一行的诊断；PageUp/PageDown 或 `<a-v>`/`<c-v>` 翻页，其他按键关闭 |
+| `SPC c` / `SPC C` | `lsp-callers` / `lsp-callees` | 列出调用者 / 被调用者，只有一层 |
+| `SPC R` | `lsp-rename [NAME]` | 重命名光标处的符号；没给名字时打开命令行，预填光标处的词 |
+| `SPC a` | `lsp-code-action` | 列出光标或选区处的代码动作，选一个执行 |
 | | `lsp-format` | 让服务器格式化整个文档，clangd 读 `.clang-format` |
 | | `lsp-diagnostics` | 列出所有诊断 |
 | | `lsp-restart` | 重启当前语言的服务器，失败后也用它重试 |
@@ -101,6 +101,6 @@ soda.popup(text)    -- 光标旁的浮窗，放不下时滚轮或翻页键滚动
 - 不取消请求。
 - 语义高亮每次取全文，不用增量。
 - 调用层级只有一层，不是 ccls 那样可以展开的树。
-- 诊断显示在消息行和 `K` 的浮窗里，不在行尾内联显示。
+- 诊断显示在消息行和 `SPC k` 的浮窗里，不在行尾内联显示。
 - 编辑直接写到磁盘的文件不通知服务器，它要到下次读这些文件时才知道。
 - 不支持创建、改名、删除文件的编辑；遇到时整个编辑都不应用。

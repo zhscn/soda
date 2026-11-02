@@ -1,7 +1,6 @@
 use soda::{
-    application::Event,
     core::{EditError, Selection},
-    editor::{Command as Edit, Language},
+    editor::Command as Edit,
     interaction::{
         BindingError, Command, EditMode, Input, InputKey, InputMotion, Key, KeyStroke, Layer,
         UserInput,
@@ -56,7 +55,7 @@ fn overrides_can_use_literal_sequences_without_affecting_insert_or_defaults() {
     send(&mut r, key('f'));
     assert_eq!(text(&r), " f");
     send(&mut r, KeyStroke::plain(Key::Esc));
-    send(&mut r, key('/'));
+    send(&mut r, key('v'));
     assert!(matches!(r.layer(), Some(Layer::Search { .. })));
 }
 #[test]
@@ -119,14 +118,14 @@ fn prefixes_consume_invalid_input_and_reset_on_focus_loss_release_and_commands()
 #[test]
 fn named_commands_and_input_overrides_use_separate_controlled_entry_points() {
     let mut r = runtime();
-    r.register_command("insert", |_| {
+    r.register_command("insert-custom", |_| {
         Ok(Command::Edit(Edit::InsertText("custom".into())))
     })
     .unwrap();
     r.bind(
         EditMode::Normal,
         &[key('Q')],
-        Command::Named("insert".into()),
+        Command::Named("insert-custom".into()),
     )
     .unwrap();
     send(&mut r, key('Q'));
@@ -156,47 +155,26 @@ fn named_commands_and_input_overrides_use_separate_controlled_entry_points() {
     );
     assert_eq!(text(&r), "custom");
 }
-#[test]
-fn visual_state_is_cleared_when_its_document_changes_outside_the_session() {
-    let mut r = runtime();
-    send(&mut r, key('i'));
-    r.input(UserInput::Paste("abc".into()));
-    send(&mut r, KeyStroke::plain(Key::Esc));
-    send(&mut r, key('v'));
-    assert_eq!(r.edit_mode(), EditMode::Visual);
-    let v = r.app().active_view().unwrap();
-    r.dispatch(Event::Edit {
-        view: v,
-        command: Edit::InsertText("".into()),
-        time: std::time::Duration::ZERO,
-    });
-    // Explicit replacement of the visual range changes text and invalidates its anchors.
-    r.dispatch(Event::Edit {
-        view: v,
-        command: Edit::Delete {
-            direction: soda::editor::Direction::Forward,
-            smart: false,
-        },
-        time: std::time::Duration::ZERO,
-    });
-    assert_eq!(r.edit_mode(), EditMode::Normal);
-    assert!(r.editor_caret().is_none());
-    r.dispatch(Event::NewDocument(Language::PlainText));
-    assert_eq!(r.edit_mode(), EditMode::Normal);
-}
 
 #[test]
-fn arrows_complete_operator_motions_and_visual_escape_exits_after_a_count() {
+fn arrows_extend_a_selection_and_escape_drops_a_count() {
     let mut r = runtime();
     send(&mut r, key('i'));
     r.input(UserInput::Paste("abc".into()));
     send(&mut r, KeyStroke::plain(Key::Esc));
-    send(&mut r, key('0'));
+    send(&mut r, KeyStroke::plain(Key::Home));
+    let extend = KeyStroke {
+        shift: true,
+        ..KeyStroke::plain(Key::Right)
+    };
+    send(&mut r, extend);
     send(&mut r, key('d'));
-    send(&mut r, KeyStroke::plain(Key::Right));
     assert_eq!(text(&r), "bc");
-    send(&mut r, key('v'));
+    // A count given up with Escape does not reach the next command.
     send(&mut r, key('2'));
     send(&mut r, KeyStroke::plain(Key::Esc));
     assert_eq!(r.edit_mode(), EditMode::Normal);
+    send(&mut r, extend);
+    send(&mut r, key('d'));
+    assert_eq!(text(&r), "c");
 }

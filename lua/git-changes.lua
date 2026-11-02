@@ -1,10 +1,10 @@
 -- Lists the places that differ from what git has staged in *changes*, one
 -- per hunk, for Enter, ]q and [q. `git diff` output has no `path:line:` of
 -- its own, so this turns its hunk headers into locations.
--- Built in: <space>g.
+-- Built in: SPC g.
 
 soda.command("display changes bottom")
-soda.command("map normal <space>g git-changes")
+soda.command("map global <c-c>g git-changes")
 
 local function locations(diff)
   local list, path = {}, nil

@@ -221,7 +221,7 @@ fn buffer_edits_in_a_request_undo_as_one_step() {
         &mut r,
         r#"assert(soda.buffer():text() == "one\ntwo\nthree")"#,
     );
-    keys(&mut r, "<c-r>");
+    keys(&mut r, "U");
     lua(
         &mut r,
         r#"assert(soda.buffer():text() == "ONE\nTWO\nTHREE")"#,
@@ -253,14 +253,14 @@ fn buffer_edits_refuse_a_stale_revision() {
 #[test]
 fn buffer_selection_reads_and_moves() {
     let mut r = runtime();
-    // Normal mode keeps a caret, so a range collapses to its start.
+    // Normal mode holds a selection as it is given.
     lua(
         &mut r,
         r#"
         local buf = soda.buffer()
         buf:set_selection({2, 2}, {2, 4})
         local anchor, head = buf:selection()
-        assert(anchor[1] == 2 and anchor[2] == 2 and head[2] == 2)
+        assert(anchor[1] == 2 and anchor[2] == 2 and head[2] == 4)
         "#,
     );
     keys(&mut r, "i");
@@ -275,9 +275,9 @@ fn buffer_selection_reads_and_moves() {
     );
 }
 #[test]
-fn buffer_selection_in_visual_mode() {
+fn buffer_selection_reads_what_is_selected() {
     let mut r = runtime();
-    keys(&mut r, "gg0vl");
+    keys(&mut r, "<a-lt>LL");
     lua(
         &mut r,
         r#"
@@ -287,7 +287,6 @@ fn buffer_selection_in_visual_mode() {
         assert(buf:text(anchor, head) == "on")
         "#,
     );
-    assert_eq!(r.edit_mode(), EditMode::Visual);
 }
 #[test]
 fn buffer_edits_in_a_hook_undo_apart_from_what_insert_mode_types() {
@@ -300,7 +299,7 @@ fn buffer_edits_in_a_hook_undo_apart_from_what_insert_mode_types() {
         end)
         "#,
     );
-    keys(&mut r, "ggIab<esc>");
+    keys(&mut r, "<a-lt>iab<esc>");
     lua(
         &mut r,
         r#"assert(soda.buffer():text() == "abone\ntwo\nthree!", soda.buffer():text())"#,
@@ -392,7 +391,7 @@ fn clang_format_extension_replaces_only_changed_lines() {
     assert_eq!(text(&r), "int  a;\nint b;\nint   c;\nint d;\n");
 }
 #[test]
-fn clang_format_extension_formats_only_the_visual_lines() {
+fn clang_format_extension_formats_only_the_selected_lines() {
     if std::process::Command::new("clang-format")
         .arg("--version")
         .output()
@@ -406,7 +405,7 @@ fn clang_format_extension_formats_only_the_visual_lines() {
     r.input(UserInput::Paste("int  a;\nint  b;\nint  c;\n".into()));
     r.command(Command::SetMode(EditMode::Normal));
     lua(&mut r, include_str!("../lua/clang-format.lua"));
-    keys(&mut r, "ggjV");
+    keys(&mut r, "<a-lt>je");
     let formatted = "int  a;\nint b;\nint  c;\n";
     format_buffer(&mut r, formatted);
     assert_eq!(text(&r), formatted, "{}", r.message());
@@ -427,7 +426,7 @@ fn clang_format_extension_drops_output_when_the_buffer_changed() {
     r.command(Command::SetMode(EditMode::Normal));
     lua(&mut r, include_str!("../lua/clang-format.lua"));
     r.command(Command::Named("clang-format".into()));
-    keys(&mut r, "ggix<esc>");
+    keys(&mut r, "<a-lt>ix<esc>");
     for _ in 0..400 {
         r.poll();
         if r.message().starts_with("clang-format") {
@@ -460,19 +459,12 @@ fn comment_extension_says_when_a_buffer_has_no_marker() {
 fn surround_extension_wraps_the_selection_from_a_key() {
     let surround = include_str!("../lua/surround.lua");
     let mut r = extension("one two\n", surround);
-    lua(
-        &mut r,
-        r#"
-        soda.command("map visual S( surround (")
-        soda.command('map visual S" surround "')
-        "#,
-    );
-    keys(&mut r, "ggwveS(");
+    keys(&mut r, "<a-lt>llll,w<c-c>(");
     assert_eq!(text(&r), "one (two)\n", "{}", r.message());
     assert_eq!(r.edit_mode(), EditMode::Normal);
     keys(&mut r, "u");
     assert_eq!(text(&r), "one two\n");
-    keys(&mut r, "ggveS\"");
+    keys(&mut r, "<a-lt>w<c-c>\"");
     assert_eq!(text(&r), "\"one\" two\n", "{}", r.message());
 }
 #[test]
@@ -481,7 +473,7 @@ fn surround_extension_takes_any_pair_and_needs_a_selection() {
     let mut r = extension("word\n", surround);
     r.command(Command::Named("surround (".into()));
     assert!(r.message().contains("select text"), "{}", r.message());
-    keys(&mut r, "ggve");
+    keys(&mut r, "<a-lt>w");
     r.command(Command::Named("surround <b> </b>".into()));
     assert_eq!(text(&r), "<b>word</b>\n", "{}", r.message());
 }
@@ -500,7 +492,6 @@ fn commented(dir: &tempfile::TempDir, name: &str, lines: &str) -> Runtime {
     }
     assert_eq!(text(&r), lines);
     lua(&mut r, include_str!("../lua/comment.lua"));
-    lua(&mut r, r#"soda.command("map visual gc comment")"#);
     r
 }
 #[test]
@@ -518,20 +509,20 @@ fn comment_extension_aligns_markers_and_skips_blank_lines() {
     let dir = tempfile::tempdir().unwrap();
     let source = "int f() {\n    int a;\n\n        int b;\n}\n";
     let mut r = commented(&dir, "a.cpp", source);
-    keys(&mut r, "ggjVjjgc");
+    keys(&mut r, "<a-lt>jeee<a-;>");
     let on = "int f() {\n    // int a;\n\n    //     int b;\n}\n";
     assert_eq!(text(&r), on, "{}", r.message());
     keys(&mut r, "u");
     assert_eq!(text(&r), source, "one undo step");
-    keys(&mut r, "ggjVjjgc");
-    keys(&mut r, "ggjVjjgc");
+    keys(&mut r, "<a-lt>jeee<a-;>");
+    keys(&mut r, "<a-lt>jeee<a-;>");
     assert_eq!(text(&r), source, "{}", r.message());
 }
 #[test]
 fn comment_extension_leaves_out_the_line_a_selection_ends_before() {
     let dir = tempfile::tempdir().unwrap();
     let mut r = commented(&dir, "a.lua", "a()\nb()\nc()\n");
-    keys(&mut r, "ggjVgc");
+    keys(&mut r, "<a-lt>jJ<a-;>");
     assert_eq!(text(&r), "a()\n-- b()\nc()\n", "{}", r.message());
 }
 fn active_name(r: &Runtime) -> String {
@@ -578,13 +569,13 @@ fn lua_results_step_with_the_built_in_keys() {
     assert_eq!(active_name(&r), "*lint*");
     let list = r.app().active_view().unwrap();
     assert_eq!(r.app().windows().side(list), Some(Side::Bottom));
-    keys(&mut r, "]q");
+    keys(&mut r, "<a-g>n");
     wait(&mut r, |r| active_name(r).ends_with("a.txt"));
     assert_eq!(caret(&r), 5);
-    keys(&mut r, "]q");
+    keys(&mut r, "<a-g>n");
     wait(&mut r, |r| active_name(r).ends_with("b.txt"));
     assert_eq!(caret(&r), 5);
-    keys(&mut r, "]q");
+    keys(&mut r, "<a-g>n");
     assert_eq!(r.message(), "At the last result");
 }
 #[test]
@@ -703,7 +694,7 @@ fn git_changes_extension_lists_each_hunk() {
         "{}",
         r.message()
     );
-    keys(&mut r, "]q");
+    keys(&mut r, "<a-g>n");
     wait(&mut r, |r| active_name(r).ends_with("a.txt"));
     assert_eq!(caret(&r), 2);
 }

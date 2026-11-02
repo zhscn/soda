@@ -14,8 +14,6 @@ pub struct SearchSession {
     viewport: Viewport,
     query: SearchQuery,
     backward: bool,
-    vim: bool,
-    fallback: Option<SearchQuery>,
     results: SearchResults,
 }
 #[derive(Default)]
@@ -25,13 +23,8 @@ pub struct SearchResults {
     pub current: Option<Range<usize>>,
 }
 impl SearchSession {
-    pub(super) fn set_direction(&mut self, backward: bool, fallback: Option<SearchQuery>) {
-        self.fallback = fallback;
+    pub(super) fn set_direction(&mut self, backward: bool) {
         self.backward = backward;
-        self.vim = true;
-    }
-    pub(super) fn vim_direction(&self) -> Option<bool> {
-        self.vim.then_some(self.backward)
     }
     pub fn view(&self) -> ViewId {
         self.view
@@ -75,8 +68,6 @@ impl SearchSession {
             viewport: view_state.viewport,
             query: SearchQuery::new(""),
             backward: false,
-            vim: false,
-            fallback: None,
             results: SearchResults::default(),
         })
     }
@@ -119,7 +110,7 @@ impl SearchSession {
             self.results
                 .current
                 .as_ref()
-                .map(|r| if backward || self.vim { r.start } else { r.end })
+                .map(|r| if backward { r.start } else { r.end })
                 .unwrap_or(origin)
         } else {
             origin
@@ -134,20 +125,10 @@ impl SearchSession {
                 first = Some(range.clone());
             }
             if backward {
-                if if self.vim {
-                    range.start < boundary
-                } else {
-                    range.end <= boundary
-                } {
+                if range.end <= boundary {
                     chosen = Some(range.clone());
                 }
-            } else if chosen.is_none()
-                && if self.vim {
-                    range.start > boundary
-                } else {
-                    range.start >= boundary
-                }
-            {
+            } else if chosen.is_none() && range.start >= boundary {
                 chosen = Some(range.clone());
             }
             last = Some(range);
@@ -204,15 +185,7 @@ impl SearchSession {
 
 impl SearchSession {
     pub(super) fn presentation(&self, field: &super::TextInput) -> super::Presentation {
-        let label = if self.vim {
-            if self.backward {
-                "?".into()
-            } else {
-                "/".into()
-            }
-        } else {
-            format!("Find [{}]: ", self.results().count)
-        };
+        let label = format!("Find [{}]: ", self.results().count);
         let mut presentation = super::session::field_presentation(label, field);
         if let Some(error) = self.query.error() {
             presentation.text.push_str(&format!("  ({error})"));
@@ -285,24 +258,6 @@ impl SearchSession {
         };
         Ok(match input {
             Input::Cancel => Transition::finished(self.cancel_response(app, time)?),
-            Input::Confirm if self.vim && field.text().is_empty() => {
-                if let Some(query) = self.fallback.clone() {
-                    self.set_query(query.text());
-                    let mut response = self.preview_response(app, self.backward, false, time)?;
-                    response.events.push(Event::Edit {
-                        view: self.view(),
-                        command: Command::SetSearchQuery(query),
-                        time,
-                    });
-                    Transition::finished(response)
-                } else {
-                    Transition::finished(Response {
-                        message: super::Message::Set("No previous search".into()),
-                        redraw: true,
-                        ..Response::default()
-                    })
-                }
-            }
             Input::Confirm => Transition::finished(Response {
                 events: vec![Event::Edit {
                     view: self.view(),

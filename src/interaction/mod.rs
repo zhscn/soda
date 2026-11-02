@@ -5,8 +5,8 @@ mod command_line;
 pub use command_line::{CommandLine, Completion};
 mod commands;
 pub mod completion;
+pub mod modal;
 pub mod snippet;
-pub mod vim;
 pub use commands::{Command, Departure, Sourced, WindowCommand};
 mod departure;
 pub use departure::SaveWait;
@@ -35,7 +35,7 @@ mod search;
 pub use search::{SearchResults, SearchSession};
 mod jumps;
 mod keymap;
-pub use keymap::{BindingError, Context, Keymap, LineEdit};
+pub use keymap::{BindingError, Context, Keymap, KeypadStart, LineEdit};
 mod registry;
 pub use registry::{BUILTINS, Choice, CommandHandler, CommandInfo, Registry, Slot, SlotKind};
 mod session;
@@ -45,16 +45,15 @@ pub enum EditMode {
     Insert,
     #[default]
     Normal,
-    Visual,
-    VisualLine,
+    /// Many selections inside a grabbed range.
+    Beacon,
 }
 impl EditMode {
     pub fn name(self) -> &'static str {
         match self {
             Self::Normal => "normal",
             Self::Insert => "insert",
-            Self::Visual => "visual",
-            Self::VisualLine => "visual-line",
+            Self::Beacon => "beacon",
         }
     }
 }
@@ -123,8 +122,7 @@ pub struct Response {
     pub stop: bool,
     /// Show the message log in `*messages*`.
     pub messages: bool,
-    /// Input to route again, after the rest of the response, for `.` and
-    /// macros.
+    /// Input to route again, after the rest of the response, for macros.
     pub replay: Vec<UserInput>,
     /// Lua to run once the rest of the response is done.
     pub lua: Vec<LuaRequest>,
@@ -158,10 +156,10 @@ pub struct Layers {
     mode: EditMode,
     sequence: keymap::Sequence,
     keymap: Keymap,
-    vim: vim::State,
+    modal: modal::State,
     completion: completion::State,
     snippet: snippet::State,
-    /// The input being routed comes from `.` or a macro.
+    /// The input being routed comes from a macro.
     replaying: bool,
     jumps: jumps::Jumps,
     registry: Registry,
@@ -180,7 +178,7 @@ pub struct Layers {
     window_rows: Vec<(crate::application::ViewId, usize)>,
     help_rows: usize,
     picker_rows: usize,
-    /// A Vim command failed since this was last taken; replays stop.
+    /// A command failed since this was last taken; replays stop.
     failed: bool,
     /// The parameter of the event whose hooks are running, `%val{hook}`.
     hook: Option<String>,
@@ -198,7 +196,7 @@ impl Layers {
         };
         self.keymap.bind(mode.into(), keys, command, label)?;
         self.sequence.clear();
-        self.vim.clear();
+        self.modal.clear();
         Ok(())
     }
     pub fn unbind_input(&mut self, key: KeyStroke) -> Result<(), BindingError> {
@@ -210,7 +208,7 @@ impl Layers {
     }
     pub fn unbind(&mut self, mode: EditMode, keys: &[KeyStroke]) -> Result<(), BindingError> {
         self.sequence.clear();
-        self.vim.clear();
+        self.modal.clear();
         self.keymap.unbind(mode.into(), keys)
     }
     /// Registers a Rust command under a name that is not built in.
@@ -227,7 +225,7 @@ impl Layers {
     pub fn registry(&self) -> &Registry {
         &self.registry
     }
-    /// Whether a Vim command failed since `clear_failed`.
+    /// Whether a command failed since `clear_failed`.
     pub fn failed(&self) -> bool {
         self.failed
     }
@@ -261,7 +259,6 @@ impl Layers {
         expand::State {
             app,
             mode: self.mode,
-            caret: self.vim.caret(),
             root: file_root,
             hook: self.hook.as_deref(),
         }
@@ -274,34 +271,39 @@ impl Layers {
     pub fn hooks(&self, event: &str, parameter: &str) -> Vec<String> {
         self.hooks.matching(event, parameter)
     }
-    pub fn recording(&self) -> Option<char> {
-        self.vim.replay.recording()
-    }
-    pub fn editor_caret(&self) -> Option<usize> {
-        self.vim.caret()
+    pub fn recording(&self) -> bool {
+        self.modal.replay.recording()
     }
     pub fn edit_mode(&self) -> EditMode {
         self.mode
     }
-    /// Keys typed toward an unfinished binding or Vim command, if any.
+    /// Keys typed toward an unfinished binding or command, if any.
     pub fn pending(&self) -> Option<String> {
         if self.sequence.active() {
-            Some(key_notation(self.sequence.keys()))
-        } else if self.vim.active() {
-            Some(self.vim.hint())
+            Some(format!(
+                "{}{}",
+                key_notation(self.sequence.keys()),
+                self.sequence.keypad_hint()
+            ))
+        } else if self.modal.active() {
+            Some(self.modal.hint())
         } else {
             None
         }
     }
     /// The next keys of a pending multi-key binding, each with the
     /// documentation of its command, for a key hint popup.
-    pub fn continuations(&self) -> Vec<(String, String)> {
+    pub fn continuations(&self, app: &Application) -> Vec<(String, String)> {
         if !self.sequence.active() {
             return vec![];
         }
-        self.keymap
-            .continuations(self.mode.into(), self.sequence.keys())
-            .into_iter()
+        let next = if self.sequence.in_keypad() {
+            self.sequence.keypad_continuations(&self.keymap)
+        } else {
+            self.keymap
+                .continuations(&self.stack(app), self.sequence.keys())
+        };
+        next.into_iter()
             .map(|(key, label)| {
                 let doc = self.registry.doc(&label);
                 let text = if doc.is_empty() { label } else { doc };
@@ -349,7 +351,7 @@ impl Layers {
         time: Duration,
     ) -> Result<Response, EditError> {
         self.sequence.clear();
-        self.vim.clear();
+        self.modal.clear();
         let mut response = self.close(app, time)?;
         response.events.extend(self.end_insert_group(app, time));
         layer.resize(self.help_rows, self.picker_rows);
@@ -386,12 +388,20 @@ impl Layers {
     ) -> Result<InputResult, EditError> {
         if matches!(input, Input::Confirm)
             && let Some(Layer::Search { session, .. }) = &self.active
+            && session.query().is_valid()
         {
-            if let Some(backward) = session.vim_direction() {
-                self.vim.search_backward = backward;
-            }
-            if session.query().is_valid() {
-                self.vim.last_search = Some(session.query().clone());
+            {
+                self.modal.set_search(session.query().clone());
+                if let Some(range) = session.results().current.clone() {
+                    self.modal.tag = Some(modal::Tag {
+                        selection: crate::core::Selection {
+                            anchor: range.start,
+                            head: range.end,
+                        },
+                        kind: modal::Kind::Visit,
+                        expand: false,
+                    });
+                }
             }
         }
         let Some(layer) = &mut self.active else {
@@ -464,7 +474,6 @@ impl Layers {
         update: &Update,
         time: Duration,
     ) -> Result<Response, EditError> {
-        self.vim.marks.observe(update);
         self.completion.observe(update);
         self.snippet.observe(app, update);
         let searching = matches!(self.active, Some(Layer::Search { .. }));
@@ -485,29 +494,47 @@ impl Layers {
                 .is_some_and(|edit| edit.text_changed && Some(edit.document_id) == active_document)
         {
             self.sequence.clear();
-            self.vim.clear();
-            if update.active_changed || matches!(self.mode, EditMode::Visual | EditMode::VisualLine)
-            {
-                self.vim.reset();
-                if matches!(self.mode, EditMode::Visual | EditMode::VisualLine) {
-                    self.mode = EditMode::Normal;
-                }
+            self.modal.clear();
+            // Earlier selections are offsets into the text before this edit.
+            self.modal.history.clear();
+        }
+        if update.active_changed {
+            self.modal.tag = None;
+            self.modal.history.clear();
+            if self.mode == EditMode::Beacon {
+                self.leave_beacon();
             }
         }
-        if matches!(self.mode, EditMode::Visual | EditMode::VisualLine)
+        if let Some(edit) = update.edit.as_ref().and_then(|edit| edit.document.as_ref()) {
+            let keep = |position: &mut crate::editor::DocumentPosition| {
+                position
+                    .map(edit, false)
+                    .ok()
+                    .flatten()
+                    .map(|mapped| *position = mapped)
+            };
+            self.modal
+                .beacons
+                .retain_mut(|beacon| keep(&mut beacon.start).and(keep(&mut beacon.end)).is_some());
+            if let Some(grab) = &mut self.modal.grab
+                && keep(&mut grab.start).and(keep(&mut grab.end)).is_none()
+            {
+                self.modal.grab = None;
+            }
+        }
+        if self.mode == EditMode::Beacon
             && update
                 .edit
                 .as_ref()
                 .is_some_and(|edit| edit.selection_changed)
-            && !self.vim_visual_valid(app)
         {
-            self.mode = EditMode::Normal;
-            self.vim.reset();
+            self.derive_beacons(app, time);
         }
         let Some(layer) = &mut self.active else {
-            let mut response = self.vim_normalize(app, time);
-            response.events.extend(group_end);
-            return Ok(response);
+            return Ok(Response {
+                events: group_end,
+                ..Response::default()
+            });
         };
         let transition = layer.observe(app, update, time)?;
         let mut response = self.transition(transition).unwrap_or_default();
@@ -515,7 +542,7 @@ impl Layers {
         Ok(response)
     }
     fn end_insert_group(&mut self, app: &Application, time: Duration) -> Vec<Event> {
-        let Some(view) = self.vim.insert_view.take().and_then(|id| app.view(id)) else {
+        let Some(view) = self.modal.insert_view.take().and_then(|id| app.view(id)) else {
             return vec![];
         };
         let selection = app

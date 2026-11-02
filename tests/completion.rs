@@ -207,11 +207,11 @@ fn undoing_takes_back_the_candidate_then_the_typing() {
 fn repeating_types_what_was_taken() {
     let (_dir, mut r) = open("wonder\n|\n");
     r.command(Command::SetMode(EditMode::Normal));
-    keys(&mut r, "owo");
+    keys(&mut r, "<f3>Awo");
     listed(&mut r);
-    keys(&mut r, "<tab><esc>");
+    keys(&mut r, "<tab><esc><f4>");
     assert_eq!(text(&r).matches("wonder").count(), 2, "{}", text(&r));
-    keys(&mut r, ".");
+    keys(&mut r, "<f4>");
     let deadline = Instant::now() + Duration::from_secs(1);
     while Instant::now() < deadline {
         r.poll();

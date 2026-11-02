@@ -10,7 +10,7 @@
 --   h  list these keys             r  rename all its occurrences
 --
 -- A jump shows its place at the end of the line, as meow does: [3/12].
--- Built in: <space>i marks the symbol or takes its mark off; <space>I takes
+-- Built in: SPC i marks the symbol or takes its mark off; SPC I takes
 -- off the marks of this document; <a-n> and <a-p> go to the nearest other
 -- marked symbol. Those of the mark are in the `mark` context of `map`.
 
@@ -279,7 +279,7 @@ for key, command in pairs({
 }) do
   soda.command("map mark " .. key .. " " .. command)
 end
-soda.command("map normal <space>i symbol-toggle")
-soda.command("map normal <space>I symbol-clear")
+soda.command("map global <c-c>i symbol-toggle")
+soda.command("map global <c-c>I symbol-clear")
 soda.command("map normal <a-n> symbol-switch-forward")
 soda.command("map normal <a-p> symbol-switch-backward")

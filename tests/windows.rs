@@ -38,7 +38,7 @@ fn caret(r: &Runtime) -> usize {
 fn splits_copy_the_view_and_focus_moves_between_windows() {
     let mut r = runtime("one\ntwo");
     let first = r.app().active_view().unwrap();
-    keys(&mut r, "<c-w>v");
+    keys(&mut r, "<c-x>3");
     let second = r.app().active_view().unwrap();
     assert_ne!(first, second);
     assert_eq!(r.app().windows().views(), [first, second]);
@@ -46,10 +46,10 @@ fn splits_copy_the_view_and_focus_moves_between_windows() {
     // selection of its own.
     assert_eq!(caret(&r), 2);
     keys(&mut r, "j");
-    keys(&mut r, "<c-w>h");
+    keys(&mut r, "<c-c>H");
     assert_eq!(r.app().active_view(), Some(first));
     assert_eq!(caret(&r), 2);
-    keys(&mut r, "<c-w>s");
+    keys(&mut r, "<c-x>2");
     let third = r.app().active_view().unwrap();
     assert_eq!(
         r.app().windows().root(),
@@ -64,19 +64,19 @@ fn splits_copy_the_view_and_focus_moves_between_windows() {
             ],
         })
     );
-    keys(&mut r, "<c-w>k");
+    keys(&mut r, "<c-c>K");
     assert_eq!(r.app().active_view(), Some(first));
-    keys(&mut r, "<c-w>l");
+    keys(&mut r, "<c-c>L");
     assert_eq!(r.app().active_view(), Some(second));
-    keys(&mut r, "<c-w>w");
+    keys(&mut r, "<c-x>o");
     assert_eq!(r.app().active_view(), Some(first));
     // Closing a window keeps its view, hidden.
-    keys(&mut r, "<c-w>c");
+    keys(&mut r, "<c-x>0");
     assert_eq!(r.app().windows().views(), [third, second]);
     assert!(r.app().view(first).is_some());
-    keys(&mut r, "<c-w>o");
+    keys(&mut r, "<c-x>1");
     assert_eq!(r.app().windows().views().len(), 1);
-    keys(&mut r, "<c-w>c");
+    keys(&mut r, "<c-x>0");
     assert!(r.message().contains("last window"), "{}", r.message());
 }
 #[test]
@@ -119,7 +119,7 @@ fn page_rows_follow_the_active_window() {
     let mut r = runtime(&lines.join("\n"));
     r.resize(20, 5);
     r.set_page_rows(8);
-    keys(&mut r, "gg<c-d>");
+    keys(&mut r, "<a-lt><c-v>");
     let view = r.app().view(r.app().active_view().unwrap()).unwrap();
     let text = r
         .app()
@@ -176,10 +176,10 @@ fn grep_results_show_below_and_open_locations_in_the_other_window() {
     assert_eq!(r.app().windows().views(), [file, results]);
     assert_eq!(caret(&r), "one\n  ".len());
     // Stepping moves the results caret and opens the next file in place.
-    keys(&mut r, "]q");
+    keys(&mut r, "<a-g>n");
     settle(&mut r, |r| active_name(r) == "b.txt");
     assert_eq!(r.app().windows().views().len(), 2);
-    keys(&mut r, "]q");
+    keys(&mut r, "<a-g>n");
     assert_eq!(r.message(), "At the last result");
     // A new search reuses the document and its side window.
     r.command(Command::Grep("ONE".into()));
@@ -191,9 +191,9 @@ fn grep_results_show_below_and_open_locations_in_the_other_window() {
     settle(&mut r, |r| active_name(r) == "*grep*");
     assert_eq!(r.app().active_view(), Some(results));
     // Side windows close like others and cannot be split.
-    keys(&mut r, "<c-w>s");
+    keys(&mut r, "<c-x>2");
     assert!(r.message().contains("side windows"), "{}", r.message());
-    keys(&mut r, "<c-w>c");
+    keys(&mut r, "<c-x>0");
     assert_eq!(r.app().windows().views().len(), 1);
     // Rules move a kind elsewhere; a hidden results view comes back there.
     r.command(Command::Named("display grep right 30".into()));
@@ -203,12 +203,12 @@ fn grep_results_show_below_and_open_locations_in_the_other_window() {
 /// Two windows on different documents; the second is active.
 fn two_documents(first: &str, second: &str) -> (Runtime, Vec<soda::application::ViewId>) {
     let mut r = runtime(first);
-    keys(&mut r, "<c-w>s");
+    keys(&mut r, "<c-x>2");
     r.command(Command::New);
     r.command(Command::SetMode(soda::interaction::EditMode::Insert));
     r.input(UserInput::Paste(second.into()));
     r.command(Command::SetMode(soda::interaction::EditMode::Normal));
-    keys(&mut r, "gg");
+    keys(&mut r, "<a-lt>");
     let windows = r.app().windows().views();
     assert_eq!(windows.len(), 2);
     let rows = windows.iter().map(|view| (*view, 10)).collect();

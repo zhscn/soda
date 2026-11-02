@@ -518,10 +518,7 @@ impl Host {
                 scope.create_function(|_, text: String| {
                     runtime
                         .borrow_mut()
-                        .edit_event(crate::application::Event::SetClipboard {
-                            text,
-                            linewise: false,
-                        })
+                        .edit_event(crate::application::Event::SetClipboard(text))
                 })?,
             )?;
             soda.set(

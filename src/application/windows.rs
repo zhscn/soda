@@ -8,9 +8,9 @@ use super::ViewId;
 /// How a split arranges its children.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Axis {
-    /// Stacked top to bottom, as Vim's `:split`.
+    /// Stacked top to bottom.
     Rows,
-    /// Side by side, as Vim's `:vsplit`.
+    /// Side by side.
     Columns,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -62,7 +62,7 @@ impl Mouse {
                 // Rows above or below the text extend past its edges, and
                 // the view follows the head.
                 if let Some(head) = offset(runtime)
-                    && (head != anchor || runtime.editor_caret().is_some())
+                    && head != anchor
                 {
                     runtime.input(UserInput::Pointer(Pointer::Drag { anchor, head }));
                 }
@@ -90,14 +90,12 @@ impl Mouse {
                     step
                 };
                 let active = runtime.app().active_view() == Some(window.view);
-                let caret = runtime.editor_caret().filter(|_| active);
                 let Some((viewport, reveal)) = layout::scroll(
                     runtime.app(),
                     window.view,
                     lines,
                     window.text.width,
                     window.text.height,
-                    caret,
                 ) else {
                     return;
                 };

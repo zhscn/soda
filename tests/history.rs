@@ -25,10 +25,10 @@ fn runtime() -> Runtime {
 #[test]
 fn the_command_line_recalls_what_was_entered() {
     let mut r = runtime();
-    keys(&mut r, ":set tab-width 3<ret>:set tab-width 5<ret>");
-    keys(&mut r, ":set tab-width 3<ret>");
+    keys(&mut r, "<a-x>set tab-width 3<ret><a-x>set tab-width 5<ret>");
+    keys(&mut r, "<a-x>set tab-width 3<ret>");
     assert_eq!(r.command_history(), ["set tab-width 5", "set tab-width 3"]);
-    keys(&mut r, ":<a-p>");
+    keys(&mut r, "<a-x><a-p>");
     assert_eq!(prompt(&r), ":set tab-width 3");
     keys(&mut r, "<a-p><a-p>");
     assert_eq!(prompt(&r), ":set tab-width 5");
@@ -42,17 +42,17 @@ fn the_command_line_recalls_what_was_entered() {
     assert_eq!(prompt(&r), ":set tab-width 3");
     keys(&mut r, "<a-n>");
     assert_eq!(prompt(&r), ":se");
-    keys(&mut r, "<esc>:<a-p><a-p><ret>");
+    keys(&mut r, "<esc><a-x><a-p><a-p><ret>");
     assert_eq!(r.app().options().int(None, "tab-width"), 5);
     assert_eq!(r.command_history(), ["set tab-width 3", "set tab-width 5"]);
 }
 #[test]
 fn search_recalls_earlier_searches() {
     let mut r = runtime();
-    keys(&mut r, "/foo<ret>/bar<ret>");
+    keys(&mut r, "vfoo<ret>vbar<ret>");
     assert_eq!(r.search_history(), ["foo", "bar"]);
-    keys(&mut r, "/<up>");
-    assert_eq!(prompt(&r), "/bar");
+    keys(&mut r, "v<up>");
+    assert_eq!(prompt(&r), "Find [1]: bar");
     keys(&mut r, "<up><ret>");
     assert_eq!(r.search_history(), ["bar", "foo"]);
 }

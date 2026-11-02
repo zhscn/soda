@@ -67,10 +67,7 @@ pub enum Event {
         time: Duration,
     },
     /// Replaces the clipboard, as when the system clipboard changed.
-    SetClipboard {
-        text: String,
-        linewise: bool,
-    },
+    SetClipboard(String),
     NewDocument(Language),
     AddView(DocumentId),
     Focus(ViewId),
@@ -354,11 +351,8 @@ pub struct Application {
     open_revision: u64,
     pending_opens: BTreeMap<OpenId, OpenIntent>,
     clipboard: String,
-    clipboard_linewise: bool,
     /// Counts clipboard replacements, so frontends can mirror them.
     clipboard_revision: u64,
-    /// Named Vim registers and whether each holds whole lines.
-    registers: BTreeMap<char, (String, bool)>,
     windows: Windows,
     /// Views by when they were last focused, most recent last.
     recent: Vec<ViewId>,
@@ -1140,7 +1134,7 @@ impl Application {
             Event::Clipboard { view, action, time } => {
                 self.clipboard_action(view, action, time, &mut update)?;
             }
-            Event::SetClipboard { text, linewise } => self.set_clipboard(text, linewise),
+            Event::SetClipboard(text) => self.set_clipboard(text),
             Event::SetViewport {
                 view,
                 anchor,

@@ -142,7 +142,7 @@ fn kill_puts_the_text_on_the_clipboard() {
     keys(&mut r, "u");
     assert_eq!(text(&r), "foo(a,\n    b);\n", "one undo step");
     let (_dir, mut r) = open("a.cpp", "|f(a,\nb);\n", EditMode::Normal);
-    keys(&mut r, "<c-k>$p");
+    keys(&mut r, "<c-k><c-e>p");
     assert_eq!(text(&r), ";f(a,\nb)\n");
 }
 #[test]
@@ -172,7 +172,8 @@ fn backspace_keeps_pairs() {
         I,
         &[
             ("foo bar|", "<c-w>", "foo |"),
-            ("f(a, |b)", "<c-w>", "f(a|b)"),
+            // Word deletion takes Emacs words: punctuation goes with the word before.
+            ("f(a, |b)", "<c-w>", "f(|b)"),
             ("f(a)  |", "<c-w>", "f(a)|"),
             ("f(a)|", "<c-w>", "f(a|)"),
         ],
@@ -254,9 +255,9 @@ fn unmapping_a_key_brings_back_the_built_in_one() {
 #[test]
 fn built_in_keys_reach_their_commands() {
     let (_dir, mut r) = open("a.cpp", "|ab;\n", EditMode::Normal);
-    keys(&mut r, "gc");
+    keys(&mut r, "<a-;>");
     assert_eq!(text(&r), "// ab;\n");
     keys(&mut r, "u");
-    keys(&mut r, "vlS\"");
+    keys(&mut r, "LL<c-c>\"");
     assert_eq!(text(&r), "\"ab\";\n", "{}", r.message());
 }

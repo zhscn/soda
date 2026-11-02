@@ -45,13 +45,13 @@ fn patterns_highlight_globally_or_in_one_document() {
     // Marks of the word at the caret take the next colour each.
     line(
         &mut r,
-        "define-command mark-word highlight-local mark \\b%val{word}\\b",
+        "define-command mark-here highlight-local mark \\b%val{word}\\b",
     );
-    line(&mut r, "mark-word");
-    keys(&mut r, "w");
-    line(&mut r, "mark-word");
-    keys(&mut r, "w");
-    line(&mut r, "mark-word");
+    line(&mut r, "mark-here");
+    keys(&mut r, "<a-f><c-f>");
+    line(&mut r, "mark-here");
+    keys(&mut r, "<a-f><c-f>");
+    line(&mut r, "mark-here");
     assert_eq!(
         shown(&r)[1..],
         [
@@ -63,7 +63,7 @@ fn patterns_highlight_globally_or_in_one_document() {
     // Another document sees only the global highlight.
     r.command(Command::New);
     assert_eq!(shown(&r).len(), 1);
-    line(&mut r, "mark-word");
+    line(&mut r, "mark-here");
     assert_eq!(r.message(), "%val{word}: no word at the caret");
     line(&mut r, "next-view");
     line(&mut r, "unhighlight \\bfoo\\b");
@@ -172,7 +172,7 @@ fn keys_on_a_mark_jump_between_its_occurrences_and_show_the_place() {
 }
 
 #[test]
-fn keys_mean_what_they_always_do_off_a_mark_and_in_an_operator() {
+fn keys_mean_what_they_always_do_off_a_mark_and_in_a_count() {
     let mut r = runtime("foo bar foo\n");
     r.load_startup_lua();
     keys(&mut r, "<space>i");
@@ -188,10 +188,10 @@ fn keys_mean_what_they_always_do_off_a_mark_and_in_an_operator() {
     keys(&mut r, "l");
     keys(&mut r, "l");
     assert_eq!(head(&r), 4);
-    keys(&mut r, "dw");
-    assert_eq!(text(&r), "foo foo\n");
-    // Part way through a count, n is Vim's and does not jump.
-    keys(&mut r, "gg0");
+    keys(&mut r, "wd");
+    assert_eq!(text(&r), "foo  foo\n");
+    // Part way through a count, n is the search and does not jump.
+    keys(&mut r, "<a-lt>");
     keys(&mut r, "2n");
     assert_eq!(head(&r), 0);
     // The space after a symbol is not on it.

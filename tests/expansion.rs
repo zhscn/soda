@@ -55,7 +55,7 @@ fn statements_expand_when_they_run() {
     assert_eq!(int(&r, "indent-width"), 4, "{}", r.message());
     // Bodies keep their expansions until they run, here from a key.
     line(&mut r, "map normal Q set-local tab-width %val{line}");
-    keys(&mut r, "ggjQ");
+    keys(&mut r, "<a-lt>jQ");
     assert_eq!(int(&r, "tab-width"), 2, "{}", r.message());
 }
 #[test]

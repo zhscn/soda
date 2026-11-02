@@ -287,7 +287,7 @@ fn path_slots_browse_directories_and_backspace_removes_one() {
 fn matching_slots_complete_by_cursor_position_and_require_a_candidate() {
     let root = tree();
     let mut r = runtime(root.path());
-    keys(&mut r, ":");
+    keys(&mut r, "<a-x>");
     r.input(UserInput::Paste("map ".into()));
     // Choices without keys take typed text.
     keys(&mut r, "no");
@@ -381,7 +381,7 @@ fn candidates_carry_matched_ranges_and_description_offsets() {
         _ => panic!("command line is not open"),
     };
     // Fuzzy name match: letters in order, not necessarily adjacent.
-    keys(&mut r, ":");
+    keys(&mut r, "<a-x>");
     r.input(UserInput::Paste("svas".into()));
     let (label, marked, detail) = first(&r);
     assert!(label.starts_with("saveas PATH"));
@@ -415,7 +415,7 @@ fn a_typed_decision_leaves_room_for_its_path_and_a_question_takes_one_key() {
     wait(&mut r, |r| r.app().workspace().documents().count() == 2);
     keys(&mut r, "ix<esc>");
     // Typed, `s` is text: the line can go on to name another path.
-    keys(&mut r, ":quit s");
+    keys(&mut r, "<a-x>quit s");
     assert_eq!(text(&r), "quit s");
     r.input(UserInput::Paste("ave copy.txt".into()));
     keys(&mut r, "<ret>");
@@ -429,7 +429,7 @@ fn a_typed_decision_leaves_room_for_its_path_and_a_question_takes_one_key() {
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "a");
     // Asked about an unsaved document, one key answers.
     let mut r = runtime(root.path());
-    keys(&mut r, "iy<esc>:quit<ret>");
+    keys(&mut r, "iy<esc><a-x>quit<ret>");
     assert!(text(&r).starts_with("quit"));
     keys(&mut r, "d");
     assert!(r.quit_requested(), "{}", r.message());

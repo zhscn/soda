@@ -1,7 +1,7 @@
--- Puts a pair around the Visual selection: `surround (`, `surround "`, or
+-- Puts a pair around the selection: `surround (`, `surround "`, or
 -- two words for any pair, as in `surround <b> </b>`. An opening bracket
 -- brings its closing one; any other single argument goes on both sides.
--- Built in: S followed by a bracket or quote in Visual.
+-- Built in: SPC followed by a bracket or quote.
 
 local closing = { ["("] = ")", ["["] = "]", ["{"] = "}", ["<"] = ">" }
 
@@ -15,13 +15,12 @@ soda.define_command("surround", function(argument)
     soda.message("surround: give a pair, as in surround (")
     return
   end
-  local mode = soda.val("mode")
-  if mode ~= "visual" and mode ~= "visual-line" then
+  local buf = soda.buffer()
+  local from, to = buf:selection()
+  if from[1] == to[1] and from[2] == to[2] then
     soda.message("surround: select text first")
     return
   end
-  local buf = soda.buffer()
-  local from, to = buf:selection()
   if from[1] > to[1] or (from[1] == to[1] and from[2] > to[2]) then
     from, to = to, from
   end
@@ -29,5 +28,5 @@ soda.define_command("surround", function(argument)
 end)
 
 for _, key in ipairs({ "(", "[", "{", '"', "'", "`" }) do
-  soda.command("map visual S" .. key .. " surround " .. key)
+  soda.command("map global <c-c>" .. key .. " surround " .. key)
 end

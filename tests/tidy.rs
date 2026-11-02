@@ -28,7 +28,7 @@ fn text(r: &Runtime) -> String {
     editor.model().document().snapshot().text().to_owned()
 }
 fn save(r: &mut Runtime, path: &Path, expected: &str) {
-    keys(r, ":w<ret>");
+    keys(r, "<a-x>w<ret>");
     let deadline = Instant::now() + Duration::from_secs(2);
     while std::fs::read_to_string(path).unwrap() != expected {
         assert!(
@@ -52,14 +52,14 @@ fn saving_trims_edited_lines_and_ends_with_a_line_break() {
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
     r.start(Some(path.clone()));
     wait(&mut r, |r| text(r) == "keep  \nedit\nlast");
-    keys(&mut r, "jA \t<esc>");
+    keys(&mut r, "j<c-e>a \t<esc>");
     save(&mut r, &path, "keep  \nedit\nlast\n");
     assert_eq!(text(&r), "keep  \nedit\nlast\n");
     // Tidying is its own undo step.
     keys(&mut r, "u");
     assert_eq!(text(&r), "keep  \nedit \t\nlast");
     // A caret at the end keeps to its line after the break is added.
-    keys(&mut r, "GA!<esc>");
+    keys(&mut r, "<a-gt><c-e>a!<esc>");
     save(&mut r, &path, "keep  \nedit\nlast!\n");
     keys(&mut r, "a?<esc>");
     assert_eq!(text(&r), "keep  \nedit\nlast!?\n");

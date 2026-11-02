@@ -1,15 +1,21 @@
 //! Search queries and snapshot cursors, independent of UI and parsers.
 //! Patterns are regular expressions matched within lines, ignoring case
-//! unless they contain a capital, as kakoune and Vim's smartcase.
+//! unless they contain a capital, as kakoune does.
 use crate::core::Snapshot;
 use regex::{Regex, RegexBuilder};
 use std::{collections::VecDeque, ops::Range};
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Whole {
+    Word,
+    Symbol,
+}
 #[derive(Clone, Debug)]
 pub struct SearchQuery {
     text: String,
-    /// Matches only where no word character touches either end.
-    whole_word: bool,
+    /// Matches only where nothing of the same kind touches either end:
+    /// letters and digits for a word, and underscores too for a symbol.
+    whole: Option<Whole>,
     regex: Result<Regex, String>,
 }
 /// Whether a pattern asks for exact case: a capital that is not an escape
@@ -36,17 +42,25 @@ impl SearchQuery {
             .map_err(|_| "invalid pattern".to_owned());
         Self {
             text,
-            whole_word: false,
+            whole: None,
             regex,
         }
     }
-    /// A query for `text` exactly, as a whole word, as Vim's `*` searches.
+    /// A query for `text` exactly, as a whole word: `add` matches in
+    /// `add_executable`, where the underscore ends the word.
     pub fn word(text: impl Into<String>) -> Self {
-        let text = text.into();
+        Self::whole(text.into(), Whole::Word)
+    }
+    /// A query for `text` exactly, as a whole symbol: an underscore next to
+    /// it makes a longer symbol, so `add` does not match in `add_x`.
+    pub fn symbol(text: impl Into<String>) -> Self {
+        Self::whole(text.into(), Whole::Symbol)
+    }
+    fn whole(text: String, whole: Whole) -> Self {
         Self {
             regex: Ok(Regex::new(&regex::escape(&text)).unwrap()),
             text,
-            whole_word: true,
+            whole: Some(whole),
         }
     }
     pub fn text(&self) -> &str {
@@ -130,19 +144,23 @@ impl Iterator for SearchCursor<'_> {
                 .find_iter(&text)
                 .filter(|m| !m.is_empty())
                 .map(|m| start + m.start()..start + m.end())
-                .filter(|found| !self.query.whole_word || self.is_word_boundary(found))
+                .filter(|found| {
+                    self.query
+                        .whole
+                        .is_none_or(|whole| self.is_boundary(found, whole))
+                })
                 .collect();
             self.found.extend(found);
         }
     }
 }
 impl SearchCursor<'_> {
-    fn is_word_boundary(&self, found: &Range<usize>) -> bool {
+    fn is_boundary(&self, found: &Range<usize>, whole: Whole) -> bool {
         let word = |range: Range<usize>| {
             self.snapshot
                 .byte_slice(range)
                 .and_then(|slice| slice.chars().next())
-                .is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
+                .is_some_and(|ch| ch.is_alphanumeric() || (whole == Whole::Symbol && ch == '_'))
         };
         let before =
             crate::core::step_grapheme(self.snapshot, crate::core::ByteOffset(found.start), false)

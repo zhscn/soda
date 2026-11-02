@@ -7,9 +7,10 @@
 -- which is not something opening a file should do.
 --
 -- Built in: <a-.> goes to the definition, <a-?> lists references, <a-,> comes
--- back; K shows what the caret is on in a box until the next key; <space>c and <space>C list the callers
--- and the callees; <space>R renames and <space>a offers code actions;
--- <space>s and <space>S find symbols; <space>h switches header and source.
+-- back. Under the leader (SPC, which is <c-c>): k shows what the caret is on
+-- in a box until the next key; c and C list the callers and the callees; R
+-- renames and a offers code actions; s and S find symbols; h switches header
+-- and source.
 -- Completion follows from the server being there.
 
 soda.lsp.server("cpp", { "clangd", "--header-insertion=never", "--function-arg-placeholders=1" })
@@ -824,11 +825,11 @@ soda.completion.register({
 
 soda.command("map normal <a-.> lsp-definition")
 soda.command("map normal <a-?> lsp-references")
-soda.command("map normal K lsp-hover")
-soda.command("map normal <space>c lsp-callers")
-soda.command("map normal <space>C lsp-callees")
-soda.command("map normal <space>R lsp-rename")
-soda.command("map normal <space>a lsp-code-action")
-soda.command("map normal <space>s lsp-symbols")
-soda.command("map normal <space>S lsp-workspace-symbols")
-soda.command("map normal <space>h lsp-switch")
+soda.command("map global <c-c>k lsp-hover")
+soda.command("map global <c-c>c lsp-callers")
+soda.command("map global <c-c>C lsp-callees")
+soda.command("map global <c-c>R lsp-rename")
+soda.command("map global <c-c>a lsp-code-action")
+soda.command("map global <c-c>s lsp-symbols")
+soda.command("map global <c-c>S lsp-workspace-symbols")
+soda.command("map global <c-c>h lsp-switch")

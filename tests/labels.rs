@@ -72,12 +72,12 @@ fn two_characters_then_a_label_move_the_caret() {
 fn windows_are_picked_by_label() {
     let mut r = runtime("x");
     let first = r.app().active_view().unwrap();
-    keys(&mut r, ":vsplit<ret>");
+    keys(&mut r, "<a-x>vsplit<ret>");
     let second = r.app().active_view().unwrap();
     // With two windows, the other one is taken at once.
     keys(&mut r, "<space>w");
     assert_eq!(r.app().active_view(), Some(first));
-    keys(&mut r, ":split<ret>");
+    keys(&mut r, "<a-x>split<ret>");
     let third = r.app().active_view().unwrap();
     keys(&mut r, "<space>w");
     let shown = labels(&r);

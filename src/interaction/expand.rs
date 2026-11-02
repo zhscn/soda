@@ -22,7 +22,7 @@ pub const VALUES: &[(&str, &str)] = &[
         "column-limit",
         "clang-format's ColumnLimit for the file, 0 without one",
     ),
-    ("mode", "normal, insert, visual or visual-line"),
+    ("mode", "normal, insert or beacon"),
     (
         "hook",
         "In a hook, the event's parameter, such as the saved path",
@@ -37,8 +37,6 @@ pub(super) fn has_expansions(line: &str) -> bool {
 pub(super) struct State<'a> {
     pub app: &'a Application,
     pub mode: EditMode,
-    /// The Vim caret when it differs from the selection head.
-    pub caret: Option<usize>,
     pub root: &'a Path,
     /// The parameter of the event whose hooks are running.
     pub hook: Option<&'a str>,
@@ -112,7 +110,7 @@ fn value(name: &str, state: &State) -> Result<String, String> {
             let editor = app.workspace().editor(document).unwrap();
             let snapshot = editor.model().document().snapshot();
             let selection = editor.model().session(view.session_id).unwrap().selection();
-            let head = state.caret.unwrap_or(selection.head);
+            let head = selection.head;
             let line = snapshot.line_of(head).unwrap();
             match name {
                 "line" => (line + 1).to_string(),

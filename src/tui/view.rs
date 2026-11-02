@@ -660,18 +660,14 @@ fn status(
         None => match runtime.edit_mode() {
             EditMode::Normal => ("NORMAL", theme.mode_normal),
             EditMode::Insert => ("INSERT", theme.mode_insert),
-            EditMode::Visual => ("VISUAL", theme.mode_visual),
-            EditMode::VisualLine => ("V-LINE", theme.mode_visual),
+            EditMode::Beacon => ("BEACON", theme.mode_visual),
         },
     };
     let app = runtime.app();
     let view = app.active_view().and_then(|id| app.view(id));
     let mut right = vec![];
-    if let Some(register) = runtime.recording() {
-        right.push(Text::styled(
-            format!("recording @{register}  "),
-            theme.modified,
-        ));
+    if runtime.recording() {
+        right.push(Text::styled("recording  ", theme.modified));
     }
     if let Some(pending) = runtime.pending_keys() {
         right.push(Text::styled(format!("{pending}  "), theme.key));
@@ -934,6 +930,12 @@ fn key_hints(buf: &mut Buffer, areas: &Areas, runtime: &Runtime, theme: &Theme) 
     let max_rows = usize::from(areas.editor.height.saturating_sub(2)).clamp(1, 12);
     let columns = entries.len().div_ceil(max_rows);
     let rows = entries.len().div_ceil(columns);
+    // Narrow columns cut their words rather than hide what the keys are.
+    let room = usize::from(areas.editor.width).saturating_sub(2) / columns;
+    let column_width = column_width.min(room.saturating_sub(2));
+    if column_width <= key_width + 2 {
+        return;
+    }
     let width = (columns * (column_width + 2) + 2) as u16;
     let height = rows as u16 + 2;
     if width > areas.editor.width || height > areas.editor.height {
@@ -1051,7 +1053,7 @@ mod tests {
         assert!(rows[1].starts_with("   1 │ int main() {"));
         assert!(rows[12].starts_with(" NORMAL  [untitled "));
         assert!(rows[12].contains("] [+]"));
-        assert!(rows[12].trim_end().ends_with("3:1  100%"));
+        assert!(rows[12].trim_end().ends_with("3:2  100%"));
         assert_eq!(
             rows[13].trim(),
             "",
@@ -1071,7 +1073,7 @@ mod tests {
         assert!(rows[4].contains("unsaved [untitled ") && rows[4].trim_end().ends_with("· 1/2"));
         assert!(rows[5].starts_with("▌ save         [s]"));
         assert!(rows[6].starts_with("  discard      [d]"));
-        keys(&mut r, "<esc>:");
+        keys(&mut r, "<esc><a-x>");
         r.input(UserInput::Paste("map normal ".into()));
         let text = screen(&mut r, 60, 14);
         let rows: Vec<_> = text.lines().collect();
@@ -1089,7 +1091,7 @@ mod tests {
                 .unwrap()
                 .starts_with("╭ Help · Esc closes")
         );
-        assert!(text.lines().nth(2).unwrap().starts_with("│ Vim editing"));
+        assert!(text.lines().nth(2).unwrap().starts_with("│ Modal editing"));
     }
     #[test]
     fn notes_underline_their_range_and_speak_at_the_caret() {
@@ -1374,7 +1376,7 @@ mod tests {
             screen(r, 40, 8).lines().map(str::to_owned).collect()
         };
         // Line 3 is a real empty line and reachable; nothing follows it.
-        keys(&mut r, "ggjjjj");
+        keys(&mut r, "<a-lt>jjjj");
         let shown = rows(&mut r);
         assert!(shown[3].starts_with("   3 │"), "{shown:?}");
         assert!(!shown[4].contains('4'));
@@ -1389,14 +1391,45 @@ mod tests {
         r.command(Command::Edit(crate::editor::Command::InsertText(
             "a".into(),
         )));
-        keys(&mut r, "A<ret>");
+        keys(&mut r, "a<ret>");
         let shown = rows(&mut r);
         assert!(shown[2].starts_with("   2 │"), "{shown:?}");
         assert!(shown[6].contains("2:1"));
+        // Leaving Insert keeps the caret there, so the line stays until the
+        // caret moves away, as at the end of an Emacs buffer.
         keys(&mut r, "<esc>");
+        assert!(rows(&mut r)[2].starts_with("   2 │"));
+        keys(&mut r, "k");
         let shown = rows(&mut r);
         assert!(!shown[2].contains('2'), "{shown:?}");
         assert!(shown[6].contains("1:1"));
+    }
+    #[test]
+    fn expand_digits_show_on_text_and_after_the_end_of_lines() {
+        let root = tempfile::tempdir().unwrap();
+        let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.start(None);
+        r.command(Command::Edit(crate::editor::Command::InsertText(
+            "ab\ncd ef gh\nij\n".into(),
+        )));
+        r.command(Command::Edit(crate::editor::Command::SetSelection(
+            crate::core::Selection::caret(0),
+        )));
+        r.command(Command::SetMode(EditMode::Normal));
+        // A line selection extends to line ends, where no character is.
+        keys(&mut r, "e");
+        let shown = screen(&mut r, 30, 6);
+        let rows: Vec<_> = shown.lines().collect();
+        // The first row is the tab line.
+        assert!(rows[2].contains("cd ef gh1"), "{shown}");
+        assert!(rows[3].contains("ij2"), "{shown}");
+        // A word selection's next end within the line covers the space there.
+        keys(&mut r, "<esc><c-n><c-a>w");
+        let shown = screen(&mut r, 30, 6);
+        assert!(
+            shown.lines().nth(2).unwrap().contains("cd ef1gh2"),
+            "{shown}"
+        );
     }
     #[test]
     fn flags_take_the_first_gutter_cell() {
@@ -1436,7 +1469,7 @@ mod tests {
             "a\nb\nc\nd".into(),
         )));
         r.command(Command::SetMode(EditMode::Normal));
-        keys(&mut r, "gg");
+        keys(&mut r, "<a-lt>");
         keys(&mut r, "j");
         r.command(Command::Named("set line-numbers relative".into()));
         let text = screen(&mut r, 40, 10);

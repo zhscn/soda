@@ -42,12 +42,13 @@ fn carets_and_histories_outlive_the_session() {
     r.start(None);
     open(&mut r, &a);
     keys(&mut r, "2jll");
-    keys(&mut r, ":close<ret>");
+    keys(&mut r, "<a-x>close<ret>");
     // Within the session, a closed file opens where it was left.
     open(&mut r, &a);
     wait(&mut r, |r| caret(r).unwrap().1 == 10);
     open(&mut r, &b);
-    keys(&mut r, "j/y<ret>");
+    // The search selects the match; the caret is its head.
+    keys(&mut r, "jvy<ret>");
     let text = r.persist();
     let mut next = Runtime::new(dir.path().to_owned()).unwrap();
     next.restore(&text);
@@ -56,5 +57,5 @@ fn carets_and_histories_outlive_the_session() {
     next.start(Some(a.clone()));
     wait(&mut next, |r| caret(r).is_some_and(|(_, head)| head == 10));
     open(&mut next, &b);
-    wait(&mut next, |r| caret(r).unwrap().1 == 2);
+    wait(&mut next, |r| caret(r).unwrap().1 == 3);
 }

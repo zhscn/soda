@@ -238,8 +238,8 @@ pub(super) fn register<'scope, 'r: 'scope>(
             let anchor = offset(snapshot, &anchor)?;
             let head = offset(snapshot, &head)?;
             runtime.failed = false;
-            runtime.command(crate::interaction::Command::Vim(
-                crate::interaction::vim::VimCommand::VisualRange { anchor, head },
+            runtime.command(crate::interaction::Command::Edit(
+                crate::editor::Command::SetSelection(crate::core::Selection { anchor, head }),
             ));
             Ok(())
         })?,

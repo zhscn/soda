@@ -40,11 +40,12 @@ fn line(r: &mut Runtime, command: &str) {
 fn indentation_options_shape_plain_text_and_local_values_win() {
     let mut r = runtime("a\nb");
     line(&mut r, "set indent-width 2");
-    keys(&mut r, ">>");
+    line(&mut r, "indent");
     assert_eq!(text(&r), "  a\nb");
     line(&mut r, "set expand-tab false");
     line(&mut r, "set tab-width 2");
-    keys(&mut r, "j>>");
+    keys(&mut r, "j");
+    line(&mut r, "indent");
     assert_eq!(text(&r), "  a\n\tb");
     // A second document takes the global values; a local one only its own.
     r.command(Command::New);
@@ -53,7 +54,7 @@ fn indentation_options_shape_plain_text_and_local_values_win() {
     r.command(Command::SetMode(EditMode::Normal));
     line(&mut r, "set-local indent-width 8");
     line(&mut r, "set-local expand-tab true");
-    keys(&mut r, ">>");
+    line(&mut r, "indent");
     assert_eq!(text(&r), "        c");
     let document = r
         .app()

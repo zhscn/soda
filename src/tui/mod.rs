@@ -178,7 +178,7 @@ fn draw(
     drawn?;
     Ok(())
 }
-/// The text of every window; only the active one shows the Vim caret.
+/// The text of every window; only the active one shows beacons.
 fn frames(
     runtime: &Runtime,
     highlighter: &mut Highlighter,
@@ -189,16 +189,21 @@ fn frames(
         .windows
         .iter()
         .map(|window| {
-            let caret = runtime
-                .editor_caret()
-                .filter(|_| Some(window.view) == active);
+            let overlay = if Some(window.view) == active {
+                layout::Overlay {
+                    beacons: runtime.beacons(),
+                    digits: runtime.expand_hints(),
+                }
+            } else {
+                layout::Overlay::default()
+            };
             layout::frame(
                 runtime.app(),
                 window.view,
                 highlighter,
                 window.text.width,
                 window.text.height,
-                caret,
+                &overlay,
             )
         })
         .collect()
@@ -213,7 +218,6 @@ fn follow(runtime: &mut Runtime, areas: &view::Areas) -> io::Result<()> {
         window.view,
         window.text.width,
         window.text.height,
-        runtime.editor_caret(),
     )
     .map_err(io::Error::other)?
     {

@@ -1,4 +1,4 @@
--- Emacs editing commands that have no Vim counterpart: word case, transposing
+-- Emacs editing commands: word case, transposing
 -- and whitespace. Moves and the C-x keys are built into the key tables.
 --
 -- Built in: <a-u> <a-l> <a-c> <a-t> <a-\> <a-space> <a-^> and <c-t> in Normal

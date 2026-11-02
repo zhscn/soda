@@ -25,7 +25,7 @@ fn switch_reuses_a_view_without_preview_and_cancel_leaves_focus() {
     key(&mut r, Key::Esc);
     assert_eq!(r.app().active_view(), Some(second));
     r.command(Command::SetMode(soda::interaction::EditMode::Normal));
-    key(&mut r, Key::Char(':'));
+    r.command(Command::Named("commands".into()));
     key(&mut r, Key::Char('b'));
     key(&mut r, Key::Enter);
     key(&mut r, Key::Enter);

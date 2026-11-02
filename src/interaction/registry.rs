@@ -2,9 +2,9 @@
 //! the command palette. Built-in names are fixed; registered Rust handlers and
 //! user definitions share one replaceable namespace.
 use super::{
-    Command, Departure, EditMode, WindowCommand,
-    keymap::{Context, LINE_EDITS, LineEdit, PROMPT_ACTIONS},
-    vim::{Insert, VimCommand},
+    Command, Departure, WindowCommand,
+    keymap::{Context, KeypadStart, LINE_EDITS, LineEdit, PROMPT_ACTIONS},
+    modal::{Action, Entry as InsertAt, Query, Step},
 };
 use crate::{
     application::{Application, Axis, ClipboardAction, Direction},
@@ -80,8 +80,9 @@ const OPTIONAL_PATH: Slot = Slot {
 const MODE: Slot = slot(
     "MODE",
     SlotKind::Choice(&[
+        word("global", "Keys of every mode, and of the keypad"),
         word("normal", "Normal mode keys"),
-        word("visual", "Visual mode keys"),
+        word("beacon", "Beacon keys, over Normal's"),
         word("insert", "Insert mode keys"),
         word("completion", "Keys while the completion list shows"),
         word("snippet", "Keys while a snippet has places left"),
@@ -303,6 +304,14 @@ fn context(name: &str) -> Result<Context, String> {
 fn keys(text: &str) -> Result<Vec<super::KeyStroke>, String> {
     super::KeyStroke::parse_sequence(text)
 }
+fn digit(text: &str) -> Result<usize, String> {
+    text.trim()
+        .parse()
+        .map_err(|_| format!("not a digit: {text}"))
+}
+fn typed(text: &str) -> Result<Vec<super::UserInput>, String> {
+    Ok(keys(text)?.into_iter().map(super::UserInput::Key).collect())
+}
 fn move_line(backward: bool, extend: bool) -> Command {
     Command::Edit(Edit::Move {
         motion: if backward { Motion::Up } else { Motion::Down },
@@ -469,7 +478,7 @@ pub static BUILTINS: &[Builtin] = &[
     builtin!(
         "search-backward",
         "Search the document backward",
-        Command::Vim(VimCommand::Search { backward: true })
+        Command::SearchBackward
     ),
     builtin!("replace", "Search and replace", Command::Replace),
     builtin!(
@@ -488,22 +497,8 @@ pub static BUILTINS: &[Builtin] = &[
         "Open the command line to choose a command",
         Command::Ex(String::new())
     ),
-    builtin!(
-        "undo",
-        "Undo",
-        Command::Vim(VimCommand::Undo {
-            redo: false,
-            count: 1
-        })
-    ),
-    builtin!(
-        "redo",
-        "Redo",
-        Command::Vim(VimCommand::Undo {
-            redo: true,
-            count: 1
-        })
-    ),
+    builtin!("undo", "Undo", Command::Modal(Action::Undo { redo: false })),
+    builtin!("redo", "Redo", Command::Modal(Action::Undo { redo: true })),
     builtin!(
         "completion-trigger",
         "List candidates for the word at the caret",
@@ -553,23 +548,17 @@ pub static BUILTINS: &[Builtin] = &[
     builtin!(
         "recenter",
         "Scroll so the caret's line is in the middle of the window",
-        Command::Vim(VimCommand::Recenter)
+        Command::Modal(Action::Recenter)
     ),
     builtin!(
         "half-page-down",
         "Move down half a page and scroll with it",
-        Command::Vim(VimCommand::HalfPage {
-            down: true,
-            count: 0
-        })
+        Command::Modal(Action::HalfPage { down: true })
     ),
     builtin!(
         "half-page-up",
         "Move up half a page and scroll with it",
-        Command::Vim(VimCommand::HalfPage {
-            down: false,
-            count: 0
-        })
+        Command::Modal(Action::HalfPage { down: false })
     ),
     builtin!(
         "copy",
@@ -656,25 +645,295 @@ pub static BUILTINS: &[Builtin] = &[
         "Outdent the current or selected lines",
         Command::Edit(Edit::IndentSelection { outdent: true })
     ),
-    builtin!(
-        "normal-mode",
-        "Leave Insert or Visual",
-        Command::Vim(VimCommand::Insert(Insert::Leave))
-    ),
+    builtin!("normal-mode", "Leave Insert", Command::Modal(Action::Leave)),
     builtin!(
         "insert-mode",
         "Insert before the cursor",
-        Command::Vim(VimCommand::Insert(Insert::Before))
+        Command::Modal(Action::Insert(InsertAt::Before))
     ),
     builtin!(
-        "visual-mode",
-        "Characterwise Visual",
-        Command::SetMode(EditMode::Visual)
+        "left",
+        "Move left, keeping a character selection",
+        Command::Modal(Action::Move {
+            step: Step::Left,
+            extend: false
+        })
+    ),
+    builtin!(
+        "right",
+        "Move right, keeping a character selection",
+        Command::Modal(Action::Move {
+            step: Step::Right,
+            extend: false
+        })
+    ),
+    builtin!(
+        "up",
+        "Move up, keeping a character selection",
+        Command::Modal(Action::Move {
+            step: Step::Up,
+            extend: false
+        })
+    ),
+    builtin!(
+        "down",
+        "Move down, keeping a character selection",
+        Command::Modal(Action::Move {
+            step: Step::Down,
+            extend: false
+        })
+    ),
+    builtin!(
+        "left-expand",
+        "Extend a character selection left",
+        Command::Modal(Action::Move {
+            step: Step::Left,
+            extend: true
+        })
+    ),
+    builtin!(
+        "right-expand",
+        "Extend a character selection right",
+        Command::Modal(Action::Move {
+            step: Step::Right,
+            extend: true
+        })
+    ),
+    builtin!(
+        "up-expand",
+        "Extend a character selection up",
+        Command::Modal(Action::Move {
+            step: Step::Up,
+            extend: true
+        })
+    ),
+    builtin!(
+        "down-expand",
+        "Extend a character selection down",
+        Command::Modal(Action::Move {
+            step: Step::Down,
+            extend: true
+        })
+    ),
+    builtin!(
+        "next-word",
+        "Select to the end of the next word",
+        Command::Modal(Action::Thing {
+            symbol: false,
+            backward: false
+        })
+    ),
+    builtin!(
+        "back-word",
+        "Select to the start of the previous word",
+        Command::Modal(Action::Thing {
+            symbol: false,
+            backward: true
+        })
+    ),
+    builtin!(
+        "next-symbol",
+        "Select to the end of the next symbol",
+        Command::Modal(Action::Thing {
+            symbol: true,
+            backward: false
+        })
+    ),
+    builtin!(
+        "back-symbol",
+        "Select to the start of the previous symbol",
+        Command::Modal(Action::Thing {
+            symbol: true,
+            backward: true
+        })
+    ),
+    builtin!(
+        "mark-word",
+        "Select the word here and search for it",
+        Command::Modal(Action::Mark { symbol: false })
+    ),
+    builtin!(
+        "mark-symbol",
+        "Select the symbol here and search for it",
+        Command::Modal(Action::Mark { symbol: true })
+    ),
+    builtin!(
+        "select-line",
+        "Select the line; again extends",
+        Command::Modal(Action::Line)
+    ),
+    builtin!(
+        "block",
+        "Select the group around the selection; again takes its parent",
+        Command::Modal(Action::Query(Query::Block))
+    ),
+    builtin!(
+        "to-block",
+        "Extend to the end of the next group",
+        Command::Modal(Action::Query(Query::ToBlock))
+    ),
+    builtin!(
+        "find",
+        "Select through the next occurrence of a character",
+        Command::Modal(Action::Find { till: false })
+    ),
+    builtin!(
+        "till",
+        "Select up to the next occurrence of a character",
+        Command::Modal(Action::Find { till: true })
+    ),
+    builtin!(
+        "inner-of-thing",
+        "Select inside a thing: r s c a brackets, g string, e w symbol word, p l b",
+        Command::Modal(Action::ThingAt { inner: true })
+    ),
+    builtin!(
+        "bounds-of-thing",
+        "Select around a thing",
+        Command::Modal(Action::ThingAt { inner: false })
+    ),
+    builtin!(
+        "reverse",
+        "Swap the ends of the selection",
+        Command::Modal(Action::Reverse)
+    ),
+    builtin!(
+        "cancel",
+        "Drop the selection; in Beacon with none, leave",
+        Command::Modal(Action::Cancel)
+    ),
+    builtin!(
+        "pop-selection",
+        "Go back to the previous selection",
+        Command::Modal(Action::PopSelection { all: false })
+    ),
+    builtin!(
+        "pop-all-selection",
+        "Go back to the first selection",
+        Command::Modal(Action::PopSelection { all: true })
+    ),
+    builtin!(
+        "negative-argument",
+        "Reverse the next command",
+        Command::Modal(Action::Negative)
+    ),
+    builtin!(
+        "insert",
+        "Insert at the start of the selection",
+        Command::Modal(Action::Insert(InsertAt::Before))
+    ),
+    builtin!(
+        "append",
+        "Insert at the end of the selection",
+        Command::Modal(Action::Insert(InsertAt::After))
+    ),
+    builtin!(
+        "open-below",
+        "Open a line below and insert",
+        Command::Modal(Action::Insert(InsertAt::Below))
+    ),
+    builtin!(
+        "open-above",
+        "Open a line above and insert",
+        Command::Modal(Action::Insert(InsertAt::Above))
+    ),
+    builtin!(
+        "kill",
+        "Cut the selection, or to the line end",
+        Command::Modal(Action::Kill)
+    ),
+    builtin!(
+        "change",
+        "Delete the selection, or a character, and insert",
+        Command::Modal(Action::Change)
+    ),
+    builtin!(
+        "delete",
+        "Delete the selection or a character, leaving the clipboard alone",
+        Command::Modal(Action::Delete)
+    ),
+    builtin!("save", "Copy the selection", Command::Modal(Action::Save)),
+    builtin!(
+        "put",
+        "Paste at the caret, leaving the selection in place",
+        Command::Modal(Action::Yank)
+    ),
+    builtin!(
+        "replace-selection",
+        "Paste over the selection",
+        Command::Modal(Action::Replace)
+    ),
+    builtin!(
+        "join",
+        "Select the blanks between this line and the one above",
+        Command::Modal(Action::Join)
+    ),
+    builtin!(
+        "search-next",
+        "Select the next match of the search, or of the selection",
+        Command::Modal(Action::Search)
+    ),
+    builtin!(
+        "search-pop",
+        "Forget the search for the one before it",
+        Command::Modal(Action::PopSearch)
+    ),
+    builtin!(
+        "set-mark",
+        "Start a character selection at the caret",
+        Command::Modal(Action::SetMark)
+    ),
+    builtin!(
+        "grab",
+        "Enter Beacon inside the selection, or leave a marker",
+        Command::Modal(Action::Grab)
+    ),
+    builtin!(
+        "swap-grab",
+        "Swap the selection with what was grabbed",
+        Command::Modal(Action::SwapGrab)
+    ),
+    builtin!(
+        "macro-start",
+        "Start recording keys",
+        Command::Modal(Action::MacroStart)
+    ),
+    builtin!(
+        "macro-end",
+        "End recording, or play the last macro",
+        Command::Modal(Action::MacroEnd)
+    ),
+    builtin!(
+        "macro-lines",
+        "Play the last macro on each selected line",
+        Command::Modal(Action::MacroLines)
+    ),
+    builtin!(
+        "macro-matches",
+        "Play the last macro on each match of the search",
+        Command::Modal(Action::MacroMatches)
+    ),
+    builtin!(
+        "repeat",
+        "Run the last command again",
+        Command::Modal(Action::Repeat)
+    ),
+    builtin!(
+        "expand",
+        [slot("N", SlotKind::Word)],
+        "More of what the selection covers; without one, a count",
+        |a| Ok(Command::Modal(Action::Expand(digit(a)?)))
+    ),
+    builtin!(
+        "digit-argument",
+        [slot("N", SlotKind::Word)],
+        "Start or extend a count for the next command",
+        |a| Ok(Command::Modal(Action::Digit(digit(a)?)))
     ),
     builtin!(
         "map",
         [MODE, KEYS, slot("COMMAND", SlotKind::Rest)],
-        "Bind keys in normal, visual, insert or prompt",
+        "Bind keys in global, normal, beacon, insert or prompt",
         |a| {
             let (mode, rest) = split(a);
             let (sequence, target) = split(rest);
@@ -868,10 +1127,24 @@ pub static BUILTINS: &[Builtin] = &[
         |a| Ok(Command::UnflagLines((!a.is_empty()).then(|| a.to_owned())))
     ),
     builtin!(
+        "keypad",
+        [slot("START", SlotKind::Word)],
+        "Read keys through the keypad: leader, meta, ctrl-meta or a prefix key",
+        |a| Ok(Command::Keypad(match required(a)?.as_str() {
+            "leader" => KeypadStart::Leader,
+            "meta" => KeypadStart::Modifier { control: false },
+            "ctrl-meta" => KeypadStart::Modifier { control: true },
+            prefix => match keys(prefix)?[..] {
+                [key] => KeypadStart::Prefix(key),
+                _ => return Err("keypad starts from one key".into()),
+            },
+        }))
+    ),
+    builtin!(
         "each-line",
         [slot("KEYS", SlotKind::Rest)],
-        "Type KEYS in Normal mode at the start of each selected line, as Vim's :normal",
-        |a| Ok(Command::EachLine(keys(&required(a)?)?))
+        "Type KEYS in Normal mode at the start of each selected line",
+        |a| Ok(Command::EachLine(typed(&required(a)?)?))
     ),
     builtin!(
         "each-match",
@@ -884,7 +1157,7 @@ pub static BUILTINS: &[Builtin] = &[
             let (pattern, rest) = split(a);
             Ok(Command::EachMatch {
                 pattern: regex::Regex::new(&required(pattern)?).map_err(|e| e.to_string())?,
-                keys: keys(&required(rest)?)?,
+                keys: typed(&required(rest)?)?,
             })
         }
     ),

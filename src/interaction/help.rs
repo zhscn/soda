@@ -5,45 +5,43 @@ use super::{
     session::Transition,
 };
 
-const VIM: &str = "Vim editing
-Normal is the initial mode. Esc / Ctrl-[ / Ctrl-C leave Insert or Visual.
-i / a Insert before / after cursor   I / A Insert at line start / end
-o / O Open a line below / above, using language indentation
-h j k l / arrows Move   w b e Word start / back / end
-0 / ^ / $ Line start / first nonblank / end   gg / G First / last line
-f t F T + character Find in line   ; / , Repeat / reverse the find
-% Matching bracket   { / } Previous / next empty line   Ctrl-D / Ctrl-U Half page
-Counts: 3w, 2dd, 2d3w, 3gg, 3G (maximum 10000)
-d / c / y + motion Delete / change / yank   dd / cc / yy Whole lines
-> / < Shift lines   gu / gU / g~ Lower / upper / toggle case   ~ Toggle a character
-Text objects after an operator or in Visual: iw aw iW aW i\" a\" i' i` i( a( ib i[ i{ iB i< ip ap
-D / C Delete / change to line end   s / S Substitute characters / lines   J Join lines
-x / X Delete characters forward / backward   r + character Replace
-p / P Put after / before cursor   u Undo   Ctrl-R Redo   . Repeat the last change
-\"a-\"z Named register before y d c p   \"A-\"Z Append   \"_ Discard
-q + register Record a macro, q stops   @ + register Play it   @@ Play the last again
-m + letter Set a mark   ' / ` + letter Jump to its line / exact position
-v / V Characterwise / linewise Visual; motions extend; o swaps ends; p replaces
-/ / ? Search forward / backward   n / N Repeat / reverse search   * / # Search the word";
-const SCOPE: &str = "Scope
-Supported Vim commands form a fixed subset. Unsupported Normal input is consumed.
-Block Visual, counted inserts and file marks are not implemented.
-Search is literal and case-sensitive. Unicode movement uses editor graphemes.
-File and buffer commands use Soda workflows, not a general Ex interpreter.";
-const NOTES: &str = "Esc / Ctrl-[ / Ctrl-C leave Insert and Visual and cancel pending keys.
-Ctrl-C in Normal also stops run, shell and grep; ]q / [q step through their results.
-Space j jumps to two typed characters by label; Space w picks a window by label.
+const MODAL: &str = "Modal editing
+Normal selects first, then acts on the selection, as meow does. Unbound keys do nothing.
+h j k l Move, across lines   H J K L Extend a character selection
+w b / W B Select a word / symbol; again takes the next
+[ ] Mark the word / symbol here, which also becomes the search
+e Select the line; again extends   o Group around the selection; again its parent   O To the next group
+f t + character Select through / up to it   , . + thing Select inside / around it
+Things: r s c a brackets, g string, w word, e symbol, p paragraph, l line, b buffer
+Digits extend a selection by as many more; hints show where. Without one, a digit is a count.
+- Reverses the next command   Space and digits Give a count
+; Swap the ends   z Previous selection   Z First selection   Esc Drop the selection
+i a Insert at the start / end of the selection   I A Open a line above / below
+r Cut, or to the line end   s Change   d Delete   y Copy   p Paste   ' Select the join to the line above
+v Search   n Next match, of the search or the selection   N Forget the search
+u Undo   U Redo   ` Repeat the last command
+q Jump by two characters   Q Go to a line   R Replace   / Open a file
+
+Keypad
+x c start C-x and C-c: x s is C-x C-s. Each key is tried with Ctrl, then plain; Space forces plain.
+Space is the leader: Space f is C-c f. m and g put M- and C-M- on the next key.
+
+Macros and Beacon
+F3 / C-x ( Record   F4 / C-x ) End, or play   C-x e Play
+E Play on each selected line   V Play on each match of the search
+G Grab the selection: Beacon, where each selection follows the main one's kind.
+In Beacon i a s type at every selection; a macro recorded there plays at each of them.
+Without a selection G leaves a marker; S swaps the selection with what was grabbed.";
+const NOTES: &str = "Esc / Ctrl-[ / Ctrl-G leave Insert and cancel pending keys.
+C-c C-c stops run, shell and grep; M-g n / M-g p step through their results.
 Printable characters insert text in Insert and prompts.
-Unbound Normal and Visual keys use the Vim grammar above.
-Emacs moves are Vim motions there: C-f C-b C-n C-p C-a C-e M-f M-b M-m M-< M-> M-{ M-}.
-Also C-s search, C-Space Visual, C-y paste; in Visual C-w cuts and M-w copies; in Normal M-d kills a word.
 Command lines read state with %opt{NAME} and %val{file|name|kind|line|column|selection|word|root|mode|column-limit}.
 Hooks: hook open|new|save|close|mode|focus FILTER COMMAND runs COMMAND when FILTER matches.
 Configuration: ~/.config/soda/init holds map, unmap, define-command, hook, set, display and highlight lines.";
 
 /// Help generated from the effective key tables and command registry.
 pub fn text(keymap: &Keymap, registry: &Registry) -> String {
-    let mut out = format!("{VIM}\n\n{NOTES}\n");
+    let mut out = format!("{MODAL}\n\n{NOTES}\n");
     for context in Context::ALL {
         out.push_str(&format!("\n{} keys\n", context.name()));
         // One row per target, listing every key bound to it.
@@ -69,7 +67,6 @@ pub fn text(keymap: &Keymap, registry: &Registry) -> String {
         out.push_str(&format!("  {name:<38} {}\n", info.doc));
     }
     out.push('\n');
-    out.push_str(SCOPE);
     out
 }
 /// Help for the default bindings, as printed by `--help`.

@@ -88,7 +88,7 @@ fn insert_mode_uses_readline_keys() {
 #[test]
 fn prompts_share_readline_keys() {
     let mut r = runtime("");
-    keys(&mut r, "<esc>:");
+    keys(&mut r, "<esc><a-x>");
     r.input(UserInput::Paste("abc def".into()));
     keys(&mut r, "<c-a><c-f><c-k>");
     let Some(Layer::CommandLine(_)) = r.layer() else {
@@ -102,20 +102,20 @@ fn prompts_share_readline_keys() {
 #[test]
 fn command_line_resolves_names_aliases_and_line_numbers() {
     let mut r = runtime("one\ntwo\nthree");
-    keys(&mut r, "<esc>:");
+    keys(&mut r, "<esc><a-x>");
     r.input(UserInput::Paste("2".into()));
     keys(&mut r, "<ret>");
     assert_eq!(state(&r).1, 4);
-    keys(&mut r, ":");
+    keys(&mut r, "<a-x>");
     r.input(UserInput::Paste("no-such-command".into()));
     keys(&mut r, "<ret>");
     let text = r.layer().unwrap().presentation().text;
     assert!(text.contains("unknown command"), "{text}");
-    keys(&mut r, "<esc>:");
+    keys(&mut r, "<esc><a-x>");
     r.input(UserInput::Paste("ls".into()));
     keys(&mut r, "<ret>");
     assert!(matches!(r.layer(), Some(Layer::CommandLine(_))));
-    keys(&mut r, "<esc>:");
+    keys(&mut r, "<esc><a-x>");
     r.input(UserInput::Paste("open".into()));
     keys(&mut r, "<ret>");
     assert!(matches!(r.layer(), Some(Layer::CommandLine(_))));
@@ -127,7 +127,7 @@ fn open_accepts_a_path_argument() {
     std::fs::write(dir.path().join("a b.txt"), "content").unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
     r.start(None);
-    keys(&mut r, ":");
+    keys(&mut r, "<a-x>");
     r.input(UserInput::Paste("open a b.txt".into()));
     keys(&mut r, "<ret>");
     for _ in 0..500 {
@@ -152,7 +152,7 @@ fn configuration_maps_defines_and_reports_line_numbers() {
          map prompt <c-j> confirm\n\
          map normal x no-such-command\n\
          quit\n\
-         map visual <c-x><esc> nop\n",
+         map normal <c-x><esc> nop\n",
     );
     let lines: Vec<_> = errors.iter().map(|(line, _)| *line).collect();
     assert_eq!(lines, [6, 7, 8]);
@@ -163,7 +163,7 @@ fn configuration_maps_defines_and_reports_line_numbers() {
     wait_for_shell(&mut r);
     assert_eq!(state(&r).0, "HELLO WORLD");
     // The prompt binding confirms the command line.
-    keys(&mut r, ":");
+    keys(&mut r, "<a-x>");
     r.input(UserInput::Paste("ls".into()));
     keys(&mut r, "<c-j>");
     assert!(matches!(r.layer(), Some(Layer::CommandLine(_))));

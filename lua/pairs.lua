@@ -6,7 +6,7 @@
 -- do what the built-in ones do.
 --
 -- Built in, with Emacs's keys: <c-a-f> <c-a-b> <c-a-u> <c-a-a> <c-a-e> move
--- in every mode; <a-o> and <c-a-space> select in Normal and Visual; <c-k>,
+-- in every mode; <a-o> and <c-a-space> select in Normal; <c-k>,
 -- <c-a-k>, <c-a-bs>, <c-s-right> and <c-s-left> work in Normal and Insert;
 -- Backspace and word deletion are soft in Insert. To keep a built-in key,
 -- unmap it:
@@ -22,9 +22,9 @@ end
 local function line_end(buf, line)
   return { line, #buf:line(line) + 1 }
 end
-local function visual()
-  local mode = soda.val("mode")
-  return mode == "visual" or mode == "visual-line"
+local function selecting(buf)
+  local anchor, head = buf:selection()
+  return not same(anchor, head)
 end
 
 -- The nearest expression, past comments and directives.
@@ -38,7 +38,7 @@ local function step(buf, at, method)
 end
 
 local function move(buf, to)
-  if visual() then
+  if selecting(buf) then
     local anchor = buf:selection()
     buf:select(anchor, to)
   else
@@ -80,7 +80,7 @@ soda.define_command("sexp-expand", function()
     from, to = to, from
   end
   local range
-  if visual() then
+  if selecting(buf) then
     range = buf:enclosing(from)
     while range and before(range.to, to) do
       range = buf:enclosing(range.from)
@@ -294,14 +294,14 @@ soda.define_command("sexp-kill-backward", function()
   end
 end)
 
-for _, mode in ipairs({ "normal", "visual", "insert" }) do
+for _, mode in ipairs({ "normal", "insert" }) do
   soda.command("map " .. mode .. " <c-a-f> sexp-forward")
   soda.command("map " .. mode .. " <c-a-b> sexp-backward")
   soda.command("map " .. mode .. " <c-a-u> sexp-up")
   soda.command("map " .. mode .. " <c-a-a> sexp-beginning")
   soda.command("map " .. mode .. " <c-a-e> sexp-end")
 end
-for _, mode in ipairs({ "normal", "visual" }) do
+for _, mode in ipairs({ "normal" }) do
   soda.command("map " .. mode .. " <a-o> sexp-expand")
   soda.command("map " .. mode .. " <c-a-space> sexp-expand")
 end

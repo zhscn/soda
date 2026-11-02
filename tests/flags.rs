@@ -51,7 +51,7 @@ fn flags_mark_lines_by_group_and_follow_edits() {
     line(&mut r, "flag-lines build error ✗ %val{line}");
     assert_eq!(flags(&r)[0], (1, "✗".into(), Face::Error));
     // Lines opened above move the flags down with their text.
-    keys(&mut r, "ggOnew<esc>");
+    keys(&mut r, "<a-lt>Inew<esc>");
     assert_eq!(flags(&r).iter().map(|f| f.0).collect::<Vec<_>>(), [2, 4, 5]);
     // Removing a group leaves the other.
     line(&mut r, "unflag-lines build");

@@ -332,41 +332,40 @@ fn copies_reach_the_system_clipboard_and_pastes_read_it() {
     host.set_system_clipboard(Box::new(system.clone()));
     host.input(TerminalEvent::Paste("one\ntwo".into()));
     host.input(key(KeyCode::Esc));
-    for ch in "ggyy".chars() {
+    host.command(Action::Named("document-start".into()));
+    for ch in ".ly".chars() {
         host.input(key(KeyCode::Char(ch)));
     }
     assert_eq!(system.0.borrow().0, ["one\n"]);
-    // The system clipboard still holds the same text: the yank stays linewise.
+    // The system clipboard still holds the same text: it pastes at the caret.
     system.0.borrow_mut().1 = Some("one\n".into());
     host.input(key(KeyCode::Char('p')));
     assert_eq!(document_text(&host), "one\none\ntwo");
     // Text copied elsewhere replaces it, by character unless it ends a line.
     system.0.borrow_mut().1 = Some("X".into());
-    host.input(key(KeyCode::Char('P')));
-    assert_eq!(document_text(&host), "one\nXone\ntwo");
+    host.input(key(KeyCode::Char('p')));
+    assert_eq!(document_text(&host), "one\none\nXtwo");
     // Loading does not echo the text back.
     assert_eq!(system.0.borrow().0, ["one\n"]);
 }
 #[test]
-fn pointer_clicks_place_the_caret_and_drags_select_in_visual_mode() {
-    use crate::interaction::{EditMode, Pointer};
+fn pointer_clicks_place_the_caret_and_drags_select() {
+    use crate::interaction::Pointer;
     let mut host = host();
     host.input(TerminalEvent::Paste("one\ntwo\nthree".into()));
     host.input(TerminalEvent::Pointer(Pointer::Drag { anchor: 1, head: 5 }));
-    assert_eq!(host.edit_mode(), EditMode::Visual);
-    assert_eq!(selection(&host).range(), 1..6);
+    assert_eq!(selection(&host).range(), 1..5);
     host.input(TerminalEvent::Pointer(Pointer::Reveal(9)));
-    assert_eq!(selection(&host).range(), 1..10);
+    assert_eq!(selection(&host).range(), 1..9);
     host.input(TerminalEvent::Pointer(Pointer::Click(5)));
-    assert_eq!(host.edit_mode(), EditMode::Normal);
     assert_eq!(selection(&host), crate::core::Selection::caret(5));
-    // Normal mode keeps the caret on a character.
+    // Normal mode lets the caret sit at the end of a line.
     host.input(TerminalEvent::Pointer(Pointer::Click(3)));
-    assert_eq!(selection(&host), crate::core::Selection::caret(2));
+    assert_eq!(selection(&host), crate::core::Selection::caret(3));
     // Modal layers keep the pointer away from the text.
     host.command(Action::Save { choose_path: true });
     host.input(TerminalEvent::Pointer(Pointer::Click(8)));
-    assert_eq!(selection(&host), crate::core::Selection::caret(2));
+    assert_eq!(selection(&host), crate::core::Selection::caret(3));
 }
 #[test]
 fn an_internal_clipboard_leaves_the_system_one_alone() {
@@ -377,9 +376,9 @@ fn an_internal_clipboard_leaves_the_system_one_alone() {
     system.0.borrow_mut().1 = Some("outside".into());
     host.input(TerminalEvent::Paste("one".into()));
     host.input(key(KeyCode::Esc));
-    for ch in "yyp".chars() {
+    for ch in ".lyp".chars() {
         host.input(key(KeyCode::Char(ch)));
     }
     assert!(system.0.borrow().0.is_empty());
-    assert_eq!(document_text(&host), "one\none");
+    assert_eq!(document_text(&host), "oneone");
 }

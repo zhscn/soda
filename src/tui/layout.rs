@@ -62,6 +62,8 @@ pub(super) fn row(
 ) -> Vec<Span> {
     let marks = Marks {
         selection,
+        beacons: &[],
+        digits: &[],
         matches: &[],
         detail: text.len(),
         categories: &[],
@@ -71,11 +73,22 @@ pub(super) fn row(
     };
     styled_row(text, byte_start, marks, left, width, tab)
 }
+/// What the modal layer shows over the text of the active window.
+#[derive(Default)]
+pub(super) struct Overlay {
+    /// The other selections of Beacon.
+    pub beacons: Vec<std::ops::Range<usize>>,
+    /// Digits that extend the selection, drawn over the character there.
+    pub digits: Vec<(usize, char)>,
+}
 /// Byte ranges styled within a row: the selection is document-relative;
 /// matches, the detail offset and highlight categories are relative to the
 /// row text, categories ordered and disjoint.
 struct Marks<'a> {
     selection: std::ops::Range<usize>,
+    /// More selections, of Beacon; carets among them show as one cell.
+    beacons: &'a [std::ops::Range<usize>],
+    digits: &'a [(usize, char)],
     matches: &'a [std::ops::Range<usize>],
     detail: usize,
     categories: &'a [(std::ops::Range<usize>, Category)],
@@ -140,6 +153,8 @@ fn styled_row(
 ) -> Vec<Span> {
     let Marks {
         selection,
+        beacons,
+        digits,
         matches,
         detail,
         categories,
@@ -189,7 +204,13 @@ fn styled_row(
         if end > left && cells > 0 {
             let visible = end.min(right).saturating_sub(column.max(left));
             let marked = whitespace && (cluster == "\t" || (cluster == " " && offset >= trailing));
-            let rendered = if marked && column >= left {
+            let digit = digits
+                .iter()
+                .find(|(place, _)| *place == byte_start + offset)
+                .map(|(_, digit)| *digit);
+            let rendered = if let Some(digit) = digit {
+                format!("{digit}{}", " ".repeat(visible.saturating_sub(1)))
+            } else if marked && column >= left {
                 let mark = if cluster == "\t" { "»" } else { "·" };
                 format!("{mark}{}", " ".repeat(visible - 1))
             } else if cluster == "\t" || column < left || end > right {
@@ -199,9 +220,13 @@ fn styled_row(
             } else {
                 cluster.into()
             };
-            let selected = !selection.is_empty()
-                && byte_start + offset < selection.end
-                && byte_start + offset + cluster.len() > selection.start;
+            let at = byte_start + offset;
+            let selected = (!selection.is_empty()
+                && at < selection.end
+                && at + cluster.len() > selection.start)
+                || beacons.iter().any(|beacon| {
+                    at < beacon.end.max(beacon.start + 1) && at + cluster.len() > beacon.start
+                });
             let matched = matches
                 .iter()
                 .any(|range| offset < range.end && offset + cluster.len() > range.start);
@@ -221,7 +246,8 @@ fn styled_row(
                 .iter()
                 .rev()
                 .find(|(range, _)| range.start <= offset && offset < range.end)
-                .map(|(_, face)| *face);
+                .map(|(_, face)| *face)
+                .or(digit.map(|_| Face::Todo));
             if let Some(last) = spans.last_mut().filter(|last| {
                 last.selected == selected
                     && last.matched == matched
@@ -268,6 +294,8 @@ pub(super) fn candidate_row<T>(
     };
     let marks = Marks {
         selection,
+        beacons: &[],
+        digits: &[],
         matches: &row.highlights,
         detail: detail.unwrap_or(text.len()),
         categories: &[],
@@ -527,13 +555,12 @@ pub(super) fn follow_caret(
     id: ViewId,
     width: u16,
     rows: u16,
-    caret: Option<usize>,
 ) -> Result<Option<ViewportAdjustment>, crate::application::Error> {
     let view = app.view(id).unwrap();
     let editor = app.workspace().editor(view.document_id).unwrap();
     let state = editor.model().session(view.session_id).unwrap().state();
     let snapshot = editor.model().document().snapshot();
-    let head = caret.unwrap_or(state.selection().head);
+    let head = state.selection().head;
     let layout = Rows::new(app, view, width, head).unwrap();
     let tab = layout.tab;
     let (place, column) = layout.place(head);
@@ -636,11 +663,10 @@ pub(super) fn scroll(
     lines: isize,
     width: u16,
     rows: u16,
-    caret: Option<usize>,
 ) -> Option<(ViewportAdjustment, Option<usize>)> {
     let view = app.view(id)?;
     let editor = app.workspace().editor(view.document_id)?;
-    let head = caret.unwrap_or(editor.model().session(view.session_id)?.selection().head);
+    let head = editor.model().session(view.session_id)?.selection().head;
     let layout = Rows::new(app, view, width, head)?;
     let (top, _) = layout.place(view.viewport.anchor.offset.0);
     let top = layout.step(top, lines);
@@ -687,7 +713,7 @@ pub(super) fn frame(
     highlighter: &mut Highlighter,
     width: u16,
     rows: u16,
-    caret: Option<usize>,
+    modal: &Overlay,
 ) -> Result<Option<Frame>, crate::application::Error> {
     let Some(view) = app.view(id) else {
         return Ok(None);
@@ -696,7 +722,7 @@ pub(super) fn frame(
     let document = editor.model().document();
     let state = editor.model().session(view.session_id).unwrap().state();
     let snapshot = document.snapshot();
-    let head = caret.unwrap_or(state.selection().head);
+    let head = state.selection().head;
     let line = snapshot.line_of(head).unwrap();
     let tab = document.whitespace().tab_width;
     let column = logical_column_at(snapshot, ByteOffset(head), tab)?.0;
@@ -725,7 +751,7 @@ pub(super) fn frame(
     let highlights = highlighter.lines(app, view.document_id, top..bottom);
     let options = app.options();
     let show_whitespace = options.bool(Some(view.document_id), "show-whitespace");
-    // The ruler marks the first column past the limit, as Vim's colorcolumn.
+    // The ruler marks the first column past the limit.
     let ruler = match options.int(Some(view.document_id), "ruler") as usize {
         0 => None,
         limit => limit
@@ -780,6 +806,18 @@ pub(super) fn frame(
                 })
                 .collect(),
         };
+        // A digit at the end of a line has no character to stand on, so it
+        // stands after the text, as the indicator does.
+        if last_row != Some(false) {
+            let end = line_start + text.trim_end_matches(['\n', '\r']).len();
+            for (_, digit) in modal.digits.iter().filter(|(at, _)| *at == end) {
+                hints.push(Inlay {
+                    column: usize::MAX,
+                    text: digit.to_string(),
+                    face: Some(Face::Todo),
+                });
+            }
+        }
         if last_row != Some(false)
             && let Some(text) = app.indicator(view.document_id, number)
         {
@@ -791,6 +829,8 @@ pub(super) fn frame(
         }
         let marks = Marks {
             selection: state.selection().range(),
+            beacons: &modal.beacons,
+            digits: &modal.digits,
             matches: &[],
             detail: text.len(),
             categories: &categories,
@@ -909,8 +949,7 @@ mod tests {
         width: u16,
         height: u16,
     ) -> Result<Frame, crate::application::Error> {
-        if let Some(viewport) =
-            super::follow_caret(app, app.active_view().unwrap(), width, height, None)?
+        if let Some(viewport) = super::follow_caret(app, app.active_view().unwrap(), width, height)?
         {
             app.dispatch(Event::SetViewport {
                 view: viewport.view,
@@ -924,7 +963,7 @@ mod tests {
             &mut Highlighter::default(),
             width,
             height,
-            None,
+            &Overlay::default(),
         )?
         .unwrap())
     }
@@ -1066,7 +1105,7 @@ mod tests {
             &mut Highlighter::default(),
             0,
             0,
-            None,
+            &Overlay::default(),
         )
         .unwrap()
         .unwrap();
@@ -1192,14 +1231,14 @@ mod tests {
             &mut Highlighter::default(),
             10,
             4,
-            None,
+            &Overlay::default(),
         )
         .unwrap()
         .unwrap();
         assert_eq!(app.view(view).unwrap().viewport, before);
         assert!(projected.cursor.is_none());
         assert!(
-            super::follow_caret(&app, app.active_view().unwrap(), 10, 4, None)
+            super::follow_caret(&app, app.active_view().unwrap(), 10, 4)
                 .unwrap()
                 .is_some()
         );
@@ -1272,7 +1311,7 @@ mod tests {
         let shown = frame(&mut app, 10, 2).unwrap();
         assert_eq!(joined_row(&shown.rows[0]), "three four");
         assert_eq!(shown.cursor, Some((1, 1)));
-        let (viewport, reveal) = super::scroll(&app, view, -1, 10, 2, None).unwrap();
+        let (viewport, reveal) = super::scroll(&app, view, -1, 10, 2).unwrap();
         assert_eq!(viewport.anchor, ByteOffset(0));
         // The caret comes back to the bottom row, at its column in the row.
         assert_eq!(reveal, Some(9));
@@ -1294,16 +1333,14 @@ mod tests {
         assert_eq!(super::offset_at(&app, 80, 1, 1), Some(5));
         assert_eq!(super::offset_at(&app, 80, -1, 0), Some(0));
         assert_eq!(super::offset_at(&app, 80, 9, 0), Some(13));
-        let (viewport, reveal) =
-            super::scroll(&app, app.active_view().unwrap(), 3, 80, 2, None).unwrap();
+        let (viewport, reveal) = super::scroll(&app, app.active_view().unwrap(), 3, 80, 2).unwrap();
         assert_eq!(viewport.anchor, ByteOffset(10));
         assert_eq!(reveal, Some(10));
         // The last line can scroll to the top and no further.
-        let (viewport, _) =
-            super::scroll(&app, app.active_view().unwrap(), 30, 80, 2, None).unwrap();
+        let (viewport, _) = super::scroll(&app, app.active_view().unwrap(), 30, 80, 2).unwrap();
         assert_eq!(viewport.anchor, ByteOffset(13));
         assert_eq!(
-            super::scroll(&app, app.active_view().unwrap(), -1, 80, 2, None)
+            super::scroll(&app, app.active_view().unwrap(), -1, 80, 2)
                 .unwrap()
                 .1,
             None

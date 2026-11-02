@@ -10,7 +10,7 @@ Soda 是以 TUI 交付、以 C++ 交互缩进为核心体验的 Rust 编辑器�
 | --- | --- |
 | P0 | C++ 即时缩进与 tab/space 混排可靠、自然；行为与 clang-format 布局一致 |
 | P1 | 代码规模与复杂度可控，模块职责清晰、可独立验证 |
-| P2 | 默认工作流开箱即用：Vim 编辑、readline 输入键、文件与缓冲区、搜索替换、命令面板 |
+| P2 | 默认工作流开箱即用：模态编辑、readline 输入键、文件与缓冲区、搜索替换、命令面板 |
 | P3 | 基础扩展能力：键位、命令组合与外部进程 |
 | P4 | 保留语言服务、GUI 和远程会话的演进空间 |
 
@@ -25,7 +25,7 @@ Soda 是以 TUI 交付、以 C++ 交互缩进为核心体验的 Rust 编辑器�
 | `language` | 语言档案与目录（文件归属的唯一判断）、跨语言共享的空白策略与生成 | [语法高亮与导航](syntax.md)、[交互缩进](indentation.md) |
 | `files` | 文件 I/O、工作区、打开与保存请求、后台 worker | [文件服务](files.md) |
 | `application` | owner-thread 状态归约：视图、窗口树、文档、剪贴板与寄存器、文件完成 | [边界契约](contracts.md) |
-| `interaction` | 键位、命令表、Vim 语法、输入框、picker、搜索替换、补全等会话 | [交互层](interaction.md)、[补全](completion.md)、[扩展模型](extension.md) |
+| `interaction` | 键位、命令表、模态编辑、输入框、picker、搜索替换、补全等会话 | [交互层](interaction.md)、[模态编辑的设计](modal.md)、[补全](completion.md)、[扩展模型](extension.md) |
 | `options` | 带类型的选项表，全局值与文档覆盖 | [扩展模型](extension.md) |
 | `runtime` | 命令循环：执行响应、观察更新、调度后台任务与外部命令、语言服务器的进程与同步 | [交互层](interaction.md)、[语言服务器](lsp.md) |
 | `syntax` | 分类、C++ 词法着色、TextMate 引擎与增量行缓存、内置语法；只依赖 `core` 和 `cpp` | [语法高亮与导航](syntax.md) |
@@ -39,7 +39,7 @@ Soda 是以 TUI 交付、以 C++ 交互缩进为核心体验的 Rust 编辑器�
 
 **C++ 分析。** 使用自有的无损词法和扁平节点树，不依赖 tree-sitter 或 clangd。编辑后重新词法分析受影响区域并修复容器节点，与完整分析做差分测试。续行与对齐移植 clang-format 的 ContinuationIndenter 规则（fake parentheses、嵌套块缩进、参数对齐），以 clang-format 格式化过的 LLVM 源码为准测量一致率。节点目前使用绝对位置，每次编辑有 O(n) 的偏移更新；改为相对位置是已知的后续工作。
 
-**交互模型。** 保留 Vim 的 Normal/Insert/Visual 和 operator 语法，不采用 helix 的选择优先模型。Insert 和所有输入框共享 readline 风格的行编辑键。
+**交互模型。** 选择优先，语义和键位取自 meow：Normal、Insert、Beacon 三个固定模式，每个键是一条命令，分发是 Emacs 式的键位表栈，`x s` 和 `C-x C-s` 走同一棵绑定树。多选区只存在于 Beacon，Normal 永远只有一个选区。Vim 语法已经移除：它是固定的底层，Emacs 键只能翻译成 Vim 键，产出范围的功能（结构化选择、符号标记）接不进 operator 语法。Insert 和所有输入框共享 readline 风格的行编辑键。理由与取舍见[模态编辑的设计](modal.md)。
 
 **扩展模型。** 按 kakoune 的方式组织：所有操作是命名命令，键位、`:` 命令行、配置文件和帮助都引用命令名；扩展通过 `define-command` 组合命令，用 `pipe` / `shell` 调用外部进程。选项、展开和钩子让命令语言能读写状态并响应事件；命令语言只做配置，逻辑写在 Lua 5.4（mlua）里，绑定到同一组命令、展开和通知上，见[扩展模型](extension.md)。
 
@@ -55,13 +55,13 @@ Soda 是以 TUI 交付、以 C++ 交互缩进为核心体验的 Rust 编辑器�
 
 ## 5 当前范围与后续工作
 
-已完成：编辑内核与历史、文件生命周期、C++ 增量分析与缩进、clang-format 配置、TUI、语法高亮、Vim 子集（含文本对象、dot repeat、宏、寄存器、标记）、搜索替换、文件与缓冲区 picker、命令表、键位配置、命令面板、外部命令、系统剪贴板、鼠标、分屏与显示规则、项目搜索。
+已完成：编辑内核与历史、文件生命周期、C++ 增量分析与缩进、clang-format 配置、TUI、语法高亮、meow 式模态编辑（选区、keypad、宏、Beacon 多选区）、搜索替换、文件与缓冲区 picker、命令表、键位配置、命令面板、外部命令、系统剪贴板、鼠标、分屏与显示规则、项目搜索。
 
 待定事项，开始前需要确认方向：
 
 - C++：三元表达式续行、宏内容、尾随注释对齐；CST 相对位置改写。
 - 语言服务：clangd/LSP 接入（补全、诊断、跳转）与语法高亮的取舍。
-- 交互：多选区、Visual block、窗口大小调整。
+- 交互：窗口大小调整。
 - 前端：GUI 与远程会话，在本地会话模型稳定后再设计。
 
 ## 6 设计参考
@@ -72,7 +72,8 @@ Soda 是以 TUI 交付、以 C++ 交互缩进为核心体验的 Rust 编辑器�
 | --- | --- | --- |
 | llvm-project | `~/project/llvm-project` | `clang/lib/Format/` 的结构识别、token 角色、ContinuationIndenter 与空白生成 |
 | intellij-community | `~/project/intellij-community` | 缩进查询服务边界、Search Everywhere 的来源与结果管理 |
-| kakoune | `~/project/kakoune` | 命令、键位与扩展模型；代码规模参照 |
+| kakoune | `~/project/kakoune` | 命令、键位与扩展模型；选区与多选区；代码规模参照 |
+| meow | `~/.emacs.d/elpaca/sources/meow` | 模态编辑的语义与键位、keypad、beacon |
 | helix | `~/package/helix` | Rust 编辑内核与终端前端组织、keymap 与命令表 |
 | codemirror | `~/package/codemirror` | 状态、事务、历史分组与搜索 cursor |
 | neovim | `~/package/neovim` | 命令行补全状态、位置结果集 |

@@ -105,7 +105,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `soda.choose(title, items, fn)` | 在命令行里从 `items` 中选一项，输入过滤，选中后以从 1 起的序号调用 `fn`；取消时不调用 |
 | `soda.hook(event, filter, fn)` | 事件发生时以事件参数调用 `fn` |
 | `soda.define_command(name, fn)` | 定义命令，调用时把参数文本整体传给 `fn` |
-| `soda.results(kind, lines)` | 把结果行写入 `*kind*` 并设为最近的结果，回车和 `]q`/`[q` 与 `grep`、`run` 的结果相同；`lines` 可以是 `路径:行:列:` 行，或文件名行加缩进的 `行:列  文本` 分组行；其他行留作标题，一个位置都没有时只显示消息 |
+| `soda.results(kind, lines)` | 把结果行写入 `*kind*` 并设为最近的结果，回车和 `M-g n`/`M-g p` 与 `grep`、`run` 的结果相同；`lines` 可以是 `路径:行:列:` 行，或文件名行加缩进的 `行:列  文本` 分组行；其他行留作标题，一个位置都没有时只显示消息 |
 | `soda.open(path, [line], [column])` | 打开文件并放置光标，行列从 1 开始，列按字节；打开是异步的，文件内容要在之后的请求里读 |
 | `soda.clipboard(text)` | 替换剪贴板内容，与编辑器自己的复制一样同步到系统剪贴板 |
 | `soda.spawn(argv, fn, [input])` | 在项目根目录后台运行程序（不经过 shell），结束后调用 `fn(code, stdout, stderr)`；`input` 写入标准输入 |
@@ -117,19 +117,19 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 
 ### 内置模块
 
-`lua/` 目录的模块编译进二进制，用户无需安装。启动时加载的模块只增加命令和键位，用到时才做事；`git-flags` 每打开或保存一个文件都运行 git，所以要在 `init.lua` 里 `require("git-flags")` 才生效。不想要某个键时用 `unmap`。
+`lua/` 目录的模块编译进二进制，用户无需安装。启动时加载的模块只增加命令和键位，用到时才做事；`git-flags` 每打开或保存一个文件都运行 git，所以要在 `init.lua` 里 `require("git-flags")` 才生效。不想要某个键时用 `unmap`。leader 指 Normal 的 `SPC`，它读作 `<c-c>`，所以这些键在 `global` 表里绑成 `<c-c>` 加一个键，所有模式下 `C-c` 加同一个键也能用。
 
 | 模块 | 内容 | 键位 |
 | --- | --- | --- |
-| `lsp` | 跳转、引用、调用层级、hover、诊断、重命名、代码动作、符号、格式化、签名提示和补全，见[语言服务器](lsp.md) | `<a-.>`、`<a-?>`、`K`、`<space>c`、`<space>C`、`<space>R`、`<space>a`、`<space>s`、`<space>S`、`<space>h` |
+| `lsp` | 跳转、引用、调用层级、hover、诊断、重命名、代码动作、符号、格式化、签名提示和补全，见[语言服务器](lsp.md) | `<a-.>`、`<a-?>`，leader 下的 `k`、`c`、`C`、`R`、`a`、`s`、`S`、`h` |
 | `pairs` | 结构化编辑，见[交互层](interaction.md#结构化编辑) | 见交互层 |
-| `comment` | 切换行注释 | Normal、Visual 的 `gc`、`<a-;>` |
+| `comment` | 切换行注释 | `<a-;>` |
 | `emacs` | Emacs 的单词大小写、对调和空白命令，见[交互层](interaction.md#emacs-键位) | 见交互层 |
 | `snippets` | 按语言注册 snippet，作为补全候选，见[补全](completion.md#snippet) | 无 |
-| `surround` | 在 Visual 选区两侧加上成对的文本 | Visual 的 `S` 加括号或引号 |
-| `clang-format` | 用 clang-format 格式化文档或 Visual 选中的行，只替换有变化的行 | 无 |
-| `symbol-overlay` | 标记符号并在标记之间跳转、改名，见[交互层](interaction.md#高亮模式) | `<space>i`、`<space>I`、`<a-n>`、`<a-p>`，以及 `mark` 键位表 |
-| `git-changes` | 把 `git diff` 的每个改动块列入 `*changes*` | `<space>g` |
+| `surround` | 在选区两侧加上成对的文本 | `SPC` 加括号或引号 |
+| `clang-format` | 用 clang-format 格式化文档或选中的行，只替换有变化的行 | 无 |
+| `symbol-overlay` | 标记符号并在标记之间跳转、改名，见[交互层](interaction.md#高亮模式) | leader 下的 `i`、`I`，`<a-n>`、`<a-p>`，以及 `mark` 键位表 |
+| `git-changes` | 把 `git diff` 的每个改动块列入 `*changes*` | leader 下的 `g` |
 | `git-flags` | 用行标记标出新增、修改和删除的行，不随启动加载 | 无 |
 
 ### 文档
@@ -140,11 +140,11 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | --- | --- |
 | `buf:text()`、`buf:text(from, to)` | 全文或一段范围的文本 |
 | `buf:line(n)` | 第 n 行的文本，不含换行 |
-| `buf:line_count()` | 行数；最后一个换行之后的空行不算，与 Vim 相同 |
+| `buf:line_count()` | 行数；最后一个换行之后的空行不算 |
 | `buf:revision()` | 文本修订号，文本每次改变都变化 |
 | `buf:selection()` | 返回 anchor 和 head 两个位置 |
 | `buf:set_selection(anchor, head?)` | 设置选区；省略 head 时为 caret |
-| `buf:select(anchor, head)` | 进入 Visual 并选中这段范围；`head` 可以在 `anchor` 之前。已在 Visual 时改变选区 |
+| `buf:select(anchor, head)` | 选中这段范围；`head` 可以在 `anchor` 之前 |
 | `buf:edit(changes, revision?)` | 应用编辑，返回新的修订号 |
 | `buf:indent(n)` | 语言给第 n 行的缩进字符串；语言不给出时为 nil |
 | `buf:line_comment()` | 该语言的行注释标记，来自语言档案；没有行注释时为 nil |
@@ -158,7 +158,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 - **撤销**：一次请求对一个文档的全部编辑合并成一个撤销步。钩子是单独的请求，所以它的编辑自成一步，不并入 Insert 模式的输入。
 - **作用视图**：选区属于视图。请求所在的视图显示该文档时用它，否则用屏幕上的视图，再否则用任一视图。
 - **结构**：条目是词、字面量、注释、预处理指令或整个括号分组，标点不属于任何条目；位置落在条目中间时，返回的是位置一侧的部分。C++ 的答案来自语法树，能区分模板的 `<` 和比较，未闭合的分组和被 `#if` 分支拆开的分组都不算分组。其他语言按 `(`、`[`、`{` 配对，字面量和注释来自 TextMate，跨行的字符串和注释按行算；纯文本没有字面量。
-- **选区与模式**：选区是半开区间，Visual 模式下读到的范围就是选中的文本。按行选中时范围的终点在下一行行首，把选区换算成行号要去掉这一行。Normal 模式只有 caret，设置范围选区后会收缩到范围起点。Visual 模式下设置与之不符的选区、或编辑当前文档，会回到 Normal。
+- **选区与模式**：选区是半开区间，读到的范围就是选中的文本。`anchor` 和 `head` 相同时没有选区。
 
 ## 实施顺序
 

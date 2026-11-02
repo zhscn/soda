@@ -17,7 +17,9 @@ use std::{path::Path, time::Duration};
 pub enum Command {
     Edit(EditCommand),
     SetMode(super::EditMode),
-    Vim(super::vim::VimCommand),
+    Modal(super::modal::Action),
+    /// Work the runtime does for the modal layer.
+    Effect(Box<super::modal::Effect>),
     /// Open the command line with initial text.
     Ex(String),
     /// Open the command line with a note on what it asks about.
@@ -40,6 +42,8 @@ pub enum Command {
         context: super::Context,
         keys: Vec<super::KeyStroke>,
     },
+    /// Reads the next keys through the keypad.
+    Keypad(super::KeypadStart),
     Define {
         name: String,
         body: String,
@@ -79,7 +83,7 @@ pub enum Command {
     /// Searches the project; results go to the `*grep*` document.
     Grep(String),
     /// Opens the location on the caret line, or moves to the next line's
-    /// first non-blank as Vim's Enter does.
+    /// first non-blank.
     Jump,
     /// Goes back to where the caret jumped from, or forward again.
     JumpBack,
@@ -128,6 +132,8 @@ pub enum Command {
     CheckFiles,
     /// Shows a message.
     Echo(String),
+    /// Fails with a message, which stops a macro.
+    Fail(String),
     /// Moves to one of the places two typed characters occur on screen.
     JumpTo,
     /// Highlights a pattern everywhere, or in the current document.
@@ -148,15 +154,21 @@ pub enum Command {
     UnflagLines(Option<String>),
     /// Replays keys in Normal mode from the start of each selected line,
     /// or of the caret's line.
-    EachLine(Vec<super::KeyStroke>),
+    EachLine(Vec<super::UserInput>),
     /// Replays keys in Normal mode from each match of a pattern in the
     /// selected lines, or in the whole document.
     EachMatch {
         pattern: regex::Regex,
-        keys: Vec<super::KeyStroke>,
+        keys: Vec<super::UserInput>,
     },
-    /// Routes keys as if typed, for `each-line` and `each-match`.
-    Replay(Vec<super::KeyStroke>),
+    /// Replays input in Normal mode from each of these offsets, last first,
+    /// as one undo step.
+    EachAt {
+        targets: Vec<usize>,
+        keys: Vec<super::UserInput>,
+    },
+    /// Routes input as if typed, for `each-line` and `each-match`.
+    Replay(Vec<super::UserInput>),
     /// Focuses a window chosen by its label.
     WindowPick,
     /// Shows recent messages in `*messages*`.
@@ -175,6 +187,7 @@ pub enum Command {
         placement: crate::application::Placement,
     },
     Search,
+    SearchBackward,
     Completion(super::completion::Action),
     /// Inserts a snippet at the caret.
     Snippet(String),
@@ -261,7 +274,7 @@ impl Layers {
     /// Applies a configuration command: `map`, `unmap` or `define-command`.
     pub fn configure(&mut self, command: Command) -> Result<(), String> {
         self.sequence.clear();
-        self.vim.clear();
+        self.modal.clear();
         match command {
             Command::Map {
                 context: super::Context::Prompt,
@@ -368,8 +381,13 @@ impl Layers {
             return Ok(super::InputResult::Blocked);
         }
         self.sequence.clear();
-        self.vim.clear();
-        let register = self.vim.armed.take();
+        // The prefix argument waits for the keypad to give it a command.
+        if !matches!(
+            command,
+            Command::Modal(_) | Command::Keypad(_) | Command::Named(_)
+        ) {
+            self.modal.clear();
+        }
         let mut response = Response {
             redraw: true,
             message: Message::Clear,
@@ -377,18 +395,40 @@ impl Layers {
         };
         let opening_path = matches!(command, Command::OpenPath(_));
         self.jumps.clear_pending();
-        use super::vim::{Motion, VimCommand};
+        // With a mark set, every move extends from it, as in Emacs.
+        let marked = self.mode != super::EditMode::Insert
+            && super::modal::execute_place(app)
+                .and_then(|selection| self.modal.tag(selection))
+                .is_some_and(|tag| tag.kind == super::modal::Kind::Char);
+        let command = match command {
+            Command::Edit(EditCommand::Move {
+                motion,
+                extend: false,
+            }) if marked => Command::Edit(EditCommand::Move {
+                motion,
+                extend: true,
+            }),
+            Command::Line {
+                edit,
+                extend: false,
+            } if marked && edit.is_motion() => Command::Line { edit, extend: true },
+            command => command,
+        };
         match &command {
-            Command::Vim(
-                VimCommand::Move(Motion::Top | Motion::Bottom | Motion::MatchPair, _)
-                | VimCommand::RepeatSearch { .. }
-                | VimCommand::SearchWord { .. }
-                | VimCommand::JumpMark { .. },
-            ) => self.jumps.expect(),
             Command::ResultStep { .. } => self.jumps.expect_result(),
+            Command::Modal(super::modal::Action::Found {
+                kind: super::modal::Kind::Block,
+                ..
+            })
+            | Command::Edit(EditCommand::Goto { .. })
+            | Command::Edit(EditCommand::Move {
+                motion: crate::editor::Motion::DocumentStart | crate::editor::Motion::DocumentEnd,
+                ..
+            }) => self.jumps.expect(),
             _ => {}
         }
         match command {
+            Command::Keypad(start) => self.sequence.start(start),
             Command::JumpBack => match self.jumps.back(app) {
                 Some(place) => go(app, place, time, &mut response),
                 None => response.message = Message::Set("At the oldest jump".into()),
@@ -398,55 +438,19 @@ impl Layers {
                 None => response.message = Message::Set("At the newest jump".into()),
             },
             Command::SetMode(mode) => {
-                if matches!(mode, super::EditMode::Visual | super::EditMode::VisualLine) {
-                    if self.mode == mode {
-                        return Ok(super::InputResult::Handled(response));
-                    }
-                    return self.execute(
-                        Command::Vim(super::vim::VimCommand::Visual {
-                            linewise: mode == super::EditMode::VisualLine,
-                        }),
-                        app,
-                        time,
-                        file_root,
-                    );
+                self.modal.tag = None;
+                if self.mode == super::EditMode::Beacon {
+                    self.leave_beacon();
                 }
-                let caret = self.vim.caret();
-                self.vim.reset();
                 self.mode = mode;
-                if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
-                    let selection = app
-                        .workspace()
-                        .editor(view.document_id)
-                        .unwrap()
-                        .model()
-                        .session(view.session_id)
-                        .unwrap()
-                        .selection();
-                    response.events.push(Event::Edit {
-                        view: view.id,
-                        command: EditCommand::SetSelection(
-                            caret.map_or(selection, crate::core::Selection::caret),
-                        ),
-                        time,
-                    });
-                }
             }
-            Command::Vim(super::vim::VimCommand::Search { backward }) => {
-                if let Some(view) = app.active_view() {
-                    let mut session = SearchSession::new(app, view)?;
-                    session.set_direction(backward, self.vim.last_search.clone());
-                    response = self.enter(
-                        Layer::Search {
-                            input: TextInput::default(),
-                            session,
-                        },
-                        app,
-                        time,
-                    )?;
-                }
+            Command::Modal(action) => response = self.modal_execute(action, app, time),
+            Command::Fail(message) => {
+                response = self.fail(response, &message);
+                response.failed = true;
             }
-            Command::Vim(command) => response = self.vim_execute(command, register, app, time),
+            // Only the runtime can do these; it takes them from the response.
+            effect @ Command::Effect(_) => response.commands.push(effect),
             Command::Ex(_) | Command::Ask { .. } => {
                 let (text, note) = match command {
                     Command::Ask { line, note } => (line, Some(note)),
@@ -666,12 +670,14 @@ impl Layers {
                         self.enter(Layer::Replace(ReplaceSession::new(app, view)?), app, time)?;
                 }
             }
-            Command::Search => {
+            Command::SearchBackward | Command::Search => {
                 if let Some(view) = app.active_view() {
+                    let mut session = SearchSession::new(app, view)?;
+                    session.set_direction(matches!(command, Command::SearchBackward));
                     response = self.enter(
                         Layer::Search {
                             input: TextInput::default(),
-                            session: SearchSession::new(app, view)?,
+                            session,
                         },
                         app,
                         time,
@@ -826,8 +832,11 @@ impl Layers {
                     self.jumps.clear_pending();
                     self.jumps.end_walk();
                     response.commands.extend([
-                        Command::Vim(VimCommand::Move(Motion::Down, 1)),
-                        Command::Vim(VimCommand::Move(Motion::First, 1)),
+                        Command::Modal(super::modal::Action::Move {
+                            step: super::modal::Step::Down,
+                            extend: false,
+                        }),
+                        Command::Named("line-start".into()),
                     ]);
                 }
             }
@@ -927,13 +936,13 @@ impl Layers {
                     });
                 }
             }
-            Command::EachLine(_) | Command::EachMatch { .. } => {
+            Command::EachLine(_) | Command::EachMatch { .. } | Command::EachAt { .. } => {
                 if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
                     response.commands = self.each(app, view, command);
                 }
             }
             Command::Replay(keys) => {
-                response.replay = keys.into_iter().map(super::UserInput::Key).collect();
+                response.replay = keys;
             }
             Command::JumpTo => {
                 if let Some(view) = app.active_view() {
@@ -1042,13 +1051,7 @@ impl Layers {
         let document = editor.model().document();
         let snapshot = document.snapshot();
         let selection = editor.model().session(view.session_id).unwrap().selection();
-        // Visual mode covers its lines even when anchor and head meet.
-        let range = match (self.mode, self.vim.visual) {
-            (EditMode::Visual | EditMode::VisualLine, Some((anchor, head))) => {
-                Some(anchor.min(head)..anchor.max(head))
-            }
-            _ => Some(selection.range()).filter(|range| !range.is_empty()),
-        };
+        let range = Some(selection.range()).filter(|range| !range.is_empty());
         let lines = range.map(|range| {
             snapshot.line_of(range.start).unwrap()..=snapshot.line_of(range.end).unwrap()
         });
@@ -1073,6 +1076,7 @@ impl Layers {
                 }
                 (targets, keys)
             }
+            Command::EachAt { targets, keys } => (targets, keys),
             _ => unreachable!(),
         };
         let mut commands = vec![];
@@ -1267,7 +1271,7 @@ impl Layers {
         for key in std::iter::repeat_n(Key::Backspace, before)
             .chain(std::iter::repeat_n(Key::Delete, after))
         {
-            self.vim
+            self.modal
                 .replay
                 .record(UserInput::Key(KeyStroke::plain(key)));
         }
@@ -1285,7 +1289,7 @@ impl Layers {
             });
             text
         };
-        self.vim.replay.record(UserInput::Paste(typed));
+        self.modal.replay.record(UserInput::Paste(typed));
     }
     /// Expands a snippet in place of a range as one undoable step; returns
     /// its text. Lines after the first get the language's indentation.

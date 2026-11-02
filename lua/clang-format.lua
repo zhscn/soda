@@ -1,4 +1,4 @@
--- Formats the buffer with clang-format, or the lines of a Visual selection.
+-- Formats the buffer with clang-format, or the selected lines.
 -- Only lines that change are replaced, so the caret stays where it was. If
 -- the buffer changes while clang-format runs, the output is dropped.
 -- Built in as the clang-format command.
@@ -33,8 +33,8 @@ soda.define_command("clang-format", function()
   local text, revision = buf:text(), buf:revision()
   local file = soda.val("file")
   local argv = { "clang-format", "--assume-filename=" .. (file ~= "" and file or "soda.cpp") }
-  local mode = soda.val("mode")
-  if mode == "visual" or mode == "visual-line" then
+  local anchor, head = buf:selection()
+  if anchor[1] ~= head[1] or anchor[2] ~= head[2] then
     local anchor, head = buf:selection()
     local from, to = math.min(anchor[1], head[1]), math.max(anchor[1], head[1])
     -- The range leaves out its end: at a line's start, that line is not selected.

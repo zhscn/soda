@@ -167,7 +167,7 @@ fn a_list_keeps_the_directory_its_paths_mean() {
     let wanted = repo.join("linked/d.txt");
     wait(&mut r, |r| path(r).as_deref() == Some(&wanted));
     // In another project, the next result still means the first.
-    keys(&mut r, "]q");
+    keys(&mut r, "<a-g>n");
     let wanted = repo.join("module/c.txt");
     wait(&mut r, |r| path(r).as_deref() == Some(&wanted));
 }

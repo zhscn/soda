@@ -133,7 +133,7 @@ pub(super) fn jump(app: &Application, time: Duration, response: &mut Response) -
 }
 
 /// Moves the results caret to the next or previous result line and opens
-/// it, as Vim's `:cnext` and `:cprevious`. On fresh results the caret has
+/// it. On fresh results the caret has
 /// not visited its line yet, so a first line that is a result comes first.
 pub(super) fn step(
     app: &Application,

@@ -36,55 +36,105 @@
 
 取消、确认和应用更新引起的结束都使用同一生命周期协议。Layers 移除已结束会话后，Runtime 执行其返回的事件与效果；输入事件不能保留为可跨会话重放的内部 intent。尺寸在 Layers 中保存，新进入的帮助和 picker 会话在第一次绘制前继承对应尺寸。
 
-## Vim 编辑模型
+## 模态编辑模型
 
-默认从 Normal 开始。Insert 接收文字和粘贴；Esc、Ctrl-[ 或 Ctrl-C 返回 Normal，并将光标移回前一个字符。Normal 的光标停在行内字符上，空行允许停在行首。Visual 和 VisualLine 分别选择字符与整行。模式、待完成命令和期望列由交互层拥有，文档选区、文本事务与撤销仍由 editor/core 拥有。
+模型取自 meow：先选中，再对选区操作。为什么这样设计、与 meow 和 kakoune 的差别见[模态编辑的设计](modal.md)。`interaction/modal/` 是这一层：
 
-`vim/parser.rs` 解析计数、operator、寄存器名和待完成按键，输出类型化 VimCommand。各模块分工：
-- `vim/motion.rs`：计算移动终点，并标出每种移动的类型（exclusive、inclusive、按行）。
-- `vim/object.rs`：计算文本对象的范围。
-- `vim/execute.rs`：把移动类型、行操作和模式转换变成 Application 事件。
-- `vim/replay.rs`：保存 `.` 和宏要重放的按键，以及标记。
+- `mod.rs`：`Action`（键能触发的动作）和模态状态。
+- `text.rs`：文本里的位置，纯函数，不碰状态。
+- `execute.rs`：每个动作如何改变选区，或如何使用选区。
+- `beacon.rs`：Beacon 的多选区。
+- `replay.rs`：键盘宏。
 
-移动终点与 operator 范围分开，不能直接用核心的选区扩展代替 Vim motion。Visual 选区在核心中仍为半开范围，实际光标位置单独提供给前端；前端据此跟随光标并绘制选区。
+模式固定三个，不能由用户定义：
 
-| 操作 | 当前支持 |
+| 模式 | 单键的含义 |
 | --- | --- |
-| 移动 | h/j/k/l、箭头、w/b/e、0/^/$、gg/G、f/t/F/T 及 `;`/`,`、`%`、`{`/`}`，以及对应计数；Ctrl-D/Ctrl-U 移动半页并同样滚动视图 |
-| 插入 | i/a、I/A、o/O；Enter 和 o 使用已有语言缩进服务，O 插入后重算缩进 |
-| operator | d/c/y、`>`/`<`、gu/gU/g~，加 motion 或文本对象；dd/cc/yy/`>>`/`<<`/guu 等按行；operator 前后计数相乘 |
-| 文本对象 | iw/aw、iW/aW，`i"`/`a"` 等三种引号，`i(`/`a(`（含 `b`）、`i[`、`i{`（含 `B`）、`i<`，ip/ap |
-| 修改 | x/X、r 加单个字符、D/C、s/S、`~`、J |
-| 重复 | `.` 重复上一次修改，带计数时替换原计数；q 加寄存器录制宏，@ 加寄存器重放，`@@` 重放上一个 |
-| 寄存器 | `"a`–`"z` 命名寄存器，`"A`–`"Z` 追加，`"_` 丢弃，`"+`、`"*` 与无名寄存器相同；p/P 支持计数 |
-| 标记 | m 加小写字母设置，`'` 跳到标记行首个非空白，`` ` `` 跳到精确位置 |
-| Visual | v/V，支持的 motion 与文本对象，d/c/y、`>`/`<`、`~`/u/U、J、o 交换两端、p/P 替换选区；`:` 打开命令行并保留 Visual 的行范围（供 `each-line`、`each-match` 使用）；Esc 返回 Normal |
-| 历史 | u、Ctrl-R；Insert 和 change 的修改作为一次撤销单元 |
-| 搜索 | / 和 ? 的正则增量搜索（smart case，无效模式在输入后提示 `invalid pattern`），n/N 按已确认方向重复或反向；`*`/`#` 按整词搜索光标下的单词 |
+| Normal | 移动、选择、对选区操作。没有绑定的键什么也不做 |
+| Insert | 输入字符 |
+| Beacon | Normal 的键，加上派生选区：选区在 grab 范围内成组出现 |
 
-**移动类型**：
-- 跨行的 exclusive 移动如果终点在行首，会退到上一行行尾。若起点又在首个非空白字符之前，范围改为整行。所以在段首执行 `d}` 会删掉整段。
-- 带计数的 `dd` 超出缓冲区时删到末尾；光标已在最后一行时则失败。
-- 光标不在任何括号对内时，`i(` 等使用本行后面的第一对括号。
+选区是核心里的半开范围，可以为空，空选区就是光标。光标可以停在行尾，离开 Insert 时不回退。提示输入不是模式，而是覆盖在模式之上的层；keypad 也不是模式，而是读键状态。
 
-**`.` 和宏**：
-- 两者都重放当初键入的按键，而不是重放编辑结果，所以 Insert 中键入的文字、补全和缩进会按原样再执行一遍。
-- 一次修改从 Normal 空闲时的第一个键开始，到修改完成后回到空闲 Normal 结束，包括期间的 Insert。
-- Runtime 用一个类似 Vim typeahead 的队列执行重放：重放中再触发的重放插到队列前面。任何 Vim 命令失败（移动越界、找不到字符、寄存器为空）都会清空队列，这就是递归宏结束的方式。从不失败的宏在一百万个键后停止。
-- 宏录制时状态栏显示 `recording @a`；录下的是用户键入的键，不包括重放产生的键。
+### 选区的种类
 
-**寄存器和标记**：
-- 命名寄存器同时成为无名寄存器，也会同步到系统剪贴板。
-- 标记以文档位置保存，随每次编辑映射；位置被删除或文档关闭时丢弃。
+选区带一个种类（`Kind`）：字符、词、符号、行、块、查找、搜索、join。种类随选区一起记住，选区一旦变化（编辑、鼠标、Lua）种类自动失效，所以不会过期。
 
-**限制**：
-- Normal 计数限制为 10,000。
-- 输入 operator 或 g 等前缀后，Esc、Ctrl-[ 或 Ctrl-C 取消；未知组合被消费并显示错误，不落入文档。修改绑定、直接调用命令、目标文档发生文本变化或活动视图变化时清理待完成状态。
-- 计数插入、Visual block、大写（跨文件）标记和完整 Ex 语法尚未实现。
-- Unicode 移动沿用编辑核心的 grapheme 边界，词分类使用字母数字下划线、标点、空白三类；不提供 Vim 的 iskeyword 配置。
-- 终止换行保存在文本中，末尾空行的光标表示不完全等同于 Vim 的 endofline 元数据。
+命令按种类决定扩展还是替换：
 
-BeginUndoGroup 保存操作开始前的选区，EndUndoGroup 保存结束时的选区。打开新行时的定位、缩进和后续输入因此可以作为一次撤销恢复，并在 redo 时恢复 Normal 光标。失败事务不改变分组计划；移动、保存、其他会话操作、焦点切换和进入功能会话建立分组边界。Vim 层不维护第二份文本或撤销历史。
+| 命令 | 同种类已有选区 | 其他情况 |
+| --- | --- | --- |
+| `h j k l` | 字符选区：移动头部 | 取消选区后移动 |
+| `H J K L` | 移动头部 | 从光标开始字符选区 |
+| `w b W B` | 由 `[`、`]` 标记的：扩展；由 `w` 产生的：替换为下一个 | 从光标开始 |
+| `e` | 向选区方向扩展 | 选中当前行，不含换行 |
+| `o` | 取父分组 | 取周围的分组，光标紧贴开括号时取这一组 |
+| 数字 | 按种类再走 N 步，保持远端，也保持种类 | 没有选区时是计数 |
+
+`w` 取到下一个词的结尾，选区包含词前的空白，遇到标点停止：`foo bar, baz` 连按 `w` 依次选中 `foo`、` bar`、` baz`。词只含字母数字，符号另含下划线。
+
+选中后行尾附近显示 1 到 0 的数字，表示按这个数字能扩展到哪里，1.5 秒后或下一个键时消失。
+
+`o`、`O` 和 `,` `.` 的括号走语言结构，字符串和注释里的括号不算分组。文字查询由 `Response.structure` 交给 runtime，因为结构分析需要可变访问；answer 再以 `Action::Found` 回到这一层。
+
+### 操作
+
+| 键 | 无选区 | 有选区 |
+| --- | --- | --- |
+| `r` `kill` | 剪切到行尾 | 剪切；正向的行选区带上换行；join 选区合并 |
+| `s` `change` | 删一个字符，进入 Insert | 删除，进入 Insert，不写剪贴板 |
+| `d` `delete` | 删一个字符 | 删除，不写剪贴板；join 选区合并 |
+| `y` `save` | 报错 | 复制 |
+| `p` `yank` | 粘贴 | 收起选区后粘贴，不替换 |
+
+`replace-selection` 用剪贴板替换选区，没有默认键。查找失败时选区不变并报告，不会丢失。`u` 撤销后恢复修改前的选区。
+
+每次选择都把旧选区记入历史，`z` 退回一步，`Z` 退到最早，`Esc` 清除选区和历史。`;` 交换两端，之后的 `e`、数字、`n` 都跟随新方向。
+
+`n` 取下一个匹配：选区不是当前搜索的匹配时，先把选中文本作为新的搜索。选区反向时反向走，到头绕回。`N` 丢弃当前搜索，退回上一个。`[`、`]` 同时设置搜索，`v` 打开搜索提示，确认后选区是匹配。行尾显示 `[i/N]`，下一个键清除。
+
+计数来自 leader：`SPC 3`，之后的数字继续累加，也可以在无选区时直接按数字。`-` 让下一条命令反向。`` ` `` 重复上一条命令，不包括插入的文字。
+
+### Keypad
+
+`x`、`c` 是绑定到 `keypad <c-x>`、`keypad <c-c>` 的普通 Normal 键，Space 绑定到 `keypad leader`，`m`、`g` 绑定到 `keypad meta`、`keypad ctrl-meta`，都可以改。
+
+绑定只有一份，在 `global` 表里，比如 `<c-x><c-s>`。keypad 读键时只查这一张表，每个键先试 Ctrl 再试原样：
+
+| 键 | 序列 | 说明 |
+| --- | --- | --- |
+| `x s` | `<c-x><c-s>` | Ctrl 优先 |
+| `x k` | `<c-x>k` | 没有 Ctrl 绑定，退回原样 |
+| `x <space> o` | `<c-x>o` | Space 强制下一个键不加修饰，和 `<c-x><c-o>` 区分 |
+| `<space> f` | `<c-c>f` | leader 的第一个键不加修饰 |
+| `m x` | `<a-x>` | 只作用于下一个键，之后按 keypad 规则 |
+
+和 meow 的差别：`m`、`g` 只在开头起作用，所以 `x p g` 能到 `<c-x>pg`；`SPC` 后面没有保留键。Backspace 退掉上一个键，Esc 取消，计数跨过 keypad 保留。
+
+### 宏
+
+`F3`、`C-x (`、`SPC [` 开始录制，`F4`、`C-x )`、`SPC ]` 结束；没在录制时后两者播放，`C-x e` 同样。录的是按键，回放走同一条路由，补全列表里的选择录成结果文字。`E` 在选中的每一行行首播放，`V` 在搜索的每处匹配播放，都合成一次撤销；任一命令失败时停止。
+
+### Beacon
+
+`G` 把选区设为 grab 并进入 Beacon；没有选区时 `G` 留下标记，配合 `S` 把选区移过去。主选区在 session 里，其余选区是跟随编辑的位置（`DocumentPosition`），不进入核心。Normal 和单选区 Insert 永远只有一个选区，所以只有下面的操作需要知道多选区，移动命令不用改。
+
+主选区每次变化，其余选区按它的种类重新派生：
+
+| 主选区 | 派生 |
+| --- | --- |
+| 无 | 其他行的同一显示列，较短的行跳过 |
+| 字符 | 其他行相同列范围的选区 |
+| 词、符号（`w`） | 每个词，和主选区一样是选区 |
+| 词、符号（`[`、`]`） | 同一个词的每处匹配 |
+| 搜索 | 搜索的每处匹配 |
+| 行 | 同样高度的每组行 |
+| 查找 | 每处字符 |
+| join | 每行的缩进处 |
+
+`d`、`r` 删除所有选区，`r` 把它们的文字逐行放进剪贴板。`i`、`a`、`s` 在所有选区上进入 Insert，输入、Enter、Backspace 和 Delete 是同一个事务里的多处修改。这时自动配对、缩进和补全都不参与，Enter 只插入换行。Esc 回到 Beacon。
+
+录制开始时回到主选区单独编辑；结束时对其余选区逐个回放，连同录制的修改合成一次撤销，然后离开 Beacon。
 
 ## 命令、键位与配置
 
@@ -108,17 +158,27 @@ BeginUndoGroup 保存操作开始前的选区，EndUndoGroup 保存结束时的�
 
 ### 键位上下文
 
-键位按上下文解析：`normal`、`visual`（同时用于字符和整行 Visual）、`insert`、`completion`、`snippet`（补全列表显示时、snippet 还有位置时，只接受单键，没有绑定的键落回 Insert，见[补全](completion.md)）和 `prompt`（所有输入框、picker 与确认对话框）。每个上下文依次查找：
+键位表有 `global`、`normal`、`beacon`、`insert`、`completion`、`snippet`、`mark` 和 `prompt`（所有输入框、picker 与确认对话框）。按键从一组栈里查找，先查到的算数，和 Emacs 读 active maps 一样（`Layers::stack`）：
+
+| 模式 | 栈 |
+| --- | --- |
+| Insert | `completion`（列表显示时）、`snippet`（还有位置时）、`insert`、`global` |
+| Normal | `mark`（光标在标记上时）、`normal`、`global` |
+| Beacon | `beacon`、`normal`、`global` |
+
+`global` 是所有模式共有的键，`C-x`、`C-c` 下的键都在这里，keypad 也只读这张表。模块把键绑到 `<c-c>` 下，就同时得到 `SPC` 入口。
+
+每张表依次查找：
 
 1. 用户层：`map` 和 Rust `bind`（prompt 为 `bind_input`）写入；`unmap`、`unbind` 和 `unbind_input` 删除用户条目，默认解释随之恢复。
 2. 默认层：`interaction::keymap` 中的静态表，引用命令名并在启动时解析，测试保证每个默认条目都能解析。
-3. 兜底：normal/visual 的普通字符交给 Vim 语法；insert 和 prompt 的可打印字符直接输入。
+3. 都没有时：Normal 和 Beacon 忽略这个键；insert 和 prompt 的可打印字符直接输入。
 
 用户层的完整绑定不能同时是另一个用户绑定的前缀；用户层前缀会遮住默认层中相同开头的单键。序列最多四个按键。Esc、Ctrl-[、Ctrl-G 和 Ctrl-C 取消待完成序列；前三个不能作为序列的第二个及以后的按键，Ctrl-C 可以（`<c-x><c-c>`）。要关闭某个默认键，把它绑定到 `nop`。
 
 `prompt` 上下文的目标是输入动作，不是应用命令：`confirm`、`cancel`、`complete`、`complete-backward`、`candidate-next`、`candidate-previous`、`candidate-first`、`candidate-last`、`page-next`、`page-previous`、`match-next`、`match-previous`、`replace-all`、`help`、`select-all`、`nop`，以及下面的行编辑名。prompt 绑定只接受单个按键。输入组件因此不会执行文档命令或切换编辑模式。
 
-Normal 的默认绑定除 Vim 语法外还有 `<c-r>` 重做、PageDown / PageUp 翻页、`<c-z>` 挂起、`<f1>` 帮助，以及 helix 式的空格菜单：`<space>f` 项目文件、`<space>b` 缓冲区、`<space>:` 命令面板。Insert 中方向键、Enter、Tab 和 Shift-Tab 分别绑定 `move-up`/`move-down`、`newline`、`insert-tab` 和 `outdent`。
+Normal 的默认绑定按 meow，见[模态编辑模型](#模态编辑模型)，另有 PageDown / PageUp 翻页、`<f1>` 帮助。Insert 中方向键、Enter、Tab 和 Shift-Tab 分别绑定 `move-up`/`move-down`、`newline`、`insert-tab` 和 `outdent`。
 
 ### 括号配对
 
@@ -139,20 +199,20 @@ Insert 中按选项 `auto-pairs`（默认开）成对输入括号，与 Emacs �
 | `<c-a-f>` / `<c-a-b>` | `sexp-forward` / `sexp-backward` | 越过一个表达式，停在分组边界 |
 | `<c-a-u>` | `sexp-up` | 到包围它的括号 |
 | `<c-a-a>` / `<c-a-e>` | `sexp-beginning` / `sexp-end` | 到所在分组内部的开头 / 结尾 |
-| Normal、Visual `<a-o>`、`<c-a-space>` | `sexp-expand` | 选中光标处或包围它的分组，再按扩大一层 |
+| Normal `<a-o>`、`<c-a-space>` | `sexp-expand` | 选中光标处或包围它的分组，再按扩大一层 |
 | Normal、Insert `<c-a-k>` / `<c-a-bs>` | `sexp-kill-forward` / `sexp-kill-backward` | 剪切下一个 / 上一个表达式 |
 | Normal、Insert `<c-k>` | `sexp-kill` | 剪切到行尾；有表达式越过行尾时剪切到它结束，遇到所在分组的闭括号时停在它之前 |
 | Normal、Insert `<c-s-right>` / `<c-s-left>` | `sexp-slurp` / `sexp-barf` | 把闭括号移到下一个表达式之后 / 最后一个表达式之前 |
 | Insert `<bs>`、`<c-h>` | `soft-backspace` | 删除会破坏配对时只移动光标；空的一对整个删除 |
 | Insert `<c-w>`、`<c-bs>`、`<a-bs>` | `soft-delete-word` | 标点删到最近的括号为止，紧邻括号时同 `soft-backspace` |
 
-`foo(a,⏎ b);` 行首的 `<c-k>` 留下 `;`，`if (x) {⏎} else {⏎}` 行首的留下 `else {⏎}`，这与 puni 的 `beyond` 相同。没有写模式的键在 Normal、Visual 和 Insert 中都有效。用 `unmap insert <bs>` 这样的命令恢复内置行为。
+`foo(a,⏎ b);` 行首的 `<c-k>` 留下 `;`，`if (x) {⏎} else {⏎}` 行首的留下 `else {⏎}`，这与 puni 的 `beyond` 相同。没有写模式的键在 Normal 和 Insert 中都有效。用 `unmap insert <bs>` 这样的命令恢复内置行为。
 
 ### Emacs 键位
 
-Vim 布局不变，Emacs 的键加在 Vim 没有用到的位置上，所以两边的习惯可以混用。键位取自 Emacs 默认值，再加上这几处本地习惯：`C-v` / `M-v` 翻半页（view-mode），`C-x C-o` 选窗口（ace-window）。
+Emacs 的键和模态键并存。键位取自 Emacs 默认值，再加上这几处本地习惯：`C-v` / `M-v` 翻半页（view-mode），`C-x C-o` 选窗口（ace-window）。
 
-Normal、Visual 和 Insert 都有效：
+所有模式都有效（`global` 表）：
 
 | 键 | 命令 |
 | --- | --- |
@@ -168,29 +228,38 @@ Normal、Visual 和 Insert 都有效：
 | `C-/`、`C-_`、`C-x u`，`C-M-/`、`C-M-_` | `undo`，`redo` |
 | `M-;` | `comment`（只切换行注释） |
 | `C-z` | `suspend` |
-| `C-g` | 与 Esc 相同：取消待完成的键，离开 Insert 和 Visual |
+| `C-c C-c` | `stop` |
 
-Normal 和 Visual 中，下面的移动直接交给 Vim 语法，所以能带计数、跟在 operator 后面（`d<a-f>`、`3<c-n>`）：`C-f`、`C-b`（`l`、`h`），`C-n`、`C-p`（`j`、`k`），`C-a`、`C-e`（`0`、`$`），`M-f`、`M-b`（`w`、`b`），`M-m`（`^`），`M-<`、`M->`（`gg`、`G`），`M-{`、`M-}`。这些键没有绑定时才走这条路，所以 `map` 可以覆盖；帮助页的键表里不列出它们。
+`C-c` 是前缀，不再离开 Insert；用 Esc、`C-[` 或 `C-g`。
 
-| 模式 | 键 | 作用 |
-| --- | --- | --- |
-| Normal、Visual | `C-s` | `/` |
-| Normal、Visual | `C-Space` | `v`，再按退出 |
-| Normal、Visual | `C-y` | `P` |
-| Visual | `C-w`、`M-w` | `d`、`y` |
-| Normal | `M-d`、`M-Backspace` | `dw`、`db` |
-| Normal、Insert | `M-u`、`M-l`、`M-c` | `upcase-word`、`downcase-word`、`capitalize-word`，只看当前行，大小写转换只处理 ASCII |
-| Normal、Insert | `C-t`、`M-t` | `transpose-chars`、`transpose-words`，只看当前行 |
-| Normal、Insert | `M-\`、`M-Space`、`M-^` | `delete-horizontal-space`、`just-one-space`、`join-line` |
-| Insert | `C-n`、`C-p`、`M-<`、`M->` | 移动 |
-| Insert | `C-s`、`C-r` | `search`、`search-backward`，结束后回到 Insert，光标在匹配结尾 |
-| Insert | `C-o`、`C-j`、`M-m` | `open-line`、`newline`、`back-to-indentation` |
+`C-c` 下的键也是 leader 键，`SPC` 加同样的键：`f` 项目文件、`b` 缓冲区、`:` 命令面板、`r` 最近文件、`j` 跳转、`w`、`o` 选窗口，`H J K L` 切窗口，`1`–`0` 计数，`[`、`]` 宏；模块另加 `k` 悬停、`c`、`C` 调用方、被调用方、`R` 重命名、`a` 代码动作、`s`、`S` 符号、`h` 头文件切换、`g` git 改动、`i`、`I` 符号高亮、`(` 等 surround。
+
+Normal 中：
+
+| 键 | 作用 |
+| --- | --- |
+| `C-f`、`C-b`、`C-n`、`C-p` | 同 `l`、`h`、`j`、`k` |
+| `C-a`、`C-e`、`M-<`、`M->`、`M-f`、`M-b` | 行首、行尾、文档首尾、按词移动 |
+| `C-Space` | 开始字符选区，之后的移动扩展它 |
+| `C-g` | 取消选区 |
+| `C-w`、`M-w`、`C-y` | `kill`、`save`、`yank` |
+| `C-d` | `delete` |
+| `C-s`、`C-r` | `search`、`search-backward` |
+| `M-d`、`M-Backspace` | 删除到词尾、词首 |
+
+Normal、Insert 都有效：
+
+| 键 | 作用 |
+| --- | --- |
+| `M-u`、`M-l`、`M-c` | `upcase-word`、`downcase-word`、`capitalize-word`，只看当前行，大小写转换只处理 ASCII |
+| `C-t`、`M-t` | `transpose-chars`、`transpose-words`，只看当前行 |
+| `M-\`、`M-Space`、`M-^` | `delete-horizontal-space`、`just-one-space`、`join-line` |
+
+Insert 另有 `C-n`、`C-p`、`M-<`、`M->` 移动，`C-s`、`C-r` 搜索（结束后回到 Insert，光标在匹配结尾），`C-o`、`C-j`、`M-m` 为 `open-line`、`newline`、`back-to-indentation`。
 
 输入框另有 `C-g` 取消、`C-j` 确认、`M-<` / `M->` 到第一个 / 最后一个候选、`C-v` / `M-v` 翻页、`C-s` / `C-r` 下一个 / 上一个匹配。
 
-和 Vim 冲突的其余键保持 Vim 的含义：Normal 的 `C-d`、`C-u`、`C-w`、`C-r`、`C-o`。要换成 Emacs 的含义，用 `map` 重新绑定。
-
-`M-y`（kill ring）、`C-Space` 在 Insert 中设置 mark、`M-.`（没有 LSP）、连续 `C-k` 合并没有实现。Alt 加 Shift 的符号键在 kitty 协议下按美式键盘换算。
+`M-y`（kill ring）、连续 `C-k` 合并没有实现。Alt 加 Shift 的符号键在 kitty 协议下按美式键盘换算。
 
 ### 按键记法
 
@@ -212,9 +281,9 @@ Insert 和 prompt 共享一组 readline 风格的行编辑命令。名字只定�
 | Ctrl-K | `kill-line-end` | 剪切到行尾；位于行尾时剪切换行 |
 | Ctrl-Y | `yank` | 粘贴剪切内容 |
 
-Shift 加方向键、Home 和 End 扩展选区，对应 `extend-` 前缀的同名命令。Insert 中 `kill-line-end` 写入应用剪贴板，`yank` 等同于粘贴剪贴板；输入框使用组件自己的剪切缓冲。连续剪切不合并。Normal 和 Visual 不使用这组键；这两个模式的 Emacs 键见[Emacs 键位](#emacs-键位)。
+Shift 加方向键、Home 和 End 扩展选区，对应 `extend-` 前缀的同名命令。Insert 中 `kill-line-end` 写入应用剪贴板，`yank` 等同于粘贴剪贴板；输入框使用组件自己的剪切缓冲。连续剪切不合并。Normal 不使用这组键；它的 Emacs 键见[Emacs 键位](#emacs-键位)。
 
-这组键替换了 Vim Insert 中的少数原义：Ctrl-A/E 的重复插入与行尾滚动、Ctrl-K 二合字符、Ctrl-D 减少缩进（由 Shift-Tab 承担）、Ctrl-Y 复制上一行字符。Ctrl-N/Ctrl-P 上下移动；以后有补全时，弹窗打开期间由补全使用。
+Ctrl-N/Ctrl-P 上下移动；补全列表打开期间由补全使用。
 
 ### 配置文件
 
@@ -222,11 +291,11 @@ Shift 加方向键、Home 和 End 扩展选区，对应 `extend-` 前缀的同�
 
 ```
 # ~/.config/soda/init
-map normal <space>f project
-map normal <space>b buffers
+map global <c-c>f project
+map global <c-c>b buffers
 map insert <c-s> write
 define-command fmt pipe clang-format --assume-filename="$SODA_FILE"
-map normal <space>= fmt
+map global <c-c>= fmt
 define-command grep-word shell grep -rn %arg{1} .
 set line-numbers relative
 set clipboard internal
@@ -276,7 +345,7 @@ hook open .*/Makefile set-local expand-tab false
 | `window-left` / `-right` / `-up` / `-down`、`window-next` / `window-previous` | | 切换窗口 |
 | `half-page-down` / `half-page-up` | | 移动半页并滚动 |
 | `grep PATTERN` | | 在项目文件中按正则表达式搜索，结果写入 `*grep*` |
-| `jump` | | 打开当前行写明的位置；不是位置行时等同 Vim 的回车 |
+| `jump` | | 打开当前行写明的位置；不是位置行时移到下一行首个非空白字符 |
 | `jump-back` / `jump-forward` | | 沿跳转历史后退或前进（`<c-o>` / `<c-i>`） |
 | `next-result` / `previous-result` | `cn` / `cp` | 在最近的结果文档（`*grep*` 或 `*run*`）中打开下一个或上一个位置 |
 | `run CMD` | `make` | 后台运行命令，输出流式写入 `*run*` |
@@ -288,11 +357,11 @@ hook open .*/Makefile set-local expand-tab false
 | `highlight FACE PATTERN` / `highlight-local FACE PATTERN` | | 在所有文档 / 当前文档中高亮正则表达式 |
 | `flag-lines GROUP FACE SIGN LINES` / `unflag-lines [GROUP]` | | 在当前文档的行号栏给行打上标记 / 去掉一组或全部标记 |
 | `unhighlight [PATTERN]` | | 去掉某个模式的高亮，或者全部 |
-| `each-line KEYS` | | 在每个选中行的行首以 Normal 模式输入 KEYS，相当于 Vim 的 `:'<,'>normal` |
+| `each-line KEYS` | | 在每个选中行的行首以 Normal 模式输入 KEYS |
 | `each-match PATTERN KEYS` | | 在每处匹配以 Normal 模式输入 KEYS；有选区时只在选中的行中 |
-| `recent FILE` | | 打开最近用过的文件（`<space>r`） |
-| `jump-to` | | 输入两个字符，再按屏幕上的标签跳到那里（`<space>j`） |
-| `window-pick` | | 按标签选择窗口；只有两个窗口时直接切换（`<space>w`） |
+| `recent FILE` | | 打开最近用过的文件（`SPC r`） |
+| `jump-to` | | 输入两个字符，再按屏幕上的标签跳到那里（`SPC j`） |
+| `window-pick` | | 按标签选择窗口；只有两个窗口时直接切换（`SPC w`） |
 | `echo [TEXT]` | | 在消息行显示文字，常与 `%val{}` 一起用 |
 | `check-files` | `checktime` | 重新加载磁盘上变化了的干净文件，报告其余的 |
 | `display KIND PLACEMENT` | | 设置某种文档的显示位置，见[终端界面](ui.md#窗口) |
@@ -309,7 +378,7 @@ hook open .*/Makefile set-local expand-tab false
 | `undo` / `redo`、`copy` / `cut` / `paste` | | 历史与剪贴板 |
 | `move-up` / `move-down`、`document-start` / `document-end` | | 移动；`extend-move-up` / `extend-move-down` 扩展选区 |
 | `page-up` / `page-down`、`select-all` | | 翻页与全选 |
-| `normal-mode` / `insert-mode` / `visual-mode` | | 切换编辑模式 |
+| `normal-mode` / `insert-mode` | | 切换编辑模式 |
 | `indent` / `outdent`、`insert-tab` / `insert-literal-tab`、`newline` | | 缩进、Tab 和语言感知换行 |
 | 行编辑命令 | | 见上表 |
 | `map` / `unmap` / `define-command` | | 键位与命令定义 |
@@ -317,15 +386,15 @@ hook open .*/Makefile set-local expand-tab false
 | `pipe` / `shell` | | 外部进程 |
 | `nop` | | 不执行任何操作，用于屏蔽默认键 |
 
-打开、保存和离开文档沿用 Soda 的异步任务、冲突检测与保存/丢弃/取消流程，不模拟 Vim 的 Ex 执行环境。窗口键沿用 Vim 的 `Ctrl-W` 前缀：`s`/`v` 分屏，`c`/`q` 关闭，`o` 只留当前，`h`/`j`/`k`/`l` 和方向键按方向切换，`w`/`Ctrl-W`/`W` 按顺序切换。`write-quit` 只自动保存当前文档，其他未保存文档仍需明确处理。相对路径以当前文档的目录解析，支持 `~/`。
+打开、保存和离开文档沿用 Soda 的异步任务、冲突检测与保存/丢弃/取消流程。窗口键见 [Emacs 键位](#emacs-键位)。`write-quit` 只自动保存当前文档，其他未保存文档仍需明确处理。相对路径以当前文档的目录解析，支持 `~/`。
 
 ### 帮助
 
-编辑区的 `F1` 打开只读帮助页，方向键、PageUp/PageDown 与 Home/End 浏览内容，F1、Enter 或 Esc 返回编辑区。帮助页由当前键位表生成：分上下文列出键、命令名和说明，包括用户绑定；Vim 语法（计数、operator、motion）是固定说明。`--help` 输出默认键位生成的同一份内容。帮助不修改文档、选区和编辑视口，并阻止编辑命令传播。
+编辑区的 `F1` 打开只读帮助页，方向键、PageUp/PageDown 与 Home/End 浏览内容，F1、Enter 或 Esc 返回编辑区。帮助页由当前键位表生成：分上下文列出键、命令名和说明，包括用户绑定；模态键的说明是固定文字。`--help` 输出默认键位生成的同一份内容。帮助不修改文档、选区和编辑视口，并阻止编辑命令传播。
 
 ## 命令行
 
-命令行是通用交互入口：一个单行输入加一个候选列表。它承担 `:` 命令、M-x 式命令面板、打开文件、另存为、跳转、缓冲区切换和项目文件选择。这些入口只是预填不同的文字：`:` 和 `<space>:` 预填空串，`open` 预填 `open `，`<space>f` 预填 `project `，`<space>b` 预填 `buffer `。
+命令行是通用交互入口：一个单行输入加一个候选列表。它承担 M-x 式命令面板、打开文件、另存为、跳转、缓冲区切换和项目文件选择。这些入口只是预填不同的文字：`M-x` 和 `SPC :` 预填空串，`open` 预填 `open `，`<space>f` 预填 `project `，`<space>b` 预填 `buffer `。
 
 这是对 emacs minibuffer（vertico）体验的取舍：保留“输入命令、按参数补全、Backspace 退一层目录、候选跟随输入”的感受，放弃嵌套 minibuffer 和输入区与候选区之间的焦点转移。命令行的模型接近 REPL：一行文字就是一条命令，补全只帮助写出这行文字。
 
@@ -503,12 +572,12 @@ Runtime 在更新中观察 SaveId，并将带 Operation 身份的失败交给等
 结果写入 scratch 文档 `*grep*`，按文件分组：文件名单独一行（相对项目根目录），下面每行一个匹配 `  行:列  文本`，行号右对齐，列是从 1 开始的字节列，文本去掉行首缩进。文件之间空一行。文件名、行列和匹配到的文本分别着色；匹配高亮只作用于文本部分，搜数字时不会标到行号。结果文档（`*run*` 除外）默认 `line-numbers` 为 `off`，因为每行已经有自己的行号。
 - scratch 文档没有文件，永远不算未保存，关闭时不会询问。
 - 再次搜索会替换它的内容，并把光标和视口放回开头。
-- 它是普通文档，可以用 Vim 移动和搜索。
+- 它是普通文档，可以移动和搜索。
 - 没有匹配时只显示消息，不打开文档。
 
 打开结果位置：
-- Normal 模式的回车执行 `jump`：当前行是位置行时打开该位置；在文件名行上时移到下面第一个结果并打开；否则像 Vim 一样移到下一行首个非空白字符。
-- `]q`/`[q`（`next-result`/`previous-result`）移动最近一次 `grep`、`run` 或扩展（`soda.results`）的结果文档的光标并打开对应位置，相当于 Vim 的 `:cnext`/`:cprevious`。结果刚生成时，第一次 `]q` 打开第一个结果。
+- Normal 模式的回车执行 `jump`：当前行是位置行时打开该位置；在文件名行上时移到下面第一个结果并打开；否则移到下一行首个非空白字符。
+- `M-g n`/`M-g p`（`next-result`/`previous-result`）移动最近一次 `grep`、`run` 或扩展（`soda.results`）的结果文档的光标并打开对应位置。结果刚生成时，第一次 `next-result` 打开第一个结果。
 - 位置行有两种格式。`路径:行:列:` 或 `路径:行:` 是编译器常见的格式，列缺省按第一列处理，路径不能含空白。分组格式是缩进的 `行:列  文本`，路径取上方最近的非缩进行，所以可以含空白；`*run*` 不认这种格式，普通文档也不认，以免把编译器输出或文件内容误判为位置。相对路径以结果文档的目录为基准。
 - 打开位置使用 `OpenAt` 事件：文件还没加载时，行列随打开请求保存，加载完成后再放置光标，所以异步打开不需要另外的跳转步骤。
 
@@ -519,7 +588,7 @@ Application 拥有一个跨文档共享的剪贴板。ClipboardAction 提供复�
 复制保留文档、选区和历史；剪切在事务成功后才替换剪贴板，并将光标放到删除范围起点。粘贴在光标处插入或替换选区，作为一次独立的可撤销编辑。撤销恢复文档与选区，不改变剪贴板。模态层阻止这些文档命令；终端 bracketed paste 仍可直接输入到当前组件。
 
 剪贴板每次被替换时版本号加一。前端可以给 Runtime 提供一个 `SystemClipboard`，Runtime 据此与系统剪贴板同步：
-- **复制**：每次归约后，版本号变化就把新内容写入系统剪贴板。Vim 的删除也写入，相当于 `clipboard=unnamedplus`。
+- **复制**：每次归约后，版本号变化就把新内容写入系统剪贴板。`kill` 也写入。
 - **粘贴**：`p`、`P`、`paste` 执行前先读取系统剪贴板。内容与应用剪贴板不同时，替换应用剪贴板：以换行结尾的按行粘贴，否则按字符粘贴。内容相同则保留原来的按行标记，所以 `yy` 之后 `p` 仍按行粘贴。读回的内容不会再写出去。
 
 终端前端按环境选择实现：
@@ -529,10 +598,10 @@ Application 拥有一个跨文档共享的剪贴板。ClipboardAction 提供复�
 
 ## 鼠标
 
-前端把鼠标位置换算成当前视图中的字节偏移，再以 `UserInput::Pointer` 交给交互层；屏幕坐标不进入交互层。行为对应 Vim 的 `mouse=a`：
-- **单击**：放置光标，并退出 Visual。Normal 中光标仍限制在字符上。
-- **拖动**：进入 Visual，从按下处选到当前位置。Insert 中拖动会先结束插入的撤销组。拖到文本区上下边缘之外时，选区延伸到可见区之外的行，视口跟随。
-- **滚轮**：每格滚动三行，最后一行最多滚到顶部。光标离开可见区时移到最近的可见行，保持列；Visual 中移动的是选区头。
+前端把鼠标位置换算成当前视图中的字节偏移，再以 `UserInput::Pointer` 交给交互层；屏幕坐标不进入交互层。
+- **单击**：放置光标。
+- **拖动**：从按下处选到当前位置，模式不变。拖到文本区上下边缘之外时，选区延伸到可见区之外的行，视口跟随。
+- **滚轮**：每格滚动三行，最后一行最多滚到顶部。光标离开可见区时移到最近的可见行，保持列；有选区时移动的是选区头。
 - **标签栏**：单击切换到该文档，与 `buffer` 命令相同。
 - 打开交互层（命令行、搜索、帮助等）时，编辑区不响应鼠标。
 
@@ -552,7 +621,7 @@ TODO 高亮由这个原语在配置中写成：
 highlight todo \b(TODO|FIXME|XXX)\b
 ```
 
-内置模块 `symbol-overlay` 用同一原语标记符号，对应 Emacs 的同名包。`<space>i`（`symbol-toggle`）标记光标处的符号，每个符号取一种没在用的颜色（共 8 种），再按一次取消；`<space>I`（`symbol-clear`）去掉当前文档的标记，不影响其他高亮和别的文档；`<a-n>` / `<a-p>` 到最近的另一个已标记符号。标记跟着文档，不跨文档。
+内置模块 `symbol-overlay` 用同一原语标记符号，对应 Emacs 的同名包。`SPC i`（`symbol-toggle`）标记光标处的符号，每个符号取一种没在用的颜色（共 8 种），再按一次取消；`SPC I`（`symbol-clear`）去掉当前文档的标记，不影响其他高亮和别的文档；`<a-n>` / `<a-p>` 到最近的另一个已标记符号。标记跟着文档，不跨文档。
 
 光标在标记上时，键位表 `mark` 优先于 Normal，离开标记就恢复原义；数字前缀、operator 和多键序列进行到一半时不受影响：
 
@@ -577,8 +646,8 @@ highlight todo \b(TODO|FIXME|XXX)\b
 
 ## 对每行或每处匹配输入按键
 
-`each-line KEYS` 和 `each-match PATTERN KEYS` 对应 meow 的 `meow-kmacro-lines`/`meow-kmacro-matches`，也就是 Vim 的 `:'<,'>normal` 和 `:g/PATTERN/normal`。在很多场合它们可以代替多光标。
-- **范围**：在 Visual 中按 `:` 打开命令行时，范围是 Visual 覆盖的行；否则是选区覆盖的行；都没有时，`each-line` 只作用于光标所在行，`each-match` 作用于整个文档。
+`each-line KEYS` 和 `each-match PATTERN KEYS` 对应 meow 的 `meow-kmacro-lines`/`meow-kmacro-matches`。在很多场合它们可以代替多光标。
+- **范围**：选区覆盖的行；都没有时，`each-line` 只作用于光标所在行，`each-match` 作用于整个文档。
 - **执行**：KEYS 用按键记法书写，可以包含宏，如 `each-line @q`、`each-match foo ciwbar<esc>`。每个目标先回到 Normal 模式，光标放在行首或匹配开头，再像键入一样回放 KEYS。目标从下往上处理，所以对一行的修改不会移动上方的目标。
 - **撤销**：全部修改合并为一步撤销。
 - **失败**：某个目标上的按键失败时，只放弃这个目标剩下的按键，其余目标照常执行。最多处理 10,000 个目标。
@@ -594,13 +663,13 @@ highlight todo \b(TODO|FIXME|XXX)\b
 
 ## 屏幕标签跳转
 
-`jump-to`（`<space>j`）对应 avy 的 `avy-goto-char-2`：先输入两个字符，所有窗口显示的行中每处出现的位置都标上标签，再输入标签跳过去；目标在别的窗口时焦点随之移动。
+`jump-to`（`SPC j`）对应 avy 的 `avy-goto-char-2`：先输入两个字符，所有窗口显示的行中每处出现的位置都标上标签，再输入标签跳过去；目标在别的窗口时焦点随之移动。
 - 查询全是小写时不区分大小写，含大写时精确匹配。
 - 当前窗口的目标排在最前，其余窗口按布局顺序。标签按 `asdfghjkl` 主行优先；超过 26 处时全部用两个字母，标签之间没有前缀关系。只有一处时直接跳过去，没有时提示 `No XX on screen`。
 - 已输入的标签字母可以退格；Esc 取消；文本、窗口或焦点变化时标签失效并关闭。
 - 只看窗口可见的行；水平滚出窗口的位置也会分到标签，但不显示。
 
-`window-pick`（`<space>w`）对应 ace-window：每个窗口的左上角显示一个标签，输入后聚焦那个窗口。只有两个窗口时直接切到另一个，只有一个时什么也不做。
+`window-pick`（`SPC w`）对应 ace-window：每个窗口的左上角显示一个标签，输入后聚焦那个窗口。只有两个窗口时直接切到另一个，只有一个时什么也不做。
 
 标签由交互层的 `Layer::Labels` 持有，前端用 `cell_of` 把文档位置换算成窗口内的格子再绘制。
 
@@ -610,14 +679,14 @@ highlight todo \b(TODO|FIXME|XXX)\b
 
 - **记录什么**：离开的位置。切换文档一定记录，不论是打开文件、切 buffer、切窗口还是扩展调用 `soda.open`。同一文档内只有这些命令记录：`gg`、`G`、`%`、`/`、`?`、`n`、`N`、`*`、`#`、mark 跳转、`jump-to`，以及打开结果。没有实际移动时不记录。
 - **结果文档**：`*grep*` 这类 scratch 文档不是历史中的一站。从面板打开结果时，记录的是进入面板之前所在的文件位置。
-- **连续走结果**：连续用回车或 `]q`/`[q` 走同一份结果只算一次，所以一次 `<c-o>` 就回到开始看结果之前的地方；要在结果之间来回用 `[q`。其他跳转或新的结果会结束这一段。
+- **连续走结果**：连续用回车或 `M-g n`/`M-g p` 走同一份结果只算一次，所以一次 `<c-o>` 就回到开始看结果之前的地方；要在结果之间来回用 `M-g p`。其他跳转或新的结果会结束这一段。
 - **位置跟随编辑**；文档关闭时，它在列表里的位置一并删除。
 - **去重**：相邻两项在同一文档的同一行时只留一个，最多保留 100 项，不跨会话保存。
 - 传统终端发送的 `<c-i>` 就是 Tab，所以 Normal 模式的 `<tab>` 也绑定为 `jump-forward`。
 
 ## 导航与选择
 
-文档中的 `Ctrl-Left/Right` 按 Unicode 单词移动，`Ctrl-Backspace/Delete` 删除到前后词边界；已有选区时先删除选区。单词边界与输入组件采用相同规则，标点和空白是分隔符，跨行操作保留 grapheme 边界。查询逐行读取 rope，不生成全文字符串。SelectAll 命令全选；默认 Vim 键位可用 `ggVG` 选择全部行。选区存在时 Tab 缩进所选行，Shift-Tab 反缩进，选区与事务一起映射；选区终点恰好位于下一行开头时不包含该行。没有选区时 Tab 按文档的 tab/space 策略插入缩进。
+文档中的 `Ctrl-Left/Right` 按 Unicode 单词移动，`Ctrl-Backspace/Delete` 删除到前后词边界；已有选区时先删除选区。单词边界与输入组件采用相同规则，标点和空白是分隔符，跨行操作保留 grapheme 边界。查询逐行读取 rope，不生成全文字符串。SelectAll 命令全选；选区存在时 Tab 缩进所选行，Shift-Tab 反缩进，选区与事务一起映射；选区终点恰好位于下一行开头时不包含该行。没有选区时 Tab 按文档的 tab/space 策略插入缩进。
 
 `PageUp/PageDown` 移动一个视口减一行，保留目标逻辑列并同时移动视口；Shift 扩展选区。前端通过 `set_page_rows` 提供编辑区可见行数；零或一行视口仍至少移动一行。core 只理解指定行数的垂直移动。
 
@@ -739,7 +808,7 @@ Picker 默认将文字输入焦点留在 `TextInput`。当前候选与输入光�
 
 输入框使用“行编辑键”一节的默认键；文字输入或粘贴替换选区。Ctrl-P / Ctrl-N 和上下方向键选择候选，Tab / Shift-Tab 补全，Enter 确认，Esc / Ctrl-C 取消。
 
-命令行的默认操作见“命令行”一节：`:`、`<space>:`、`<space>f`、`<space>b` 分别以空串、空串、`project `、`buffer ` 进入；输入筛选，上下键选择，Tab 填入，Enter 执行，Esc 取消。`Home` / `End` 操作输入光标，候选导航不改变文字。
+命令行的默认操作见“命令行”一节：`M-x`、`SPC :`、`SPC f`、`SPC b` 分别以空串、空串、`project `、`buffer ` 进入；输入筛选，上下键选择，Tab 填入，Enter 执行，Esc 取消。`Home` / `End` 操作输入光标，候选导航不改变文字。
 
 搜索入口：
 
@@ -753,7 +822,7 @@ Picker 默认将文字输入焦点留在 `TextInput`。当前候选与输入光�
 
 ## 设计参考
 
-Vim：`~/package/vim`，主要对照 `runtime/doc/motion.txt`、`change.txt`、`visual.txt` 和 `src/normal.c` 的 motion、operator 与模式语义。Neovim：`~/package/neovim`，参考 `src/nvim/normal.c` 和 `ops.c` 的输入状态与操作执行边界。
+meow：`~/.emacs.d/elpaca/sources/meow`，对照选区、keypad 和 beacon 语义。kakoune：`~/project/kakoune`，对照选区操作和宏。
 
 下列为本地源码参考位置。组件分层、会话与结果校验吸收这些设计，具体按键和执行策略由 Soda 的交互契约确定。
 
@@ -782,8 +851,3 @@ IntelliJ 的旧 `platform/lang-impl/src/com/intellij/ide/actions/searcheverywher
 `cargo test --test workflows` 验证复制剪切粘贴、Unicode 导航、跳转、翻页和替换。`cargo test --test departure` 控制保存完成的时序，验证保存后关闭、取消等待、写入失败、新编辑、逐文档退出与重新加载保护。
 
 
-## Vim 基线验证
-
-`tests/fixtures/vim.json` 保存隔离 Vim 实际生成的文本与字节光标结果。`cargo test --test vim` 对照这些结果，覆盖普通移动、计数、operator 范围、字符/行寄存器、Visual、插入、搜索、undo/redo，并验证 C++ 缩进与保存退出流程。夹具只覆盖已支持的语义子集，不表示完整兼容性。`normal!` 中失败的按键会中止其后的按键，宏也无法在其中录制，所以夹具里每条按键序列都不能中途失败；宏、`>`/`<`（Vim 默认插入 tab）和 Ctrl-D/Ctrl-U 由 `tests/vim.rs` 中的单独测试覆盖。
-
-使用 `python scripts/generate_vim_cases.py --vim /path/to/vim` 更新期望值。生成器使用 `-Nu NONE -i NONE -n -es`，不读取用户配置或 viminfo，固定 tabstop/shiftwidth 为 4 并启用 autoindent。新用例只需给出 before 和 keys，生成器填充 after 与 cursor；测试运行不依赖 Vim 可执行文件。`cargo test --test keymaps` 验证模式覆盖、输入组件覆盖、多键冲突、取消与注册命令边界。

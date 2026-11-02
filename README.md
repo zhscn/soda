@@ -1,6 +1,6 @@
 # Soda
 
-Soda 是用 Rust 实现的终端编辑器，核心体验是 CLion 式的 C++ 即时缩进：回车时根据增量维护的语法结构和项目的 `.clang-format` 计算新行缩进，并正确处理 tab 与 space 混排。编辑采用 Vim 语法，Insert 和输入框支持 readline 键。
+Soda 是用 Rust 实现的终端编辑器，核心体验是 CLion 式的 C++ 即时缩进：回车时根据增量维护的语法结构和项目的 `.clang-format` 计算新行缩进，并正确处理 tab 与 space 混排。编辑采用 meow 式的选择优先模型，Insert 和输入框支持 readline 键。
 
 ```sh
 cargo run --release -- [--no-config] [FILE]

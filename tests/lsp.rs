@@ -359,7 +359,7 @@ fn code_actions_offer_titles_and_apply_edits_and_commands() {
 #[test]
 fn hover_shows_in_a_box_until_the_next_key() {
     let Some(mut f) = open("x\n") else { return };
-    keys(&mut f.r, "K");
+    keys(&mut f.r, "<c-c>k");
     wait(&mut f.r, |r| r.popup() == Some("first\n  second"));
     keys(&mut f.r, "l");
     assert_eq!(f.r.popup(), None);
@@ -379,7 +379,7 @@ fn diagnostics_become_notes_with_their_words_and_join_the_hover() {
     assert_eq!(notes[0].text, "bad line\nmore");
     assert_eq!(notes[0].severity, soda::application::Severity::Error);
     assert_eq!(notes[0].range, 4..5, "an empty range marks one cell");
-    keys(&mut f.r, "jK");
+    keys(&mut f.r, "j<c-c>k");
     wait(&mut f.r, |r| {
         r.popup() == Some("bad line\nmore\n\nfirst\n  second")
     });
@@ -429,7 +429,7 @@ fn a_missing_server_is_said_once() {
         r.poll();
     }
     assert_eq!(r.message(), "quiet");
-    keys(&mut r, "K");
+    keys(&mut r, "<c-c>k");
     assert_eq!(r.message(), "No language server for this document");
 }
 #[test]

@@ -2,7 +2,7 @@
 use super::{
     Command, EditMode, Input, InputResult, Layers, Message,
     keymap::{self, Resolution},
-    vim::{Insert, VimCommand},
+    modal::{Action, BeaconEdit},
 };
 use crate::{application::Application, core::EditError, editor::Command as EditCommand};
 use std::{path::Path, time::Duration};
@@ -172,42 +172,6 @@ pub enum UserInput {
     FocusGained,
 }
 
-/// Emacs keys of Normal and Visual as the Vim keys that do the same, so
-/// they take counts and follow operators as arrows do. The rest of the
-/// table has no use after an operator: `d<c-w>` is not `dd`.
-fn emacs_keys(key: &KeyStroke, visual: bool, pending: bool) -> Option<&'static str> {
-    let key = keymap::canonical(*key).ok()?;
-    let motion = match (key.control, key.alt, key.code) {
-        (true, false, Key::Char('f')) => Some("l"),
-        (true, false, Key::Char('b')) => Some("h"),
-        (true, false, Key::Char('n')) => Some("j"),
-        (true, false, Key::Char('p')) => Some("k"),
-        (true, false, Key::Char('a')) => Some("0"),
-        (true, false, Key::Char('e')) => Some("$"),
-        (false, true, Key::Char('f')) => Some("w"),
-        (false, true, Key::Char('b')) => Some("b"),
-        (false, true, Key::Char('m')) => Some("^"),
-        (false, true, Key::Char('<')) => Some("gg"),
-        (false, true, Key::Char('>')) => Some("G"),
-        (false, true, Key::Char('{')) => Some("{"),
-        (false, true, Key::Char('}')) => Some("}"),
-        _ => None,
-    };
-    if motion.is_some() || pending {
-        return motion;
-    }
-    match (key.control, key.alt, key.code) {
-        (true, false, Key::Char('s')) => Some("/"),
-        (true, false, Key::Char(' ')) => Some("v"),
-        (true, false, Key::Char('y')) => Some("P"),
-        (true, false, Key::Char('w')) if visual => Some("d"),
-        (false, true, Key::Char('w')) if visual => Some("y"),
-        (false, true, Key::Char('d')) if !visual => Some("dw"),
-        (false, true, Key::Backspace) if !visual => Some("db"),
-        _ => None,
-    }
-}
-
 fn pending(message: Message) -> InputResult {
     InputResult::Handled(super::Response {
         redraw: true,
@@ -228,7 +192,7 @@ impl Layers {
     ) -> Result<InputResult, EditError> {
         self.route_recorded(input, false, app, time, file_root)
     }
-    /// Routes input replayed by `.` or a macro; a macro being recorded
+    /// Routes input replayed by a macro; a macro being recorded
     /// keeps the keys that started the replay, not the replayed ones.
     pub fn route_replayed(
         &mut self,
@@ -239,11 +203,30 @@ impl Layers {
     ) -> Result<InputResult, EditError> {
         self.route_recorded(input, true, app, time, file_root)
     }
-    fn idle(&self) -> bool {
-        self.active.is_none()
-            && self.mode == EditMode::Normal
-            && !self.vim.active()
-            && !self.sequence.active()
+    /// The key tables in force, first to be asked first: what the caret is
+    /// on or in, the mode, then what every mode shares.
+    pub(super) fn stack(&self, app: &Application) -> Vec<keymap::Context> {
+        use keymap::Context;
+        let mut stack = vec![];
+        match self.mode {
+            EditMode::Insert => {
+                if self.completion.visible() {
+                    stack.push(Context::Completion);
+                }
+                if self.snippet.active() {
+                    stack.push(Context::Snippet);
+                }
+            }
+            EditMode::Normal if !self.modal.active() && app.on_mark() => stack.push(Context::Mark),
+            EditMode::Beacon => stack.push(Context::Beacon),
+            EditMode::Normal => {}
+        }
+        stack.push(match self.mode {
+            EditMode::Insert => Context::Insert,
+            EditMode::Normal | EditMode::Beacon => Context::Normal,
+        });
+        stack.push(Context::Global);
+        stack
     }
     fn route_recorded(
         &mut self,
@@ -261,17 +244,12 @@ impl Layers {
             | UserInput::FocusLost
             | UserInput::FocusGained => false,
         };
-        if typed {
-            let idle = self.idle();
-            self.vim.replay.typed(&input, replayed, idle);
+        if typed && !replayed {
+            let fresh = !self.sequence.active();
+            self.modal.replay.typed(&input, fresh);
         }
         self.replaying = replayed;
-        let result = self.route(input, app, time, file_root);
-        if typed {
-            let idle = self.idle();
-            self.vim.replay.routed(idle);
-        }
-        result
+        self.route(input, app, time, file_root)
     }
     fn route(
         &mut self,
@@ -290,11 +268,11 @@ impl Layers {
             return self.execute(super::Command::CheckFiles, app, time, file_root);
         }
         if matches!(input, UserInput::FocusLost) {
-            if !self.sequence.active() && !self.vim.active() {
+            if !self.sequence.active() && !self.modal.active() {
                 return Ok(InputResult::Blocked);
             }
             self.sequence.clear();
-            self.vim.clear();
+            self.modal.clear();
             return Ok(pending(Message::Clear));
         }
         if matches!(&input, UserInput::Key(key) if key.release) {
@@ -314,10 +292,10 @@ impl Layers {
         let key = match input {
             UserInput::Key(key) => key,
             UserInput::Paste(_) | UserInput::Unrecognized
-                if self.sequence.active() || self.vim.active() =>
+                if self.sequence.active() || self.modal.active() =>
             {
                 self.sequence.clear();
-                self.vim.clear();
+                self.modal.clear();
                 return Ok(pending(Message::Keep));
             }
             UserInput::Paste(text) if self.mode == EditMode::Insert => {
@@ -334,121 +312,125 @@ impl Layers {
             }
             _ => return Ok(InputResult::Blocked),
         };
-        if self.mode == EditMode::Insert && !self.sequence.active() {
-            let list = self.completion.visible();
-            let command = list
-                .then(|| self.keymap.over_insert(keymap::Context::Completion, key))
-                .flatten()
-                // Enter is a line break until a candidate is chosen.
-                .filter(|command| {
-                    self.completion.selected()
-                        || !matches!(
-                            command,
-                            Command::Completion(super::completion::Action::Accept)
-                        )
-                })
-                .or_else(|| {
-                    self.snippet
-                        .active()
-                        .then(|| self.keymap.over_insert(keymap::Context::Snippet, key))
-                        .flatten()
-                });
-            if let Some(command) = command {
-                self.vim.replay.unrecord();
-                return self.execute(command, app, time, file_root);
-            }
+        // A command waits for one more key.
+        if let Some(read) = self.modal.read.take() {
+            let ch = match key.code {
+                Key::Char(ch) if !key.alt && !key.control => ch,
+                Key::Enter => '\n',
+                _ => {
+                    self.modal.clear();
+                    return Ok(pending(Message::Clear));
+                }
+            };
+            return Ok(InputResult::Handled(self.modal_read(read, ch, app, time)));
         }
-        // Keys of a marked symbol stand in for Normal's while the caret is on
-        // one, after symbol-overlay's map; part way through a count, an
-        // operator or a key sequence they mean what they always do.
-        if self.mode == EditMode::Normal
+        // A count goes on with digits, as the transient map of `digit-argument`.
+        if self.modal.count.is_some()
             && !self.sequence.active()
-            && !self.vim.active()
-            && app.on_mark()
-            && let Some(command) = self.keymap.over_insert(keymap::Context::Mark, key)
+            && !key.alt
+            && !key.control
+            && let Key::Char(ch) = key.code
+            && let Some(digit) = ch.to_digit(10)
         {
-            return self.execute(command, app, time, file_root);
-        }
-        let cancel = keymap::is_cancel(&key)
-            && !self.sequence.continues(key, self.mode.into(), &self.keymap);
-        if cancel && (self.sequence.active() || self.vim.active()) {
-            let exit_visual =
-                self.vim.active() && matches!(self.mode, EditMode::Visual | EditMode::VisualLine);
-            self.sequence.clear();
-            self.vim.clear();
-            if !exit_visual {
-                return Ok(pending(Message::Clear));
-            }
-        } else if !self.vim.active() || self.sequence.active() {
-            match self.sequence.push(key, self.mode.into(), &self.keymap) {
-                Resolution::Complete(command) => {
-                    self.vim.clear();
-                    return self.execute(command, app, time, file_root);
-                }
-                Resolution::Prefix => return Ok(pending(Message::Clear)),
-                Resolution::Invalid => {
-                    return Ok(pending(Message::Set("Undefined key sequence".into())));
-                }
-                Resolution::Pass => {}
-            }
-        }
-        if cancel {
             return self.execute(
-                Command::Vim(VimCommand::Insert(Insert::Leave)),
+                Command::Modal(Action::Digit(digit as usize)),
                 app,
                 time,
                 file_root,
             );
         }
-        let plain = !key.alt && !key.control && !key.unsupported_modifiers;
-        if self.mode == EditMode::Insert {
-            return match key.code {
-                Key::Char(ch) if plain => {
-                    self.completion.typed = !self.replaying;
-                    self.execute(
-                        Command::Edit(EditCommand::TypeChar(ch)),
-                        app,
-                        time,
-                        file_root,
-                    )
-                }
-                _ => Ok(InputResult::Blocked),
+        // Typing with beacons is the same edit at every caret; bindings that
+        // know one caret, as auto-pairs do, stay out of it.
+        if self.mode == EditMode::Insert
+            && self.modal.beacon_insert
+            && !self.sequence.active()
+            && !key.alt
+            && !key.control
+        {
+            let edit = match key.code {
+                Key::Char(ch) => Some(BeaconEdit::Text(ch.to_string())),
+                Key::Enter => Some(BeaconEdit::Text("\n".into())),
+                Key::Backspace => Some(BeaconEdit::Backward),
+                Key::Delete => Some(BeaconEdit::Forward),
+                _ => None,
             };
-        }
-        // Normal and Visual keys without a binding feed the Vim grammar;
-        // arrows take part in counts and operator motions.
-        let vim_key = match key.code {
-            Key::Char(ch) => Some(ch),
-            Key::Left => Some(if key.shift { 'b' } else { 'h' }),
-            Key::Right => Some(if key.shift { 'w' } else { 'l' }),
-            Key::Up if !key.shift => Some('k'),
-            Key::Down if !key.shift => Some('j'),
-            Key::Home => Some('0'),
-            Key::End => Some('$'),
-            _ => None,
-        };
-        let visual = matches!(self.mode, EditMode::Visual | EditMode::VisualLine);
-        let mut plain_key = [0; 4];
-        let vim_keys = match vim_key.filter(|_| plain) {
-            Some(ch) => Some(&*ch.encode_utf8(&mut plain_key)),
-            None => emacs_keys(&key, visual, self.vim.active()),
-        };
-        if let Some(keys) = vim_keys {
-            for ch in keys.chars() {
-                match self.vim.key(ch, visual) {
-                    Ok(Some(command)) => return self.execute(command, app, time, file_root),
-                    Ok(None) => {}
-                    Err(error) => {
-                        self.failed = true;
-                        return Ok(pending(Message::Set(format!("{error}: {ch}"))));
-                    }
-                }
+            if let Some(edit) = edit {
+                return Ok(InputResult::Handled(self.beacon_type(edit, app, time)));
             }
+        }
+        let stack = self.stack(app);
+        let cancel = keymap::is_cancel(&key) && !self.sequence.continues(key, &stack, &self.keymap);
+        if cancel && (self.sequence.active() || self.modal.active()) {
+            self.sequence.clear();
+            self.modal.clear();
             return Ok(pending(Message::Clear));
         }
-        if self.vim.active() {
-            self.vim.clear();
+        // Enter is a line break until a candidate is chosen.
+        let chosen = self.completion.selected();
+        let skip = move |command: &Command| {
+            !chosen
+                && matches!(
+                    command,
+                    Command::Completion(super::completion::Action::Accept)
+                )
+        };
+        let resolution = if self.sequence.in_keypad() {
+            self.sequence.push_keypad(key, &stack, &self.keymap)
+        } else {
+            self.sequence.push(key, &stack, &self.keymap, &skip)
+        };
+        match resolution {
+            Resolution::Complete(command) => {
+                // `repeat` runs again what a key ran, not what that went on
+                // to run, nor itself.
+                let repeat = matches!(&command, Command::Named(line) if line.trim() == "repeat");
+                // Keys a macro replays are not what was typed.
+                if !repeat
+                    && !self.replaying
+                    && !matches!(
+                        command,
+                        Command::Keypad(_)
+                            | Command::Modal(Action::Repeat | Action::Digit(_) | Action::Negative)
+                    )
+                {
+                    self.modal.last = Some(command.clone());
+                }
+                // Choosing from a list is no use to a replay.
+                if matches!(
+                    self.sequence.source,
+                    Some(keymap::Context::Completion | keymap::Context::Snippet)
+                ) {
+                    self.modal.replay.unrecord();
+                }
+                return self.execute(command, app, time, file_root);
+            }
+            Resolution::Prefix => return Ok(pending(Message::Clear)),
+            Resolution::Invalid => {
+                return Ok(pending(Message::Set("Undefined key sequence".into())));
+            }
+            Resolution::Pass => {}
         }
-        Ok(InputResult::Blocked)
+        if self.mode != EditMode::Insert {
+            if cancel {
+                self.modal.clear();
+            }
+            return Ok(InputResult::Blocked);
+        }
+        if cancel {
+            return self.execute(Command::Modal(Action::Leave), app, time, file_root);
+        }
+        let plain = !key.alt && !key.control && !key.unsupported_modifiers;
+        match key.code {
+            Key::Char(ch) if plain => {
+                self.completion.typed = !self.replaying;
+                self.execute(
+                    Command::Edit(EditCommand::TypeChar(ch)),
+                    app,
+                    time,
+                    file_root,
+                )
+            }
+            _ => Ok(InputResult::Blocked),
+        }
     }
 }

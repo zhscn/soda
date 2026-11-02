@@ -59,7 +59,7 @@ fn brackets_pair_step_over_and_delete_together() {
     keys(&mut r, "x<left>[");
     assert_eq!(shown(&r), "(a) [|x");
     // Plain text keeps quotes single.
-    keys(&mut r, "<esc>A \"");
+    keys(&mut r, "<esc><c-e>a \"");
     assert_eq!(shown(&r), "(a) [x \"|");
     r.command(Command::Named("set auto-pairs false".into()));
     keys(&mut r, "(");
@@ -89,7 +89,7 @@ fn cpp_pairs_quotes_outside_literals_and_opens_blocks() {
     assert_eq!(shown(&r), "if (x) {\n  s = \"(\"|\n}");
     keys(&mut r, "; // don't (");
     assert_eq!(shown(&r), "if (x) {\n  s = \"(\"; // don't (|\n}");
-    keys(&mut r, "<esc>ggOc = x'");
+    keys(&mut r, "<esc><a-lt>Ic = x'");
     assert_eq!(shown(&r), "c = x'|\nif (x) {\n  s = \"(\"; // don't (\n}");
     keys(&mut r, "<bs> '");
     assert_eq!(shown(&r), "c = x '|'\nif (x) {\n  s = \"(\"; // don't (\n}");

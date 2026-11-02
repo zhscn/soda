@@ -1,8 +1,8 @@
 //! Context-scoped key tables. Defaults are command lines resolved through the
 //! registry; user bindings shadow them and unbinding restores the default.
 use super::{
-    Command, EditMode, Input, InputKey, InputMotion, Key, KeyStroke, picker::ListMotion,
-    registry::Registry, vim::VimCommand,
+    Command, EditMode, Input, InputKey, InputMotion, Key, KeyStroke, modal::Action,
+    picker::ListMotion, registry::Registry,
 };
 use crate::{
     application::ClipboardAction,
@@ -11,8 +11,11 @@ use crate::{
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum Context {
+    /// Under every editing mode: the home of `C-x`, `C-c` and the keypad.
+    Global,
     Normal,
-    Visual,
+    /// Beacon; other keys go to Normal.
+    Beacon,
     Insert,
     /// Insert while the completion list shows; other keys go to Insert.
     Completion,
@@ -23,9 +26,10 @@ pub enum Context {
     Prompt,
 }
 impl Context {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
+        Self::Global,
         Self::Normal,
-        Self::Visual,
+        Self::Beacon,
         Self::Insert,
         Self::Completion,
         Self::Snippet,
@@ -34,8 +38,9 @@ impl Context {
     ];
     pub fn name(self) -> &'static str {
         match self {
+            Self::Global => "global",
             Self::Normal => "normal",
-            Self::Visual => "visual",
+            Self::Beacon => "beacon",
             Self::Insert => "insert",
             Self::Completion => "completion",
             Self::Snippet => "snippet",
@@ -51,7 +56,7 @@ impl From<EditMode> for Context {
     fn from(mode: EditMode) -> Self {
         match mode {
             EditMode::Normal => Self::Normal,
-            EditMode::Visual | EditMode::VisualLine => Self::Visual,
+            EditMode::Beacon => Self::Beacon,
             EditMode::Insert => Self::Insert,
         }
     }
@@ -150,9 +155,9 @@ impl LineEdit {
                 direction: Direction::Forward,
                 smart: false,
             }),
-            Self::DeleteWordBackward => Command::Vim(VimCommand::EraseWord),
+            Self::DeleteWordBackward => Command::Modal(Action::EraseWord),
             Self::DeleteWordForward => Command::Edit(Edit::DeleteWord(Direction::Forward)),
-            Self::KillLineStart => Command::Vim(VimCommand::EraseLineStart),
+            Self::KillLineStart => Command::Modal(Action::EraseLineStart),
             Self::KillLineEnd => Command::Clipboard(ClipboardAction::Kill {
                 backward: false,
                 word: false,
@@ -299,9 +304,9 @@ const READLINE: &[(&str, &str)] = &[
     ("<c-k>", "kill-line-end"),
     ("<c-y>", "yank"),
 ];
-/// Emacs commands with no Vim meaning here, the same in every editing mode.
-/// Emacs motions in Normal and Visual feed the Vim grammar: see `routing`.
-const EMACS: &[(&str, &str)] = &[
+/// Keys of every editing mode. `<c-c>` is the leader: `<space>f` in Normal
+/// reads as `<c-c>f`, so a module binds its keys here once.
+const GLOBAL: &[(&str, &str)] = &[
     ("<c-x><c-s>", "write"),
     ("<c-x><c-w>", "saveas"),
     ("<c-x><c-f>", "open"),
@@ -343,54 +348,141 @@ const EMACS: &[(&str, &str)] = &[
     ("<c-a-/>", "redo"),
     ("<c-a-_>", "redo"),
     ("<c-z>", "suspend"),
+    ("<c-c><c-c>", "stop"),
+    ("<f3>", "macro-start"),
+    ("<f4>", "macro-end"),
+    ("<c-x>(", "macro-start"),
+    ("<c-x>)", "macro-end"),
+    ("<c-x>e", "macro-end"),
+    ("<c-c>[", "macro-start"),
+    ("<c-c>]", "macro-end"),
+    ("<c-c>1", "digit-argument 1"),
+    ("<c-c>2", "digit-argument 2"),
+    ("<c-c>3", "digit-argument 3"),
+    ("<c-c>4", "digit-argument 4"),
+    ("<c-c>5", "digit-argument 5"),
+    ("<c-c>6", "digit-argument 6"),
+    ("<c-c>7", "digit-argument 7"),
+    ("<c-c>8", "digit-argument 8"),
+    ("<c-c>9", "digit-argument 9"),
+    ("<c-c>0", "digit-argument 0"),
+    ("<c-c>f", "project"),
+    ("<c-c>o", "window-pick"),
+    ("<c-c>b", "buffers"),
+    ("<c-c>:", "commands"),
+    ("<c-c>j", "jump-to"),
+    ("<c-c>w", "window-pick"),
+    ("<c-c>r", "recent"),
+    ("<c-c>H", "window-left"),
+    ("<c-c>J", "window-down"),
+    ("<c-c>K", "window-up"),
+    ("<c-c>L", "window-right"),
 ];
+/// The keys of `meow`, and Emacs keys for the same moves.
 const NORMAL: &[(&str, &str)] = &[
-    ("<c-r>", "redo"),
+    ("h", "left"),
+    ("j", "down"),
+    ("k", "up"),
+    ("l", "right"),
+    ("H", "left-expand"),
+    ("J", "down-expand"),
+    ("K", "up-expand"),
+    ("L", "right-expand"),
+    ("<left>", "left"),
+    ("<down>", "down"),
+    ("<up>", "up"),
+    ("<right>", "right"),
+    ("<s-left>", "left-expand"),
+    ("<s-down>", "down-expand"),
+    ("<s-up>", "up-expand"),
+    ("<s-right>", "right-expand"),
+    ("<c-b>", "left"),
+    ("<c-n>", "down"),
+    ("<c-p>", "up"),
+    ("<c-f>", "right"),
+    ("<home>", "line-start"),
+    ("<end>", "line-end"),
+    ("<c-a>", "line-start"),
+    ("<c-e>", "line-end"),
+    ("<a-lt>", "document-start"),
+    ("<a-gt>", "document-end"),
+    ("<a-b>", "word-left"),
+    ("<a-f>", "word-right"),
+    ("w", "next-word"),
+    ("b", "back-word"),
+    ("W", "next-symbol"),
+    ("B", "back-symbol"),
+    ("[", "mark-word"),
+    ("]", "mark-symbol"),
+    ("e", "select-line"),
+    ("o", "block"),
+    ("O", "to-block"),
+    ("f", "find"),
+    ("t", "till"),
+    (",", "inner-of-thing"),
+    (".", "bounds-of-thing"),
+    (";", "reverse"),
+    ("<esc>", "cancel"),
+    ("<c-g>", "cancel"),
+    ("<c-[>", "cancel"),
+    ("z", "pop-selection"),
+    ("Z", "pop-all-selection"),
+    ("-", "negative-argument"),
+    ("0", "expand 0"),
+    ("1", "expand 1"),
+    ("2", "expand 2"),
+    ("3", "expand 3"),
+    ("4", "expand 4"),
+    ("5", "expand 5"),
+    ("6", "expand 6"),
+    ("7", "expand 7"),
+    ("8", "expand 8"),
+    ("9", "expand 9"),
+    ("i", "insert"),
+    ("a", "append"),
+    ("A", "open-below"),
+    ("I", "open-above"),
+    ("r", "kill"),
+    ("s", "change"),
+    ("d", "delete"),
+    ("y", "save"),
+    ("p", "put"),
+    ("<c-w>", "kill"),
+    ("<a-w>", "save"),
+    ("<c-y>", "put"),
+    ("<c-d>", "delete"),
+    ("<a-d>", "delete-word-forward"),
+    ("<a-bs>", "delete-word-backward"),
+    ("<c-space>", "set-mark"),
+    ("'", "join"),
+    ("n", "search-next"),
+    ("N", "search-pop"),
+    ("v", "search"),
+    ("<c-s>", "search"),
+    ("<c-r>", "search-backward"),
+    ("u", "undo"),
+    ("U", "redo"),
+    ("q", "jump-to"),
+    ("Q", "goto"),
+    ("R", "replace"),
+    ("/", "open"),
+    ("`", "repeat"),
+    ("G", "grab"),
+    ("S", "swap-grab"),
+    ("E", "macro-lines"),
+    ("V", "macro-matches"),
+    ("x", "keypad <c-x>"),
+    ("c", "keypad <c-c>"),
+    ("m", "keypad meta"),
+    ("g", "keypad ctrl-meta"),
+    ("<space>", "keypad leader"),
     ("<pagedown>", "page-down"),
     ("<pageup>", "page-up"),
-    ("<c-d>", "half-page-down"),
-    ("<c-u>", "half-page-up"),
-    ("<c-w>s", "split"),
-    ("<c-w>v", "vsplit"),
-    ("<c-w>c", "close-window"),
-    ("<c-w>q", "close-window"),
-    ("<c-w>o", "only"),
-    ("<c-w>h", "window-left"),
-    ("<c-w>j", "window-down"),
-    ("<c-w>k", "window-up"),
-    ("<c-w>l", "window-right"),
-    ("<c-w><left>", "window-left"),
-    ("<c-w><down>", "window-down"),
-    ("<c-w><up>", "window-up"),
-    ("<c-w><right>", "window-right"),
-    ("<c-w>w", "window-next"),
-    ("<c-w><c-w>", "window-next"),
-    ("<c-w>W", "window-previous"),
     ("<ret>", "jump"),
-    ("]q", "next-result"),
     ("<c-o>", "jump-back"),
     ("<c-i>", "jump-forward"),
     // Terminals without the kitty protocol send Tab for Ctrl-I.
     ("<tab>", "jump-forward"),
-    ("[q", "previous-result"),
-    ("<c-c>", "stop"),
-    ("<f1>", "help"),
-    ("<space>f", "project"),
-    ("<space>b", "buffers"),
-    ("<space>:", "commands"),
-    ("<space>j", "jump-to"),
-    ("<space>w", "window-pick"),
-    ("<space>r", "recent"),
-    ("<space>H", "window-left"),
-    ("<space>J", "window-down"),
-    ("<space>K", "window-up"),
-    ("<space>L", "window-right"),
-];
-const VISUAL: &[(&str, &str)] = &[
-    ("<pagedown>", "page-down"),
-    ("<pageup>", "page-up"),
-    ("<c-d>", "half-page-down"),
-    ("<c-u>", "half-page-up"),
     ("<f1>", "help"),
 ];
 const COMPLETION: &[(&str, &str)] = &[
@@ -603,7 +695,7 @@ fn sequence(keys: &[KeyStroke]) -> Result<Vec<KeyStroke>, BindingError> {
 }
 
 pub struct Keymap {
-    edit: [Layer<Command>; 6],
+    edit: [Layer<Command>; 7],
     prompt: Layer<Input>,
 }
 impl Default for Keymap {
@@ -615,13 +707,10 @@ impl Default for Keymap {
         };
         let parse = |keys: &str| KeyStroke::parse_sequence(keys).unwrap();
         for (context, table) in [
+            (Context::Global, GLOBAL),
             (Context::Normal, NORMAL),
-            (Context::Normal, EMACS),
-            (Context::Visual, VISUAL),
-            (Context::Visual, EMACS),
             (Context::Insert, INSERT),
             (Context::Insert, READLINE),
-            (Context::Insert, EMACS),
             (Context::Completion, COMPLETION),
             (Context::Snippet, SNIPPET),
             (Context::Mark, &[]),
@@ -672,16 +761,22 @@ impl Keymap {
             context => self.edit[context as usize].unbind(keys),
         }
     }
-    /// The command of a key in a context that takes single keys over Insert.
-    pub(super) fn over_insert(&self, context: Context, key: KeyStroke) -> Option<Command> {
-        let key = canonical(key).ok()?;
-        match self.resolve(context, &[key]) {
-            Resolution::Complete(command) => Some(command),
-            _ => None,
+    /// The first table of `stack` that knows `keys`, as Emacs reads its
+    /// active maps; `skip` passes over a binding that is off for now.
+    pub(super) fn resolve(
+        &self,
+        stack: &[Context],
+        keys: &[KeyStroke],
+        skip: &dyn Fn(&Command) -> bool,
+    ) -> (Resolution<Command>, Context) {
+        for &context in stack {
+            match self.edit[context as usize].resolve(keys) {
+                Resolution::Pass => {}
+                Resolution::Complete(command) if skip(&command) => {}
+                resolution => return (resolution, context),
+            }
         }
-    }
-    pub(super) fn resolve(&self, context: Context, keys: &[KeyStroke]) -> Resolution<Command> {
-        self.edit[context as usize].resolve(keys)
+        (Resolution::Pass, Context::Global)
     }
     /// Field keys are single strokes; printable characters insert text.
     pub(super) fn input(&self, key: KeyStroke) -> Input {
@@ -700,11 +795,12 @@ impl Keymap {
     /// a key that continues a longer sequence reports its own keys.
     pub fn continuations(
         &self,
-        context: Context,
+        stack: &[Context],
         prefix: &[KeyStroke],
     ) -> Vec<(KeyStroke, String)> {
         let mut out: Vec<(KeyStroke, String)> = vec![];
-        for (keys, label) in self.bindings(context) {
+        let bindings = stack.iter().flat_map(|context| self.bindings(*context));
+        for (keys, label) in bindings {
             if keys.len() <= prefix.len() || !keys.starts_with(prefix) {
                 continue;
             }
@@ -736,19 +832,137 @@ impl Keymap {
     }
 }
 
-/// Pending literal key sequence of an editing context.
+/// How the keypad starts: `x` reads as `<c-x>`, the leader as `<c-c>` with
+/// its next key plain, `m` and `g` as Meta and Ctrl-Meta on the next key.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum KeypadStart {
+    Prefix(KeyStroke),
+    Leader,
+    Modifier { control: bool },
+}
+#[derive(Clone, Copy, Default)]
+struct Keypad {
+    /// The next key is taken as it is; Space asks for this.
+    literal: bool,
+    /// The next key takes Alt, and Ctrl if the flag says so.
+    modifier: Option<bool>,
+}
+/// Pending key sequence of an editing context. In the keypad each plain key
+/// is tried with Ctrl first, then as it is, in the global table alone: both
+/// `x s` and `<c-x><c-s>` reach one binding, and `x <space> o` still reaches
+/// `<c-x>o` next to `<c-x><c-o>`.
 #[derive(Default)]
 pub(super) struct Sequence {
     keys: Vec<KeyStroke>,
+    keypad: Option<Keypad>,
+    /// The table that gave the last complete binding.
+    pub source: Option<Context>,
 }
 impl Sequence {
     pub fn active(&self) -> bool {
-        !self.keys.is_empty()
+        !self.keys.is_empty() || self.keypad.is_some()
     }
     pub fn clear(&mut self) {
         self.keys.clear();
+        self.keypad = None;
     }
-    pub fn push(&mut self, key: KeyStroke, context: Context, map: &Keymap) -> Resolution<Command> {
+    pub fn start(&mut self, start: KeypadStart) {
+        self.clear();
+        let mut keypad = Keypad::default();
+        match start {
+            KeypadStart::Prefix(key) => self.keys.push(key),
+            KeypadStart::Leader => {
+                self.keys.extend(canonical(CTRL_C));
+                keypad.literal = true;
+            }
+            KeypadStart::Modifier { control } => keypad.modifier = Some(control),
+        }
+        self.keypad = Some(keypad);
+    }
+    pub fn in_keypad(&self) -> bool {
+        self.keypad.is_some()
+    }
+    /// The keys a keypad key stands for, in the order to try them.
+    fn candidates(key: KeyStroke, keypad: Keypad) -> Vec<KeyStroke> {
+        if let Some(control) = keypad.modifier {
+            return vec![KeyStroke {
+                alt: true,
+                control,
+                ..key
+            }];
+        }
+        let char_key = matches!(key.code, Key::Char(_)) && !key.control && !key.alt;
+        if keypad.literal || !char_key {
+            return vec![key];
+        }
+        let control = KeyStroke {
+            control: true,
+            ..key
+        };
+        vec![control, key]
+    }
+    pub fn push_keypad(
+        &mut self,
+        key: KeyStroke,
+        stack: &[Context],
+        map: &Keymap,
+    ) -> Resolution<Command> {
+        let keypad = self.keypad.unwrap_or_default();
+        let Ok(key) = canonical(key) else {
+            self.clear();
+            return Resolution::Invalid;
+        };
+        if key.code == Key::Backspace {
+            if self.keys.len() > 1 {
+                self.keys.pop();
+            } else {
+                self.clear();
+            }
+            return Resolution::Prefix;
+        }
+        if key.code == Key::Char(' ') && !keypad.literal && keypad.modifier.is_none() {
+            self.keypad = Some(Keypad {
+                literal: true,
+                modifier: None,
+            });
+            return Resolution::Prefix;
+        }
+        for candidate in Self::candidates(key, keypad) {
+            let Ok(candidate) = canonical(candidate) else {
+                continue;
+            };
+            let keys = [&self.keys[..], &[candidate]].concat();
+            // A chord with Meta means what it means when typed; plain keys
+            // of Normal stay out of what the keypad reads.
+            let tables: &[Context] = if keypad.modifier.is_some() {
+                stack
+            } else {
+                &[Context::Global]
+            };
+            match map.resolve(tables, &keys, &|_| false).0 {
+                Resolution::Prefix => {
+                    self.keys = keys;
+                    self.keypad = Some(Keypad::default());
+                    return Resolution::Prefix;
+                }
+                Resolution::Complete(command) => {
+                    self.source = Some(Context::Global);
+                    self.clear();
+                    return Resolution::Complete(command);
+                }
+                _ => {}
+            }
+        }
+        self.clear();
+        Resolution::Invalid
+    }
+    pub fn push(
+        &mut self,
+        key: KeyStroke,
+        stack: &[Context],
+        map: &Keymap,
+        skip: &dyn Fn(&Command) -> bool,
+    ) -> Resolution<Command> {
         let active = self.active();
         let Ok(key) = canonical(key) else {
             self.clear();
@@ -759,9 +973,10 @@ impl Sequence {
             };
         };
         self.keys.push(key);
-        match map.resolve(context, &self.keys) {
-            Resolution::Prefix => Resolution::Prefix,
-            Resolution::Complete(command) => {
+        match map.resolve(stack, &self.keys, skip) {
+            (Resolution::Prefix, _) => Resolution::Prefix,
+            (Resolution::Complete(command), context) => {
+                self.source = Some(context);
                 self.clear();
                 Resolution::Complete(command)
             }
@@ -778,9 +993,64 @@ impl Sequence {
     pub fn keys(&self) -> &[KeyStroke] {
         &self.keys
     }
+    /// What the pending keypad state adds to `keys`, for the status line.
+    pub fn keypad_hint(&self) -> &'static str {
+        match self.keypad {
+            Some(Keypad {
+                modifier: Some(true),
+                ..
+            }) => "C-M-",
+            Some(Keypad {
+                modifier: Some(false),
+                ..
+            }) => "M-",
+            Some(Keypad { literal: true, .. }) => "SPC ",
+            _ => "",
+        }
+    }
+    /// Next keys as the keypad reads them: a Ctrl binding shows as its plain
+    /// key and wins over a plain binding of that key.
+    pub fn keypad_continuations(&self, map: &Keymap) -> Vec<(KeyStroke, String)> {
+        let keypad = self.keypad.unwrap_or_default();
+        let next = map.continuations(&[Context::Global], &self.keys);
+        if keypad.literal {
+            return next
+                .into_iter()
+                .filter(|(key, _)| !key.control && !key.alt)
+                .collect();
+        }
+        if keypad.modifier.is_some() {
+            return vec![];
+        }
+        let mut out: Vec<(KeyStroke, String)> = vec![];
+        for (key, label) in next.iter().filter(|(key, _)| key.control && !key.alt) {
+            out.push((
+                KeyStroke {
+                    control: false,
+                    ..*key
+                },
+                label.clone(),
+            ));
+        }
+        for (key, label) in next.iter().filter(|(key, _)| !key.control) {
+            if !out.iter().any(|(shown, _)| shown == key) {
+                out.push((*key, label.clone()));
+            }
+        }
+        out
+    }
     /// Whether a key goes on with the pending sequence.
-    pub fn continues(&self, key: KeyStroke, context: Context, map: &Keymap) -> bool {
+    pub fn continues(&self, key: KeyStroke, stack: &[Context], map: &Keymap) -> bool {
         let keys = [&self.keys[..], &[key]].concat();
-        self.active() && !matches!(map.resolve(context, &keys), Resolution::Pass)
+        !self.keys.is_empty()
+            && !matches!(map.resolve(stack, &keys, &|_| false).0, Resolution::Pass)
     }
 }
+const CTRL_C: KeyStroke = KeyStroke {
+    code: Key::Char('c'),
+    control: true,
+    alt: false,
+    shift: false,
+    unsupported_modifiers: false,
+    release: false,
+};

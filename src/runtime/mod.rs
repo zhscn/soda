@@ -6,6 +6,7 @@ use crate::{
     files::{FileCompletion, FileRunner, paths::PathRunner},
     interaction::{
         Command, InputResult, Layer, Layers, Message, Response, UserInput,
+        modal::{Action, Effect, Kind, Query},
         picker::{PickerEffect, PickerRunner},
     },
 };
@@ -65,7 +66,7 @@ pub struct Runtime {
     clipboard_revision: u64,
     message: String,
     epoch: Instant,
-    /// Input `.` and macros still have to replay, next first, as Vim's
+    /// Input macros still have to replay, next first, as a
     /// typeahead: a replay started while replaying goes to the front.
     replay: std::collections::VecDeque<UserInput>,
     replaying: bool,
@@ -92,6 +93,8 @@ pub struct Runtime {
     lua_queue: std::collections::VecDeque<(lua::Request, Option<ViewId>)>,
     lua_running: bool,
     dirty: bool,
+    /// When the digits that extend a selection go away.
+    hints_until: Option<Duration>,
     /// Text in a box by the caret, until the next input.
     /// Words for the message row while it has no message, until replaced.
     hint: Option<String>,
@@ -155,6 +158,7 @@ impl Runtime {
             lua_queue: Default::default(),
             lua_running: false,
             dirty: true,
+            hints_until: None,
             hint: None,
             popup: None,
             popup_scroll: Default::default(),
@@ -258,8 +262,16 @@ impl Runtime {
     pub fn run_running(&self) -> bool {
         self.run.busy()
     }
-    pub fn editor_caret(&self) -> Option<usize> {
-        self.layers.editor_caret()
+    /// Digits that extend the selection, for a moment after each key.
+    pub fn expand_hints(&self) -> Vec<(usize, char)> {
+        if self.hints_until.is_none() {
+            return vec![];
+        }
+        self.layers.expand_hints(&self.app)
+    }
+    /// The other selections of Beacon.
+    pub fn beacons(&self) -> Vec<std::ops::Range<usize>> {
+        self.layers.beacons(&self.app)
     }
     pub fn edit_mode(&self) -> crate::interaction::EditMode {
         self.layers.edit_mode()
@@ -270,15 +282,15 @@ impl Runtime {
     pub fn search_history(&self) -> &[String] {
         self.layers.search_history()
     }
-    /// The register a macro is being recorded into.
-    pub fn recording(&self) -> Option<char> {
+    /// Whether a macro is being recorded.
+    pub fn recording(&self) -> bool {
         self.layers.recording()
     }
     pub fn pending_keys(&self) -> Option<String> {
         self.layers.pending()
     }
     pub fn key_continuations(&self) -> Vec<(String, String)> {
-        self.layers.continuations()
+        self.layers.continuations(&self.app)
     }
     pub fn message(&self) -> &str {
         &self.message
@@ -332,6 +344,7 @@ impl Runtime {
         self.input_at(input, self.epoch.elapsed());
     }
     pub fn input_at(&mut self, input: UserInput, time: Duration) {
+        self.hints_until = Some(time + HINT_TIME);
         if self.popup.is_some()
             && self.layer().is_none()
             && let UserInput::Key(key) = &input
@@ -584,14 +597,8 @@ impl Runtime {
             }
             _ => {}
         }
-        // Named registers stay inside the editor.
         if let Event::Clipboard {
-            action:
-                ClipboardAction::Put {
-                    register: None | Some('"' | '+' | '*'),
-                    ..
-                }
-                | ClipboardAction::Paste,
+            action: ClipboardAction::Paste,
             ..
         } = &event
         {
@@ -835,6 +842,13 @@ impl Runtime {
             return false;
         }
         for command in response.commands {
+            let command = match command {
+                Command::Effect(effect) => match self.effect(*effect) {
+                    Some(command) => command,
+                    None => continue,
+                },
+                command => command,
+            };
             match self
                 .layers
                 .execute(command, &self.app, time, &self.app.root())
@@ -871,7 +885,28 @@ impl Runtime {
         }
         true
     }
-    /// Routes `.` and macro input again. A failing command drops the rest,
+    /// Does what the modal layer asked; a structure query answers with the
+    /// command that selects what it found, to run in the same batch.
+    fn effect(&mut self, effect: Effect) -> Option<Command> {
+        let view = self.app.active_view().and_then(|id| self.app.view(id))?;
+        let document = view.document_id;
+        match effect {
+            Effect::Structure(query, selection) => {
+                let found = self
+                    .app
+                    .with_editor(document, |editor| Ok(structure(editor, query, selection)));
+                match found {
+                    Ok(Some(action)) => Some(Command::Modal(action)),
+                    _ => Some(Command::Fail("No block here".into())),
+                }
+            }
+            Effect::Indicator(line, text) => {
+                self.app.set_indicator(document, line, text);
+                None
+            }
+        }
+    }
+    /// Routes macro input again. A failing command drops the rest,
     /// which is how a recursive macro ends; a bound on the number of inputs
     /// ends one that never fails.
     fn replay(&mut self, time: Duration) {
@@ -909,13 +944,7 @@ impl Runtime {
         if text.is_empty() || text == self.app.clipboard() {
             return;
         }
-        // Text copied elsewhere pastes by line when it ends a line, as in Vim.
-        let linewise = text.ends_with('\n');
-        if self
-            .app
-            .dispatch(Event::SetClipboard { text, linewise })
-            .is_ok()
-        {
+        if self.app.dispatch(Event::SetClipboard(text)).is_ok() {
             self.clipboard_revision = self.app.clipboard_revision();
         }
     }
@@ -942,6 +971,13 @@ impl Runtime {
     }
     /// Bounded completion reduction prevents workers from monopolizing input.
     pub fn poll(&mut self) {
+        if self
+            .hints_until
+            .is_some_and(|until| self.epoch.elapsed() >= until)
+        {
+            self.hints_until = None;
+            self.dirty = true;
+        }
         self.poll_lua();
         self.poll_lsp();
         for _ in 0..8 {
@@ -1092,3 +1128,89 @@ impl Runtime {
 
 #[cfg(test)]
 mod tests;
+
+/// How long the digits that extend a selection stay.
+const HINT_TIME: Duration = Duration::from_millis(1500);
+/// What a query finds, as the selection to make.
+fn structure(
+    editor: &mut crate::files::Editing<'_>,
+    query: Query,
+    selection: crate::core::Selection,
+) -> Option<Action> {
+    let range = selection.range();
+    let inside = |group: &crate::language::Group| {
+        let around = group.range();
+        around.start <= range.start && range.end <= around.end && around != range
+    };
+    let climb = |editor: &mut crate::files::Editing<'_>, mut at: usize, wanted: Option<char>| {
+        let mut last: Option<std::ops::Range<usize>> = None;
+        loop {
+            let group = editor.enclosing(at).ok()??;
+            // Each step must leave the group before it.
+            if last.as_ref() == Some(&group.range()) {
+                return None;
+            }
+            last = Some(group.range());
+            let open = editor.model().document().snapshot();
+            let first = open.byte_slice(group.open.clone())?.to_string();
+            if inside(&group) && wanted.is_none_or(|ch| first.starts_with(ch)) {
+                return Some(group);
+            }
+            at = group.open.start;
+        }
+    };
+    match query {
+        Query::Block => {
+            let next = range
+                .is_empty()
+                .then(|| editor.item(range.start, crate::language::Side::After));
+            let item = next.and_then(Result::ok).flatten();
+            let group = match item {
+                Some(item) if item.kind == crate::language::ItemKind::Group => item.range,
+                _ => climb(editor, range.start, None)?.range(),
+            };
+            let backward = selection.anchor > selection.head;
+            let (anchor, head) = if backward {
+                (group.end, group.start)
+            } else {
+                (group.start, group.end)
+            };
+            Some(Action::Found {
+                anchor,
+                head,
+                kind: Kind::Block,
+                expand: true,
+            })
+        }
+        Query::ToBlock => {
+            let mut at = selection.head;
+            let end = loop {
+                let item = editor.item(at, crate::language::Side::After).ok()??;
+                if item.kind == crate::language::ItemKind::Group {
+                    break item.range.end;
+                }
+                at = item.range.end;
+            };
+            Some(Action::Found {
+                anchor: selection.anchor,
+                head: end,
+                kind: Kind::Block,
+                expand: true,
+            })
+        }
+        Query::Pair { open, inner } => {
+            let group = climb(editor, range.start, Some(open))?;
+            let around = if inner {
+                group.open.end..group.close.start
+            } else {
+                group.range()
+            };
+            Some(Action::Found {
+                anchor: around.start,
+                head: around.end,
+                kind: Kind::Thing,
+                expand: false,
+            })
+        }
+    }
+}

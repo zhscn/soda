@@ -1,7 +1,6 @@
 //! Mouse input after the frontend has resolved screen cells to positions in
-//! the active view. Clicks and drags follow Vim's `mouse=a`: a click places
-//! the caret and leaves Visual mode, a drag selects in Visual mode.
-use super::{EditMode, InputResult, Layers, Message, Response, vim::visual_selection};
+//! the active view. A click places the caret, a drag selects.
+use super::{InputResult, Layers, Message, Response};
 use crate::{
     application::{Application, Event, ViewId},
     core::Selection,
@@ -15,7 +14,7 @@ pub enum Pointer {
     Click(usize),
     /// Selects from where the button went down to where it is now.
     Drag { anchor: usize, head: usize },
-    /// Moves the caret, or the Visual head, back into view after scrolling.
+    /// Moves the head of the selection back into view after scrolling.
     Reveal(usize),
     /// Shows a document, as `buffer` does.
     Document(DocumentId),
@@ -37,21 +36,15 @@ impl Layers {
         let Some(view) = app.active_view().and_then(|id| app.view(id)) else {
             return InputResult::Blocked;
         };
-        let snapshot = app
-            .workspace()
-            .editor(view.document_id)
-            .unwrap()
-            .model()
-            .document()
-            .snapshot();
         self.sequence.clear();
-        self.vim.clear();
+        self.modal.clear();
         let mut response = Response {
             redraw: true,
             message: Message::Clear,
             ..Response::default()
         };
-        let visual = matches!(self.mode, EditMode::Visual | EditMode::VisualLine);
+        let editor = app.workspace().editor(view.document_id).unwrap();
+        let current = editor.model().session(view.session_id).unwrap().selection();
         let selection = match pointer {
             Pointer::Document(document) => {
                 response.events.push(super::commands::show(app, document));
@@ -61,28 +54,15 @@ impl Layers {
                 response.events.push(Event::Focus(view));
                 return InputResult::Handled(response);
             }
-            Pointer::Click(offset) => {
-                if visual {
-                    self.mode = EditMode::Normal;
-                }
-                self.vim.reset();
-                Selection::caret(offset)
-            }
-            Pointer::Drag { anchor, head } => {
-                response.events.extend(self.end_insert_group(app, time));
-                if !visual {
-                    self.mode = EditMode::Visual;
-                }
-                self.vim.reset();
-                self.vim.visual = Some((anchor, head));
-                visual_selection(snapshot, anchor, head, self.mode == EditMode::VisualLine)
-            }
-            Pointer::Reveal(offset) => match self.vim.visual {
-                Some((anchor, _)) => {
-                    self.vim.visual = Some((anchor, offset));
-                    visual_selection(snapshot, anchor, offset, self.mode == EditMode::VisualLine)
-                }
-                None => Selection::caret(offset),
+            Pointer::Click(offset) => Selection::caret(offset),
+            Pointer::Drag { anchor, head } => Selection { anchor, head },
+            Pointer::Reveal(offset) => Selection {
+                anchor: if current.range().is_empty() {
+                    offset
+                } else {
+                    current.anchor
+                },
+                head: offset,
             },
         };
         response.events.push(Event::Edit {
