@@ -32,6 +32,8 @@ const FUNCTIONS: &[&str] = &[
     "message",
     "flag",
     "unflag",
+    "note",
+    "popup",
     "hook",
     "define_command",
     "spawn",
@@ -281,6 +283,44 @@ impl Host {
                         })
                     },
                 )?,
+            )?;
+            soda.set(
+                "note",
+                scope.create_function(|_, (group, items): (String, Vec<mlua::Table>)| {
+                    let notes = items
+                        .iter()
+                        .map(|item| {
+                            let place = |name: &str| -> mlua::Result<(usize, usize)> {
+                                let [line, column]: [usize; 2] = item.get(name)?;
+                                Ok((line.saturating_sub(1), column.saturating_sub(1)))
+                            };
+                            let severity: String = item.get("severity")?;
+                            Ok(crate::application::NoteSpan {
+                                start: place("from")?,
+                                end: place("to")?,
+                                severity: crate::application::Severity::parse(&severity)
+                                    .map_err(mlua::Error::runtime)?,
+                                text: item.get("text")?,
+                            })
+                        })
+                        .collect::<mlua::Result<Vec<_>>>()?;
+                    let mut runtime = runtime.borrow_mut();
+                    let document = runtime.document().map_err(mlua::Error::runtime)?;
+                    runtime.edit_event(crate::application::Event::Note {
+                        document,
+                        group,
+                        notes,
+                    })
+                })?,
+            )?;
+            soda.set(
+                "popup",
+                scope.create_function(|_, text: String| {
+                    let mut runtime = runtime.borrow_mut();
+                    runtime.popup = Some(text);
+                    runtime.dirty = true;
+                    Ok(())
+                })?,
             )?;
             soda.set(
                 "unflag",

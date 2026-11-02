@@ -196,7 +196,7 @@ pub(super) fn render(
             text,
         );
     }
-    let prompt = message(buf, areas.message, runtime, theme);
+    let prompt = message(buf, areas.message, runtime, theme, text);
     match runtime.layer() {
         Some(Layer::CommandLine(line)) => {
             let area = Rect {
@@ -230,8 +230,52 @@ pub(super) fn render(
     {
         completions(buf, areas, position, popup, theme);
     }
+    if let (None, Some(words)) = (runtime.layer(), runtime.popup()) {
+        floating(buf, areas.editor, cursor, words, theme);
+    }
     if let Some(position) = cursor {
         frame.set_cursor_position(position);
+    }
+}
+
+/// Text in a box by the caret, on whichever side has more room. What does
+/// not fit is cut, marked with `…`.
+fn floating(buf: &mut Buffer, area: Rect, caret: Option<Position>, words: &str, theme: &Theme) {
+    let widest = area.width.saturating_sub(4).min(80);
+    if widest < 8 || area.height < 3 {
+        return;
+    }
+    let lines = layout::wrap(words, usize::from(widest));
+    let caret = caret.unwrap_or(Position::new(area.x, area.y));
+    let (above, below) = (caret.y - area.y, area.bottom().saturating_sub(caret.y + 1));
+    let room = above.max(below).saturating_sub(2);
+    if room == 0 {
+        return;
+    }
+    let shown = lines.len().min(usize::from(room));
+    let inner = lines[..shown]
+        .iter()
+        .map(|line| layout::plain(line, 0, usize::from(widest)).chars().count())
+        .max()
+        .unwrap_or(0) as u16;
+    let (wide, high) = (inner + 4, shown as u16 + 2);
+    let y = if below >= above {
+        caret.y + 1
+    } else {
+        caret.y - high
+    };
+    let x = caret.x.min(area.right().saturating_sub(wide)).max(area.x);
+    float_box(buf, Rect::new(x, y, wide, high), theme);
+    for (row, line) in lines[..shown].iter().enumerate() {
+        let cut = row + 1 == shown && shown < lines.len();
+        let text = if cut { "…" } else { line.as_str() };
+        buf.set_stringn(
+            x + 2,
+            y + 1 + row as u16,
+            layout::plain(text, 0, usize::from(inner)),
+            usize::from(inner),
+            theme.float,
+        );
     }
 }
 
@@ -252,41 +296,52 @@ fn completions(
         .unwrap_or(0);
     let detail = popup.rows.iter().map(|r| r.detail.len()).max().unwrap_or(0);
     let area = areas.editor;
-    let wide = ((label + detail + 4) as u16).min(area.width);
-    let high = popup.rows.len() as u16;
+    // Border, marker and a gap on the left; the same on the right, less the
+    // marker, so the labels line up with the word being typed.
+    let wide = ((label + detail + 5) as u16).min(area.width);
+    let (above, below) = (caret.y - area.y, area.bottom().saturating_sub(caret.y + 1));
+    let wanted = popup.rows.len() as u16 + 2;
+    let fits_below = below >= wanted || below >= above;
+    let high = wanted.min(if fits_below { below } else { above });
+    if high < 3 {
+        return;
+    }
     let x = caret
         .x
-        .saturating_sub(popup.typed as u16 + 1)
+        .saturating_sub(popup.typed as u16 + 2)
         .max(area.x)
         .min(area.right().saturating_sub(wide));
-    let y = if caret.y + 1 + high <= area.bottom() {
+    let y = if fits_below {
         caret.y + 1
     } else {
-        caret.y.saturating_sub(high).max(area.y)
+        caret.y - high
     };
-    let name = wide.saturating_sub(detail as u16 + 4) as usize;
-    for (row, candidate) in popup.rows.iter().enumerate() {
-        let y = y + row as u16;
+    float_box(buf, Rect::new(x, y, wide, high), theme);
+    let name = wide.saturating_sub(detail as u16 + 5) as usize;
+    for (row, candidate) in popup.rows.iter().take(usize::from(high - 2)).enumerate() {
+        let y = y + 1 + row as u16;
         let style = if candidate.selected {
-            theme.panel.patch(theme.candidate_selected)
+            let band = Rect::new(x + 1, y, wide - 2, 1);
+            buf.set_style(band, theme.candidate_selected);
+            buf.set_string(x + 1, y, "▌", theme.marker.patch(theme.candidate_selected));
+            theme.float.patch(theme.candidate_selected)
         } else {
-            theme.panel
+            theme.float
         };
-        buf.set_string(x, y, " ".repeat(wide.into()), style);
-        buf.set_stringn(x + 1, y, &candidate.label, name, style);
+        buf.set_stringn(x + 2, y, &candidate.label, name, style);
         for range in &candidate.matched {
             let column = width(&candidate.label[..range.start]);
             if column < name {
                 let matched = &candidate.label[range.clone()];
-                buf.set_stringn(x + 1 + column as u16, y, matched, 1, style.patch(theme.key));
+                buf.set_stringn(x + 2 + column as u16, y, matched, 1, style.patch(theme.key));
             }
         }
         buf.set_stringn(
-            x + wide - detail as u16 - 1,
+            x + wide - detail as u16 - 2,
             y,
             &candidate.detail,
             detail,
-            style,
+            style.patch(theme.detail),
         );
     }
 }
@@ -611,6 +666,13 @@ fn status(
         right.push(Text::raw("running…  "));
     }
     if let Some(text) = text.filter(|_| view.is_some()) {
+        let (errors, warnings) = text.problems;
+        if errors > 0 {
+            right.push(Text::styled(format!("E{errors}  "), theme.status_error));
+        }
+        if warnings > 0 {
+            right.push(Text::styled(format!("W{warnings}  "), theme.status_warning));
+        }
         right.push(Text::raw(format!("{}  ", text.language)));
         let (line, column) = text.caret;
         let percent = (line + 1) * 100 / text.line_count.max(1);
@@ -670,7 +732,13 @@ fn tail(text: &str, width: usize) -> String {
 
 /// The bottom row shows messages, or a prompt layer's input. Returns the
 /// prompt cursor.
-fn message(buf: &mut Buffer, area: Rect, runtime: &Runtime, theme: &Theme) -> Option<Position> {
+fn message(
+    buf: &mut Buffer,
+    area: Rect,
+    runtime: &Runtime,
+    theme: &Theme,
+    text: Option<&layout::Frame>,
+) -> Option<Position> {
     let width = usize::from(area.width);
     match runtime.layer() {
         Some(Layer::Search { .. } | Layer::Replace(_) | Layer::Saving(_) | Layer::Labels(_)) => {
@@ -680,8 +748,20 @@ fn message(buf: &mut Buffer, area: Rect, runtime: &Runtime, theme: &Theme) -> Op
             cursor.map(|x| Position::new(area.x + x.min(width.saturating_sub(1)) as u16, area.y))
         }
         _ => {
-            let text = layout::plain(runtime.message(), 0, width);
-            buf.set_stringn(area.x, area.y, text, width, theme.text);
+            // A message outranks the note under the caret, which comes back
+            // with the next key.
+            let note = text
+                .and_then(|text| text.note.as_ref())
+                .filter(|_| runtime.message().is_empty());
+            let (words, style) = match note {
+                Some((severity, words)) => (
+                    words.lines().next().unwrap_or(""),
+                    theme.severity(*severity),
+                ),
+                None => (runtime.message(), theme.text),
+            };
+            let row = layout::plain(words, 0, width);
+            buf.set_stringn(area.x, area.y, row, width, style);
             None
         }
     }
@@ -694,6 +774,15 @@ fn inset(area: Rect) -> Rect {
         area.width.saturating_sub(2),
         area.height.saturating_sub(2),
     )
+}
+/// The box everything floating over the text sits in.
+fn float_box(buf: &mut Buffer, area: Rect, theme: &Theme) {
+    Clear.render(area, buf);
+    Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(theme.float_border)
+        .style(theme.float)
+        .render(area, buf);
 }
 fn popup(buf: &mut Buffer, area: Rect, title: &str, theme: &Theme) {
     Clear.render(area, buf);
@@ -980,6 +1069,134 @@ mod tests {
         );
         assert!(text.lines().nth(2).unwrap().starts_with("│ Vim editing"));
     }
+    #[test]
+    fn notes_underline_their_range_and_speak_at_the_caret() {
+        use crate::application::{Event, NoteSpan, Severity};
+        use ratatui::{backend::TestBackend, style::Modifier};
+        let root = tempfile::tempdir().unwrap();
+        let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.start(None);
+        r.command(Command::Edit(crate::editor::Command::InsertText(
+            "one two\nthree\n".into(),
+        )));
+        r.command(Command::SetMode(EditMode::Normal));
+        let document = r
+            .app()
+            .view(r.app().active_view().unwrap())
+            .unwrap()
+            .document_id;
+        r.dispatch(Event::Note {
+            document,
+            group: "test".into(),
+            notes: vec![
+                NoteSpan {
+                    start: (0, 4),
+                    end: (0, 7),
+                    severity: Severity::Warning,
+                    text: "second word\nmore".into(),
+                },
+                NoteSpan {
+                    start: (1, 0),
+                    end: (1, 5),
+                    severity: Severity::Error,
+                    text: "broken".into(),
+                },
+            ],
+        });
+        r.command(Command::Named("goto 1:1".into()));
+        let text = screen(&mut r, 60, 10);
+        let rows: Vec<_> = text.lines().collect();
+        assert_eq!(rows[9].trim_end(), "second word", "{text}");
+        assert!(rows[8].contains("E1") && rows[8].contains("W1"), "{text}");
+        let theme = Theme::detect();
+        let areas = Areas::new(&r, 60, 10);
+        let texts = super::super::frames(
+            &r,
+            &mut crate::tui::highlight::Highlighter::default(),
+            &areas,
+        )
+        .unwrap();
+        let mut terminal = ratatui::Terminal::new(TestBackend::new(60, 10)).unwrap();
+        terminal
+            .draw(|frame| render(frame, &r, &theme, &areas, &texts))
+            .unwrap();
+        let cells = terminal.backend().buffer();
+        let first = rows[1].split("one").next().unwrap().chars().count() as u16;
+        let underlined = |x| cells[(x, 1)].modifier.contains(Modifier::UNDERLINED);
+        assert!(!underlined(first + 3) && underlined(first + 4) && underlined(first + 6));
+        assert_eq!(
+            cells[(first + 4, 1)].underline_color,
+            theme.todo.fg.unwrap()
+        );
+    }
+
+    #[test]
+    fn wrapping_breaks_at_spaces_and_inside_long_words() {
+        assert_eq!(layout::wrap("aaa bbb ccc", 7), ["aaa bbb", "ccc"]);
+        assert_eq!(layout::wrap("a\n\nb", 7), ["a", "", "b"]);
+        assert_eq!(
+            layout::wrap("abcdefghij kl", 4),
+            ["abcd", "efgh", "ij", "kl"]
+        );
+    }
+
+    #[test]
+    fn completions_sit_in_a_box_under_the_caret_line() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("a.txt"), "alpha alder\n\n").unwrap();
+        let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.start(Some(root.path().join("a.txt")));
+        for _ in 0..500 {
+            r.poll();
+            if r.app().views().any(|v| {
+                r.app()
+                    .workspace()
+                    .file(v.document_id)
+                    .unwrap()
+                    .path()
+                    .is_some()
+            }) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        r.command(Command::Named("goto 2".into()));
+        r.command(Command::SetMode(EditMode::Insert));
+        keys(&mut r, "al");
+        for _ in 0..500 {
+            r.poll();
+            if r.completion_popup().is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let text = screen(&mut r, 40, 14);
+        let rows: Vec<_> = text.lines().collect();
+        let top = rows.iter().position(|row| row.contains("╭")).expect(&text);
+        assert!(rows[top - 1].contains("al"), "{text}");
+        assert!(rows[top + 1].contains("│ al"), "{text}");
+        assert!(rows[top + 3].contains("╰"), "{text}");
+    }
+
+    #[test]
+    fn a_popup_wraps_in_a_box_by_the_caret() {
+        let root = tempfile::tempdir().unwrap();
+        let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.start(None);
+        r.command(Command::Lua(
+            r#"soda.popup("int value\n\nA long sentence that has to wrap")"#.into(),
+        ));
+        let text = screen(&mut r, 24, 12);
+        let rows: Vec<_> = text.lines().collect();
+        assert!(rows.iter().any(|row| row.contains("╭")), "{text}");
+        assert!(rows.iter().any(|row| row.contains("int value")), "{text}");
+        assert!(
+            rows.iter().any(|row| row.contains("A long sentence")),
+            "{text}"
+        );
+        assert!(rows.iter().any(|row| row.contains("to wrap")), "{text}");
+    }
+
     #[test]
     fn a_status_line_pushed_up_hides_the_text_under_it() {
         let root = tempfile::tempdir().unwrap();

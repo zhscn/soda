@@ -82,6 +82,8 @@ pub struct Runtime {
     lua_queue: std::collections::VecDeque<(lua::Request, Option<ViewId>)>,
     lua_running: bool,
     dirty: bool,
+    /// Text in a box by the caret, until the next input.
+    popup: Option<String>,
 }
 impl Runtime {
     /// A runtime with `root` as a project, whatever the directory holds.
@@ -136,6 +138,7 @@ impl Runtime {
             lua_queue: Default::default(),
             lua_running: false,
             dirty: true,
+            popup: None,
         })
     }
     /// Opens the file given on the command line, or an untitled document.
@@ -309,6 +312,7 @@ impl Runtime {
         self.input_at(input, self.epoch.elapsed());
     }
     pub fn input_at(&mut self, input: UserInput, time: Duration) {
+        self.popup = None;
         let result = self
             .layers
             .route_input(input, &self.app, time, &self.app.root());
@@ -331,6 +335,9 @@ impl Runtime {
         self.lsp.enable();
     }
     /// The list of candidates to show under the caret.
+    pub fn popup(&self) -> Option<&str> {
+        self.popup.as_deref()
+    }
     pub fn completion_popup(&self) -> Option<crate::interaction::completion::Popup> {
         self.layers.completion_popup()
     }

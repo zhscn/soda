@@ -7,12 +7,13 @@
 -- which is not something opening a file should do.
 --
 -- Built in: <a-.> goes to the definition, <a-?> lists references, <a-,> comes
--- back; K shows what the caret is on; <space>c and <space>C list the callers
+-- back; K shows what the caret is on in a box until the next key; <space>c and <space>C list the callers
 -- and the callees. Completion follows from the server being there.
 
 soda.lsp.server("cpp", { "clangd", "--header-insertion=never", "--function-arg-placeholders=1" })
 
 local diagnostics = {}
+local severities = { "error", "warning" }
 
 local function path_of(uri)
   return (uri:gsub("^file://", ""):gsub("%%(%x%x)", function(hex)
@@ -202,6 +203,24 @@ soda.define_command("lsp-callees", function()
   hierarchy("callees", "callHierarchy/outgoingCalls", "to")
 end)
 
+-- The diagnostics of the caret's line, above what the server says.
+local function with_problems(contents)
+  local words = {}
+  local _, head = soda.buffer():selection()
+  for _, diagnostic in ipairs(diagnostics[soda.lsp.uri()] or {}) do
+    if diagnostic.range.start.line == head[1] - 1 then
+      table.insert(words, diagnostic.message)
+    end
+  end
+  if contents ~= "" then
+    if #words > 0 then
+      table.insert(words, "")
+    end
+    table.insert(words, contents)
+  end
+  return table.concat(words, "\n")
+end
+
 soda.define_command("lsp-hover", function()
   ask("textDocument/hover", nil, function(result)
     local contents = result and result.contents
@@ -209,11 +228,15 @@ soda.define_command("lsp-hover", function()
       contents = contents.value or (contents[1] and (contents[1].value or contents[1]))
     end
     if type(contents) ~= "string" or contents == "" then
-      soda.message("Nothing known here")
+      local problems = with_problems("")
+      if problems == "" then
+        soda.message("Nothing known here")
+      else
+        soda.popup(problems)
+      end
       return
     end
-    -- The message line shows one line; the whole of it is in `messages`.
-    soda.message((contents:gsub("%s*\n%s*", " ")))
+    soda.popup(with_problems(contents))
   end)
 end)
 
@@ -224,11 +247,30 @@ local function flag_current()
   end
   soda.unflag("lsp-error")
   soda.unflag("lsp-warning")
-  local errors, warnings = {}, {}
+  local errors, warnings, notes = {}, {}, {}
+  local buf = soda.buffer()
+  local info = soda.lsp.info()
+  local function place(position)
+    -- Diagnostics can arrive for text that has since gone.
+    local line = position.line + 1
+    local text = line <= buf:line_count() and buf:line(line) or ""
+    return { line, to_byte(text, position.character, info and info.encoding or "utf-8") + 1 }
+  end
   for _, diagnostic in ipairs(diagnostics[uri] or {}) do
     local line = diagnostic.range.start.line + 1
     table.insert(diagnostic.severity == 1 and errors or warnings, line)
+    local from, to = place(diagnostic.range.start), place(diagnostic.range["end"])
+    if from[1] == to[1] and from[2] == to[2] then
+      to[2] = to[2] + 1 -- An empty range still marks a cell.
+    end
+    table.insert(notes, {
+      from = from,
+      to = to,
+      severity = severities[diagnostic.severity] or "info",
+      text = diagnostic.message,
+    })
   end
+  soda.note("lsp", notes)
   if #errors > 0 then
     soda.flag("lsp-error", "error", "E", errors)
   end

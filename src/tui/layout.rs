@@ -1,6 +1,6 @@
 use super::highlight::Highlighter;
 use crate::{
-    application::{Application, ViewId},
+    application::{Application, Face, Severity, ViewId},
     core::{
         ByteOffset, LogicalColumn, column_width, logical_column_at, offset_at_logical_column,
         step_grapheme,
@@ -42,6 +42,10 @@ pub(super) struct Frame {
     pub language: String,
     /// The column of the ruler on screen, when it is in view.
     pub ruler: Option<u16>,
+    /// The note to show for the caret: the worst at it, else on its line.
+    pub note: Option<(crate::application::Severity, String)>,
+    /// Errors and warnings in the document.
+    pub problems: (usize, usize),
 }
 
 /// Clip by terminal cells. Partially visible tabs/wide graphemes become spaces;
@@ -190,6 +194,41 @@ pub(super) fn candidate_row<T>(
         faces: &[],
     };
     styled_row(text, 0, marks, 0, width, NonZeroUsize::new(4).unwrap())
+}
+/// Lines of `text` at most `width` cells wide, broken at spaces where they
+/// can be.
+pub(super) fn wrap(text: &str, width: usize) -> Vec<String> {
+    let mut lines = vec![];
+    for line in text.lines() {
+        let mut current = String::new();
+        let mut used = 0;
+        for word in line.split_inclusive(' ') {
+            let cells = unicode_width::UnicodeWidthStr::width(word);
+            let text = unicode_width::UnicodeWidthStr::width(word.trim_end());
+            if used + text > width && used > 0 {
+                lines.push(std::mem::take(&mut current).trim_end().to_owned());
+                used = 0;
+            }
+            current.push_str(word);
+            used += cells;
+            // A word wider than a line, such as a path, breaks where it must.
+            while used > width + 1 || (used > width && !current.ends_with(' ')) {
+                let mut cells = 0;
+                let end = current
+                    .char_indices()
+                    .find(|(_, ch)| {
+                        cells += unicode_width::UnicodeWidthChar::width(*ch).unwrap_or(0);
+                        cells > width
+                    })
+                    .map_or(current.len(), |(at, _)| at);
+                let rest = current.split_off(end);
+                lines.push(std::mem::replace(&mut current, rest));
+                used = unicode_width::UnicodeWidthStr::width(current.as_str());
+            }
+        }
+        lines.push(current.trim_end().to_owned());
+    }
+    lines
 }
 pub(super) fn plain(text: &str, left: usize, width: usize) -> String {
     row(text, 0, 0..0, left, width, NonZeroUsize::new(4).unwrap())
@@ -560,6 +599,7 @@ pub(super) fn frame(
     };
     let patterns: Vec<_> = app.highlights(view.document_id).collect();
     let flags = app.flags(view.document_id);
+    let notes = app.notes(view.document_id);
     let mut text = std::borrow::Cow::Borrowed("");
     for ((number, row), segment) in &shown {
         let number = *number;
@@ -576,6 +616,13 @@ pub(super) fn frame(
             })
             .collect();
         faces.sort_by_key(|(range, _)| range.start);
+        // Last, so the worst note's underline wins over everything else.
+        let start = snapshot.line_start(number).unwrap();
+        faces.extend(notes.iter().filter_map(|note| {
+            let from = note.range.start.max(start) - start;
+            let to = note.range.end.min(start + text.len()).checked_sub(start)?;
+            (from < to).then_some((from..to, Face::Note(note.severity)))
+        }));
         let marks = Marks {
             selection: state.selection().range(),
             matches: &[],
@@ -605,6 +652,25 @@ pub(super) fn frame(
             ),
         });
     }
+    let line_of = |offset| snapshot.line_of(offset);
+    let note = notes
+        .iter()
+        .rev()
+        .find(|note| note.range.contains(&head) || note.range.end == head)
+        .or_else(|| {
+            notes
+                .iter()
+                .rev()
+                .find(|note| line_of(note.range.start) == Some(line))
+        })
+        .map(|note| (note.severity, note.text.to_owned()));
+    let count = |severity| {
+        notes
+            .iter()
+            .filter(|note| note.severity == severity)
+            .count()
+    };
+    let problems = (count(Severity::Error), count(Severity::Warning));
     let (caret_place, _) = layout.place(head);
     let cursor = shown
         .iter()
@@ -631,6 +697,8 @@ pub(super) fn frame(
         line_count: lines,
         language: document.language().profile().name.clone(),
         ruler,
+        note,
+        problems,
     }))
 }
 

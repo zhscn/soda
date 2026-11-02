@@ -163,10 +163,32 @@ fn references_and_callers_are_results() {
     assert_eq!(text(&f.r), "a.cpp\n  2:3  caller\n");
 }
 #[test]
-fn hover_shows_on_one_line() {
+fn hover_shows_in_a_box_until_the_next_key() {
     let Some(mut f) = open("x\n") else { return };
     keys(&mut f.r, "K");
-    wait(&mut f.r, |r| r.message() == "first second");
+    wait(&mut f.r, |r| r.popup() == Some("first\n  second"));
+    keys(&mut f.r, "l");
+    assert_eq!(f.r.popup(), None);
+}
+#[test]
+fn diagnostics_become_notes_with_their_words_and_join_the_hover() {
+    let Some(mut f) = open("one\ntwo\n") else {
+        return;
+    };
+    let document =
+        f.r.app()
+            .view(f.r.app().active_view().unwrap())
+            .unwrap()
+            .document_id;
+    wait(&mut f.r, |r| !r.app().notes(document).is_empty());
+    let notes = f.r.app().notes(document);
+    assert_eq!(notes[0].text, "bad line\nmore");
+    assert_eq!(notes[0].severity, soda::application::Severity::Error);
+    assert_eq!(notes[0].range, 4..5, "an empty range marks one cell");
+    keys(&mut f.r, "jK");
+    wait(&mut f.r, |r| {
+        r.popup() == Some("bad line\nmore\n\nfirst\n  second")
+    });
 }
 #[test]
 fn the_server_completes_with_snippets() {

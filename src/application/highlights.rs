@@ -13,6 +13,8 @@ pub enum Face {
     Error,
     /// One of the backgrounds for marked symbols.
     Mark(u8),
+    /// The underline of a note.
+    Note(super::Severity),
 }
 pub const MARKS: u8 = 4;
 impl Face {

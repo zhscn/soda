@@ -17,12 +17,12 @@ rust-analyzer 默认不开，因为它会运行项目的构建脚本，打开一
 | --- | --- | --- |
 | `<a-.>` | `lsp-definition` | 到定义，有多处时列出；`<a-,>` 回来 |
 | `<a-?>` | `lsp-references` | 列出引用 |
-| `K` | `lsp-hover` | 在消息行显示光标处的信息，压成一行 |
+| `K` | `lsp-hover` | 在光标旁的浮窗里显示光标处的信息，上面列出这一行的诊断；下一个按键关闭 |
 | `<space>c` / `<space>C` | `lsp-callers` / `lsp-callees` | 列出调用者 / 被调用者，只有一层 |
 | | `lsp-diagnostics` | 列出所有诊断 |
 | | `lsp-restart` | 重启当前语言的服务器，失败后也用它重试 |
 
-列表是普通的结果文档，`]q` / `[q` 和回车都能用。诊断在行号栏显示：错误 `E`，其余 `W`。补全不需要配置，服务器在就是一个来源，`.`、`->`、`::` 触发。
+列表是普通的结果文档，`]q` / `[q` 和回车都能用。诊断在行号栏显示错误 `E`、其余 `W`，范围加彩色下划线，光标所在行的诊断自动显示在消息行（有其他消息时让位），状态栏显示文档的错误和警告数。补全不需要配置，服务器在就是一个来源，`.`、`->`、`::` 触发。
 
 ## 同步
 
@@ -42,6 +42,15 @@ soda.lsp.on(method, function(params) end)     -- 服务器的通知
 soda.lsp.uri()                                -- 当前文档的 URI
 soda.lsp.info()                               -- encoding、capabilities；没有服务器时为 nil
 soda.lsp.restart()
+```
+
+诊断和浮窗走通用接口，别的扩展也能用：
+
+```lua
+soda.note(group, {
+  { from = { 2, 5 }, to = { 2, 9 }, severity = "warning", text = "..." },  -- 行、字节列，从 1 起
+})                  -- 替换这一组；空表清除。severity 是 error、warning 或 info
+soda.popup(text)    -- 光标旁的浮窗，下一个按键关闭，放不下的部分截断
 ```
 
 作用对象是当前文档的语言的服务器。JSON 的 `null` 在 Lua 里是 `nil`。

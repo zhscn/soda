@@ -24,8 +24,16 @@ pub(super) struct Theme {
     pub border: Style,
     pub title: Style,
     pub panel: Style,
+    /// What floats over the text: a box, so it stays apart from the caret
+    /// line and from any text beneath it.
+    pub float: Style,
+    pub float_border: Style,
     pub candidate_selected: Style,
     pub marker: Style,
+    pub status_error: Style,
+    pub status_warning: Style,
+    /// Notes that are neither errors nor warnings.
+    pub info: Style,
     pub matched: Style,
     pub detail: Style,
     /// Tab and trailing space marks.
@@ -134,8 +142,13 @@ impl Theme {
             border: on(p.gutter, p.bg),
             title: on(p.blue, p.bg).add_modifier(Modifier::BOLD),
             panel: on(p.fg, p.bg),
+            float: on(p.fg, p.bg_dark),
+            float_border: on(p.comment, p.bg_dark),
             candidate_selected: Style::new().bg(c(p.bg_highlight)),
             marker: Style::new().fg(c(p.blue)),
+            status_error: on(p.red, p.bg_dark).add_modifier(Modifier::BOLD),
+            status_warning: on(p.yellow, p.bg_dark).add_modifier(Modifier::BOLD),
+            info: Style::new().fg(c(p.blue)),
             matched: Style::new().fg(c(p.orange)).add_modifier(Modifier::BOLD),
             detail: Style::new().fg(c(p.comment)),
             whitespace: Style::new().fg(c(p.gutter)),
@@ -184,6 +197,22 @@ impl Theme {
             crate::application::Face::Todo => self.todo,
             crate::application::Face::Error => self.error,
             crate::application::Face::Mark(n) => self.marks[usize::from(n)],
+            crate::application::Face::Note(severity) => {
+                let colour = self.severity(severity).fg.unwrap_or_default();
+                Style::new()
+                    .underline_color(colour)
+                    .add_modifier(Modifier::UNDERLINED)
+            }
+        }
+    }
+    /// A note's colour.
+    pub fn severity(&self, severity: crate::application::Severity) -> Style {
+        match severity {
+            crate::application::Severity::Error => self.error,
+            crate::application::Severity::Warning => {
+                Style::new().fg(self.todo.fg.unwrap_or_default())
+            }
+            crate::application::Severity::Info => self.info,
         }
     }
     /// A flag's sign: the face's colour on the gutter's background.

@@ -20,9 +20,11 @@ pub use clipboard::ClipboardAction;
 mod display;
 mod flags;
 mod highlights;
+mod notes;
 mod tidy;
 pub use flags::Flag;
 pub use highlights::{Face, Highlight, MARKS};
+pub use notes::{Note, NoteSpan, Severity};
 mod windows;
 pub use display::Placement;
 pub use windows::{Area, Axis, Direction, Node, Side, Windows};
@@ -179,6 +181,12 @@ pub enum Event {
         group: String,
         flag: Flag,
         lines: Vec<usize>,
+    },
+    /// Replaces a group's notes on a document.
+    Note {
+        document: DocumentId,
+        group: String,
+        notes: Vec<NoteSpan>,
     },
     /// Removes a group's flags, or all, from a document.
     Unflag {
@@ -355,6 +363,7 @@ pub struct Application {
     highlights: highlights::Highlights,
     grep_pattern: Option<(DocumentId, regex::Regex)>,
     flags: flags::Flags,
+    notes: notes::Notes,
 }
 impl Application {
     pub fn new(service: FileService) -> Self {
@@ -423,6 +432,12 @@ impl Application {
     }
     pub fn options(&self) -> &crate::options::Options {
         &self.options
+    }
+    /// A document's notes, the least severe first.
+    pub fn notes(&self, document: DocumentId) -> Vec<Note<'_>> {
+        self.workspace
+            .editor(document)
+            .map_or_else(Vec::new, |editor| self.notes.of(editor.model().document()))
     }
     /// The flag on each flagged line of a document, by zero-based line.
     pub fn flags(&self, document: DocumentId) -> BTreeMap<usize, &Flag> {
@@ -609,6 +624,7 @@ impl Application {
                 self.touched.record(change);
             }
             self.flags.map(change);
+            self.notes.map(change);
             for view in self
                 .views
                 .values_mut()
@@ -980,6 +996,7 @@ impl Application {
                 self.touched.forget(document);
                 self.highlights.forget(document);
                 self.flags.forget(document);
+                self.notes.forget(document);
                 self.repair_windows();
                 update.closed_views = ids;
                 update.closed_documents.push(document);
@@ -1181,6 +1198,18 @@ impl Application {
                     .ok_or(FileError::UnknownDocument)?;
                 self.flags
                     .add(editor.model().document(), &group, &flag, &lines);
+                update.options_changed = true;
+            }
+            Event::Note {
+                document,
+                group,
+                notes,
+            } => {
+                let editor = self
+                    .workspace
+                    .editor(document)
+                    .ok_or(FileError::UnknownDocument)?;
+                self.notes.set(editor.model().document(), &group, notes);
                 update.options_changed = true;
             }
             Event::Unflag { document, group } => {
