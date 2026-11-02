@@ -188,8 +188,10 @@ impl Theme {
             key: Style::new().fg(c(p.magenta)).add_modifier(Modifier::BOLD),
             label: badge(p.magenta),
             todo: Style::new().fg(c(p.yellow)).add_modifier(Modifier::BOLD),
-            marks: [p.yellow, p.green, p.blue, p.magenta]
-                .map(|bg| Style::new().fg(c(p.bg)).bg(c(bg))),
+            marks: [
+                p.yellow, p.green, p.blue, p.magenta, p.orange, p.cyan, p.red, p.comment,
+            ]
+            .map(|bg| Style::new().fg(c(p.bg)).bg(c(bg))),
         }
     }
 }

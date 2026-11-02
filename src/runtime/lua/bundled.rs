@@ -16,6 +16,10 @@ pub(super) const MODULES: &[(&str, &str)] = &[
     ("pairs", include_str!("../../../lua/pairs.lua")),
     ("snippets", include_str!("../../../lua/snippets.lua")),
     ("surround", include_str!("../../../lua/surround.lua")),
+    (
+        "symbol-overlay",
+        include_str!("../../../lua/symbol-overlay.lua"),
+    ),
 ];
 /// Modules loaded at startup. They add commands and keys, and do nothing
 /// until those are used; `git-flags` runs git on every file, so it waits
@@ -29,4 +33,5 @@ pub(super) const STARTUP: &[&str] = &[
     "pairs",
     "snippets",
     "surround",
+    "symbol-overlay",
 ];

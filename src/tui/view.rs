@@ -1250,6 +1250,23 @@ mod tests {
     }
 
     #[test]
+    fn an_indicator_stands_at_the_end_of_its_line_until_the_next_key() {
+        let root = tempfile::tempdir().unwrap();
+        let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.start(None);
+        r.command(Command::Edit(crate::editor::Command::InsertText(
+            "one\ntwo\n".into(),
+        )));
+        r.command(Command::SetMode(EditMode::Normal));
+        r.command(Command::Lua(r#"soda.indicator(2, "[2/3]")"#.into()));
+        let text = screen(&mut r, 40, 8);
+        assert!(text.contains("two [2/3]"), "{text}");
+        assert!(!text.contains("one ["), "{text}");
+        keys(&mut r, "l");
+        assert!(!screen(&mut r, 40, 8).contains("[2/3]"));
+    }
+
+    #[test]
     fn semantic_tokens_replace_the_category_under_them() {
         use crate::syntax::Category::{Function, Keyword, Type};
         let base = [(0..4, Keyword), (6..10, Keyword)];

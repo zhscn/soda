@@ -17,9 +17,9 @@ pub enum Face {
     /// The underline of a note.
     Note(super::Severity),
 }
-pub const MARKS: u8 = 4;
+pub const MARKS: u8 = 8;
 impl Face {
-    /// `todo`, `error`, `info`, `mark1` to `mark4`, or `mark` for the next mark
+    /// `todo`, `error`, `info`, `mark1` to `mark8`, or `mark` for the next mark
     /// colour.
     pub fn parse(name: &str) -> Result<Option<Self>, String> {
         Ok(Some(match name {

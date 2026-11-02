@@ -18,15 +18,18 @@ pub enum Context {
     Completion,
     /// Insert while a snippet has places left; below `Completion`.
     Snippet,
+    /// Normal with the caret on a marked symbol; other keys go to Normal.
+    Mark,
     Prompt,
 }
 impl Context {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Normal,
         Self::Visual,
         Self::Insert,
         Self::Completion,
         Self::Snippet,
+        Self::Mark,
         Self::Prompt,
     ];
     pub fn name(self) -> &'static str {
@@ -36,6 +39,7 @@ impl Context {
             Self::Insert => "insert",
             Self::Completion => "completion",
             Self::Snippet => "snippet",
+            Self::Mark => "mark",
             Self::Prompt => "prompt",
         }
     }
@@ -599,7 +603,7 @@ fn sequence(keys: &[KeyStroke]) -> Result<Vec<KeyStroke>, BindingError> {
 }
 
 pub struct Keymap {
-    edit: [Layer<Command>; 5],
+    edit: [Layer<Command>; 6],
     prompt: Layer<Input>,
 }
 impl Default for Keymap {
@@ -620,6 +624,7 @@ impl Default for Keymap {
             (Context::Insert, EMACS),
             (Context::Completion, COMPLETION),
             (Context::Snippet, SNIPPET),
+            (Context::Mark, &[]),
         ] {
             for (keys, line) in table {
                 let target = registry.parse_builtin(line).unwrap();

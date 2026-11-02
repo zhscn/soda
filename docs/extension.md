@@ -99,6 +99,8 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `soda.message(text)` | 设置状态消息 |
 | `soda.flag(group, face, sign, lines)` / `soda.unflag([group])` | 行标记，`lines` 是从 1 开始的行号数组；`unflag` 没有标记可去时不报错 |
 | `soda.hint(text)` | 消息行没有消息时显示的文字，一直保留到下一次调用；`nil` 清除 |
+| `soda.indicator(line, text)` | 在当前文档第 `line` 行的行尾显示文字，下一个按键清除 |
+| `soda.keys(notation)` | 按键记法输入按键，如 `soda.keys("foo<ret>")`，走和键盘一样的路径 |
 | `soda.prompt(text)` | 打开命令行并预填 `text` |
 | `soda.choose(title, items, fn)` | 在命令行里从 `items` 中选一项，输入过滤，选中后以从 1 起的序号调用 `fn`；取消时不调用 |
 | `soda.hook(event, filter, fn)` | 事件发生时以事件参数调用 `fn` |
@@ -126,6 +128,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `snippets` | 按语言注册 snippet，作为补全候选，见[补全](completion.md#snippet) | 无 |
 | `surround` | 在 Visual 选区两侧加上成对的文本 | Visual 的 `S` 加括号或引号 |
 | `clang-format` | 用 clang-format 格式化文档或 Visual 选中的行，只替换有变化的行 | 无 |
+| `symbol-overlay` | 标记符号并在标记之间跳转、改名，见[交互层](interaction.md#高亮模式) | `<space>i`、`<space>I`、`<a-n>`、`<a-p>`，以及 `mark` 键位表 |
 | `git-changes` | 把 `git diff` 的每个改动块列入 `*changes*` | `<space>g` |
 | `git-flags` | 用行标记标出新增、修改和删除的行，不随启动加载 | 无 |
 

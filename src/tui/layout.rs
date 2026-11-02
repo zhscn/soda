@@ -91,6 +91,7 @@ struct Marks<'a> {
 struct Inlay {
     column: usize,
     text: String,
+    face: Option<Face>,
 }
 fn cells_of(text: &str) -> usize {
     unicode_width::UnicodeWidthStr::width(text)
@@ -173,8 +174,8 @@ fn styled_row(
                 detail: false,
                 category: None,
                 whitespace: false,
-                face: None,
-                inlay: true,
+                face: inlay.face,
+                inlay: inlay.face.is_none(),
             });
         }
     };
@@ -394,7 +395,11 @@ impl<'a> Rows<'a> {
                 let line = snapshot.line_of(offset)?;
                 let column = logical_column_at(snapshot, ByteOffset(offset), tab).ok()?.0;
                 let text = text.chars().filter(|c| !c.is_control()).collect();
-                inlays.entry(line).or_default().push(Inlay { column, text });
+                inlays.entry(line).or_default().push(Inlay {
+                    column,
+                    text,
+                    face: None,
+                });
             }
         }
         Some(Self {
@@ -764,16 +769,26 @@ pub(super) fn frame(
             .wrap
             .is_some()
             .then(|| *row + 1 == layout.segments(number).len());
-        let hints: Vec<Inlay> = match last_row {
+        let mut hints: Vec<Inlay> = match last_row {
             None => layout.inlays.get(&number).cloned().unwrap_or_default(),
             Some(false) => vec![],
             Some(true) => (layout.inlays.get(&number).into_iter().flatten())
                 .map(|hint| Inlay {
                     column: usize::MAX,
                     text: format!(" {}", hint.text),
+                    face: None,
                 })
                 .collect(),
         };
+        if last_row != Some(false)
+            && let Some(text) = app.indicator(view.document_id, number)
+        {
+            hints.push(Inlay {
+                column: usize::MAX,
+                text: format!(" {text}"),
+                face: Some(Face::Todo),
+            });
+        }
         let marks = Marks {
             selection: state.selection().range(),
             matches: &[],

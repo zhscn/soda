@@ -546,14 +546,34 @@ Application 拥有一个跨文档共享的剪贴板。ClipboardAction 提供复�
 - **替换与删除**：同一模式再次添加时替换原来的外观。`unhighlight PATTERN` 从当前文档和全局中去掉这个模式，不带参数时去掉全部；没有可去掉的高亮时报错。文档关闭时它的高亮一并删除。
 - **配置**：配置文件可以使用 `highlight`；`highlight-local` 需要文档，只能在命令行、键位或钩子中使用。
 
-TODO 高亮和 symbol-overlay 都由这个原语加 `%val{word}`（光标处由字母、数字和 `_` 组成的词）在配置中组合：
+TODO 高亮由这个原语在配置中写成：
 
 ```
 highlight todo \b(TODO|FIXME|XXX)\b
-define-command mark-word highlight-local mark \b%val{word}\b
-map normal <space>i mark-word
-map normal <space>I unhighlight
 ```
+
+内置模块 `symbol-overlay` 用同一原语标记符号，对应 Emacs 的同名包。`<space>i`（`symbol-toggle`）标记光标处的符号，每个符号取一种没在用的颜色（共 8 种），再按一次取消；`<space>I`（`symbol-clear`）去掉当前文档的标记，不影响其他高亮和别的文档；`<a-n>` / `<a-p>` 到最近的另一个已标记符号。标记跟着文档，不跨文档。
+
+光标在标记上时，键位表 `mark` 优先于 Normal，离开标记就恢复原义；数字前缀、operator 和多键序列进行到一半时不受影响：
+
+| 键 | 命令 | 作用 |
+| --- | --- | --- |
+| `i` | `symbol-toggle` | 取消标记 |
+| `n` / `p` | `symbol-jump-next` / `symbol-jump-prev` | 下一处 / 上一处，到头回绕，光标保持在符号内的位置 |
+| `<` / `>` | `symbol-jump-first` / `symbol-jump-last` | 第一处 / 最后一处 |
+| `w` | `symbol-save` | 复制符号 |
+| `e` | `symbol-echo-mark` | 回到上次跳转之前的位置 |
+| `d` | `lsp-definition` | 到定义 |
+| `s` | `symbol-search` | 以符号为查询打开搜索 |
+| `q` | `symbol-query-replace` | 以符号为查询打开替换 |
+| `r` | `symbol-rename [NAME]` | 重命名当前文档里所有出现处，一步撤销，标记跟过去 |
+| `h` | `symbol-help` | 列出这些键 |
+
+这些键遮住了 Normal 里的 `i`、`p`、`w`、`e`、`d`、`s`、`q`、`r`、`h` 等，和 Emacs 里 overlay 内键位盖过 meow 一样。不想要的用 `unmap mark h` 去掉，也可以用 `map mark KEY COMMAND` 改绑。
+
+跳转后行尾显示位置，比如 `[3/12]`，和 meow-visit 一样，下一个按键清除。Lua 用 `soda.indicator(line, text)` 显示。
+
+与 Emacs 的差别：没有 `t`（限定在函数内），没有 `symbol-overlay-mode` 的自动高亮；`s` 和 `q` 按字面子串匹配，所以 `foo` 也会命中 `foobar`；只有 `r` 和跳转按整个符号算。
 
 ## 对每行或每处匹配输入按键
 

@@ -342,6 +342,7 @@ impl Runtime {
             return;
         }
         self.popup = None;
+        self.app.clear_indicator();
         let result = self
             .layers
             .route_input(input, &self.app, time, &self.app.root());

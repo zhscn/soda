@@ -85,6 +85,7 @@ const MODE: Slot = slot(
         word("insert", "Insert mode keys"),
         word("completion", "Keys while the completion list shows"),
         word("snippet", "Keys while a snippet has places left"),
+        word("mark", "Keys with the caret on a marked symbol"),
         word("prompt", "Command line and prompt keys"),
     ]),
 );
@@ -121,6 +122,10 @@ const FACE: Slot = slot(
         word("mark2", "Second mark background"),
         word("mark3", "Third mark background"),
         word("mark4", "Fourth mark background"),
+        word("mark5", "Fifth mark background"),
+        word("mark6", "Sixth mark background"),
+        word("mark7", "Seventh mark background"),
+        word("mark8", "Eighth mark background"),
     ]),
 );
 /// `flag-lines GROUP FACE SIGN LINES`: LINES are one-based numbers or

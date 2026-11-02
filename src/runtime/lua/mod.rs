@@ -39,6 +39,8 @@ const FUNCTIONS: &[&str] = &[
     "hint",
     "tokens",
     "inlays",
+    "indicator",
+    "keys",
     "hook",
     "define_command",
     "spawn",
@@ -324,6 +326,30 @@ impl Host {
                         group,
                         notes,
                     })
+                })?,
+            )?;
+            soda.set(
+                "indicator",
+                scope.create_function(|_, (line, text): (usize, String)| {
+                    let mut runtime = runtime.borrow_mut();
+                    let document = runtime.document().map_err(mlua::Error::runtime)?;
+                    runtime
+                        .app
+                        .set_indicator(document, line.saturating_sub(1), text);
+                    runtime.dirty = true;
+                    Ok(())
+                })?,
+            )?;
+            soda.set(
+                "keys",
+                scope.create_function(|_, notation: String| {
+                    let keys = crate::interaction::KeyStroke::parse_sequence(&notation)
+                        .map_err(|error| mlua::Error::runtime(format!("{error:?}")))?;
+                    let mut runtime = runtime.borrow_mut();
+                    for key in keys {
+                        runtime.input(crate::interaction::UserInput::Key(key));
+                    }
+                    Ok(())
                 })?,
             )?;
             soda.set(

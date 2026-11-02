@@ -377,6 +377,8 @@ pub struct Application {
     grep_pattern: Option<(DocumentId, regex::Regex)>,
     flags: flags::Flags,
     notes: notes::Notes,
+    /// Words at the end of a line, until the next key.
+    indicator: Option<(DocumentId, usize, String)>,
     tokens: tokens::Tokens,
     inlays: inlays::Inlays,
 }
@@ -447,6 +449,47 @@ impl Application {
     }
     pub fn options(&self) -> &crate::options::Options {
         &self.options
+    }
+    /// Whether the caret stands on a marked symbol.
+    pub fn on_mark(&self) -> bool {
+        let Some(view) = self.active_view().and_then(|id| self.view(id)) else {
+            return false;
+        };
+        let Some(editor) = self.workspace.editor(view.document_id) else {
+            return false;
+        };
+        let Some(session) = editor.model().session(view.session_id) else {
+            return false;
+        };
+        let snapshot = editor.model().document().snapshot();
+        let head = session.selection().head;
+        let Some(line) = snapshot.line_of(head) else {
+            return false;
+        };
+        let start = snapshot.line_start(line).unwrap();
+        let text = snapshot.line(line).unwrap();
+        let at = head - start;
+        self.highlights(view.document_id)
+            .filter(|highlight| matches!(highlight.face, Face::Mark(_)))
+            .any(|highlight| {
+                highlight
+                    .pattern
+                    .find_iter(&text)
+                    .any(|found| found.start() <= at && at < found.end())
+            })
+    }
+    /// Words shown at the end of a line of a document, until the next key.
+    pub fn set_indicator(&mut self, document: DocumentId, line: usize, text: String) {
+        self.indicator = Some((document, line, text));
+    }
+    pub fn clear_indicator(&mut self) {
+        self.indicator = None;
+    }
+    pub fn indicator(&self, document: DocumentId, line: usize) -> Option<&str> {
+        self.indicator
+            .as_ref()
+            .filter(|(at, shown, _)| *at == document && *shown == line)
+            .map(|(_, _, text)| text.as_str())
     }
     /// Semantic tokens starting within a byte range, relative to its start.
     pub fn tokens(

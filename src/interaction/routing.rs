@@ -358,6 +358,17 @@ impl Layers {
                 return self.execute(command, app, time, file_root);
             }
         }
+        // Keys of a marked symbol stand in for Normal's while the caret is on
+        // one, after symbol-overlay's map; part way through a count, an
+        // operator or a key sequence they mean what they always do.
+        if self.mode == EditMode::Normal
+            && !self.sequence.active()
+            && !self.vim.active()
+            && app.on_mark()
+            && let Some(command) = self.keymap.over_insert(keymap::Context::Mark, key)
+        {
+            return self.execute(command, app, time, file_root);
+        }
         let cancel = keymap::is_cancel(&key)
             && !self.sequence.continues(key, self.mode.into(), &self.keymap);
         if cancel && (self.sequence.active() || self.vim.active()) {
