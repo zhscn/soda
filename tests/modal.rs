@@ -386,13 +386,26 @@ fn the_keypad_tries_ctrl_first_and_space_asks_for_the_plain_key() {
 #[test]
 fn keypad_sequences_are_said_and_cancelled_and_step_back() {
     let mut r = runtime("|a\n");
+    // As Emacs writes keys; the keypad adds only modifiers it holds.
     keys(&mut r, "x");
-    assert_eq!(r.pending_keys().as_deref(), Some("<c-x>"));
+    assert_eq!(r.pending_keys().as_deref(), Some("C-x"));
     assert!(r.key_continuations().iter().any(|(key, _)| key == "s"));
-    keys(&mut r, "<esc>");
+    keys(&mut r, "<space>");
+    assert_eq!(r.pending_keys().as_deref(), Some("C-x"));
+    keys(&mut r, "<esc><space>");
+    assert_eq!(r.pending_keys().as_deref(), Some("C-c"));
+    keys(&mut r, "<esc>m");
+    assert_eq!(r.pending_keys().as_deref(), Some("M-"));
+    keys(&mut r, "g");
+    assert_eq!(r.pending_keys().as_deref(), Some("M-g"));
+    assert!(r.key_continuations().iter().any(|(key, _)| key == "p"));
+    keys(&mut r, "<esc>i<c-x>");
+    assert_eq!(r.pending_keys().as_deref(), Some("C-x"));
+    assert!(r.key_continuations().iter().any(|(key, _)| key == "C-s"));
+    keys(&mut r, "<esc><esc>");
     assert_eq!(r.pending_keys(), None);
     keys(&mut r, "xz");
-    assert_eq!(r.message(), "Undefined key sequence");
+    assert_eq!(r.message(), "C-x z is undefined");
     keys(&mut r, "x<bs>");
     assert_eq!(r.pending_keys(), None);
     keys(&mut r, "l");
@@ -466,4 +479,28 @@ fn beacon_delete_and_change_reach_every_selection() {
     let mut r = runtime("|abc\ndef\n");
     keys(&mut r, "eeG<c-a>sX<esc>");
     assert_eq!(shown(&r).replace('|', ""), "Xbc\nXef\n");
+}
+#[test]
+fn keypad_hints_list_what_m_and_g_reach() {
+    let mut r = runtime("|a\n");
+    let hints = |r: &soda::runtime::Runtime| -> Vec<String> {
+        r.key_continuations().into_iter().map(|(key, _)| key).collect()
+    };
+    // `m` alone reaches chords with Meta of every table: `M-g` is global,
+    // `M-<` Normal's; each shows as the key to press.
+    keys(&mut r, "m");
+    let after_m = hints(&r);
+    assert!(after_m.contains(&"g".into()) && after_m.contains(&"<".into()));
+    assert!(after_m.iter().all(|key| !key.contains('-')), "{after_m:?}");
+    // After a prefix Meta cannot be typed, so `M-p` is not offered.
+    keys(&mut r, "g");
+    let after_mg = hints(&r);
+    assert!(after_mg.contains(&"p".into()));
+    assert!(after_mg.iter().all(|key| !key.contains('-')), "{after_mg:?}");
+    keys(&mut r, "<esc>");
+    // `g` alone is Ctrl and Meta together: `C-M-,`, not `M-g`.
+    keys(&mut r, "g");
+    let after_g = hints(&r);
+    assert!(after_g.contains(&",".into()), "{after_g:?}");
+    assert!(!after_g.contains(&"g".into()), "{after_g:?}");
 }

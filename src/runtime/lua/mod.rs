@@ -460,17 +460,36 @@ impl Host {
             )?;
             soda.set(
                 "define_command",
-                scope.create_function(|_, (name, function): (String, Function)| {
-                    let id = self.keep(function)?;
-                    runtime
-                        .borrow_mut()
-                        .layers
-                        .configure(Command::Define {
-                            name,
-                            body: format!("lua-call {id} %arg{{@}}"),
-                        })
-                        .map_err(mlua::Error::runtime)
-                })?,
+                scope.create_function(
+                    |_, (name, second, third): (String, Value, Option<Function>)| {
+                        // `(name, doc, fn)` reads like a docstring;
+                        // `(name, fn)` has none.
+                        let (doc, function) = match (second, third) {
+                            (Value::String(doc), Some(function)) => {
+                                (Some(doc.to_str()?.to_owned()), function)
+                            }
+                            (Value::Function(function), None) => (None, function),
+                            _ => {
+                                return Err(mlua::Error::runtime(
+                                    "define_command takes a name, a description and a function",
+                                ));
+                            }
+                        };
+                        let id = self.keep(function)?;
+                        // The body names a function by number, which says
+                        // nothing to a reader; the name does.
+                        let doc = doc.unwrap_or_else(|| name.clone());
+                        runtime
+                            .borrow_mut()
+                            .layers
+                            .configure(Command::Define {
+                                name,
+                                body: format!("lua-call {id} %arg{{@}}"),
+                                doc: Some(doc),
+                            })
+                            .map_err(mlua::Error::runtime)
+                    },
+                )?,
             )?;
             soda.set(
                 "results",

@@ -148,7 +148,7 @@
 | --- | --- | --- |
 | 内置 | 静态表，参数解析为类型化 `Command` | 固定，不可替换 |
 | Rust 注册 | `register_command(name, handler)`，处理函数读取只读 Application 并返回 `Command` | 不可与内置名或别名冲突；重复注册替换 |
-| 用户定义 | `define-command NAME BODY` | 同上；与 Rust 注册共享名字空间 |
+| 用户定义 | `define-command NAME BODY` | 同上；与 Rust 注册共享名字空间；帮助显示命令体，Lua 定义的显示其说明 |
 
 命令行的第一个空白分隔词是命令名，其余部分去掉首尾空白后整体作为参数，由命令自己解释：路径参数保留内部空格，`map` 再拆分模式、按键和目标。`Command::Named(line)` 携带一条命令行，在执行时解析，因此绑定可以引用之后才定义的命令。`:` 命令行、配置文件、键位目标和 `define-command` 的命令体使用同一个解析器；`:42` 这种纯数字输入仍表示跳转到行。
 
@@ -263,7 +263,7 @@ Insert 另有 `C-n`、`C-p`、`M-<`、`M->` 移动，`C-s`、`C-r` 搜索（结�
 
 ### 按键记法
 
-单个字符直接书写；带修饰键或特殊键写在尖括号中，大小写不敏感：`<c-x>`、`<a-f>`（`<m-f>` 同义）、`<s-tab>`、`<c-s-left>`。特殊键名为 `esc`、`ret`（`cr`、`enter`）、`tab`、`backtab`、`bs`（`backspace`）、`del`、`space`、`lt`、`gt`、`left`、`right`、`up`、`down`、`home`、`end`、`pageup`、`pagedown` 和 `f1` 到 `f12`。序列直接拼接，例如 `<space>f`、`<c-x><c-s>`。帮助和前缀提示使用同一记法输出。
+单个字符直接书写；带修饰键或特殊键写在尖括号中，大小写不敏感：`<c-x>`、`<a-f>`（`<m-f>` 同义）、`<s-tab>`、`<c-s-left>`。特殊键名为 `esc`、`ret`（`cr`、`enter`）、`tab`、`backtab`、`bs`（`backspace`）、`del`、`space`、`lt`、`gt`、`left`、`right`、`up`、`down`、`home`、`end`、`pageup`、`pagedown` 和 `f1` 到 `f12`。序列直接拼接，例如 `<space>f`、`<c-x><c-s>`。帮助使用同一记法输出；状态栏、按键提示和消息则用 Emacs 记法（`C-x C-s`），见[界面](ui.md)。
 
 ### 行编辑键
 

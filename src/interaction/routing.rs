@@ -160,6 +160,47 @@ impl std::fmt::Display for KeyStroke {
 pub fn key_notation(keys: &[KeyStroke]) -> String {
     keys.iter().map(ToString::to_string).collect()
 }
+impl KeyStroke {
+    /// The key as Emacs describes it: `C-x`, `M-f`, `C-M-S-<left>`, `SPC`,
+    /// `RET`; for what the editor shows, while `Display` writes what
+    /// `map` reads.
+    pub fn emacs(&self) -> String {
+        let name = match self.code {
+            Key::Char(' ') => "SPC".into(),
+            Key::Char(ch) => ch.to_string(),
+            Key::Enter => "RET".into(),
+            Key::Esc => "ESC".into(),
+            Key::Tab => "TAB".into(),
+            Key::Backspace => "DEL".into(),
+            Key::Delete => "<delete>".into(),
+            Key::BackTab => "<backtab>".into(),
+            Key::Left => "<left>".into(),
+            Key::Right => "<right>".into(),
+            Key::Up => "<up>".into(),
+            Key::Down => "<down>".into(),
+            Key::Home => "<home>".into(),
+            Key::End => "<end>".into(),
+            Key::PageUp => "<prior>".into(),
+            Key::PageDown => "<next>".into(),
+            Key::F(number) => format!("<f{number}>"),
+            Key::Unrecognized => "?".into(),
+        };
+        let mut out = String::new();
+        for (on, prefix) in [(self.control, "C-"), (self.alt, "M-"), (self.shift, "S-")] {
+            if on {
+                out.push_str(prefix);
+            }
+        }
+        out + &name
+    }
+}
+/// A key sequence as Emacs describes it, keys apart: `C-x C-s`.
+pub fn emacs_notation(keys: &[KeyStroke]) -> String {
+    keys.iter()
+        .map(KeyStroke::emacs)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
 
 #[derive(Clone, Debug)]
 pub enum UserInput {
@@ -374,6 +415,18 @@ impl Layers {
                     Command::Completion(super::completion::Action::Accept)
                 )
         };
+        // What the keys read as, for when they turn out to mean nothing.
+        let typed = {
+            let keys = super::emacs_notation(self.sequence.keys());
+            let plain = matches!(key.code, Key::Char(_)) && !key.control && !key.alt;
+            let hint = if plain { self.sequence.keypad_hint() } else { "" };
+            let key = format!("{hint}{}", key.emacs());
+            if keys.is_empty() {
+                key
+            } else {
+                format!("{keys} {key}")
+            }
+        };
         let resolution = if self.sequence.in_keypad() {
             self.sequence.push_keypad(key, &stack, &self.keymap)
         } else {
@@ -406,7 +459,7 @@ impl Layers {
             }
             Resolution::Prefix => return Ok(pending(Message::Clear)),
             Resolution::Invalid => {
-                return Ok(pending(Message::Set("Undefined key sequence".into())));
+                return Ok(pending(Message::Set(format!("{typed} is undefined"))));
             }
             Resolution::Pass => {}
         }

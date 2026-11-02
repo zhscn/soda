@@ -28,7 +28,7 @@ local function difference(old, new)
   return start, stop, table.concat(after, "", first, last_new)
 end
 
-soda.define_command("clang-format", function()
+soda.define_command("clang-format", "Format the buffer or the selected lines with clang-format", function()
   local buf = soda.buffer()
   local text, revision = buf:text(), buf:revision()
   local file = soda.val("file")

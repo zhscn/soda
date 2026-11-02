@@ -960,6 +960,7 @@ pub static BUILTINS: &[Builtin] = &[
             Ok(Command::Define {
                 name: required(name)?,
                 body: required(body)?,
+                doc: None,
             })
         }
     ),
@@ -1268,7 +1269,12 @@ pub static BUILTINS: &[Builtin] = &[
 
 enum Entry {
     Native(CommandHandler),
-    User(String),
+    /// A body of command lines and what help shows for it; without a
+    /// description help shows the body.
+    User {
+        body: String,
+        doc: Option<String>,
+    },
 }
 /// A command name with its signature and documentation, for help and the
 /// command line.
@@ -1395,11 +1401,16 @@ impl Registry {
         self.entries.insert(name, Entry::Native(handler));
         Ok(())
     }
-    pub fn define(&mut self, name: String, body: String) -> Result<(), String> {
+    pub fn define(
+        &mut self,
+        name: String,
+        body: String,
+        doc: Option<String>,
+    ) -> Result<(), String> {
         if reserved(&name) {
             return Err(format!("{name} is a built-in command"));
         }
-        self.entries.insert(name, Entry::User(body));
+        self.entries.insert(name, Entry::User { body, doc });
         Ok(())
     }
     /// Parses a line naming only built-in commands; used for default tables.
@@ -1435,7 +1446,7 @@ impl Registry {
         }
         let (name, args) = split(line);
         match self.entries.get(name) {
-            Some(Entry::User(body)) => {
+            Some(Entry::User { body, .. }) => {
                 if depth == MAX_DEPTH {
                     return Err(format!(
                         "{name} recursively expands more than {MAX_DEPTH} levels"
@@ -1491,11 +1502,11 @@ impl Registry {
                 doc: "Registered command".into(),
                 builtin: None,
             },
-            Entry::User(body) => CommandInfo {
+            Entry::User { body, doc } => CommandInfo {
                 name: name.clone(),
                 aliases: &[],
                 slots: ARGUMENTS,
-                doc: body.clone(),
+                doc: doc.clone().unwrap_or_else(|| body.clone()),
                 builtin: None,
             },
         });
@@ -1517,7 +1528,7 @@ impl Registry {
             return (*doc).into();
         }
         match self.entries.get(name) {
-            Some(Entry::User(body)) => body.clone(),
+            Some(Entry::User { body, doc }) => doc.clone().unwrap_or_else(|| body.clone()),
             Some(Entry::Native(_)) => "Registered command".into(),
             None => String::new(),
         }

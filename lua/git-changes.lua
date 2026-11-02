@@ -31,7 +31,7 @@ local function locations(diff)
   return list
 end
 
-soda.define_command("git-changes", function()
+soda.define_command("git-changes", "List the hunks git has not staged", function()
   local argv = {
     "git", "diff", "-U0", "--relative", "--no-color", "--no-ext-diff",
     "--src-prefix=a/", "--dst-prefix=b/",

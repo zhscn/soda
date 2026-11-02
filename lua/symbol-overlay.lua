@@ -109,7 +109,7 @@ local function free_colour(buf)
   return count % COLOURS + 1
 end
 
-soda.define_command("symbol-toggle", function()
+soda.define_command("symbol-toggle", "Mark or unmark the symbol at the caret", function()
   local word = require_word()
   if not word then
     return
@@ -124,29 +124,29 @@ soda.define_command("symbol-toggle", function()
   end
 end)
 
-soda.define_command("symbol-clear", function()
+soda.define_command("symbol-clear", "Unmark every symbol", function()
   local buf = soda.buffer()
   for word in pairs(marks(buf)) do
     remove(buf, word)
   end
 end)
 
-soda.define_command("symbol-jump-next", function()
+soda.define_command("symbol-jump-next", "Next occurrence of the marked symbol", function()
   jump(function(index, total)
     return index % total + 1
   end)
 end)
-soda.define_command("symbol-jump-prev", function()
+soda.define_command("symbol-jump-prev", "Previous occurrence of the marked symbol", function()
   jump(function(index, total)
     return (index - 2) % total + 1
   end)
 end)
-soda.define_command("symbol-jump-first", function()
+soda.define_command("symbol-jump-first", "First occurrence of the marked symbol", function()
   jump(function()
     return 1
   end)
 end)
-soda.define_command("symbol-jump-last", function(_)
+soda.define_command("symbol-jump-last", "Last occurrence of the marked symbol", function(_)
   jump(function(_, total)
     return total
   end)
@@ -177,14 +177,14 @@ local function switch(forward)
   local offsets = occurrences(buf, best_word)
   show_count(buf, (place(buf, offsets, best_word)), #offsets)
 end
-soda.define_command("symbol-switch-forward", function()
+soda.define_command("symbol-switch-forward", "Next occurrence of another marked symbol", function()
   switch(true)
 end)
-soda.define_command("symbol-switch-backward", function()
+soda.define_command("symbol-switch-backward", "Previous occurrence of another marked symbol", function()
   switch(false)
 end)
 
-soda.define_command("symbol-echo-mark", function()
+soda.define_command("symbol-echo-mark", "Go back to where the jump started", function()
   local buf = soda.buffer()
   local place_before = before[buf.id]
   if place_before then
@@ -194,7 +194,7 @@ soda.define_command("symbol-echo-mark", function()
   end
 end)
 
-soda.define_command("symbol-save", function()
+soda.define_command("symbol-save", "Copy the symbol", function()
   local word = require_word()
   if word then
     soda.clipboard(word)
@@ -202,7 +202,7 @@ soda.define_command("symbol-save", function()
   end
 end)
 
-soda.define_command("symbol-search", function()
+soda.define_command("symbol-search", "Search for the symbol", function()
   local word = require_word()
   if word then
     soda.command("search")
@@ -210,7 +210,7 @@ soda.define_command("symbol-search", function()
   end
 end)
 
-soda.define_command("symbol-query-replace", function()
+soda.define_command("symbol-query-replace", "Query replace the symbol", function()
   local word = require_word()
   if word then
     soda.command("replace")
@@ -218,7 +218,7 @@ soda.define_command("symbol-query-replace", function()
   end
 end)
 
-soda.define_command("symbol-rename", function(name)
+soda.define_command("symbol-rename", "Rename every occurrence of the symbol", function(name)
   name = (name or ""):match("^%s*(.-)%s*$")
   local word = require_word()
   if not word then
@@ -252,7 +252,7 @@ soda.define_command("symbol-rename", function(name)
   end
 end)
 
-soda.define_command("symbol-help", function()
+soda.define_command("symbol-help", "Show the keys of a marked symbol", function()
   soda.popup(table.concat({
     "i  take the mark off      w  copy the symbol",
     "n  next occurrence        e  back to where the jump started",

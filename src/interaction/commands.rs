@@ -47,6 +47,8 @@ pub enum Command {
     Define {
         name: String,
         body: String,
+        /// What help and key hints show; `None` shows the body.
+        doc: Option<String>,
     },
     Hook {
         event: &'static str,
@@ -306,7 +308,7 @@ impl Layers {
                 .keymap
                 .unbind(context, &keys)
                 .map_err(|e| e.to_string()),
-            Command::Define { name, body } => self.registry.define(name, body),
+            Command::Define { name, body, doc } => self.registry.define(name, body, doc),
             Command::Hook {
                 event,
                 filter,

@@ -143,7 +143,7 @@ end
 
 -- Goes to a place the server names, or lists them when there are several.
 local function go_to(command, method, kind)
-  soda.define_command(command, function()
+  soda.define_command(command, "Go to the " .. kind .. " of the symbol", function()
     ask(method, nil, function(result)
       if result and (result.uri or result.targetUri) then
         result = { result }
@@ -166,7 +166,7 @@ go_to("lsp-definition", "textDocument/definition", "definition")
 go_to("lsp-declaration", "textDocument/declaration", "declaration")
 go_to("lsp-type-definition", "textDocument/typeDefinition", "type definition")
 
-soda.define_command("lsp-references", function()
+soda.define_command("lsp-references", "List references to the symbol", function()
   ask("textDocument/references", { context = { includeDeclaration = true } }, function(result)
     local entries = {}
     for _, location in ipairs(result or {}) do
@@ -205,10 +205,10 @@ local function hierarchy(kind, method, field)
     end)
   end)
 end
-soda.define_command("lsp-callers", function()
+soda.define_command("lsp-callers", "List the functions calling this one", function()
   hierarchy("callers", "callHierarchy/incomingCalls", "from")
 end)
-soda.define_command("lsp-callees", function()
+soda.define_command("lsp-callees", "List the functions this one calls", function()
   hierarchy("callees", "callHierarchy/outgoingCalls", "to")
 end)
 
@@ -230,7 +230,7 @@ local function with_problems(contents)
   return table.concat(words, "\n")
 end
 
-soda.define_command("lsp-hover", function()
+soda.define_command("lsp-hover", "Show the server's documentation for the symbol", function()
   ask("textDocument/hover", nil, function(result)
     local contents = result and result.contents
     if type(contents) == "table" then
@@ -396,7 +396,7 @@ soda.hook("focus", ".*", function()
   decorate()
 end)
 
-soda.define_command("lsp-diagnostics", function()
+soda.define_command("lsp-diagnostics", "List the server's diagnostics", function()
   local entries = {}
   for uri, list in pairs(diagnostics) do
     for _, diagnostic in ipairs(list) do
@@ -550,7 +550,7 @@ soda.lsp.on("workspace/applyEdit", function(params)
   apply_edit(params.edit)
 end)
 
-soda.define_command("lsp-rename", function(name)
+soda.define_command("lsp-rename", "Rename the symbol across the project", function(name)
   name = (name or ""):match("^%s*(.-)%s*$")
   if name == "" then
     soda.prompt("lsp-rename " .. soda.val("word"))
@@ -585,7 +585,7 @@ local function perform(action, origin)
   end
 end
 
-soda.define_command("lsp-code-action", function()
+soda.define_command("lsp-code-action", "Pick one of the server's code actions", function()
   local buf = soda.buffer()
   local info = soda.lsp.info()
   if not info then
@@ -631,7 +631,7 @@ soda.define_command("lsp-code-action", function()
   end)
 end)
 
-soda.define_command("lsp-format", function()
+soda.define_command("lsp-format", "Format the buffer with the language server", function()
   local buf = soda.buffer()
   local origin = { buffer = buf, revision = buf:revision() }
   local uri = soda.lsp.uri()
@@ -645,7 +645,7 @@ soda.define_command("lsp-format", function()
   end)
 end)
 
-soda.define_command("lsp-switch", function()
+soda.define_command("lsp-switch", "Switch between a header and its source", function()
   local uri = soda.lsp.uri()
   local asked = uri
     and soda.lsp.request("textDocument/switchSourceHeader", { uri = uri }, function(result, failure)
@@ -680,7 +680,7 @@ local function outline(symbols, depth, rows)
   return rows
 end
 
-soda.define_command("lsp-symbols", function()
+soda.define_command("lsp-symbols", "List the symbols of the document", function()
   local buf = soda.buffer()
   local path = path_of(soda.lsp.uri() or "")
   ask("textDocument/documentSymbol", nil, function(result)
@@ -702,7 +702,7 @@ soda.define_command("lsp-symbols", function()
   end)
 end)
 
-soda.define_command("lsp-workspace-symbols", function(query)
+soda.define_command("lsp-workspace-symbols", "Search the symbols of the project", function(query)
   query = (query or ""):match("^%s*(.-)%s*$")
   if query == "" then
     soda.prompt("lsp-workspace-symbols ")
@@ -777,7 +777,7 @@ soda.hook("save", ".*", function()
   end
 end)
 
-soda.define_command("lsp-restart", function()
+soda.define_command("lsp-restart", "Restart the language server", function()
   soda.lsp.restart()
 end)
 

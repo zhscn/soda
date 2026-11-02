@@ -5,7 +5,7 @@
 
 local closing = { ["("] = ")", ["["] = "]", ["{"] = "}", ["<"] = ">" }
 
-soda.define_command("surround", function(argument)
+soda.define_command("surround", "Put a pair around the selection", function(argument)
   local open, close = argument:match("^(%S+)%s+(%S+)$")
   if not open then
     open = argument:match("^%S+$")

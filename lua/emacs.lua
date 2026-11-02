@@ -34,16 +34,25 @@ local function change_word(change)
     buf:set_selection({ line, to + 1 })
   end
 end
-soda.define_command("upcase-word", change_word(string.upper))
-soda.define_command("downcase-word", change_word(string.lower))
+soda.define_command(
+  "upcase-word",
+  "Upcase the word after the caret",
+  change_word(string.upper)
+)
+soda.define_command(
+  "downcase-word",
+  "Downcase the word after the caret",
+  change_word(string.lower)
+)
 soda.define_command(
   "capitalize-word",
+  "Capitalize the word after the caret",
   change_word(function(word)
     return word:lower():gsub("^[^%a]*%a", string.upper)
   end)
 )
 
-soda.define_command("transpose-chars", function()
+soda.define_command("transpose-chars", "Swap the characters around the caret", function()
   local buf = soda.buffer()
   local line, column, text = caret(buf)
   if column > #text then
@@ -60,7 +69,7 @@ soda.define_command("transpose-chars", function()
   buf:set_selection({ line, to })
 end)
 
-soda.define_command("transpose-words", function()
+soda.define_command("transpose-words", "Swap the words around the caret", function()
   local buf = soda.buffer()
   local line, column, text = caret(buf)
   local words, first = {}, 1
@@ -103,10 +112,10 @@ local function replace_spaces(with)
     buf:set_selection({ line, from + #with })
   end
 end
-soda.define_command("delete-horizontal-space", replace_spaces(""))
-soda.define_command("just-one-space", replace_spaces(" "))
+soda.define_command("delete-horizontal-space", "Delete spaces and tabs around the caret", replace_spaces(""))
+soda.define_command("just-one-space", "Leave one space around the caret", replace_spaces(" "))
 
-soda.define_command("join-line", function()
+soda.define_command("join-line", "Join this line to the previous one", function()
   local buf = soda.buffer()
   local line, _, text = caret(buf)
   if line == 1 then
@@ -120,14 +129,14 @@ soda.define_command("join-line", function()
   buf:set_selection({ line - 1, #kept + 1 })
 end)
 
-soda.define_command("open-line", function()
+soda.define_command("open-line", "Insert a newline after the caret", function()
   local buf = soda.buffer()
   local _, head = buf:selection()
   buf:edit({ { head, head, "\n" } })
   buf:set_selection(head)
 end)
 
-soda.define_command("back-to-indentation", function()
+soda.define_command("back-to-indentation", "Go to the first non-blank of the line", function()
   local buf = soda.buffer()
   local line, _, text = caret(buf)
   buf:set_selection({ line, text:find("%S") or #text + 1 })

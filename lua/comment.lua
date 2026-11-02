@@ -18,7 +18,7 @@ local function selected_lines(buf)
   return from[1], to[1]
 end
 
-soda.define_command("comment", function()
+soda.define_command("comment", "Toggle line comments on the caret's or the selected lines", function()
   local buf = soda.buffer()
   local marker = buf:line_comment()
   if not marker then

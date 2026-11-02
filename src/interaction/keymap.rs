@@ -811,7 +811,7 @@ impl Keymap {
             let label = if keys.len() == prefix.len() + 1 {
                 label
             } else {
-                format!("+{}", super::key_notation(&keys[..=prefix.len()]))
+                format!("+{}", super::emacs_notation(&keys[..=prefix.len()]))
             };
             out.push((next, label));
         }
@@ -993,7 +993,9 @@ impl Sequence {
     pub fn keys(&self) -> &[KeyStroke] {
         &self.keys
     }
-    /// What the pending keypad state adds to `keys`, for the status line.
+    /// The modifiers the keypad will give the next key, as Emacs writes
+    /// them, after `m` or `g`; a plain key may or may not take Ctrl, so
+    /// it says nothing and the key hints show what follows.
     pub fn keypad_hint(&self) -> &'static str {
         match self.keypad {
             Some(Keypad {
@@ -1004,35 +1006,41 @@ impl Sequence {
                 modifier: Some(false),
                 ..
             }) => "M-",
-            Some(Keypad { literal: true, .. }) => "SPC ",
             _ => "",
         }
     }
-    /// Next keys as the keypad reads them: a Ctrl binding shows as its plain
-    /// key and wins over a plain binding of that key.
-    pub fn keypad_continuations(&self, map: &Keymap) -> Vec<(KeyStroke, String)> {
+    /// Next keys as the keypad reads them, each shown as the plain key to
+    /// press. After `m` or `g` they are the chords with Meta of the whole
+    /// stack, as the keypad resolves them; otherwise a Ctrl binding wins
+    /// over a plain binding of that key, and chords with Meta, which the
+    /// keypad cannot type after a prefix, are left out.
+    pub fn keypad_continuations(
+        &self,
+        stack: &[Context],
+        map: &Keymap,
+    ) -> Vec<(KeyStroke, String)> {
         let keypad = self.keypad.unwrap_or_default();
-        let next = map.continuations(&[Context::Global], &self.keys);
-        if keypad.literal {
-            return next
+        let plain = |key: KeyStroke| KeyStroke {
+            control: false,
+            alt: false,
+            ..key
+        };
+        if let Some(control) = keypad.modifier {
+            return map
+                .continuations(stack, &self.keys)
                 .into_iter()
-                .filter(|(key, _)| !key.control && !key.alt)
+                .filter(|(key, _)| key.alt && key.control == control)
+                .map(|(key, label)| (plain(key), label))
                 .collect();
         }
-        if keypad.modifier.is_some() {
-            return vec![];
-        }
+        let next = map.continuations(&[Context::Global], &self.keys);
         let mut out: Vec<(KeyStroke, String)> = vec![];
-        for (key, label) in next.iter().filter(|(key, _)| key.control && !key.alt) {
-            out.push((
-                KeyStroke {
-                    control: false,
-                    ..*key
-                },
-                label.clone(),
-            ));
+        if !keypad.literal {
+            for (key, label) in next.iter().filter(|(key, _)| key.control && !key.alt) {
+                out.push((plain(*key), label.clone()));
+            }
         }
-        for (key, label) in next.iter().filter(|(key, _)| !key.control) {
+        for (key, label) in next.iter().filter(|(key, _)| !key.control && !key.alt) {
             if !out.iter().any(|(shown, _)| shown == key) {
                 out.push((*key, label.clone()));
             }

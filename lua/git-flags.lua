@@ -40,4 +40,4 @@ end
 
 soda.hook("open", ".*", update)
 soda.hook("save", ".*", update)
-soda.define_command("git-flags", function() update(soda.val("file")) end)
+soda.define_command("git-flags", "Refresh the git flags of the buffer", function() update(soda.val("file")) end)

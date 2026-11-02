@@ -30,7 +30,7 @@ pub use pointer::Pointer;
 mod replace;
 pub use replace::{ReplacePhase, ReplaceSession};
 mod routing;
-pub use routing::{Key, KeyStroke, UserInput, key_notation};
+pub use routing::{Key, KeyStroke, UserInput, emacs_notation, key_notation};
 mod search;
 pub use search::{SearchResults, SearchSession};
 mod jumps;
@@ -280,11 +280,15 @@ impl Layers {
     /// Keys typed toward an unfinished binding or command, if any.
     pub fn pending(&self) -> Option<String> {
         if self.sequence.active() {
-            Some(format!(
-                "{}{}",
-                key_notation(self.sequence.keys()),
-                self.sequence.keypad_hint()
-            ))
+            // The keys as Emacs writes them, `C-x`, and the modifiers the
+            // keypad holds for the next key, `C-x M-`.
+            let keys = emacs_notation(self.sequence.keys());
+            let next = self.sequence.keypad_hint();
+            Some(match (keys.is_empty(), next.is_empty()) {
+                (true, _) => next.into(),
+                (false, true) => keys,
+                (false, false) => format!("{keys} {next}"),
+            })
         } else if self.modal.active() {
             Some(self.modal.hint())
         } else {
@@ -297,17 +301,27 @@ impl Layers {
         if !self.sequence.active() {
             return vec![];
         }
+        let stack = self.stack(app);
         let next = if self.sequence.in_keypad() {
-            self.sequence.keypad_continuations(&self.keymap)
+            self.sequence.keypad_continuations(&stack, &self.keymap)
         } else {
-            self.keymap
-                .continuations(&self.stack(app), self.sequence.keys())
+            self.keymap.continuations(&stack, self.sequence.keys())
         };
         next.into_iter()
             .map(|(key, label)| {
+                // A binding with arguments says which, as `surround (`
+                // and `surround [` share a description.
                 let doc = self.registry.doc(&label);
-                let text = if doc.is_empty() { label } else { doc };
-                (key_notation(&[key]), text)
+                let args = label
+                    .trim()
+                    .split_once(char::is_whitespace)
+                    .map(|(_, a)| a.trim());
+                let text = match args {
+                    _ if doc.is_empty() => label.clone(),
+                    Some(args) if !args.is_empty() => format!("{doc}: {args}"),
+                    _ => doc,
+                };
+                (key.emacs(), text)
             })
             .collect()
     }

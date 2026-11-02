@@ -46,7 +46,7 @@ local function move(buf, to)
   end
 end
 
-soda.define_command("sexp-forward", function()
+soda.define_command("sexp-forward", "Go past the next expression", function()
   local buf = soda.buffer()
   local _, head = buf:selection()
   local item = step(buf, head, "next_item")
@@ -54,7 +54,7 @@ soda.define_command("sexp-forward", function()
     move(buf, item.to)
   end
 end)
-soda.define_command("sexp-backward", function()
+soda.define_command("sexp-backward", "Go back over the previous expression", function()
   local buf = soda.buffer()
   local _, head = buf:selection()
   local item = step(buf, head, "prev_item")
@@ -62,7 +62,7 @@ soda.define_command("sexp-backward", function()
     move(buf, item.from)
   end
 end)
-soda.define_command("sexp-up", function()
+soda.define_command("sexp-up", "Go to the start of the enclosing group", function()
   local buf = soda.buffer()
   local _, head = buf:selection()
   local group = buf:enclosing(head)
@@ -72,7 +72,7 @@ soda.define_command("sexp-up", function()
 end)
 
 -- Selects the group at the caret, then the group around the selection.
-soda.define_command("sexp-expand", function()
+soda.define_command("sexp-expand", "Select the group at the caret, then the one around it", function()
   local buf = soda.buffer()
   local anchor, head = buf:selection()
   local from, to = anchor, head
@@ -125,7 +125,7 @@ local function kill_end(buf, at)
   end
 end
 
-soda.define_command("sexp-kill", function()
+soda.define_command("sexp-kill", "Kill to the line end, keeping pairs whole", function()
   local buf = soda.buffer()
   local _, head = buf:selection()
   if same(head, line_end(buf, head[1])) or buf:in_literal(head) then
@@ -201,13 +201,13 @@ local function soft_backspace(buf)
   end
 end
 
-soda.define_command("soft-backspace", function()
+soda.define_command("soft-backspace", "Delete backward without breaking a pair", function()
   soft_backspace(soda.buffer())
 end)
 
 -- A word goes as usual; punctuation goes up to the nearest bracket, and at
 -- a bracket deletion is a soft backspace.
-soda.define_command("soft-delete-word", function()
+soda.define_command("soft-delete-word", "Delete a word backward without breaking a pair", function()
   local buf = soda.buffer()
   local anchor, head = buf:selection()
   local before_caret = buf:line(head[1]):sub(1, head[2] - 1)
@@ -225,7 +225,7 @@ soda.define_command("soft-delete-word", function()
 end)
 
 -- Moves the closing bracket past the next expression.
-soda.define_command("sexp-slurp", function()
+soda.define_command("sexp-slurp", "Move the closing bracket past the next expression", function()
   local buf = soda.buffer()
   local _, head = buf:selection()
   local group = buf:enclosing(head)
@@ -238,7 +238,7 @@ soda.define_command("sexp-slurp", function()
   buf:edit({ { group.inner_to, group.to, "" }, { item.to, item.to, close } })
 end)
 -- Moves the closing bracket before the last expression inside.
-soda.define_command("sexp-barf", function()
+soda.define_command("sexp-barf", "Move the closing bracket before the last expression", function()
   local buf = soda.buffer()
   local _, head = buf:selection()
   local group = buf:enclosing(head)
@@ -258,7 +258,7 @@ local function kill_to(buf, from, to)
   buf:edit({ { from, to, "" } })
 end
 
-soda.define_command("sexp-beginning", function()
+soda.define_command("sexp-beginning", "Go to the start of the group's contents", function()
   local buf = soda.buffer()
   local _, head = buf:selection()
   local group = buf:enclosing(head)
@@ -267,7 +267,7 @@ soda.define_command("sexp-beginning", function()
   end
 end)
 
-soda.define_command("sexp-end", function()
+soda.define_command("sexp-end", "Go to the end of the group's contents", function()
   local buf = soda.buffer()
   local _, head = buf:selection()
   local group = buf:enclosing(head)
@@ -276,7 +276,7 @@ soda.define_command("sexp-end", function()
   end
 end)
 
-soda.define_command("sexp-kill-forward", function()
+soda.define_command("sexp-kill-forward", "Kill the next expression", function()
   local buf = soda.buffer()
   local _, head = buf:selection()
   local item = step(buf, head, "next_item")
@@ -285,7 +285,7 @@ soda.define_command("sexp-kill-forward", function()
   end
 end)
 
-soda.define_command("sexp-kill-backward", function()
+soda.define_command("sexp-kill-backward", "Kill the previous expression", function()
   local buf = soda.buffer()
   local _, head = buf:selection()
   local item = step(buf, head, "prev_item")

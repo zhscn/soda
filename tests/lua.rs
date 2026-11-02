@@ -76,6 +76,35 @@ fn hooks_and_commands_call_lua_functions() {
     assert_eq!(r.message(), "mapped");
 }
 #[test]
+fn key_hints_show_what_lua_commands_say_they_do() {
+    let mut r = runtime();
+    lua(
+        &mut r,
+        r#"
+        soda.define_command("wrap", "Wrap the selection", function() end)
+        soda.define_command("bare", function() end)
+        soda.command("map global <c-c>( wrap (")
+        soda.command("map global <c-c>b bare")
+        soda.command("define-command both wrap (; bare")
+        soda.command("map global <c-c>B both")
+        assert(not pcall(soda.define_command, "odd", "no function"))
+        "#,
+    );
+    keys(&mut r, "<c-c>");
+    let hints = r.key_continuations();
+    let hint = |key: &str| {
+        hints
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, doc)| doc.as_str())
+    };
+    // Arguments tell apart bindings of one command; without a description
+    // a Lua command shows its name, and a command line its body.
+    assert_eq!(hint("("), Some("Wrap the selection: ("));
+    assert_eq!(hint("b"), Some("bare"));
+    assert_eq!(hint("B"), Some("wrap (; bare"));
+}
+#[test]
 fn lua_flags_lines_and_runs_processes() {
     let mut r = runtime();
     lua(

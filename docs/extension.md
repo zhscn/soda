@@ -104,7 +104,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `soda.prompt(text)` | 打开命令行并预填 `text` |
 | `soda.choose(title, items, fn)` | 在命令行里从 `items` 中选一项，输入过滤，选中后以从 1 起的序号调用 `fn`；取消时不调用 |
 | `soda.hook(event, filter, fn)` | 事件发生时以事件参数调用 `fn` |
-| `soda.define_command(name, fn)` | 定义命令，调用时把参数文本整体传给 `fn` |
+| `soda.define_command(name, [doc], fn)` | 定义命令，调用时把参数文本整体传给 `fn`；`doc` 是一句说明，按键提示、帮助和命令补全显示它，省略时显示命令名 |
 | `soda.results(kind, lines)` | 把结果行写入 `*kind*` 并设为最近的结果，回车和 `M-g n`/`M-g p` 与 `grep`、`run` 的结果相同；`lines` 可以是 `路径:行:列:` 行，或文件名行加缩进的 `行:列  文本` 分组行；其他行留作标题，一个位置都没有时只显示消息 |
 | `soda.open(path, [line], [column])` | 打开文件并放置光标，行列从 1 开始，列按字节；打开是异步的，文件内容要在之后的请求里读 |
 | `soda.clipboard(text)` | 替换剪贴板内容，与编辑器自己的复制一样同步到系统剪贴板 |
@@ -113,7 +113,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 - **执行模型**：Lua 运行在编辑器线程上，同一时间只运行一个请求（一段代码、一次钩子或命令调用、一个进程的回调）。请求运行时 `soda` 的函数直接作用于编辑器。请求中引发的 Lua（例如 `soda.command` 触发的钩子、执行的 `lua` 命令）排队，等当前请求返回后运行。
 - **作用对象**：每个请求在它产生时所在的视图上运行，就像钩子一样。所以 `soda.spawn` 的回调作用于调用 `spawn` 时的文档，即使用户已经切换到别的文档；焦点不因此改变。
 - **错误**：Lua 错误以 `lua: ` 开头显示在消息行并写入 `*messages*`，不影响编辑器继续运行。
-- **钩子和命令**：`soda.hook` 和 `soda.define_command` 保存 Lua 函数本身，在命令表和钩子中表现为 `lua-call ID`。钩子的事件参数也可以在命令行钩子中用 `%val{hook}` 读取。
+- **钩子和命令**：`soda.hook` 和 `soda.define_command` 保存 Lua 函数本身，在命令表和钩子中表现为 `lua-call ID`。这个命令体对读者没有意义，所以 Lua 命令在按键提示和帮助里显示 `doc` 或命令名，而不是命令体。钩子的事件参数也可以在命令行钩子中用 `%val{hook}` 读取。
 
 ### 内置模块
 
