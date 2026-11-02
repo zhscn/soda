@@ -1,6 +1,7 @@
 //! Resolves mouse events against the current screen areas: the tab row
 //! switches documents, a click in a window focuses it and places the
-//! caret, a drag selects, and the wheel scrolls the window under it.
+//! caret, a drag selects, and the wheel scrolls an open popup, else the
+//! window under it.
 use super::{layout, view};
 use crate::{
     interaction::{Pointer, UserInput},
@@ -67,6 +68,16 @@ impl Mouse {
                 }
             }
             MouseEventKind::Up(_) => self.press = None,
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+                if runtime.layer().is_none() && runtime.popup().is_some() =>
+            {
+                let lines = if event.kind == MouseEventKind::ScrollUp {
+                    -3
+                } else {
+                    3
+                };
+                runtime.scroll_popup(lines);
+            }
             MouseEventKind::ScrollUp | MouseEventKind::ScrollDown if runtime.layer().is_none() => {
                 let Some(window) = window else {
                     return;

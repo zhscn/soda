@@ -318,6 +318,7 @@ impl Host {
                 scope.create_function(|_, text: String| {
                     let mut runtime = runtime.borrow_mut();
                     runtime.popup = Some(text);
+                    runtime.popup_scroll.set(0);
                     runtime.dirty = true;
                     Ok(())
                 })?,

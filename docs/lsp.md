@@ -17,7 +17,7 @@ rust-analyzer 默认不开，因为它会运行项目的构建脚本，打开一
 | --- | --- | --- |
 | `<a-.>` | `lsp-definition` | 到定义，有多处时列出；`<a-,>` 回来 |
 | `<a-?>` | `lsp-references` | 列出引用 |
-| `K` | `lsp-hover` | 在光标旁的浮窗里显示光标处的信息，上面列出这一行的诊断；下一个按键关闭 |
+| `K` | `lsp-hover` | 在光标旁的浮窗里显示光标处的信息，上面列出这一行的诊断；PageUp/PageDown 或 `<a-v>`/`<c-v>` 翻页，其他按键关闭 |
 | `<space>c` / `<space>C` | `lsp-callers` / `lsp-callees` | 列出调用者 / 被调用者，只有一层 |
 | | `lsp-diagnostics` | 列出所有诊断 |
 | | `lsp-restart` | 重启当前语言的服务器，失败后也用它重试 |
@@ -50,7 +50,7 @@ soda.lsp.restart()
 soda.note(group, {
   { from = { 2, 5 }, to = { 2, 9 }, severity = "warning", text = "..." },  -- 行、字节列，从 1 起
 })                  -- 替换这一组；空表清除。severity 是 error、warning 或 info
-soda.popup(text)    -- 光标旁的浮窗，下一个按键关闭，放不下的部分截断
+soda.popup(text)    -- 光标旁的浮窗，放不下时滚轮或翻页键滚动，边框上显示位置，其他按键关闭
 ```
 
 作用对象是当前文档的语言的服务器。JSON 的 `null` 在 Lua 里是 `nil`。

@@ -37,6 +37,16 @@ pub trait SystemClipboard {
     fn store(&mut self, text: &str);
     fn load(&mut self) -> Option<String>;
 }
+/// Whether a key pages a popup, and which way. These keys page the text
+/// otherwise, and every other key closes the popup.
+fn popup_page(key: &crate::interaction::KeyStroke) -> Option<bool> {
+    use crate::interaction::Key;
+    match (key.code, key.control, key.alt) {
+        (Key::PageDown, false, false) | (Key::Char('v'), true, false) => Some(true),
+        (Key::PageUp, false, false) | (Key::Char('v'), false, true) => Some(false),
+        _ => None,
+    }
+}
 
 pub struct Runtime {
     // Workers drop before the application so in-progress file writes can finish.
@@ -84,6 +94,11 @@ pub struct Runtime {
     dirty: bool,
     /// Text in a box by the caret, until the next input.
     popup: Option<String>,
+    /// How many lines of the popup are scrolled past; drawing keeps it in
+    /// range, since only drawing knows how the text wraps.
+    popup_scroll: std::cell::Cell<usize>,
+    /// The lines of the popup in view when it was last drawn.
+    popup_page: std::cell::Cell<usize>,
 }
 impl Runtime {
     /// A runtime with `root` as a project, whatever the directory holds.
@@ -139,6 +154,8 @@ impl Runtime {
             lua_running: false,
             dirty: true,
             popup: None,
+            popup_scroll: Default::default(),
+            popup_page: Default::default(),
         })
     }
     /// Opens the file given on the command line, or an untitled document.
@@ -312,6 +329,15 @@ impl Runtime {
         self.input_at(input, self.epoch.elapsed());
     }
     pub fn input_at(&mut self, input: UserInput, time: Duration) {
+        if self.popup.is_some()
+            && self.layer().is_none()
+            && let UserInput::Key(key) = &input
+            && let Some(forward) = popup_page(key)
+        {
+            let page = self.popup_page.get().max(1) as isize;
+            self.scroll_popup(if forward { page } else { -page });
+            return;
+        }
         self.popup = None;
         let result = self
             .layers
@@ -337,6 +363,18 @@ impl Runtime {
     /// The list of candidates to show under the caret.
     pub fn popup(&self) -> Option<&str> {
         self.popup.as_deref()
+    }
+    /// The popup's first line, for `page` lines in view out of `total`.
+    pub fn popup_scroll(&self, page: usize, total: usize) -> usize {
+        let scroll = self.popup_scroll.get().min(total.saturating_sub(page));
+        self.popup_scroll.set(scroll);
+        self.popup_page.set(page);
+        scroll
+    }
+    pub fn scroll_popup(&mut self, lines: isize) {
+        let scroll = self.popup_scroll.get().saturating_add_signed(lines);
+        self.popup_scroll.set(scroll);
+        self.dirty = true;
     }
     pub fn completion_popup(&self) -> Option<crate::interaction::completion::Popup> {
         self.layers.completion_popup()

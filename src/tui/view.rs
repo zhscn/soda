@@ -231,16 +231,23 @@ pub(super) fn render(
         completions(buf, areas, position, popup, theme);
     }
     if let (None, Some(words)) = (runtime.layer(), runtime.popup()) {
-        floating(buf, areas.editor, cursor, words, theme);
+        floating(buf, areas.editor, cursor, words, runtime, theme);
     }
     if let Some(position) = cursor {
         frame.set_cursor_position(position);
     }
 }
 
-/// Text in a box by the caret, on whichever side has more room. What does
-/// not fit is cut, marked with `…`.
-fn floating(buf: &mut Buffer, area: Rect, caret: Option<Position>, words: &str, theme: &Theme) {
+/// Text in a box by the caret, on whichever side has more room. Text that
+/// does not fit scrolls, with its place shown on the border.
+fn floating(
+    buf: &mut Buffer,
+    area: Rect,
+    caret: Option<Position>,
+    words: &str,
+    runtime: &Runtime,
+    theme: &Theme,
+) {
     let widest = area.width.saturating_sub(4).min(80);
     if widest < 8 || area.height < 3 {
         return;
@@ -253,7 +260,8 @@ fn floating(buf: &mut Buffer, area: Rect, caret: Option<Position>, words: &str, 
         return;
     }
     let shown = lines.len().min(usize::from(room));
-    let inner = lines[..shown]
+    let first = runtime.popup_scroll(shown, lines.len());
+    let inner = lines
         .iter()
         .map(|line| layout::plain(line, 0, usize::from(widest)).chars().count())
         .max()
@@ -266,15 +274,24 @@ fn floating(buf: &mut Buffer, area: Rect, caret: Option<Position>, words: &str, 
     };
     let x = caret.x.min(area.right().saturating_sub(wide)).max(area.x);
     float_box(buf, Rect::new(x, y, wide, high), theme);
-    for (row, line) in lines[..shown].iter().enumerate() {
-        let cut = row + 1 == shown && shown < lines.len();
-        let text = if cut { "…" } else { line.as_str() };
+    for (row, line) in lines[first..first + shown].iter().enumerate() {
         buf.set_stringn(
             x + 2,
             y + 1 + row as u16,
-            layout::plain(text, 0, usize::from(inner)),
+            layout::plain(line, 0, usize::from(inner)),
             usize::from(inner),
             theme.float,
+        );
+    }
+    if shown < lines.len() {
+        let place = format!(" {}-{}/{} ", first + 1, first + shown, lines.len());
+        let at = (x + wide).saturating_sub(place.len() as u16 + 1).max(x);
+        buf.set_stringn(
+            at,
+            y + high - 1,
+            place,
+            usize::from(wide),
+            theme.float_border,
         );
     }
 }
@@ -1176,6 +1193,48 @@ mod tests {
         assert!(rows[top - 1].contains("al"), "{text}");
         assert!(rows[top + 1].contains("│ al"), "{text}");
         assert!(rows[top + 3].contains("╰"), "{text}");
+    }
+
+    #[test]
+    fn a_long_popup_scrolls_and_shows_its_place() {
+        let root = tempfile::tempdir().unwrap();
+        let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.start(None);
+        let words: Vec<_> = (1..=30).map(|n| format!("line{n}")).collect();
+        r.command(Command::Lua(format!(
+            "soda.popup(\"{}\")",
+            words.join("\\n")
+        )));
+        let first = screen(&mut r, 40, 14);
+        assert!(
+            first.contains("line1 ") && !first.contains("line30"),
+            "{first}"
+        );
+        assert!(first.contains("/30 "), "{first}");
+        r.scroll_popup(1000);
+        let last = screen(&mut r, 40, 14);
+        assert!(
+            last.contains("line30") && !last.contains("line1 "),
+            "{last}"
+        );
+        // Scrolling past the end is forgotten, so back up is immediate.
+        r.scroll_popup(-1);
+        assert!(screen(&mut r, 40, 14).contains("line29"));
+        // Paging keeps it open and moves by what is in view; others close.
+        r.scroll_popup(-1000);
+        screen(&mut r, 40, 14);
+        keys(&mut r, "<pagedown>");
+        let paged = screen(&mut r, 40, 14);
+        assert!(
+            !paged.contains("line1 ") && !paged.contains(" 1-"),
+            "{paged}"
+        );
+        keys(&mut r, "<a-v>");
+        assert!(screen(&mut r, 40, 14).contains("line1 "));
+        keys(&mut r, "<c-v>");
+        assert!(r.popup().is_some());
+        keys(&mut r, "l");
+        assert!(r.popup().is_none());
     }
 
     #[test]
