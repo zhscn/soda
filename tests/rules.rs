@@ -141,7 +141,7 @@ fn record_member_rules_do_not_change_enum_indentation() {
         c.rules.expression().operand_alignment,
         OperandAlignment::AfterOperator
     );
-    assert!(c.diagnostics.iter().any(|d| d.option == "AlignOperands"));
+    assert!(c.diagnostics.iter().all(|d| d.option != "AlignOperands"));
     assert_eq!(query("enum E {\nA,\n};", 1, &c.rules).target_column, 3);
     assert_eq!(query("class C {\nint x;\n};", 1, &c.rules).target_column, 6);
 }

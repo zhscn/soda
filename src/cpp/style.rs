@@ -6,6 +6,19 @@ pub enum NamespaceIndentation {
     Inner,
     All,
 }
+/// clang-format's IndentGotoLabels: where a goto label stands against the
+/// statements of its block.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GotoLabelIndent {
+    /// At column zero.
+    None,
+    /// A level out from the statements.
+    Outer,
+    /// With the statements.
+    Inner,
+    /// Half a level out.
+    Half,
+}
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PPDirectiveIndent {
     None,
@@ -57,6 +70,9 @@ pub struct CppStyle {
     pub indent_case_blocks: bool,
     /// clang-format's IndentRequiresClause, for a clause on its own line.
     pub indent_requires_clause: bool,
+    pub goto_labels: GotoLabelIndent,
+    /// clang-format's `LambdaBodyIndentation: OuterScope`.
+    pub lambda_outer_scope: bool,
     /// Signed label offset from the declaration indentation.
     pub access_specifier_offset: isize,
     pub pp_directive_indent: PPDirectiveIndent,
@@ -87,6 +103,8 @@ impl Default for CppStyle {
             indent_case_body: true,
             indent_case_blocks: false,
             indent_requires_clause: true,
+            goto_labels: GotoLabelIndent::Outer,
+            lambda_outer_scope: false,
             access_specifier_offset: 0,
             pp_directive_indent: PPDirectiveIndent::None,
             pp_indent_width: None,

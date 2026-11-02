@@ -93,6 +93,30 @@ pub(super) fn to_rules(v: &Map<String, Value>, doc: usize) -> Result<CppRules, C
         boolean(get!("IndentCaseBlocks"), doc, "IndentCaseBlocks")?;
     policy.structure.indent_requires_clause =
         boolean(get!("IndentRequiresClause"), doc, "IndentRequiresClause")?;
+    policy.structure.goto_labels = match choice(
+        get!("IndentGotoLabels"),
+        doc,
+        "IndentGotoLabels",
+        &[
+            "NoIndent",
+            "OuterIndent",
+            "InnerIndent",
+            "HalfIndent",
+            "true",
+            "false",
+        ],
+    )? {
+        "NoIndent" | "false" => crate::cpp::GotoLabelIndent::None,
+        "InnerIndent" => crate::cpp::GotoLabelIndent::Inner,
+        "HalfIndent" => crate::cpp::GotoLabelIndent::Half,
+        _ => crate::cpp::GotoLabelIndent::Outer,
+    };
+    policy.structure.lambda_outer_scope = choice(
+        get!("LambdaBodyIndentation"),
+        doc,
+        "LambdaBodyIndentation",
+        &["Signature", "OuterScope"],
+    )? == "OuterScope";
     policy.structure.indent_wrapped_function_names = boolean(
         get!("IndentWrappedFunctionNames"),
         doc,

@@ -121,8 +121,6 @@ fn merge(base: &mut Map<String, Value>, patch: &Map<String, Value>) {
 }
 
 const UNSUPPORTED: &[&str] = &[
-    "IndentGotoLabels",
-    "LambdaBodyIndentation",
     "IndentExportBlock",
     "RequiresExpressionIndentation",
     "StatementAttributeLikeMacros",
@@ -175,13 +173,6 @@ fn refresh_diagnostics(config: &mut ClangConfig) {
                 message: "parsed and retained; interactive indentation does not yet implement this option".into(),
             });
         }
-    }
-    if config.rules.expression().operand_alignment == crate::cpp::OperandAlignment::AfterOperator {
-        config.diagnostics.push(ConfigDiagnostic {
-            document: source("AlignOperands"),
-            option: "AlignOperands".into(),
-            message: "AlignAfterOperator currently uses Align continuation rules".into(),
-        });
     }
     if matches!(
         config

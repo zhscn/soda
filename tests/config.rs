@@ -171,8 +171,13 @@ fn invalid_configuration_is_atomic_and_diagnostic() {
     assert_eq!(c.diagnostics[0].option, "IndnetWidth");
     assert_eq!(c.values["IndnetWidth"], 4);
     assert_eq!(
-        parsed("IndentGotoLabels: false").diagnostics[0].option,
-        "IndentGotoLabels"
+        parsed("IndentExportBlock: false").diagnostics[0].option,
+        "IndentExportBlock"
+    );
+    assert!(
+        parsed("IndentGotoLabels: HalfIndent")
+            .diagnostics
+            .is_empty()
     );
     assert!(parsed("IndentCaseBlocks: true").diagnostics.is_empty());
 }
@@ -471,7 +476,7 @@ fn capability_diagnostics_follow_effective_presets_overrides_and_sources() {
                 .any(|d| d.option == "BraceWrapping" && d.document == 1)
         );
     }
-    let inherited = parsed("BreakBeforeBraces: GNU\nAlignOperands: AlignAfterOperator");
+    let inherited = parsed("BreakBeforeBraces: GNU\nCpp11BracedListStyle: AlignFirstComment");
     let c = parse_config(
         "IndentWidth: 3",
         &inherited,
@@ -482,9 +487,13 @@ fn capability_diagnostics_follow_effective_presets_overrides_and_sources() {
     .unwrap()
     .unwrap();
     assert!(c.diagnostics.iter().any(|d| d.option == "BraceWrapping"));
-    assert!(c.diagnostics.iter().any(|d| d.option == "AlignOperands"));
+    assert!(
+        c.diagnostics
+            .iter()
+            .any(|d| d.option == "Cpp11BracedListStyle")
+    );
     let c = parse_config(
-        "BreakBeforeBraces: Attach\nAlignOperands: DontAlign",
+        "BreakBeforeBraces: Attach\nCpp11BracedListStyle: Block",
         &inherited,
         "Cpp",
         false,
@@ -495,10 +504,10 @@ fn capability_diagnostics_follow_effective_presets_overrides_and_sources() {
     assert!(
         !c.diagnostics
             .iter()
-            .any(|d| matches!(d.option.as_str(), "BraceWrapping" | "AlignOperands"))
+            .any(|d| matches!(d.option.as_str(), "BraceWrapping" | "Cpp11BracedListStyle"))
     );
     let c = parse_config(
-        "AlignOperands: AlignAfterOperator\n---\nLanguage: Cpp\nIndentWidth: 3",
+        "Cpp11BracedListStyle: AlignFirstComment\n---\nLanguage: Cpp\nIndentWidth: 3",
         &base,
         "Cpp",
         false,
@@ -509,7 +518,7 @@ fn capability_diagnostics_follow_effective_presets_overrides_and_sources() {
     assert_eq!(
         c.diagnostics
             .iter()
-            .find(|d| d.option == "AlignOperands")
+            .find(|d| d.option == "Cpp11BracedListStyle")
             .unwrap()
             .document,
         1

@@ -110,7 +110,24 @@ impl CppSession {
         self.rules.enabled()
             && matches!(
                 ch,
-                ':' | '{' | '}' | '#' | 'e' | 'f' | '<' | '>' | '.' | '?' | 's'
+                ':' | '{'
+                    | '}'
+                    | '#'
+                    | 'e'
+                    | 'f'
+                    | 's'
+                    | '<'
+                    | '>'
+                    | '.'
+                    | '?'
+                    | '+'
+                    | '-'
+                    | '*'
+                    | '%'
+                    | '&'
+                    | '|'
+                    | '^'
+                    | '='
             )
     }
     fn matches(&self, snapshot: &Snapshot) -> bool {
@@ -244,7 +261,13 @@ impl CppSession {
         // An operator that cannot start a statement, typed first on a line,
         // makes it a continuation: Enter after `EXPECT_EQ(a, b)` cannot know
         // that `<< "message"` comes next, so typing it moves the line.
-        let operator = matches!(request.trigger, IndentTrigger::Typed('<' | '>' | '.' | '?'));
+        // So does any binary operator, whose precedence places the line.
+        let operator = matches!(
+            request.trigger,
+            IndentTrigger::Typed(
+                '<' | '>' | '.' | '?' | '+' | '-' | '*' | '%' | '&' | '|' | '^' | '='
+            )
+        );
         // A `?` after a colon that leads its line makes that link of a
         // conditional chain line up with the chain's first condition.
         let mut link = false;
@@ -269,7 +292,9 @@ impl CppSession {
             link = request.trigger == IndentTrigger::Typed('?')
                 && typed.first() == Some(&b':')
                 && typed.get(1) != Some(&b':');
-            if !link && !matches!(typed[..], [] | [b'<'] | [b'-'] | [b'>']) {
+            // What comes before on the line is the start of the operator.
+            let partial = typed.len() <= 2 && typed.iter().all(|b| b"<>-+*%&|^=!".contains(b));
+            if !link && !partial {
                 return Ok(IndentAdvice::Unavailable);
             }
         } else if pp_word {
@@ -301,6 +326,22 @@ impl CppSession {
                             token.kind,
                             K::Less
                                 | K::Question
+                                | K::Plus
+                                | K::Minus
+                                | K::Star
+                                | K::Percent
+                                | K::Amp
+                                | K::AmpAmp
+                                | K::Pipe
+                                | K::PipePipe
+                                | K::Caret
+                                | K::Equals
+                                | K::EqualEqual
+                                | K::ExclaimEqual
+                                | K::LessEqual
+                                | K::GreaterEqual
+                                | K::Spaceship
+                                | K::Greater
                                 | K::LessLess
                                 | K::GreaterGreater
                                 | K::Period
@@ -372,6 +413,7 @@ impl CppSession {
             && !matches!(
                 decision.role,
                 IndentRole::CaseLabel
+                    | IndentRole::GotoLabel
                     | IndentRole::AccessSpecifierLabel
                     | IndentRole::ConstructorInitializerIntro
             )

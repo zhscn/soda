@@ -150,7 +150,7 @@ mapped.update(['IndentFunctionDeclarationAfterType', 'BreakConstructorInitialize
 parser = (ROOT / 'src/config/parse.rs').read_text()
 unsupported_block = parser.split('const UNSUPPORTED:')[1].split('];', 1)[0]
 unsupported = set(re.findall(r'"([^"]+)"', unsupported_block))
-partial = {'AlignOperands', 'Cpp11BracedListStyle', 'BraceWrapping', 'BreakBeforeBraces', 'MacroBlockBegin', 'MacroBlockEnd'}
+partial = {'Cpp11BracedListStyle', 'BraceWrapping', 'BreakBeforeBraces', 'MacroBlockBegin', 'MacroBlockEnd'}
 with (ROOT / 'docs/clang-format-options.csv').open('w', newline='') as output:
     writer = csv.writer(output, lineterminator='\n')
     writer.writerow(['option', 'yaml_type', 'application'])

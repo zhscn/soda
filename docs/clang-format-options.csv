@@ -12,7 +12,7 @@ AlignConsecutiveTableGenCondOperatorColons,AlignConsecutiveStyle,retained; forma
 AlignConsecutiveTableGenDefinitionColons,AlignConsecutiveStyle,retained; formatter option
 AlignEscapedNewlines,EscapedNewlineAlignmentStyle,retained; formatter option
 AlignEscapedNewlinesLeft,EscapedNewlineAlignmentStyle,retained; formatter option
-AlignOperands,OperandAlignmentStyle,interactive; partial strategies
+AlignOperands,OperandAlignmentStyle,interactive
 AlignTrailingComments,TrailingCommentsAlignmentStyle,retained; formatter option
 AllowAllArgumentsOnNextLine,bool,retained; formatter option
 AllowAllConstructorInitializersOnNextLine,bool,retained; formatter option
@@ -101,7 +101,7 @@ IndentCaseLabels,bool,interactive
 IndentExportBlock,bool,retained; capability diagnostic
 IndentExternBlock,IndentExternBlockStyle,interactive
 IndentFunctionDeclarationAfterType,bool,interactive
-IndentGotoLabels,IndentGotoLabelStyle,retained; capability diagnostic
+IndentGotoLabels,IndentGotoLabelStyle,interactive
 IndentPPDirectives,PPDirectiveIndentStyle,interactive
 IndentRequires,bool,interactive
 IndentRequiresClause,bool,interactive
@@ -118,7 +118,7 @@ KeepEmptyLines,KeepEmptyLinesStyle,retained; formatter option
 KeepEmptyLinesAtEOF,bool,retained; formatter option
 KeepEmptyLinesAtTheStartOfBlocks,bool,retained; formatter option
 KeepFormFeed,bool,retained; formatter option
-LambdaBodyIndentation,LambdaBodyIndentationKind,retained; capability diagnostic
+LambdaBodyIndentation,LambdaBodyIndentationKind,interactive
 Language,LanguageKind,configuration
 LineEnding,LineEndingStyle,retained; formatter option
 MacroBlockBegin,std::string,interactive; partial strategies

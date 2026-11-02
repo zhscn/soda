@@ -56,11 +56,13 @@ Rust 内置模块通过 `CppStyle::compile` 生成同一策略表示，返回 `R
 | `AccessModifierOffset` | 保存相对普通成员的偏移，具体列在查询时计算 |
 | `IndentAccessModifiers` | 兼容 bool，以及 Never、Always、AfterFirstAccessModifier |
 | `IndentCaseLabels` | case/default 相对 switch 的缩进 |
+| `LambdaBodyIndentation` | Signature 时 lambda 体以签名所在的嵌套块基准缩进一级；OuterScope 时以包含 lambda 的语句所在行为基准，与签名在哪一列无关 |
+| `IndentGotoLabels` | goto 标签相对所在块语句的位置：NoIndent 在第 0 列，OuterIndent 少一级，InnerIndent 同列，HalfIndent 少半级；兼容旧的 true（OuterIndent）和 false（NoIndent） |
 | `IndentRequiresClause` | 独占一行的 requires 子句相对 `template<…>` 缩进一级或与之对齐；旧写法 IndentRequires 先转换成它。子句按 `RequiresClausePosition: OwnLine` 的布局识别，约束是用 `&&`/`||` 连接的名字（可带模板实参）或括号表达式 |
 | `IndentCaseBlocks` | 关闭时 case 标签直接打开的块与标签同级（`BraceWrapping.AfterCaseLabel` 时 `{` 独占一行，标签与 `{` 之间有独占一行的注释时按普通块处理），开启时它是 case 的一条普通语句 |
 | `IndentWrappedFunctionNames` | 换行后的函数声明名称缩进；兼容旧字段 IndentFunctionDeclarationAfterType |
 | `AlignAfterOpenBracket` | 兼容 bool 和旧版枚举，控制用户已经选定换行位置的参数对齐 |
-| `AlignOperands`、`BreakBeforeTernaryOperators` | 操作数和三元表达式续行 |
+| `AlignOperands`、`BreakBeforeTernaryOperators` | 操作数和三元表达式续行；AlignAfterOperator 时，`=` 或 `return` 之后的表达式中以运算符开头的续行左移运算符的宽度，使操作数对齐 |
 | `Cpp11BracedListStyle`、`BracedInitializerIndentWidth` | 区分块式与函数参数式初始化列表及独立宽度 |
 | `ConstructorInitializerIndentWidth`、`BreakConstructorInitializers` | 初始化列表独立宽度、首项与逗号对齐，接受 AfterComma；旧 BeforeComma 开关按 LLVM 的有效布局转换 |
 | `IndentPPDirectives`、`PPIndentWidth` | BeforeHash 调整前导空白；AfterHash 按 UseTab 在 # 后生成缩进；ForIndentation 的 Tab 范围仍由层级乘 IndentWidth 决定，PPIndentWidth 决定目标列；Leave 保留两侧空白；包含 include guard 处理 |
@@ -79,7 +81,7 @@ Rust 内置模块通过 `CppStyle::compile` 生成同一策略表示，返回 `R
 
 完整选项树保留列宽、排序、换行及其他排版配置，缩进器只使用与当前交互能力相关的字段。配置层不执行完整 formatter 的跨字段约束和全部旧字段归一化。标量和 mapping 的合法兼容形式保留在选项树中；与即时缩进相关的旧字段在策略编译前转换。
 
-显式配置 `IndentGotoLabels`、`LambdaBodyIndentation`，或预设对这些选项采用不同于 LLVM 基线的值时，会返回尚未参与交互缩进的诊断。`AlignOperands: AlignAfterOperator` 编译为独立的 AfterOperator 策略值，目前执行时采用 Align 的续行规则，并返回诊断。GNU、Whitesmiths 或自定义额外 brace indentation 同样返回能力诊断。显式选择 AlignFirstComment（包括旧 true 写法）时，会说明当前采用 FunctionCall 续行规则，尚未实现首注释锚点的区别。
+GNU、Whitesmiths 或自定义额外 brace indentation 同样返回能力诊断。显式选择 AlignFirstComment（包括旧 true 写法）时，会说明当前采用 FunctionCall 续行规则，尚未实现首注释锚点的区别。
 
 导出块、requires expression、StatementAttributeLikeMacros、TypenameMacros、TypeNames、TemplateNames、VariableTemplates、Macros 和 SkipMacroDefinitionBody 尚未接入语法或缩进策略。显式设置或偏离 LLVM 基线时返回能力诊断。枚举写法能通过配置校验不表示相应语法行为已经实现。
 

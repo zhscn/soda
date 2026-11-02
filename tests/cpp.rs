@@ -532,3 +532,27 @@ fn punctuation_inside_literals_comments_and_compound_tokens_does_not_trigger_ind
         "switch (x) {\ncase 1:^\n}",
     );
 }
+#[test]
+fn comments_right_of_a_line_start_continue_its_trailing_comment() {
+    let s = CppStyle::default();
+    let text = "void f() {\n    return; // first line\n             // second line\n             // third line\n    int i; // trailing\n    // own comment\n    if (x) { // brace\n              // under the brace\n    }\n}\n";
+    // As clang-format's continuesLineCommentSection: a comment right of
+    // where the line above starts continues the comment ending it, and one
+    // that continues a comment can be continued in turn.
+    assert_eq!(col(text, 2, &s).target_column, 12);
+    assert_eq!(col(text, 3, &s).target_column, 12);
+    // At the code's column it is a comment of its own.
+    assert_eq!(col(text, 5, &s).target_column, 4);
+    // After `{`, the brace is where the line starts for this.
+    assert_eq!(col(text, 7, &s).target_column, 13);
+    // A label ends its line before the comment under it.
+    let text = "void f() {
+    switch (x) {
+    case 1: // label
+        // body
+        g();
+    }
+}
+";
+    assert_eq!(col(text, 3, &s).target_column, 8);
+}

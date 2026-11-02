@@ -164,7 +164,14 @@ fn reference_layouts_survive_typing_from_scratch() {
         // not an ordinary continuation, follows; reindent covers that layout.
         // Likewise a link of a conditional chain whose condition wraps
         // shows that it is a link only when the `?` on the next line comes.
-        if case["name"] == "wrapped-name-False" || case["name"] == "conditional-wrapped-link" {
+        // So does an operator of lower precedence, or a comma, that comes
+        // after the lines it moves.
+        if case["name"] == "wrapped-name-False"
+            || case["name"] == "conditional-wrapped-link"
+            || case["name"]
+                .as_str()
+                .is_some_and(|name| name.starts_with("operands-later"))
+        {
             continue;
         }
         let expected = case["expected"].as_str().unwrap();

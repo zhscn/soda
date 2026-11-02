@@ -54,6 +54,8 @@ lambdas = ('void f() {\nif ([&] {\nwork();\nreturn done();\n}()) {\ngo();\n}\n'
            'auto g =\n[&](int x) {\nreturn x;\n};\nauto h =\n[&](int x) -> int {\nreturn x;\n};\n'
            'const auto [a,\nb] = [&]() {\nreturn pair();\n}();\nreturn ok() && [&] {\nreturn x;\n}();\n}\n')
 profiles.append(('lambda-contexts', {'AllowShortLambdasOnASingleLine': 'None'}, lambdas))
+profiles.append(('lambda-outer-scope', {'AllowShortLambdasOnASingleLine': 'None',
+                                        'LambdaBodyIndentation': 'OuterScope'}, lambdas))
 arguments = ('void f(unsigned Level,\nconst Map<A *, B<C>>\n&Active,\nfunction_ref<bool(int A,\nint B)>\nCheck) {\n'
              'State.push(ParenState(/*Tok=*/nullptr, First,\n/*AvoidBinPacking=*/false,\n/*NoLineBreak=*/false));\n'
              'for (auto I = List.begin(),\nE = List.end();\nI != E; ++I) {\nwork();\n}\n'
@@ -102,6 +104,19 @@ requires = ('template <class T>\nrequires Executor<std::decay_t<T>>\nvoid run(T 
             'struct A {\ntemplate <class C, class E>\nrequires(!Executor<C> &&\nExecutor<E>)\nA(C c, E e)\n: e(e) {}\nE e;\n};\n')
 for indent in [True, False]:
     profiles.append((f'requires-{indent}', {'IndentRequiresClause': indent}, requires))
+goto = 'int f() {\nif (foo()) {\nlabel1:\nbar();\n}\nlabel2:\nreturn 1;\n}\n'
+for labels in ['NoIndent', 'OuterIndent', 'InnerIndent', 'HalfIndent', True, False]:
+    profiles.append((f'goto-labels-{labels}', {'IndentGotoLabels': labels, 'IndentWidth': 4}, goto))
+operators = ('void f() {\nint aaaaa = bbbbbbbbbbb\n+ ccccccccccc\n* dddddd;\n'
+             'return aaaaa\n+ bbbbb;\nint w = ready\n? first\n: second;\n}\n')
+# An operator of lower precedence that comes later, `||` after `&&`, or a
+# comma after an argument, moves the lines before it.
+later = 'void f() {\nbool x = first\n&& second\n|| third;\ncall(aaaa\n+ bbbb,\nc);\n}\n'
+for align in ['Align', 'AlignAfterOperator']:
+    for breaking in ['NonAssignment', 'All']:
+        options = {'AlignOperands': align, 'BreakBeforeBinaryOperators': breaking}
+        profiles.append((f'operands-{align}-{breaking}', options, operators))
+        profiles.append((f'operands-later-{align}-{breaking}', options, later))
 profiles.append(('conditional-wrapped-link', {},
                  'void f() {\nResult = Context.isHidden()\n? Hidden\n: Context.isProtected()\n? Protected\n: Default;\n}\n'))
 cases = []

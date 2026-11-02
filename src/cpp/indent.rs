@@ -30,6 +30,8 @@ pub enum IndentRole {
     StatementContinuation,
     /// A requires clause on its own line under template parameters.
     RequiresClause,
+    /// A goto label, placed by IndentGotoLabels.
+    GotoLabel,
     PreprocessorDirective,
     OpeningToken,
     ClosingToken,
@@ -277,6 +279,17 @@ impl Computer<'_> {
     /// LambdaBodyIndentation): the body is one level deeper and the closing
     /// brace aligns with it.
     fn lambda_base(&self, body: usize) -> usize {
+        // LambdaBodyIndentation: OuterScope measures from the line the
+        // statement holding the lambda starts on, whatever its signature.
+        if self.style.structure.lambda_outer_scope {
+            let mut scope = self.tree.nodes[body].parent.unwrap();
+            while self.tree.nodes[scope].kind.is_group()
+                && let Some(parent) = self.tree.nodes[scope].parent
+            {
+                scope = parent;
+            }
+            return self.indent(self.line_of(self.tree.range(scope).start));
+        }
         let open = self.tree.nodes[body].tokens.start;
         let (start, arrow) = self.lambda_introducer(open).unwrap_or((open, false));
         let scope = self.tree.nodes[body].parent.unwrap();
@@ -342,6 +355,58 @@ impl Computer<'_> {
             _ => false,
         }
     }
+    /// The tokens of a line other than blanks, comments among them.
+    fn line_tokens(&self, line: usize) -> Vec<usize> {
+        let Some(r) = self.snapshot.line_content_range(line) else {
+            return vec![];
+        };
+        let start = self
+            .tree
+            .tokens
+            .partition_point(|t| t.range.start < r.start);
+        (start..self.tree.tokens.len())
+            .take_while(|&i| self.tree.tokens[i].range.start < r.end)
+            .filter(|&i| {
+                !matches!(
+                    self.tree.tokens[i].kind,
+                    K::Whitespace | K::Newline | K::EndOfFile
+                )
+            })
+            .collect()
+    }
+    /// The line comment that ends `line` and a later comment can continue,
+    /// with the column it stands at and the least column a continuation
+    /// needs, as clang-format's continuesLineCommentSection has them: right
+    /// of where the line starts, or of a `{` the comment follows; a comment
+    /// that continues one is continued from its own column.
+    fn comment_section(&self, line: usize) -> Option<(usize, usize)> {
+        let tokens = self.line_tokens(line);
+        let (&last, rest) = tokens.split_last()?;
+        if self.tree.tokens[last].kind != K::LineComment {
+            return None;
+        }
+        let column = self.column(self.tree.tokens[last].range.start);
+        let Some(&first) = rest.first() else {
+            // A comment alone on its line goes on only as a continuation,
+            // which lines up with the section it continues.
+            let (section, least) = self.comment_section(line.checked_sub(1)?)?;
+            return (column >= least).then_some((section, column));
+        };
+        // A label, `case A: // note`, ends its line before the comment
+        // under it, which then belongs to what the label introduces.
+        if rest
+            .last()
+            .is_some_and(|&i| self.tree.tokens[i].kind == K::Colon)
+        {
+            return None;
+        }
+        let brace = rest
+            .last()
+            .filter(|&&i| self.tree.tokens[i].kind == K::LBrace)
+            .copied();
+        let least = self.column(self.tree.tokens[brace.unwrap_or(first)].range.start) + 1;
+        Some((column, least))
+    }
     fn first(&self, line: usize) -> Option<usize> {
         let r = self.snapshot.line_content_range(line)?;
         let start = self
@@ -391,6 +456,16 @@ impl Computer<'_> {
             return d;
         }
         let first = self.first(self.line);
+        // A comment that continues the comment ending the line above, at a
+        // column right of where that line starts, stays beside it.
+        if let [only] = self.line_tokens(self.line)[..]
+            && self.tree.tokens[only].kind == K::LineComment
+            && let Some(above) = self.line.checked_sub(1)
+            && let Some((column, least)) = self.comment_section(above)
+            && self.column(self.tree.tokens[only].range.start) >= least
+        {
+            return self.fixed(IndentRole::StatementContinuation, column, None);
+        }
         if let Some(i) = first {
             let token = &self.tree.tokens[i];
             let id = self.tree.token_owner(i);
@@ -945,7 +1020,49 @@ pub fn compute_indent(
     {
         return Ok(body);
     }
+    if !decision.preserve && goto_label(snapshot, tree, line) {
+        // Placed against the statements the label stands among.
+        let statements = decision.target_column;
+        let width = style.whitespace.indent_width;
+        let column = match style.structure.goto_labels {
+            super::GotoLabelIndent::None => 0,
+            super::GotoLabelIndent::Outer => statements.saturating_sub(width),
+            super::GotoLabelIndent::Inner => statements,
+            super::GotoLabelIndent::Half => statements.saturating_sub(width / 2),
+        };
+        let computer = Computer {
+            snapshot,
+            tree,
+            line,
+            style,
+        };
+        return Ok(computer.fixed(IndentRole::GotoLabel, column, None));
+    }
     Ok(decision)
+}
+
+/// Whether `line` is a goto label: a name and a colon that make a statement
+/// of their own.
+fn goto_label(snapshot: &Snapshot, tree: &SyntaxTree, line: usize) -> bool {
+    let Some(range) = snapshot.line_content_range(line) else {
+        return false;
+    };
+    let tokens = tree.tokens();
+    let start = tokens.partition_point(|t| t.range.start < range.start);
+    let mut significant = (start..tokens.len()).filter(|&i| !tokens[i].kind.is_trivia());
+    let (Some(name), Some(colon)) = (significant.next(), significant.next()) else {
+        return false;
+    };
+    if tokens[name].kind != K::Identifier || tokens[colon].kind != K::Colon {
+        return false;
+    }
+    let owner = tree.token_owner(name);
+    let node = &tree.nodes[owner];
+    node.kind == N::OpaqueDeclaration
+        && node.tokens.start <= name
+        && (node.tokens.start..node.tokens.end)
+            .filter(|&i| !tokens[i].kind.is_trivia())
+            .eq([name, colon])
 }
 
 /// Whether a comment among `tokens` starts its line, rather than trailing

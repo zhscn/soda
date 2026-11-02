@@ -269,6 +269,10 @@ struct Frame {
     header: bool,
     /// A braced initializer list, whose elements are values, not declarations.
     braced: bool,
+    /// `AlignOperands: AlignAfterOperator` and this expression follows `=`
+    /// or `return`: a line its operator starts moves left by the operator,
+    /// so that the operands line up.
+    unindent: bool,
 }
 struct Replay<'a> {
     stack: Vec<Frame>,
@@ -380,9 +384,17 @@ impl Replay<'_> {
                     && p.precedence == 2
                     && (self.style.expression.operand_alignment != super::OperandAlignment::None))
         });
+        // clang-format's shouldUnindentNextOperator, and the operand after a
+        // `?` of a conditional.
+        let after_assignment =
+            prev_nc.is_some_and(|p| (p.binary && p.precedence == 2) || p.kind == K::ReturnKw);
         for (index, &level) in t.fake_left.iter().rev().enumerate() {
             let mut state = self.top().clone();
             state.wrapped = false;
+            state.unindent = self.style.expression.operand_alignment
+                == super::OperandAlignment::AfterOperator
+                && (after_assignment || (level == 3 && prev_nc.is_some_and(|p| p.question)))
+                && !t.newline;
             let align = (self.style.expression.operand_alignment != super::OperandAlignment::None)
                 || level < 2;
             let after_return = prev_nc.is_some_and(|p| p.kind == K::ReturnKw) && level == 0;
@@ -538,6 +550,9 @@ impl Replay<'_> {
             && t.kind != K::Colon
         {
             return continuation;
+        }
+        if (t.binary || t.question || t.colon) && f.unindent {
+            return f.indent - t.length - 1;
         }
         if f.indent == self.first && prev.is_some_and(|p| p.kind != K::RBrace) {
             return f.indent + cont;
@@ -733,7 +748,9 @@ pub(super) fn continuation(
                 let prec = s.precedence();
                 let bytes = snapshot.text().as_bytes();
                 let before = t.range.start > 0 && bytes[t.range.start - 1].is_ascii_whitespace();
-                let after = bytes.get(t.range.end).is_some_and(u8::is_ascii_whitespace);
+                // The end of input, where an operator is being typed, counts
+                // as the space after it.
+                let after = bytes.get(t.range.end).is_none_or(u8::is_ascii_whitespace);
                 let ambiguous =
                     matches!(t.kind, K::Star | K::Amp | K::AmpAmp | K::Less | K::Greater);
                 if matches!(t.kind, K::Arrow | K::Period | K::ArrowStar | K::PeriodStar) {
