@@ -528,6 +528,11 @@ impl CommandLine {
     }
     /// Whether the text being completed has candidates to choose from;
     /// free text such as keys or a shell command has none.
+    /// Whether Enter would take the selected row. In a path slot it takes
+    /// the typed text until a row is chosen, and Tab alone uses the default.
+    pub fn enter_selects(&self) -> bool {
+        self.list.user_selected() || self.locate().target != Some(Target::Slot(SlotKind::Path))
+    }
     pub fn completes(&self) -> bool {
         self.query
             .as_ref()
@@ -604,13 +609,18 @@ impl CommandLine {
     fn confirm(&mut self, app: &Application) -> Transition {
         let location = self.locate();
         let slot_text = &self.input.text()[location.range.clone()];
+        // A row chosen by hand wins over whatever the text already names.
+        let chosen = self.list.user_selected();
         let accept = match location.target {
-            Some(Target::Name) => self.info(slot_text).is_none(),
-            Some(Target::Slot(SlotKind::Path)) => self.list.user_selected(),
-            Some(Target::Slot(kind)) if kind.requires_match() => !self
-                .rows
-                .iter()
-                .any(|r| r.candidate.payload.replacement.as_deref() == Some(slot_text)),
+            Some(Target::Name) => chosen || self.info(slot_text).is_none(),
+            Some(Target::Slot(SlotKind::Path)) => chosen,
+            Some(Target::Slot(kind)) if kind.requires_match() => {
+                chosen
+                    || !self
+                        .rows
+                        .iter()
+                        .any(|r| r.candidate.payload.replacement.as_deref() == Some(slot_text))
+            }
             _ => false,
         };
         let mut accepted = false;

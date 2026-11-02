@@ -86,6 +86,63 @@ fn choosing_a_command_continues_with_its_arguments() {
 }
 
 #[test]
+fn a_row_chosen_by_hand_wins_over_an_exact_name() {
+    let root = tree();
+    let mut r = runtime(root.path());
+    // `project` asks for a file; `project-root` runs at once.
+    r.command(Command::Ex("project".into()));
+    assert!(rows(&r)[0].starts_with("project "), "{:?}", rows(&r));
+    assert!(rows(&r)[1].starts_with("project-root "), "{:?}", rows(&r));
+    keys(&mut r, "<down><ret>");
+    assert!(r.layer().is_none());
+
+    // The current buffer ranks last, so stand in a third one.
+    let (a, ab, other) = (
+        root.path().join("a"),
+        root.path().join("ab"),
+        root.path().join("other"),
+    );
+    for path in [&a, &ab, &other] {
+        std::fs::write(path, "").unwrap();
+        r.command(Command::OpenPath(path.clone()));
+        wait(&mut r, |r| {
+            r.app().views().any(|v| {
+                r.app().workspace().file(v.document_id).unwrap().path() == Some(path.as_path())
+            })
+        });
+    }
+    // Buffers are named by their paths; the exact name is that of `a`.
+    r.command(Command::Ex(format!("buffer {}", a.display())));
+    assert_eq!(rows(&r).len(), 2, "{:?}", rows(&r));
+    keys(&mut r, "<down><ret>");
+    wait(&mut r, |r| {
+        let view = r.app().view(r.app().active_view().unwrap()).unwrap();
+        r.app().workspace().file(view.document_id).unwrap().path() == Some(ab.as_path())
+    });
+}
+
+#[test]
+fn enter_selects_the_row_only_once_a_path_row_is_chosen() {
+    let root = tree();
+    let mut r = runtime(root.path());
+    let selects = |r: &Runtime| match r.layer() {
+        Some(Layer::CommandLine(line)) => line.enter_selects(),
+        _ => panic!("command line is not open"),
+    };
+    assert!({
+        r.command(Command::Ex("buffer ".into()));
+        selects(&r)
+    });
+    keys(&mut r, "<esc>");
+    r.command(Command::Ex("open ".into()));
+    r.input(UserInput::Paste("s".into()));
+    wait(&mut r, |r| rows(r) == ["src/"]);
+    assert!(!selects(&r));
+    keys(&mut r, "<down>");
+    assert!(selects(&r));
+}
+
+#[test]
 fn opening_the_focused_file_says_so() {
     let root = tree();
     let path = root.path().join("src/main.cpp");

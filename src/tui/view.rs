@@ -773,7 +773,10 @@ fn command_line(
         let Some(row) = rows.get(list.first_visible() + offset) else {
             break;
         };
-        let base = if selected == Some(row.candidate.key) {
+        let base = if selected == Some(row.candidate.key) && !line.enter_selects() {
+            buf.set_string(area.x, y, "▌", theme.dim);
+            theme.text
+        } else if selected == Some(row.candidate.key) {
             let band = Rect::new(area.x, y, area.width, 1);
             buf.set_style(band, theme.candidate_selected);
             buf.set_string(area.x, y, "▌", theme.marker.patch(theme.candidate_selected));
