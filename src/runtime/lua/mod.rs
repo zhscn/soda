@@ -34,6 +34,8 @@ const FUNCTIONS: &[&str] = &[
     "unflag",
     "note",
     "popup",
+    "prompt",
+    "choose",
     "hook",
     "define_command",
     "spawn",
@@ -48,6 +50,7 @@ const FUNCTIONS: &[&str] = &[
     "lsp_uri",
     "lsp_info",
     "lsp_restart",
+    "lsp_array",
 ];
 const PRELUDE: &str = r#"
 local current, names, methods, bundled = ...
@@ -95,14 +98,21 @@ for _, name in ipairs(methods) do
     return lent("buf:" .. name)["buffer_" .. name](self.id, ...)
   end
 end
-function soda.buffer()
-  return setmetatable({ id = lent("soda.buffer").buffer() }, Buffer)
+function soda.buffer(path)
+  local id = lent("soda.buffer").buffer(path)
+  return id and setmetatable({ id = id }, Buffer)
+end
+local choose = soda.choose
+function soda.choose(title, items, answer)
+  choose(title, items, function(index)
+    answer(tonumber(index))
+  end)
 end
 local completion_source = soda.completion_source
 soda.completion_source = nil
 soda.completion = {}
 soda.lsp = {}
-for _, name in ipairs({ "server", "request", "notify", "on", "uri", "info", "restart" }) do
+for _, name in ipairs({ "server", "request", "notify", "on", "uri", "info", "restart", "array" }) do
   soda.lsp[name] = soda["lsp_" .. name]
   soda["lsp_" .. name] = nil
 end
@@ -314,6 +324,25 @@ impl Host {
                 })?,
             )?;
             soda.set(
+                "prompt",
+                scope.create_function(|_, text: String| {
+                    runtime.borrow_mut().command(Command::Ex(text));
+                    Ok(())
+                })?,
+            )?;
+            soda.set(
+                "choose",
+                scope.create_function(
+                    |_, (title, items, function): (String, Vec<String>, Function)| {
+                        let id = self.keep(function)?;
+                        runtime
+                            .borrow_mut()
+                            .command(Command::Offer { id, title, items });
+                        Ok(())
+                    },
+                )?,
+            )?;
+            soda.set(
                 "popup",
                 scope.create_function(|_, text: String| {
                     let mut runtime = runtime.borrow_mut();
@@ -459,6 +488,13 @@ impl Host {
                         Ok(())
                     },
                 )?,
+            )?;
+            soda.set(
+                "lsp_array",
+                scope.create_function(|lua, table: Table| {
+                    table.set_metatable(Some(lua.array_metatable()))?;
+                    Ok(table)
+                })?,
             )?;
             soda.set(
                 "lsp_request",

@@ -29,6 +29,8 @@ pub enum SlotKind {
     Option,
     /// A recently used file.
     Recent,
+    /// One of the items of the question being asked.
+    Item,
     Word,
     Rest,
 }
@@ -36,7 +38,7 @@ impl SlotKind {
     pub fn requires_match(self) -> bool {
         matches!(
             self,
-            Self::File | Self::Buffer | Self::Choice(_) | Self::Option | Self::Recent
+            Self::File | Self::Buffer | Self::Choice(_) | Self::Option | Self::Recent | Self::Item
         )
     }
 }
@@ -906,6 +908,19 @@ pub static BUILTINS: &[Builtin] = &[
         [slot("CODE", SlotKind::Rest)],
         "Run Lua code, with the soda table for the editor",
         |a| Ok(Command::Lua(required(a)?))
+    ),
+    builtin!(
+        "choose",
+        [slot("ITEM", SlotKind::Item)],
+        "Answer the question a Lua extension asked",
+        |a| {
+            let index = required(a)?;
+            let index = index
+                .trim()
+                .parse()
+                .map_err(|_| format!("not one of the items: {index}"))?;
+            Ok(Command::Choose(index))
+        }
     ),
     builtin!(
         "lua-call",

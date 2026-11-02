@@ -168,6 +168,8 @@ pub struct Layers {
     hooks: hooks::Hooks,
     /// Recently used files, newest first, for `recent`.
     recent_files: Vec<std::path::PathBuf>,
+    /// The Lua function and the items of the question last offered.
+    offer: Option<(u64, Vec<String>)>,
     /// Command line and search histories.
     history: [history::History; 2],
     /// The results document `]q` and `[q` step through: the latest filled.

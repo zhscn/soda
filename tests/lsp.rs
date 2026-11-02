@@ -163,6 +163,89 @@ fn references_and_callers_are_results() {
     assert_eq!(text(&f.r), "a.cpp\n  2:3  caller\n");
 }
 #[test]
+fn rename_edits_open_documents_and_files_on_disk() {
+    let Some(mut f) = open("one\n") else { return };
+    // UTF-16 columns: the é before the name is two bytes and one unit.
+    let other = f.dir.path().join("b.cpp");
+    std::fs::write(&other, "first\né one\nlast\n").unwrap();
+    f.r.command(Command::Named("lsp-rename two".into()));
+    wait(&mut f.r, |r| text(r) == "two\n");
+    assert_eq!(
+        std::fs::read_to_string(&other).unwrap(),
+        "first\né two\nlast\n"
+    );
+    assert_eq!(
+        f.r.message(),
+        "Applied to 2 files: 1 open, 1 written to disk"
+    );
+    // One step undoes it, and nothing was saved.
+    keys(&mut f.r, "u");
+    assert_eq!(text(&f.r), "one\n");
+}
+#[test]
+fn rename_without_a_name_asks_with_the_word_and_a_changed_document_refuses() {
+    let Some(mut f) = open("one\n") else { return };
+    std::fs::write(f.dir.path().join("b.cpp"), "x\n  one\n").unwrap();
+    keys(&mut f.r, "<space>R");
+    match f.r.layer() {
+        Some(soda::interaction::Layer::CommandLine(line)) => {
+            assert_eq!(line.input().text(), "lsp-rename one")
+        }
+        _ => panic!("no command line"),
+    }
+    keys(&mut f.r, "<esc>");
+    f.r.command(Command::Named("lsp-rename two".into()));
+    f.r.command(Command::Edit(Edit::InsertText("x".into())));
+    wait(&mut f.r, |r| r.message().starts_with("Not applied"));
+    assert_eq!(
+        std::fs::read_to_string(f.dir.path().join("b.cpp")).unwrap(),
+        "x\n  one\n"
+    );
+}
+#[test]
+fn code_actions_offer_titles_and_apply_edits_and_commands() {
+    let Some(mut f) = open("one\ntwo\n") else {
+        return;
+    };
+    let rows = |r: &Runtime| match r.layer() {
+        Some(soda::interaction::Layer::CommandLine(line)) => line
+            .rows()
+            .iter()
+            .map(|row| row.candidate.label.clone())
+            .collect::<Vec<_>>(),
+        _ => vec![],
+    };
+    keys(&mut f.r, "<space>a");
+    wait(&mut f.r, |r| rows(r) == ["Fix it", "Tweak"]);
+    keys(&mut f.r, "<ret>");
+    wait(&mut f.r, |r| text(r) == "fixed\ntwo\n");
+
+    // A command makes the server send its edit, which is answered.
+    keys(&mut f.r, "<space>a");
+    wait(&mut f.r, |r| !rows(r).is_empty());
+    f.r.input(UserInput::Paste("twe".into()));
+    wait(&mut f.r, |r| rows(r) == ["Tweak"]);
+    keys(&mut f.r, "<ret>");
+    wait(&mut f.r, |r| text(r) == "tweakeded\ntwo\n");
+    let log = f.log.clone();
+    wait(&mut f.r, move |_| {
+        std::fs::read_to_string(&log).is_ok_and(|log| log.contains(r#"applied {"applied": true}"#))
+    });
+    assert!(f.log().contains("execute tweak"));
+
+    // The server is given the diagnostics of the line for its fixes.
+    keys(&mut f.r, "j<space>a");
+    wait(&mut f.r, |r| !rows(r).is_empty());
+    keys(&mut f.r, "<esc>");
+    let asked = f.log();
+    let last = asked.lines().rfind(|l| l.starts_with("codeAction"));
+    assert_eq!(last, Some("codeAction 1"));
+    assert!(
+        !asked.contains("codeAction {"),
+        "an empty list went as an object"
+    );
+}
+#[test]
 fn hover_shows_in_a_box_until_the_next_key() {
     let Some(mut f) = open("x\n") else { return };
     keys(&mut f.r, "K");

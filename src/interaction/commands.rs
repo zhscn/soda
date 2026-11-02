@@ -107,6 +107,15 @@ pub enum Command {
     Stop,
     /// Hands the terminal back to the shell until the editor is resumed.
     Suspend,
+    /// Asks which of the items; `Choose` answers with one of them, and the
+    /// Lua function under `id` gets its number.
+    Offer {
+        id: u64,
+        title: String,
+        items: Vec<String>,
+    },
+    /// Answers `Offer` with an item, from one.
+    Choose(usize),
     /// Runs Lua code.
     Lua(String),
     /// Calls a Lua function registered under an id, with one argument.
@@ -451,7 +460,8 @@ impl Layers {
                     app.directory(),
                     app,
                 )
-                .with_recent(self.recent_files.clone());
+                .with_recent(self.recent_files.clone())
+                .with_items(self.offer.as_ref().map_or(vec![], |(_, i)| i.clone()));
                 if let Some(note) = note {
                     line = line.with_note(note);
                 }
@@ -855,6 +865,19 @@ impl Layers {
             Command::LuaCall { id, argument } => {
                 response.lua.push(super::LuaRequest::Call { id, argument })
             }
+            Command::Offer { id, title, items } => {
+                self.offer = Some((id, items));
+                let line = "choose ".to_owned();
+                let ask = Command::Ask { line, note: title };
+                return self.execute(ask, app, time, file_root);
+            }
+            Command::Choose(index) => match self.offer.take() {
+                Some((id, items)) if (1..=items.len()).contains(&index) => {
+                    let argument = index.to_string();
+                    response.lua.push(super::LuaRequest::Call { id, argument });
+                }
+                _ => response.message = Message::Set("Nothing to choose".into()),
+            },
             Command::Messages => response.messages = true,
             Command::Echo(text) => response.message = Message::Set(text),
             Command::Highlight {

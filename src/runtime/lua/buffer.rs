@@ -142,10 +142,17 @@ pub(super) fn register<'scope, 'r: 'scope>(
 ) -> mlua::Result<()> {
     soda.set(
         "buffer",
-        scope.create_function(|_, ()| {
+        scope.create_function(|_, path: Option<String>| {
             let runtime = runtime.borrow();
-            let document = runtime.document().map_err(error)?;
-            Ok(document.number())
+            let Some(path) = path else {
+                return Ok(Some(runtime.document().map_err(error)?.number()));
+            };
+            let path = std::path::Path::new(&path);
+            let workspace = runtime.app.workspace();
+            Ok(workspace
+                .documents()
+                .find(|id| workspace.file(*id).and_then(|file| file.path()) == Some(path))
+                .map(|id| id.number()))
         })?,
     )?;
     soda.set(

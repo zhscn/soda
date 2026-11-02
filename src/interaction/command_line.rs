@@ -85,6 +85,8 @@ pub struct CommandLine {
     matcher: Matcher,
     /// Recently used files, newest first.
     recent: Vec<PathBuf>,
+    /// The items of an `Item` slot.
+    items: Vec<String>,
 }
 fn row(
     key: u64,
@@ -176,11 +178,17 @@ impl CommandLine {
             error: None,
             matcher: Matcher::new(Config::DEFAULT),
             recent: vec![],
+            items: vec![],
         }
     }
     /// Recently used files for a `recent` slot, newest first.
     pub fn with_recent(mut self, recent: Vec<PathBuf>) -> Self {
         self.recent = recent;
+        self
+    }
+    /// Items for an `Item` slot.
+    pub fn with_items(mut self, items: Vec<String>) -> Self {
+        self.items = items;
         self
     }
     /// Shows a note before the input until the line closes.
@@ -326,6 +334,7 @@ impl CommandLine {
                 Target::Slot(SlotKind::Recent) => {
                     recent(&self.recent, &self.root, &query.text, &mut self.matcher)
                 }
+                Target::Slot(SlotKind::Item) => self.item_rows(&query.text),
                 Target::Slot(SlotKind::Path) => self.paths(&query.text, &mut response),
                 Target::Slot(SlotKind::File) => self.project_files(&query.text, &mut response),
                 Target::Slot(SlotKind::Word | SlotKind::Rest) => vec![],
@@ -345,6 +354,29 @@ impl CommandLine {
         self.rows = rows;
         self.query = query;
         response
+    }
+    /// Items match fuzzily and answer with their number, so a title may
+    /// hold any text.
+    fn item_rows(&mut self, query: &str) -> Vec<MatchedCandidate<Completion>> {
+        self.matcher.config = Config::DEFAULT;
+        let mut ranked: Vec<_> = self
+            .items
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| {
+                let shown = printable(item);
+                let (score, highlights) = if query.is_empty() {
+                    (0, vec![])
+                } else {
+                    fuzzy_match(&mut self.matcher, query, &shown)?
+                };
+                let number = (index + 1).to_string();
+                let row = row(index as u64, shown, Some(number), false);
+                Some((score, mark(row, highlights, None)))
+            })
+            .collect();
+        ranked.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
+        ranked.into_iter().map(|(_, row)| row).collect()
     }
     /// Command names match fuzzily; an exact name or alias comes first.
     /// Descriptions match as substrings, after every name match.

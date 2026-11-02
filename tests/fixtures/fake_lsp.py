@@ -36,6 +36,11 @@ def spot(uri, line, character):
     return {"uri": uri, "range": {"start": position, "end": position}}
 
 
+def replacement(line, start, end, text):
+    return {"range": {"start": {"line": line, "character": start},
+                      "end": {"line": line, "character": end}}, "newText": text}
+
+
 while True:
     message = read()
     method = message.get("method", "")
@@ -75,6 +80,33 @@ while True:
                  "newText": "server_call(${1:int a})", "range": spot("", 0, 0)["range"]}},
             {"label": "server_plain", "insertText": "server_plain", "detail": "int"},
         ]})
+    elif method == "textDocument/rename":
+        log.write("rename %s\n" % params["newName"])
+        uri = params["textDocument"]["uri"]
+        answer(message, {"changes": {
+            uri: [replacement(0, 0, 3, params["newName"])],
+            uri.replace("a.cpp", "b.cpp"): [replacement(1, 2, 5, params["newName"])],
+        }})
+    elif method == "textDocument/codeAction":
+        uri = params["textDocument"]["uri"]
+        # A real server refuses anything but an array here.
+        log.write("codeAction %s\n" % json.dumps(params["context"]["diagnostics"])[:1])
+        log.write("codeAction %d\n" % len(params["context"]["diagnostics"]))
+        answer(message, [
+            {"title": "Fix it", "kind": "quickfix",
+             "edit": {"changes": {uri: [replacement(0, 0, 3, "fixed")]}}},
+            {"title": "Tweak", "kind": "refactor",
+             "command": {"title": "Tweak", "command": "tweak", "arguments": [uri]}},
+            {"title": "Unavailable", "disabled": {"reason": "no"}},
+        ])
+    elif method == "workspace/executeCommand":
+        log.write("execute %s\n" % params["command"])
+        uri = params["arguments"][0]
+        answer(message, None)
+        write({"jsonrpc": "2.0", "id": "edit", "method": "workspace/applyEdit",
+               "params": {"edit": {"changes": {uri: [replacement(0, 0, 3, "tweaked")]}}}})
+    elif message.get("id") == "edit":
+        log.write("applied %s\n" % json.dumps(message.get("result")))
     elif method == "textDocument/hover":
         answer(message, {"contents": {"kind": "plaintext", "value": "first\n  second"}})
     elif method == "textDocument/prepareCallHierarchy":

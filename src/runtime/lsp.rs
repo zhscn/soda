@@ -202,7 +202,16 @@ fn initialize(root: &Path) -> Value {
                     "references": {},
                     "callHierarchy": {},
                     "publishDiagnostics": {},
+                    "rename": {},
+                    "codeAction": {
+                        "codeActionLiteralSupport": {
+                            "codeActionKind": {
+                                "valueSet": ["quickfix", "refactor", "source"],
+                            },
+                        },
+                    },
                 },
+                "workspace": { "applyEdit": true },
             },
         },
     })
@@ -425,9 +434,18 @@ impl Lsp {
         let method = message.get("method").and_then(Value::as_str);
         match (id, method) {
             // Asked of us: nothing a client here needs to say, but servers
-            // wait for an answer.
+            // wait for an answer. Those with handlers reach Lua like any
+            // notification, which cannot answer back, so an edit is reported
+            // as applied before it is.
             (Some(id), Some(method)) => {
+                for function in self.handlers.get(method).into_iter().flatten() {
+                    out.push(Delivery::Notification {
+                        function: *function,
+                        params: message["params"].clone(),
+                    });
+                }
                 let result = match method {
+                    "workspace/applyEdit" => json!({ "applied": true }),
                     "workspace/configuration" => {
                         let items = message["params"]["items"].as_array().map_or(0, Vec::len);
                         Value::Array(vec![Value::Null; items])

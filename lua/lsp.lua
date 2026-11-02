@@ -8,7 +8,8 @@
 --
 -- Built in: <a-.> goes to the definition, <a-?> lists references, <a-,> comes
 -- back; K shows what the caret is on in a box until the next key; <space>c and <space>C list the callers
--- and the callees. Completion follows from the server being there.
+-- and the callees; <space>R renames and <space>a offers code actions.
+-- Completion follows from the server being there.
 
 soda.lsp.server("cpp", { "clangd", "--header-insertion=never", "--function-arg-placeholders=1" })
 
@@ -307,6 +308,226 @@ soda.define_command("lsp-diagnostics", function()
   show("diagnostics", entries)
 end)
 
+-- The edits of a WorkspaceEdit by URI, or nil and why it cannot be applied.
+local function edits_of(edit)
+  local files = {}
+  for uri, edits in pairs(edit.changes or {}) do
+    files[uri] = edits
+  end
+  for _, change in ipairs(edit.documentChanges or {}) do
+    if not change.textDocument then
+      return nil, "it creates, renames or deletes files"
+    end
+    files[change.textDocument.uri] = change.edits
+  end
+  return files
+end
+
+-- Changes for an open document, in the order of `buf:edit`.
+local function buffer_changes(buf, edits, encoding)
+  local count = buf:line_count()
+  local function place(position)
+    local line = position.line + 1
+    if line > count then
+      -- The end of the document, which only a final newline puts on a line.
+      if buf:text():sub(-1) == "\n" then
+        return { count + 1, 1 }
+      end
+      return { count, #buf:line(count) + 1 }
+    end
+    return { line, to_byte(buf:line(line), position.character, encoding) + 1 }
+  end
+  local changes = {}
+  for _, edit in ipairs(edits) do
+    table.insert(changes, { place(edit.range.start), place(edit.range["end"]), edit.newText })
+  end
+  return changes
+end
+
+-- The new text of a file on disk, or nil and why not.
+local function edited_file(path, edits, encoding)
+  local file, failure = io.open(path, "rb")
+  if not file then
+    return nil, failure
+  end
+  local text = file:read("a")
+  file:close()
+  local starts, at = { 1 }, 1
+  while true do
+    local newline = text:find("\n", at, true)
+    if not newline then
+      break
+    end
+    at = newline + 1
+    table.insert(starts, at)
+  end
+  local function offset(position)
+    local start = starts[position.line + 1]
+    if not start then
+      return #text + 1
+    end
+    local line = text:sub(start, (starts[position.line + 2] or #text + 2) - 2)
+    return start + to_byte(line, position.character, encoding)
+  end
+  local spans = {}
+  for index, edit in ipairs(edits) do
+    table.insert(spans, {
+      from = offset(edit.range.start),
+      to = offset(edit.range["end"]),
+      text = edit.newText,
+      index = index,
+    })
+  end
+  -- From the end, so that earlier offsets hold; at one place, later edits go
+  -- in first and the earlier ones end up before them.
+  table.sort(spans, function(a, b)
+    if a.from ~= b.from then
+      return a.from > b.from
+    end
+    return a.index > b.index
+  end)
+  for _, span in ipairs(spans) do
+    text = text:sub(1, span.from - 1) .. span.text .. text:sub(span.to)
+  end
+  return text
+end
+
+-- Applies a WorkspaceEdit: open documents through their buffers, so that it
+-- can be undone, other files on disk. Nothing is applied unless all of it
+-- can be. `origin` is a buffer and revision the answer was asked for.
+local function apply_edit(edit, origin)
+  local files, problem = edits_of(edit)
+  if not files then
+    soda.message("Not applied: " .. problem)
+    return false
+  end
+  if origin and origin.buffer:revision() ~= origin.revision then
+    soda.message("Not applied: the document changed in the meantime")
+    return false
+  end
+  local info = soda.lsp.info()
+  local encoding = info and info.encoding or "utf-8"
+  local open, closed = {}, {}
+  for uri, edits in pairs(files) do
+    local path = path_of(uri)
+    local buf = soda.buffer(path)
+    if buf then
+      table.insert(open, { buf = buf, changes = buffer_changes(buf, edits, encoding) })
+    else
+      local text, failure = edited_file(path, edits, encoding)
+      if not text then
+        soda.message("Not applied: " .. tostring(failure))
+        return false
+      end
+      table.insert(closed, { path = path, text = text })
+    end
+  end
+  for _, target in ipairs(open) do
+    target.buf:edit(target.changes)
+  end
+  for _, target in ipairs(closed) do
+    local file, failure = io.open(target.path, "wb")
+    if not file then
+      soda.message("Partly applied: " .. tostring(failure))
+      return false
+    end
+    file:write(target.text)
+    file:close()
+  end
+  local total = #open + #closed
+  local summary = "Applied to " .. total .. (total == 1 and " file" or " files")
+  if #closed > 0 then
+    summary = summary .. ": " .. #open .. " open, " .. #closed .. " written to disk"
+  end
+  soda.message(summary)
+  return true
+end
+
+soda.lsp.on("workspace/applyEdit", function(params)
+  apply_edit(params.edit)
+end)
+
+soda.define_command("lsp-rename", function(name)
+  name = (name or ""):match("^%s*(.-)%s*$")
+  if name == "" then
+    soda.prompt("lsp-rename " .. soda.val("word"))
+    return
+  end
+  local buf = soda.buffer()
+  local origin = { buffer = buf, revision = buf:revision() }
+  ask("textDocument/rename", { newName = name }, function(result)
+    if result then
+      apply_edit(result, origin)
+    else
+      soda.message("Nothing to rename here")
+    end
+  end)
+end)
+
+local function perform(action, origin)
+  if action.edit and not apply_edit(action.edit, origin) then
+    return
+  end
+  -- An action is a command itself, or carries one to run after its edit.
+  local command = type(action.command) == "table" and action.command or action
+  if type(command.command) == "string" then
+    soda.lsp.request("workspace/executeCommand", {
+      command = command.command,
+      arguments = command.arguments,
+    }, function(_, failure)
+      if failure then
+        soda.message(tostring(failure.message))
+      end
+    end)
+  end
+end
+
+soda.define_command("lsp-code-action", function()
+  local buf = soda.buffer()
+  local info = soda.lsp.info()
+  if not info then
+    soda.message("No language server for this document")
+    return
+  end
+  local function position(place)
+    local text = buf:line(math.min(place[1], buf:line_count()))
+    return { line = place[1] - 1, character = to_character(text, place[2] - 1, info.encoding) }
+  end
+  local anchor, head = buf:selection()
+  local first, last = position(anchor), position(head)
+  if first.line > last.line or (first.line == last.line and first.character > last.character) then
+    first, last = last, first
+  end
+  -- Fixes hang on diagnostics, so the server needs those of these lines.
+  local nearby = {}
+  for _, diagnostic in ipairs(diagnostics[soda.lsp.uri()] or {}) do
+    local line = diagnostic.range.start.line
+    if line >= first.line and line <= last.line then
+      table.insert(nearby, diagnostic)
+    end
+  end
+  local origin = { buffer = buf, revision = buf:revision() }
+  ask("textDocument/codeAction", {
+    range = { start = first, ["end"] = last },
+    context = { diagnostics = soda.lsp.array(nearby) },
+  }, function(result)
+    local actions, titles = {}, {}
+    for _, action in ipairs(result or {}) do
+      if not action.disabled then
+        table.insert(actions, action)
+        table.insert(titles, action.title)
+      end
+    end
+    if #actions == 0 then
+      soda.message("No code actions here")
+      return
+    end
+    soda.choose("code action", titles, function(index)
+      perform(actions[index], origin)
+    end)
+  end)
+end)
+
 soda.define_command("lsp-restart", function()
   soda.lsp.restart()
 end)
@@ -358,3 +579,5 @@ soda.command("map normal <a-?> lsp-references")
 soda.command("map normal K lsp-hover")
 soda.command("map normal <space>c lsp-callers")
 soda.command("map normal <space>C lsp-callees")
+soda.command("map normal <space>R lsp-rename")
+soda.command("map normal <space>a lsp-code-action")
