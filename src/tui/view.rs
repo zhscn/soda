@@ -78,7 +78,7 @@ impl Areas {
                 let lines = document
                     .and_then(|document| app.workspace().editor(document))
                     .map_or(1, |editor| {
-                        editor.model().document().snapshot().text_lines()
+                        editor.model().document().snapshot().line_count()
                     });
                 let digits = lines.max(1).ilog10() as u16 + 1;
                 // ` 123 │ ` keeps numbers right-aligned with a separator.
@@ -1364,45 +1364,28 @@ mod tests {
     }
 
     #[test]
-    fn the_line_after_a_final_newline_is_not_shown() {
+    fn the_line_after_a_final_newline_shows_and_is_reachable() {
         let root = tempfile::tempdir().unwrap();
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
         r.start(None);
         r.command(Command::Edit(crate::editor::Command::InsertText(
-            "a\nb\n\n".into(),
+            "a\nb\n".into(),
         )));
         r.command(Command::SetMode(EditMode::Normal));
         let rows = |r: &mut Runtime| -> Vec<String> {
             screen(r, 40, 8).lines().map(str::to_owned).collect()
         };
-        // Line 3 is a real empty line and reachable; nothing follows it.
-        keys(&mut r, "<a-lt>jjjj");
+        // As at the end of an Emacs buffer, the empty line after the final
+        // newline is a line: shown wherever the caret is, and reached by
+        // moving down, in Normal and in Insert.
+        keys(&mut r, "<a-lt>");
         let shown = rows(&mut r);
         assert!(shown[3].starts_with("   3 │"), "{shown:?}");
         assert!(!shown[4].contains('4'));
-        assert!(shown[6].trim_end().ends_with("3:1  100%"));
-        // Insert stops there too.
-        keys(&mut r, "i<down><down>");
+        keys(&mut r, "jjj");
+        assert!(rows(&mut r)[6].trim_end().ends_with("3:1  100%"));
+        keys(&mut r, "<a-lt>i<down><down><down>");
         assert!(rows(&mut r)[6].contains("3:1"));
-        // Enter at the end of text without a final newline puts the caret
-        // after it; that line shows until Insert ends.
-        keys(&mut r, "<esc>");
-        r.command(Command::New);
-        r.command(Command::Edit(crate::editor::Command::InsertText(
-            "a".into(),
-        )));
-        keys(&mut r, "a<ret>");
-        let shown = rows(&mut r);
-        assert!(shown[2].starts_with("   2 │"), "{shown:?}");
-        assert!(shown[6].contains("2:1"));
-        // Leaving Insert keeps the caret there, so the line stays until the
-        // caret moves away, as at the end of an Emacs buffer.
-        keys(&mut r, "<esc>");
-        assert!(rows(&mut r)[2].starts_with("   2 │"));
-        keys(&mut r, "k");
-        let shown = rows(&mut r);
-        assert!(!shown[2].contains('2'), "{shown:?}");
-        assert!(shown[6].contains("1:1"));
     }
     #[test]
     fn expand_digits_show_on_text_and_after_the_end_of_lines() {

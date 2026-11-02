@@ -647,7 +647,7 @@ impl Layers {
                         top.saturating_sub(count)
                     } else {
                         top.saturating_add(count)
-                            .min(snapshot.text_lines().saturating_sub(self.page_rows.max(1)))
+                            .min(snapshot.line_count().saturating_sub(self.page_rows.max(1)))
                     };
                     response.events.push(Event::Edit {
                         view: view.id,

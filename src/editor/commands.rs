@@ -76,9 +76,7 @@ pub(super) fn move_selection(
                 let target = if backward {
                     line.saturating_sub(count)
                 } else {
-                    // The empty line after a final newline is reachable only
-                    // by typing there, as after Enter at the end.
-                    let last = snapshot.text_lines().max(line + 1) - 1;
+                    let last = snapshot.line_count() - 1;
                     line.saturating_add(count).min(last)
                 };
                 offset_at_logical_column(

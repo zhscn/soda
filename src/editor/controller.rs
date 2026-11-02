@@ -316,7 +316,7 @@ impl Editor {
                 Step::Done(None)
             }
             Command::Goto { line, column } => {
-                let line = line.min(state.snapshot().text_lines() - 1);
+                let line = line.min(state.snapshot().line_count() - 1);
                 let offset = crate::core::offset_at_logical_column(
                     state.snapshot(),
                     line,

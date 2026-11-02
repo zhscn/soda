@@ -4,8 +4,9 @@
 use crate::core::{ByteOffset, Snapshot, step_grapheme};
 use std::ops::Range;
 
+/// Lines the caret can reach: the empty one after a final newline too.
 pub(crate) fn lines(text: &Snapshot) -> usize {
-    text.text_lines()
+    text.line_count()
 }
 pub(crate) fn next(text: &Snapshot, offset: usize) -> usize {
     step_grapheme(text, ByteOffset(offset), true).unwrap().0

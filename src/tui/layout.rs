@@ -396,26 +396,20 @@ struct Rows<'a> {
     snapshot: &'a crate::core::Snapshot,
     tab: NonZeroUsize,
     wrap: Option<usize>,
-    /// Lines shown, the empty one after a final newline only with the
-    /// caret on it.
+    /// Lines shown, the empty one after a final newline too: the caret can
+    /// go there, as at the end of an Emacs buffer.
     lines: usize,
     /// Hints by line, when they are shown.
     inlays: std::collections::BTreeMap<usize, Vec<Inlay>>,
 }
 impl<'a> Rows<'a> {
-    fn new(
-        app: &'a Application,
-        view: &crate::application::View,
-        width: u16,
-        caret: usize,
-    ) -> Option<Self> {
+    fn new(app: &'a Application, view: &crate::application::View, width: u16) -> Option<Self> {
         let document = app.workspace().editor(view.document_id)?.model().document();
         let snapshot = document.snapshot();
         let wrap = app
             .options()
             .bool(Some(view.document_id), "wrap")
             .then_some(usize::from(width));
-        let caret_line = snapshot.line_of(caret.min(snapshot.len_bytes()))?;
         let tab = document.whitespace().tab_width;
         let mut inlays = std::collections::BTreeMap::<usize, Vec<Inlay>>::new();
         if app.options().bool(Some(view.document_id), "inlay-hints") {
@@ -434,7 +428,7 @@ impl<'a> Rows<'a> {
             snapshot,
             tab,
             wrap,
-            lines: snapshot.text_lines().max(caret_line + 1),
+            lines: snapshot.line_count(),
             inlays,
         })
     }
@@ -561,7 +555,7 @@ pub(super) fn follow_caret(
     let state = editor.model().session(view.session_id).unwrap().state();
     let snapshot = editor.model().document().snapshot();
     let head = state.selection().head;
-    let layout = Rows::new(app, view, width, head).unwrap();
+    let layout = Rows::new(app, view, width).unwrap();
     let tab = layout.tab;
     let (place, column) = layout.place(head);
     let rows = usize::from(rows);
@@ -613,7 +607,7 @@ pub(super) fn cell_of(
     offset: usize,
 ) -> Option<(usize, usize)> {
     let view = app.view(view)?;
-    let layout = Rows::new(app, view, width, offset)?;
+    let layout = Rows::new(app, view, width)?;
     let (top, _) = layout.place(view.viewport.anchor.offset.0);
     let (place, column) = layout.place(offset);
     let row = layout.distance(top, place, rows.into())?;
@@ -629,17 +623,10 @@ pub(super) fn cell_of(
 /// either edge resolve to the lines beyond it, within the document.
 pub(super) fn offset_at(app: &Application, width: u16, row: isize, column: usize) -> Option<usize> {
     let view = app.view(app.active_view()?)?;
-    let caret = app
-        .workspace()
-        .editor(view.document_id)?
-        .model()
-        .session(view.session_id)?
-        .selection()
-        .head;
-    let layout = Rows::new(app, view, width, caret)?;
+    let layout = Rows::new(app, view, width)?;
     let (top, _) = layout.place(view.viewport.anchor.offset.0);
     let (line, index) = layout.step(top, row);
-    let line = line.min(layout.snapshot.text_lines() - 1);
+    let line = line.min(layout.snapshot.line_count() - 1);
     let column = if layout.wrap.is_some() {
         let segments = layout.segments(line);
         let segment = &segments[index.min(segments.len() - 1)];
@@ -667,10 +654,10 @@ pub(super) fn scroll(
     let view = app.view(id)?;
     let editor = app.workspace().editor(view.document_id)?;
     let head = editor.model().session(view.session_id)?.selection().head;
-    let layout = Rows::new(app, view, width, head)?;
+    let layout = Rows::new(app, view, width)?;
     let (top, _) = layout.place(view.viewport.anchor.offset.0);
     let top = layout.step(top, lines);
-    let top = (top.0.min(layout.snapshot.text_lines() - 1), top.1);
+    let top = (top.0.min(layout.snapshot.line_count() - 1), top.1);
     let (place, column) = layout.place(head);
     let rows = usize::from(rows.max(1));
     let bottom = layout.step(top, rows as isize - 1);
@@ -726,7 +713,7 @@ pub(super) fn frame(
     let line = snapshot.line_of(head).unwrap();
     let tab = document.whitespace().tab_width;
     let column = logical_column_at(snapshot, ByteOffset(head), tab)?.0;
-    let layout = Rows::new(app, view, width, head).unwrap();
+    let layout = Rows::new(app, view, width).unwrap();
     let lines = layout.lines;
     let left = view.viewport.horizontal_column;
     let mut output = Vec::new();

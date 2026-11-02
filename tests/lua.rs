@@ -376,7 +376,7 @@ fn clang_format_extension_replaces_only_changed_lines() {
     ));
     r.command(Command::SetMode(EditMode::Normal));
     lua(&mut r, include_str!("../lua/clang-format.lua"));
-    keys(&mut r, "ggjjjl");
+    keys(&mut r, "<a-lt>jjjl");
     let formatted = "int a;\nint b;\nint c;\nint d;\n";
     format_buffer(&mut r, formatted);
     assert_eq!(text(&r), formatted, "{}", r.message());
