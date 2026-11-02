@@ -39,6 +39,22 @@ pub enum Category {
     Match,
 }
 
+impl Category {
+    /// The categories a language server can name.
+    pub fn named(name: &str) -> Option<Self> {
+        Some(match name {
+            "comment" => Self::Comment,
+            "constant" => Self::Constant,
+            "type" => Self::Type,
+            "function" => Self::Function,
+            "parameter" => Self::Parameter,
+            "namespace" => Self::Namespace,
+            "macro" => Self::Macro,
+            _ => return None,
+        })
+    }
+}
+
 /// Category runs of one line, as byte ranges relative to the line start.
 pub type Runs = Vec<(Range<usize>, Category)>;
 

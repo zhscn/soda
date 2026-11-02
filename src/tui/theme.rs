@@ -30,6 +30,8 @@ pub(super) struct Theme {
     pub float_border: Style,
     pub candidate_selected: Style,
     pub marker: Style,
+    /// Words shown in the text that are not part of it.
+    pub inlay: Style,
     pub status_error: Style,
     pub status_warning: Style,
     /// Notes that are neither errors nor warnings.
@@ -146,6 +148,7 @@ impl Theme {
             float_border: on(p.comment, p.bg_dark),
             candidate_selected: Style::new().bg(c(p.bg_highlight)),
             marker: Style::new().fg(c(p.blue)),
+            inlay: Style::new().fg(c(p.comment)).add_modifier(Modifier::ITALIC),
             status_error: on(p.red, p.bg_dark).add_modifier(Modifier::BOLD),
             status_warning: on(p.yellow, p.bg_dark).add_modifier(Modifier::BOLD),
             info: Style::new().fg(c(p.blue)),

@@ -292,13 +292,108 @@ local function flag_current()
     soda.flag("lsp-error", "error", "E", lines.error)
   end
 end
+-- How a server's token types show; the rest keep their highlighting.
+local token_categories = {
+  namespace = "namespace", type = "type", class = "type", enum = "type", interface = "type",
+  struct = "type", typeParameter = "type", concept = "type", parameter = "parameter",
+  enumMember = "constant", ["function"] = "function", method = "function", macro = "macro",
+  comment = "comment",
+}
+local function show_tokens(buf, result, legend, encoding)
+  local names = {}
+  for index, name in ipairs(legend.tokenTypes) do
+    names[index] = token_categories[name] or ""
+  end
+  local count, tokens = buf:line_count(), {}
+  local data = result.data or {}
+  local line, character, row, text = 0, 0, nil, nil
+  for at = 1, #data, 5 do
+    if data[at] > 0 then
+      line, character = line + data[at], 0
+    end
+    character = character + data[at + 1]
+    if line < count then
+      if row ~= line then
+        row, text = line, buf:line(line + 1)
+      end
+      local from = to_byte(text, character, encoding)
+      local to = to_byte(text, character + data[at + 2], encoding)
+      local size = #tokens
+      tokens[size + 1], tokens[size + 2], tokens[size + 3] = line, from, to
+      tokens[size + 4] = data[at + 3]
+    end
+  end
+  soda.tokens(tokens, names)
+end
+
+local function show_inlays(buf, result, encoding)
+  local count, hints = buf:line_count(), {}
+  for _, hint in ipairs(result or {}) do
+    local line = hint.position.line + 1
+    if line <= count then
+      local label = hint.label
+      if type(label) == "table" then
+        local parts = {}
+        for _, part in ipairs(label) do
+          table.insert(parts, part.value)
+        end
+        label = table.concat(parts)
+      end
+      table.insert(hints, {
+        line = line,
+        column = to_byte(buf:line(line), hint.position.character, encoding) + 1,
+        text = (hint.paddingLeft and " " or "") .. label .. (hint.paddingRight and " " or ""),
+      })
+    end
+  end
+  soda.inlays(hints)
+end
+
+-- Asks for what is drawn over the text. A server reports diagnostics when it
+-- has finished with a change, so that is when to ask. An answer about text
+-- that has changed since would land in the wrong places, and is dropped.
+local function decorate()
+  local uri, info = soda.lsp.uri(), soda.lsp.info()
+  if not uri or not info then
+    return
+  end
+  local buf = soda.buffer()
+  local revision = buf:revision()
+  local document = { uri = uri }
+  local provider = info.capabilities.semanticTokensProvider
+  if provider then
+    local params = { textDocument = document }
+    soda.lsp.request("textDocument/semanticTokens/full", params, function(result)
+      if result and buf:revision() == revision then
+        show_tokens(buf, result, provider.legend, info.encoding)
+      end
+    end)
+  end
+  if info.capabilities.inlayHintProvider then
+    local whole = {
+      start = { line = 0, character = 0 },
+      ["end"] = { line = buf:line_count(), character = 0 },
+    }
+    local params = { textDocument = document, range = whole }
+    soda.lsp.request("textDocument/inlayHint", params, function(result)
+      if buf:revision() == revision then
+        show_inlays(buf, result, info.encoding)
+      end
+    end)
+  end
+end
+
 soda.lsp.on("textDocument/publishDiagnostics", function(params)
   diagnostics[params.uri] = params.diagnostics
   if params.uri == soda.lsp.uri() then
     flag_current()
+    decorate()
   end
 end)
-soda.hook("focus", ".*", flag_current)
+soda.hook("focus", ".*", function()
+  flag_current()
+  decorate()
+end)
 
 soda.define_command("lsp-diagnostics", function()
   local entries = {}

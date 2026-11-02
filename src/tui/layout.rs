@@ -21,6 +21,8 @@ pub(super) struct Span {
     /// A visible tab or trailing space mark.
     pub whitespace: bool,
     pub face: Option<crate::application::Face>,
+    /// An inlay hint, which is not in the text.
+    pub inlay: bool,
 }
 /// One screen row: the zero-based line it shows and its clipped text.
 pub(super) struct Row {
@@ -65,6 +67,7 @@ pub(super) fn row(
         categories: &[],
         whitespace: false,
         faces: &[],
+        inlays: &[],
     };
     styled_row(text, byte_start, marks, left, width, tab)
 }
@@ -80,6 +83,51 @@ struct Marks<'a> {
     whitespace: bool,
     /// Highlighted ranges in the row, ordered by start.
     faces: &'a [(std::ops::Range<usize>, crate::application::Face)],
+    /// Hints by logical column, in order. They take cells from the row.
+    inlays: &'a [Inlay],
+}
+/// A hint at a logical column.
+#[derive(Clone)]
+struct Inlay {
+    column: usize,
+    text: String,
+}
+fn cells_of(text: &str) -> usize {
+    unicode_width::UnicodeWidthStr::width(text)
+}
+/// What shows of a hint within `room` cells.
+fn clipped(text: &str, room: usize) -> String {
+    let mut used = 0;
+    text.chars()
+        .take_while(|ch| {
+            used += unicode_width::UnicodeWidthChar::width(*ch).unwrap_or(0);
+            used <= room
+        })
+        .collect()
+}
+/// A row's text with categories of `over` replacing those of `base`; both
+/// are ordered and disjoint.
+pub(super) fn overlay(
+    base: &[(std::ops::Range<usize>, Category)],
+    over: &[(std::ops::Range<usize>, Category)],
+) -> Vec<(std::ops::Range<usize>, Category)> {
+    let between = |from: usize, to: usize, runs: &mut Vec<_>| {
+        for (range, category) in base {
+            let (start, end) = (range.start.max(from), range.end.min(to));
+            if start < end {
+                runs.push((start..end, *category));
+            }
+        }
+    };
+    let mut runs = vec![];
+    let mut at = 0;
+    for (range, category) in over {
+        between(at, range.start, &mut runs);
+        runs.push((range.clone(), *category));
+        at = range.end;
+    }
+    between(at, usize::MAX, &mut runs);
+    runs
 }
 fn styled_row(
     text: &str,
@@ -96,6 +144,7 @@ fn styled_row(
         categories,
         whitespace,
         faces,
+        inlays,
     } = marks;
     // Spaces and tabs from here to the end of the line trail.
     let trailing = text.trim_end_matches(['\n', '\r']);
@@ -103,8 +152,34 @@ fn styled_row(
     let mut spans = Vec::<Span>::new();
     let mut next_category = 0;
     let mut column = 0;
-    let right = left.saturating_add(width);
+    let mut right = left.saturating_add(width);
+    let mut next_inlay = 0;
+    // Each hint shown leaves that many fewer cells for the text.
+    let mut hint = |until: usize, column: usize, right: &mut usize, spans: &mut Vec<Span>| {
+        while let Some(inlay) = inlays.get(next_inlay).filter(|i| i.column <= until) {
+            next_inlay += 1;
+            if inlay.column < left {
+                continue;
+            }
+            let shown = clipped(&inlay.text, right.saturating_sub(column.max(left)));
+            if shown.is_empty() {
+                continue;
+            }
+            *right -= cells_of(&shown);
+            spans.push(Span {
+                text: shown,
+                selected: false,
+                matched: false,
+                detail: false,
+                category: None,
+                whitespace: false,
+                face: None,
+                inlay: true,
+            });
+        }
+    };
     for (offset, cluster) in text.grapheme_indices(true) {
+        hint(column, column, &mut right, &mut spans);
         let end = column_width(cluster, column, tab);
         let cells = end - column;
         if column >= right {
@@ -153,6 +228,7 @@ fn styled_row(
                     && last.category == category
                     && last.whitespace == marked
                     && last.face == face
+                    && !last.inlay
             }) {
                 last.text.push_str(&rendered);
             } else {
@@ -164,10 +240,14 @@ fn styled_row(
                     category,
                     whitespace: marked,
                     face,
+                    inlay: false,
                 });
             }
         }
         column = end;
+    }
+    if column < right {
+        hint(usize::MAX, column, &mut right, &mut spans);
     }
     spans
 }
@@ -192,6 +272,7 @@ pub(super) fn candidate_row<T>(
         categories: &[],
         whitespace: false,
         faces: &[],
+        inlays: &[],
     };
     styled_row(text, 0, marks, 0, width, NonZeroUsize::new(4).unwrap())
 }
@@ -289,6 +370,8 @@ struct Rows<'a> {
     /// Lines shown, the empty one after a final newline only with the
     /// caret on it.
     lines: usize,
+    /// Hints by line, when they are shown.
+    inlays: std::collections::BTreeMap<usize, Vec<Inlay>>,
 }
 impl<'a> Rows<'a> {
     fn new(
@@ -304,12 +387,58 @@ impl<'a> Rows<'a> {
             .bool(Some(view.document_id), "wrap")
             .then_some(usize::from(width));
         let caret_line = snapshot.line_of(caret.min(snapshot.len_bytes()))?;
+        let tab = document.whitespace().tab_width;
+        let mut inlays = std::collections::BTreeMap::<usize, Vec<Inlay>>::new();
+        if app.options().bool(Some(view.document_id), "inlay-hints") {
+            for (offset, text) in app.inlays(view.document_id) {
+                let line = snapshot.line_of(offset)?;
+                let column = logical_column_at(snapshot, ByteOffset(offset), tab).ok()?.0;
+                let text = text.chars().filter(|c| !c.is_control()).collect();
+                inlays.entry(line).or_default().push(Inlay { column, text });
+            }
+        }
         Some(Self {
             snapshot,
-            tab: document.whitespace().tab_width,
+            tab,
             wrap,
             lines: snapshot.text_lines().max(caret_line + 1),
+            inlays,
         })
+    }
+    /// The cells hints take from `left` up to a character at `column`. A
+    /// wrapped line keeps its hints at the end, so it has none to count.
+    fn hinted(&self, line: usize, left: usize, column: usize) -> usize {
+        if self.wrap.is_some() {
+            return 0;
+        }
+        let hints = self.inlays.get(&line).map_or(&[][..], Vec::as_slice);
+        hints
+            .iter()
+            .filter(|hint| (left..=column).contains(&hint.column))
+            .map(|hint| cells_of(&hint.text))
+            .sum()
+    }
+    /// The logical column under a cell `cells` right of `left`; a cell of a
+    /// hint counts as the character after it.
+    fn unhinted(&self, line: usize, left: usize, cells: usize) -> usize {
+        let mut used = 0;
+        if self.wrap.is_none() {
+            for hint in self.inlays.get(&line).into_iter().flatten() {
+                if hint.column < left {
+                    continue;
+                }
+                let start = hint.column - left + used;
+                if cells < start {
+                    break;
+                }
+                let width = cells_of(&hint.text);
+                if cells < start + width {
+                    return hint.column;
+                }
+                used += width;
+            }
+        }
+        left + cells - used
     }
     fn segments(&self, line: usize) -> Vec<Segment> {
         if self.wrap.is_none() {
@@ -424,7 +553,8 @@ pub(super) fn follow_caret(
         let caret_cells = (column_width(&cluster, column, tab) - column)
             .max(1)
             .min(usize::from(width));
-        let caret_end = column.saturating_add(caret_cells);
+        let (line, _) = place;
+        let caret_end = column.saturating_add(caret_cells) + layout.hinted(line, left, column);
         if caret_end > left.saturating_add(usize::from(width)) {
             left = caret_end - usize::from(width);
         }
@@ -460,7 +590,8 @@ pub(super) fn cell_of(
     } else {
         view.viewport.horizontal_column
     };
-    Some((row, column.checked_sub(first)?))
+    let cells = column.checked_sub(first)? + layout.hinted(place.0, first, column);
+    Some((row, cells))
 }
 /// The byte offset under a cell of the active view's text area. Rows past
 /// either edge resolve to the lines beyond it, within the document.
@@ -485,7 +616,7 @@ pub(super) fn offset_at(app: &Application, width: u16, row: isize, column: usize
         let room = segment.columns.len().saturating_sub(usize::from(last));
         segment.columns.start + column.min(room)
     } else {
-        view.viewport.horizontal_column + column
+        layout.unhinted(line, view.viewport.horizontal_column, column)
     };
     offset_at_logical_column(layout.snapshot, line, LogicalColumn(column), layout.tab)
         .ok()
@@ -623,16 +754,38 @@ pub(super) fn frame(
             let to = note.range.end.min(start + text.len()).checked_sub(start)?;
             (from < to).then_some((from..to, Face::Note(note.severity)))
         }));
+        let line_start = snapshot.line_start(number).unwrap();
+        let base = highlights.get(number - top).map_or(&[][..], Vec::as_slice);
+        let semantic = app.tokens(view.document_id, line_start..line_start + text.len());
+        let categories = overlay(base, &semantic);
+        // A wrapped line would lose what hints push past the edge, so they
+        // wait at its end, on a row of their own width.
+        let last_row = layout
+            .wrap
+            .is_some()
+            .then(|| *row + 1 == layout.segments(number).len());
+        let hints: Vec<Inlay> = match last_row {
+            None => layout.inlays.get(&number).cloned().unwrap_or_default(),
+            Some(false) => vec![],
+            Some(true) => (layout.inlays.get(&number).into_iter().flatten())
+                .map(|hint| Inlay {
+                    column: usize::MAX,
+                    text: format!(" {}", hint.text),
+                })
+                .collect(),
+        };
         let marks = Marks {
             selection: state.selection().range(),
             matches: &[],
             detail: text.len(),
-            categories: highlights.get(number - top).map_or(&[], Vec::as_slice),
+            categories: &categories,
             whitespace: show_whitespace,
             faces: &faces,
+            inlays: &hints,
         };
         let (first, cells) = match layout.wrap {
-            Some(_) => (segment.columns.start, segment.columns.len()),
+            Some(_) if hints.is_empty() => (segment.columns.start, segment.columns.len()),
+            Some(_) => (segment.columns.start, usize::from(width)),
             None => (left, usize::from(width)),
         };
         output.push(Row {
@@ -682,7 +835,7 @@ pub(super) fn frame(
                 None => left,
             };
             // A caret at the end of a full row stays on its last cell.
-            let x = column.checked_sub(first)?;
+            let x = column.checked_sub(first)? + layout.hinted(line, first, column);
             let x = if layout.wrap.is_some() {
                 x.min(usize::from(width) - 1)
             } else {

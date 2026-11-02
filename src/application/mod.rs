@@ -20,11 +20,14 @@ pub use clipboard::ClipboardAction;
 mod display;
 mod flags;
 mod highlights;
+mod inlays;
 mod notes;
 mod tidy;
+mod tokens;
 pub use flags::Flag;
 pub use highlights::{Face, Highlight, MARKS};
 pub use notes::{Note, NoteSpan, Severity};
+pub use tokens::TokenSpan;
 mod windows;
 pub use display::Placement;
 pub use windows::{Area, Axis, Direction, Node, Side, Windows};
@@ -181,6 +184,16 @@ pub enum Event {
         group: String,
         flag: Flag,
         lines: Vec<usize>,
+    },
+    /// Replaces a document's semantic tokens.
+    Tokens {
+        document: DocumentId,
+        tokens: Vec<TokenSpan>,
+    },
+    /// Replaces a document's inlay hints, as zero-based line, byte and text.
+    Inlays {
+        document: DocumentId,
+        hints: Vec<(usize, usize, String)>,
     },
     /// Replaces a group's notes on a document.
     Note {
@@ -364,6 +377,8 @@ pub struct Application {
     grep_pattern: Option<(DocumentId, regex::Regex)>,
     flags: flags::Flags,
     notes: notes::Notes,
+    tokens: tokens::Tokens,
+    inlays: inlays::Inlays,
 }
 impl Application {
     pub fn new(service: FileService) -> Self {
@@ -432,6 +447,20 @@ impl Application {
     }
     pub fn options(&self) -> &crate::options::Options {
         &self.options
+    }
+    /// Semantic tokens starting within a byte range, relative to its start.
+    pub fn tokens(
+        &self,
+        document: DocumentId,
+        range: std::ops::Range<usize>,
+    ) -> Vec<(std::ops::Range<usize>, crate::syntax::Category)> {
+        self.tokens.within(document, range)
+    }
+    /// A document's inlay hints with their offsets, in order.
+    pub fn inlays(&self, document: DocumentId) -> Vec<(usize, &str)> {
+        self.workspace
+            .editor(document)
+            .map_or_else(Vec::new, |editor| self.inlays.of(editor.model().document()))
     }
     /// A document's notes, the least severe first.
     pub fn notes(&self, document: DocumentId) -> Vec<Note<'_>> {
@@ -625,6 +654,8 @@ impl Application {
             }
             self.flags.map(change);
             self.notes.map(change);
+            self.tokens.map(change);
+            self.inlays.map(change);
             for view in self
                 .views
                 .values_mut()
@@ -997,6 +1028,8 @@ impl Application {
                 self.highlights.forget(document);
                 self.flags.forget(document);
                 self.notes.forget(document);
+                self.tokens.forget(document);
+                self.inlays.forget(document);
                 self.repair_windows();
                 update.closed_views = ids;
                 update.closed_documents.push(document);
@@ -1198,6 +1231,22 @@ impl Application {
                     .ok_or(FileError::UnknownDocument)?;
                 self.flags
                     .add(editor.model().document(), &group, &flag, &lines);
+                update.options_changed = true;
+            }
+            Event::Tokens { document, tokens } => {
+                let editor = self
+                    .workspace
+                    .editor(document)
+                    .ok_or(FileError::UnknownDocument)?;
+                self.tokens.set(editor.model().document(), tokens);
+                update.options_changed = true;
+            }
+            Event::Inlays { document, hints } => {
+                let editor = self
+                    .workspace
+                    .editor(document)
+                    .ok_or(FileError::UnknownDocument)?;
+                self.inlays.set(editor.model().document(), hints);
                 update.options_changed = true;
             }
             Event::Note {

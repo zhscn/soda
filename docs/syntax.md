@@ -8,7 +8,7 @@ C++ 由自有的词法分析和结构分析支撑；其他语言参照 IntelliJ 
 | --- | --- | --- |
 | 词法高亮 | 自有词法分析器的 token 分类，加关键字表 | TextMate 语法 |
 | 结构高亮 | 结构分析中确定的名字（函数定义、类型、命名空间、标签、宏） | TextMate 作用域本身已包含一部分 |
-| 语义高亮 | LSP semantic tokens（以后） | LSP semantic tokens（以后） |
+| 语义高亮 | LSP semantic tokens | LSP semantic tokens |
 | 文件内符号 | 结构分析 | 由 `entity.name.*` 作用域生成的大纲 |
 | 跨文件导航 | LSP | LSP；没有服务器时退回单词级查找 |
 | 缩进、注释、括号 | 自有规则（clang-format） | `language-configuration.json` |

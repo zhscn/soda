@@ -37,6 +37,8 @@ const FUNCTIONS: &[&str] = &[
     "prompt",
     "choose",
     "hint",
+    "tokens",
+    "inlays",
     "hook",
     "define_command",
     "spawn",
@@ -322,6 +324,48 @@ impl Host {
                         group,
                         notes,
                     })
+                })?,
+            )?;
+            soda.set(
+                "tokens",
+                scope.create_function(|_, (data, names): (Vec<usize>, Vec<String>)| {
+                    let categories: Vec<_> = names
+                        .iter()
+                        .map(|name| crate::syntax::Category::named(name))
+                        .collect();
+                    let tokens = data
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .filter_map(|token| {
+                            let category = (*categories.get(token[3])?)?;
+                            Some(crate::application::TokenSpan {
+                                line: token[0],
+                                bytes: token[1]..token[2],
+                                category,
+                            })
+                        })
+                        .collect();
+                    let mut runtime = runtime.borrow_mut();
+                    let document = runtime.document().map_err(mlua::Error::runtime)?;
+                    runtime.edit_event(crate::application::Event::Tokens { document, tokens })
+                })?,
+            )?;
+            soda.set(
+                "inlays",
+                scope.create_function(|_, items: Vec<Table>| {
+                    let hints = items
+                        .iter()
+                        .map(|item| {
+                            let line: usize = item.get("line")?;
+                            let column: usize = item.get("column")?;
+                            let text: String = item.get("text")?;
+                            Ok((line.saturating_sub(1), column.saturating_sub(1), text))
+                        })
+                        .collect::<mlua::Result<Vec<_>>>()?;
+                    let mut runtime = runtime.borrow_mut();
+                    let document = runtime.document().map_err(mlua::Error::runtime)?;
+                    runtime.edit_event(crate::application::Event::Inlays { document, hints })
                 })?,
             )?;
             soda.set(

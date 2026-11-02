@@ -163,6 +163,33 @@ fn references_and_callers_are_results() {
     assert_eq!(text(&f.r), "a.cpp\n  2:3  caller\n");
 }
 #[test]
+fn tokens_and_hints_arrive_after_the_diagnostics_and_move_with_the_text() {
+    use soda::syntax::Category;
+    let Some(mut f) = open("é one\nsome text\n") else {
+        return;
+    };
+    let document =
+        f.r.app()
+            .view(f.r.app().active_view().unwrap())
+            .unwrap()
+            .document_id;
+    wait(&mut f.r, |r| {
+        !r.app().inlays(document).is_empty() && !r.app().tokens(document, 0..99).is_empty()
+    });
+    // Columns are UTF-16 units: the é takes two bytes and one unit. The
+    // variable has no category of its own, so it keeps its highlighting.
+    assert_eq!(
+        f.r.app().tokens(document, 0..99),
+        [(2..4, Category::Function), (11..12, Category::Parameter)]
+    );
+    assert_eq!(f.r.app().inlays(document), [(3, "a: "), (7, "int&")]);
+
+    f.r.command(Command::SetMode(EditMode::Insert));
+    keys(&mut f.r, "xx");
+    assert_eq!(f.r.app().tokens(document, 0..99)[0].0, 4..6);
+    assert_eq!(f.r.app().inlays(document)[0].0, 5);
+}
+#[test]
 fn a_call_shows_its_signature_until_it_closes() {
     let Some(mut f) = open("\n") else { return };
     f.r.command(Command::SetMode(EditMode::Insert));

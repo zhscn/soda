@@ -416,6 +416,9 @@ fn spans(buf: &mut Buffer, x: u16, y: u16, width: u16, spans: &[Span], base: Sty
         if let Some(face) = span.face {
             style = style.patch(theme.face(face));
         }
+        if span.inlay {
+            style = style.patch(theme.inlay);
+        }
         if x >= right {
             break;
         }
@@ -1195,6 +1198,71 @@ mod tests {
         assert!(rows[top - 1].contains("al"), "{text}");
         assert!(rows[top + 1].contains("│ al"), "{text}");
         assert!(rows[top + 3].contains("╰"), "{text}");
+    }
+
+    #[test]
+    fn inlay_hints_shift_the_row_and_the_caret_and_not_the_text() {
+        use crate::application::Event;
+        let root = tempfile::tempdir().unwrap();
+        let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.start(None);
+        r.command(Command::Edit(crate::editor::Command::InsertText(
+            "call(1, 2)\n".into(),
+        )));
+        r.command(Command::SetMode(EditMode::Normal));
+        let document = r
+            .app()
+            .view(r.app().active_view().unwrap())
+            .unwrap()
+            .document_id;
+        r.dispatch(Event::Inlays {
+            document,
+            hints: vec![(0, 5, "a: ".into()), (0, 8, "b: ".into())],
+        });
+        r.command(Command::Named("goto 1:9".into()));
+        let text = screen(&mut r, 40, 8);
+        assert!(text.contains("call(a: 1, b: 2)"), "{text}");
+        // Past both hints: the caret stands on the 2 on screen.
+        let areas = Areas::new(&r, 40, 8);
+        let texts = super::super::frames(
+            &r,
+            &mut crate::tui::highlight::Highlighter::default(),
+            &areas,
+        )
+        .unwrap();
+        let (x, _) = texts[0].as_ref().unwrap().cursor.unwrap();
+        assert_eq!(x, 14, "8 cells of text and 6 of hints");
+
+        // A click goes by the text: on a hint, to the character after it.
+        let width = areas.text(&r).width;
+        assert_eq!(layout::offset_at(r.app(), width, 0, 14), Some(8));
+        assert_eq!(layout::offset_at(r.app(), width, 0, 6), Some(5));
+        assert_eq!(layout::offset_at(r.app(), width, 0, 2), Some(2));
+
+        r.command(Command::Named("set inlay-hints false".into()));
+        assert!(screen(&mut r, 40, 8).contains("call(1, 2)"));
+        r.command(Command::Named("set inlay-hints true".into()));
+
+        // Wrapped text keeps its columns, and the hints wait at the end.
+        r.command(Command::Named("set wrap true".into()));
+        let text = screen(&mut r, 40, 8);
+        assert!(text.contains("call(1, 2) a:  b:"), "{text}");
+    }
+
+    #[test]
+    fn semantic_tokens_replace_the_category_under_them() {
+        use crate::syntax::Category::{Function, Keyword, Type};
+        let base = [(0..4, Keyword), (6..10, Keyword)];
+        assert_eq!(
+            layout::overlay(&base, &[(2..3, Type), (6..8, Function)]),
+            [
+                (0..2, Keyword),
+                (2..3, Type),
+                (3..4, Keyword),
+                (6..8, Function),
+                (8..10, Keyword)
+            ]
+        );
     }
 
     #[test]

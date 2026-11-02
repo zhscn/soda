@@ -120,6 +120,12 @@ pub const OPTIONS: &[OptionInfo] = &[
         doc: "Show a title row on each window when there are several",
     },
     OptionInfo {
+        name: "inlay-hints",
+        kind: Kind::Bool,
+        default: Value::Bool(true),
+        doc: "Show a language server's hints between the characters of a line",
+    },
+    OptionInfo {
         name: "wrap",
         kind: Kind::Bool,
         default: Value::Bool(false),

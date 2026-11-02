@@ -49,7 +49,15 @@ while True:
         log.write("initialize %s\n" % params["rootUri"])
         # A question first, as real servers ask, to see that it is answered.
         write({"jsonrpc": "2.0", "id": "q", "method": "window/workDoneProgress/create"})
-        answer(message, {"capabilities": {"positionEncoding": "utf-16"}})
+        answer(message, {"capabilities": {
+            "positionEncoding": "utf-16",
+            "inlayHintProvider": True,
+            "semanticTokensProvider": {
+                "legend": {"tokenTypes": ["function", "variable", "parameter"],
+                           "tokenModifiers": []},
+                "full": True,
+            },
+        }})
     elif method in ("textDocument/didOpen", "textDocument/didChange"):
         document = params["textDocument"]
         text = params.get("contentChanges", [{}])[0].get("text", document.get("text"))
@@ -80,6 +88,15 @@ while True:
                  "newText": "server_call(${1:int a})", "range": spot("", 0, 0)["range"]}},
             {"label": "server_plain", "insertText": "server_plain", "detail": "int"},
         ]})
+    elif method == "textDocument/semanticTokens/full":
+        # On line 0, column 1 for 2 units; then line 1, column 0 for 3, of a
+        # type the client does not show, and a parameter at column 4.
+        answer(message, {"data": [0, 1, 2, 0, 0, 1, 0, 3, 1, 0, 0, 4, 1, 2, 0]})
+    elif method == "textDocument/inlayHint":
+        answer(message, [{"position": {"line": 0, "character": 2}, "label": "a:",
+                          "paddingRight": True},
+                         {"position": {"line": 1, "character": 0},
+                          "label": [{"value": "int"}, {"value": "&"}]}])
     elif method == "textDocument/didSave":
         log.write("didSave\n")
     elif method == "textDocument/signatureHelp":

@@ -203,6 +203,18 @@ fn initialize(root: &Path) -> Value {
                     "callHierarchy": {},
                     "publishDiagnostics": {},
                     "rename": {},
+                    "inlayHint": {},
+                    "semanticTokens": {
+                        "requests": { "full": true },
+                        "tokenTypes": [
+                            "namespace", "type", "class", "enum", "interface", "struct",
+                            "typeParameter", "parameter", "variable", "property", "enumMember",
+                            "function", "method", "macro", "keyword", "modifier", "comment",
+                            "string", "number", "regexp", "operator", "decorator",
+                        ],
+                        "tokenModifiers": [],
+                        "formats": ["relative"],
+                    },
                     "declaration": {},
                     "typeDefinition": {},
                     "formatting": {},
