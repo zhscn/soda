@@ -770,12 +770,14 @@ fn message(
             let note = text
                 .and_then(|text| text.note.as_ref())
                 .filter(|_| runtime.message().is_empty());
-            let (words, style) = match note {
-                Some((severity, words)) => (
+            let hint = runtime.hint().filter(|_| runtime.message().is_empty());
+            let (words, style) = match (hint, note) {
+                (Some(words), _) => (words, theme.detail),
+                (None, Some((severity, words))) => (
                     words.lines().next().unwrap_or(""),
                     theme.severity(*severity),
                 ),
-                None => (runtime.message(), theme.text),
+                (None, None) => (runtime.message(), theme.text),
             };
             let row = layout::plain(words, 0, width);
             buf.set_stringn(area.x, area.y, row, width, style);

@@ -97,6 +97,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `soda.val(name)` / `soda.option(name)` | 读取 `%val{name}` / `%opt{name}` |
 | `soda.message(text)` | 设置状态消息 |
 | `soda.flag(group, face, sign, lines)` / `soda.unflag([group])` | 行标记，`lines` 是从 1 开始的行号数组；`unflag` 没有标记可去时不报错 |
+| `soda.hint(text)` | 消息行没有消息时显示的文字，一直保留到下一次调用；`nil` 清除 |
 | `soda.prompt(text)` | 打开命令行并预填 `text` |
 | `soda.choose(title, items, fn)` | 在命令行里从 `items` 中选一项，输入过滤，选中后以从 1 起的序号调用 `fn`；取消时不调用 |
 | `soda.hook(event, filter, fn)` | 事件发生时以事件参数调用 `fn` |
@@ -117,7 +118,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 
 | 模块 | 内容 | 键位 |
 | --- | --- | --- |
-| `lsp` | 跳转、引用、调用层级、hover、诊断、重命名、代码动作和补全，见[语言服务器](lsp.md) | `<a-.>`、`<a-?>`、`K`、`<space>c`、`<space>C`、`<space>R`、`<space>a` |
+| `lsp` | 跳转、引用、调用层级、hover、诊断、重命名、代码动作、符号、格式化、签名提示和补全，见[语言服务器](lsp.md) | `<a-.>`、`<a-?>`、`K`、`<space>c`、`<space>C`、`<space>R`、`<space>a`、`<space>s`、`<space>S`、`<space>h` |
 | `pairs` | 结构化编辑，见[交互层](interaction.md#结构化编辑) | 见交互层 |
 | `comment` | 切换行注释 | Normal、Visual 的 `gc`、`<a-;>` |
 | `emacs` | Emacs 的单词大小写、对调和空白命令，见[交互层](interaction.md#emacs-键位) | 见交互层 |

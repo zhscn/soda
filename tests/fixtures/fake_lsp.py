@@ -80,6 +80,29 @@ while True:
                  "newText": "server_call(${1:int a})", "range": spot("", 0, 0)["range"]}},
             {"label": "server_plain", "insertText": "server_plain", "detail": "int"},
         ]})
+    elif method == "textDocument/didSave":
+        log.write("didSave\n")
+    elif method == "textDocument/signatureHelp":
+        answer(message, {"activeSignature": 0, "activeParameter": 1, "signatures": [
+            {"label": "add(int a, int b)", "parameters": [{"label": "int a"}, {"label": "int b"}]},
+        ]})
+    elif method == "textDocument/documentSymbol":
+        answer(message, [{"name": "Outer", "kind": 5,
+                          "selectionRange": spot("", 0, 1)["range"],
+                          "children": [{"name": "inner", "kind": 6,
+                                        "selectionRange": spot("", 1, 2)["range"]}]}])
+    elif method == "workspace/symbol":
+        uri = "file://" + os.path.dirname(os.environ["FAKE_LSP_LOG"]) + "/a.cpp"
+        answer(message, [dict(name=params["query"], containerName="space", location=spot(uri, 1, 0))])
+    elif method == "textDocument/switchSourceHeader":
+        answer(message, params["uri"].replace("a.cpp", "b.cpp"))
+    elif method == "textDocument/formatting":
+        log.write("format %d\n" % params["options"]["tabSize"])
+        answer(message, [replacement(0, 0, 3, "formatted")])
+    elif method == "textDocument/declaration":
+        answer(message, spot(params["textDocument"]["uri"], 1, 2))
+    elif method == "textDocument/typeDefinition":
+        answer(message, [])
     elif method == "textDocument/rename":
         log.write("rename %s\n" % params["newName"])
         uri = params["textDocument"]["uri"]

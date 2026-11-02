@@ -195,7 +195,7 @@ fn initialize(root: &Path) -> Value {
             "capabilities": {
                 "general": { "positionEncodings": ["utf-8", "utf-16"] },
                 "textDocument": {
-                    "synchronization": { "didSave": false },
+                    "synchronization": { "didSave": true },
                     "completion": { "completionItem": { "snippetSupport": true } },
                     "hover": { "contentFormat": ["plaintext"] },
                     "definition": {},
@@ -203,6 +203,11 @@ fn initialize(root: &Path) -> Value {
                     "callHierarchy": {},
                     "publishDiagnostics": {},
                     "rename": {},
+                    "declaration": {},
+                    "typeDefinition": {},
+                    "formatting": {},
+                    "signatureHelp": {},
+                    "documentSymbol": { "hierarchicalDocumentSymbolSupport": true },
                     "codeAction": {
                         "codeActionLiteralSupport": {
                             "codeActionKind": {

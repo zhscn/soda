@@ -8,7 +8,8 @@
 --
 -- Built in: <a-.> goes to the definition, <a-?> lists references, <a-,> comes
 -- back; K shows what the caret is on in a box until the next key; <space>c and <space>C list the callers
--- and the callees; <space>R renames and <space>a offers code actions.
+-- and the callees; <space>R renames and <space>a offers code actions;
+-- <space>s and <space>S find symbols; <space>h switches header and source.
 -- Completion follows from the server being there.
 
 soda.lsp.server("cpp", { "clangd", "--header-insertion=never", "--function-arg-placeholders=1" })
@@ -139,24 +140,30 @@ local function open_location(location)
   soda.open(entry.path, entry.line + 1, byte + 1)
 end
 
-soda.define_command("lsp-definition", function()
-  ask("textDocument/definition", nil, function(result)
-    if result and result.uri then
-      result = { result }
-    end
-    if not result or #result == 0 then
-      soda.message("No definition found")
-    elseif #result == 1 then
-      open_location(result[1])
-    else
-      local entries = {}
-      for _, location in ipairs(result) do
-        table.insert(entries, location_entry(location))
+-- Goes to a place the server names, or lists them when there are several.
+local function go_to(command, method, kind)
+  soda.define_command(command, function()
+    ask(method, nil, function(result)
+      if result and (result.uri or result.targetUri) then
+        result = { result }
       end
-      show("definitions", entries)
-    end
+      if not result or #result == 0 then
+        soda.message("No " .. kind .. " found")
+      elseif #result == 1 then
+        open_location(result[1])
+      else
+        local entries = {}
+        for _, location in ipairs(result) do
+          table.insert(entries, location_entry(location))
+        end
+        show(kind .. "s", entries)
+      end
+    end)
   end)
-end)
+end
+go_to("lsp-definition", "textDocument/definition", "definition")
+go_to("lsp-declaration", "textDocument/declaration", "declaration")
+go_to("lsp-type-definition", "textDocument/typeDefinition", "type definition")
 
 soda.define_command("lsp-references", function()
   ask("textDocument/references", { context = { includeDeclaration = true } }, function(result)
@@ -528,6 +535,152 @@ soda.define_command("lsp-code-action", function()
   end)
 end)
 
+soda.define_command("lsp-format", function()
+  local buf = soda.buffer()
+  local origin = { buffer = buf, revision = buf:revision() }
+  local uri = soda.lsp.uri()
+  local options = { tabSize = tonumber(soda.option("indent-width")), insertSpaces = true }
+  ask("textDocument/formatting", { options = options }, function(edits)
+    if not edits or #edits == 0 then
+      soda.message("Already formatted")
+    else
+      apply_edit({ changes = { [uri] = edits } }, origin)
+    end
+  end)
+end)
+
+soda.define_command("lsp-switch", function()
+  local uri = soda.lsp.uri()
+  local asked = uri
+    and soda.lsp.request("textDocument/switchSourceHeader", { uri = uri }, function(result, failure)
+      if failure then
+        soda.message(tostring(failure.message))
+      elseif result then
+        soda.open(path_of(result))
+      else
+        soda.message("No matching header or source")
+      end
+    end)
+  if not asked then
+    soda.message("No language server for this document")
+  end
+end)
+
+local symbol_kinds = {
+  [2] = "module", [3] = "namespace", [5] = "class", [6] = "method", [8] = "field",
+  [9] = "constructor", [10] = "enum", [12] = "function", [13] = "variable",
+  [14] = "constant", [22] = "enumerator", [23] = "struct", [26] = "template",
+}
+-- Rows for a document's symbols; children follow their parents, indented.
+local function outline(symbols, depth, rows)
+  for _, symbol in ipairs(symbols) do
+    local kind = symbol_kinds[symbol.kind]
+    table.insert(rows, {
+      title = string.rep("  ", depth) .. symbol.name .. (kind and "  " .. kind or ""),
+      place = (symbol.selectionRange or symbol.location.range).start,
+    })
+    outline(symbol.children or {}, depth + 1, rows)
+  end
+  return rows
+end
+
+soda.define_command("lsp-symbols", function()
+  local buf = soda.buffer()
+  local path = path_of(soda.lsp.uri() or "")
+  ask("textDocument/documentSymbol", nil, function(result)
+    local rows = outline(result or {}, 0, {})
+    if #rows == 0 then
+      soda.message("No symbols here")
+      return
+    end
+    local titles = {}
+    for _, row in ipairs(rows) do
+      table.insert(titles, row.title)
+    end
+    soda.choose("symbol", titles, function(index)
+      local place = rows[index].place
+      local encoding = soda.lsp.info().encoding
+      local line = math.min(place.line + 1, buf:line_count())
+      soda.open(path, line, to_byte(buf:line(line), place.character, encoding) + 1)
+    end)
+  end)
+end)
+
+soda.define_command("lsp-workspace-symbols", function(query)
+  query = (query or ""):match("^%s*(.-)%s*$")
+  if query == "" then
+    soda.prompt("lsp-workspace-symbols ")
+    return
+  end
+  local asked = soda.lsp.request("workspace/symbol", { query = query }, function(result, failure)
+    if failure then
+      soda.message(tostring(failure.message))
+      return
+    end
+    local entries = {}
+    for _, symbol in ipairs(result or {}) do
+      local entry = location_entry(symbol.location)
+      local container = symbol.containerName
+      entry.text = (container and container ~= "" and container .. "::" or "") .. symbol.name
+      table.insert(entries, entry)
+    end
+    show("symbols", entries)
+  end)
+  if not asked then
+    soda.message("No language server for this document")
+  end
+end)
+
+-- The signature being called, with the argument at the caret in brackets.
+local function signature_of(help)
+  local signature = help and help.signatures and help.signatures[(help.activeSignature or 0) + 1]
+  if not signature then
+    return nil
+  end
+  local active = signature.activeParameter or help.activeParameter or 0
+  local parameter = signature.parameters and signature.parameters[active + 1]
+  local name = parameter and parameter.label
+  local label = signature.label
+  if type(name) == "string" then
+    local from, to = label:find(name, 1, true)
+    if from then
+      return label:sub(1, from - 1) .. "[" .. name .. "]" .. label:sub(to + 1)
+    end
+  end
+  return label
+end
+
+-- Typing a call shows its signature on the message row; it stays while the
+-- arguments are typed, so a popup, which any key closes, would not do.
+soda.completion.register({
+  triggers = { "(", ",", ")" },
+  complete = function(context, sink)
+    sink:done()
+    if context.trigger == ")" then
+      soda.hint(nil)
+    elseif context.trigger then
+      local params = here()
+      if params then
+        soda.lsp.request("textDocument/signatureHelp", params, function(result)
+          soda.hint(signature_of(result))
+        end)
+      end
+    end
+  end,
+})
+soda.hook("mode", ".*", function(mode)
+  if mode ~= "insert" then
+    soda.hint(nil)
+  end
+end)
+
+soda.hook("save", ".*", function()
+  local uri = soda.lsp.uri()
+  if uri then
+    soda.lsp.notify("textDocument/didSave", { textDocument = { uri = uri } })
+  end
+end)
+
 soda.define_command("lsp-restart", function()
   soda.lsp.restart()
 end)
@@ -581,3 +734,6 @@ soda.command("map normal <space>c lsp-callers")
 soda.command("map normal <space>C lsp-callees")
 soda.command("map normal <space>R lsp-rename")
 soda.command("map normal <space>a lsp-code-action")
+soda.command("map normal <space>s lsp-symbols")
+soda.command("map normal <space>S lsp-workspace-symbols")
+soda.command("map normal <space>h lsp-switch")

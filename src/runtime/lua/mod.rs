@@ -36,6 +36,7 @@ const FUNCTIONS: &[&str] = &[
     "popup",
     "prompt",
     "choose",
+    "hint",
     "hook",
     "define_command",
     "spawn",
@@ -321,6 +322,15 @@ impl Host {
                         group,
                         notes,
                     })
+                })?,
+            )?;
+            soda.set(
+                "hint",
+                scope.create_function(|_, text: Option<String>| {
+                    let mut runtime = runtime.borrow_mut();
+                    runtime.hint = text;
+                    runtime.dirty = true;
+                    Ok(())
                 })?,
             )?;
             soda.set(

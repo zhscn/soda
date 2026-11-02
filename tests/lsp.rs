@@ -163,6 +163,90 @@ fn references_and_callers_are_results() {
     assert_eq!(text(&f.r), "a.cpp\n  2:3  caller\n");
 }
 #[test]
+fn a_call_shows_its_signature_until_it_closes() {
+    let Some(mut f) = open("\n") else { return };
+    f.r.command(Command::SetMode(EditMode::Insert));
+    keys(&mut f.r, "add(");
+    wait(&mut f.r, |r| r.hint() == Some("add(int a, [int b])"));
+    keys(&mut f.r, "1");
+    assert_eq!(
+        f.r.hint(),
+        Some("add(int a, [int b])"),
+        "it stays while typing"
+    );
+    keys(&mut f.r, ")");
+    wait(&mut f.r, |r| r.hint().is_none());
+    keys(&mut f.r, "x(");
+    wait(&mut f.r, |r| r.hint().is_some());
+    keys(&mut f.r, "<esc>");
+    wait(&mut f.r, |r| r.hint().is_none());
+}
+#[test]
+fn symbols_are_offered_with_their_outline_and_go_where_they_stand() {
+    let Some(mut f) = open("class\n  member\n") else {
+        return;
+    };
+    let rows = |r: &Runtime| match r.layer() {
+        Some(soda::interaction::Layer::CommandLine(line)) => line
+            .rows()
+            .iter()
+            .map(|row| row.candidate.label.clone())
+            .collect::<Vec<_>>(),
+        _ => vec![],
+    };
+    keys(&mut f.r, "<space>s");
+    wait(&mut f.r, |r| rows(r) == ["Outer  class", "  inner  method"]);
+    keys(&mut f.r, "<down><ret>");
+    wait(&mut f.r, |r| {
+        r.app().active_view().is_some_and(|v| {
+            let view = r.app().view(v).unwrap();
+            let editor = r.app().workspace().editor(view.document_id).unwrap();
+            let session = editor.model().session(view.session_id).unwrap();
+            session.selection().head == 8
+        })
+    });
+    f.r.command(Command::Named("lsp-workspace-symbols helper".into()));
+    wait(&mut f.r, |r| text(r).contains("space::helper"));
+}
+#[test]
+fn a_header_and_its_source_switch() {
+    let Some(mut f) = open("a\n") else { return };
+    std::fs::write(f.dir.path().join("b.cpp"), "other\n").unwrap();
+    keys(&mut f.r, "<space>h");
+    wait(&mut f.r, |r| text(r) == "other\n");
+}
+#[test]
+fn formatting_edits_and_saving_tells_the_server() {
+    let Some(mut f) = open("one\n") else { return };
+    f.r.command(Command::Named("lsp-format".into()));
+    wait(&mut f.r, |r| text(r) == "formatted\n");
+    f.r.command(Command::Save { choose_path: false });
+    let log = f.log.clone();
+    wait(&mut f.r, move |_| {
+        std::fs::read_to_string(&log).is_ok_and(|log| log.contains("didSave"))
+    });
+}
+#[test]
+fn declarations_go_and_a_missing_type_says_so() {
+    let Some(mut f) = open("use\n  target\n") else {
+        return;
+    };
+    f.r.command(Command::Named("lsp-type-definition".into()));
+    wait(&mut f.r, |r| r.message() == "No type definition found");
+    f.r.command(Command::Named("lsp-declaration".into()));
+    wait(&mut f.r, |r| {
+        let view = r.app().view(r.app().active_view().unwrap()).unwrap();
+        let editor = r.app().workspace().editor(view.document_id).unwrap();
+        editor
+            .model()
+            .session(view.session_id)
+            .unwrap()
+            .selection()
+            .head
+            == 6
+    });
+}
+#[test]
 fn rename_edits_open_documents_and_files_on_disk() {
     let Some(mut f) = open("one\n") else { return };
     // UTF-16 columns: the é before the name is two bytes and one unit.

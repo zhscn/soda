@@ -16,15 +16,24 @@ rust-analyzer 默认不开，因为它会运行项目的构建脚本，打开一
 | 键 | 命令 | 作用 |
 | --- | --- | --- |
 | `<a-.>` | `lsp-definition` | 到定义，有多处时列出；`<a-,>` 回来 |
+| | `lsp-declaration` / `lsp-type-definition` | 到声明 / 到类型的定义 |
 | `<a-?>` | `lsp-references` | 列出引用 |
+| `<space>h` | `lsp-switch` | 在头文件和源文件之间切换，clangd 的扩展 |
+| `<space>s` | `lsp-symbols` | 从当前文档的符号大纲里选一个跳过去 |
+| `<space>S` | `lsp-workspace-symbols [QUERY]` | 在项目里按名字找符号并列出 |
 | `K` | `lsp-hover` | 在光标旁的浮窗里显示光标处的信息，上面列出这一行的诊断；PageUp/PageDown 或 `<a-v>`/`<c-v>` 翻页，其他按键关闭 |
 | `<space>c` / `<space>C` | `lsp-callers` / `lsp-callees` | 列出调用者 / 被调用者，只有一层 |
 | `<space>R` | `lsp-rename [NAME]` | 重命名光标处的符号；没给名字时打开命令行，预填光标处的词 |
 | `<space>a` | `lsp-code-action` | 列出光标或选区处的代码动作，选一个执行 |
+| | `lsp-format` | 让服务器格式化整个文档，clangd 读 `.clang-format` |
 | | `lsp-diagnostics` | 列出所有诊断 |
 | | `lsp-restart` | 重启当前语言的服务器，失败后也用它重试 |
 
 列表是普通的结果文档，`]q` / `[q` 和回车都能用。诊断在行号栏按级别显示：错误 `E`、警告 `W`、其余 `I`，一行有多条时显示最严重的，范围加彩色下划线，光标所在行的诊断自动显示在消息行（有其他消息时让位），状态栏显示文档的错误和警告数。补全不需要配置，服务器在就是一个来源，`.`、`->`、`::` 触发。
+
+输入 `(` 或 `,` 时，正在调用的函数签名显示在消息行，当前参数加方括号，输入 `)` 或离开 Insert 时消失。没有其他消息时才显示，优先于光标处的诊断。光标用方向键移出括号时不会消失，到下一次 `)` 或离开 Insert 为止。
+
+保存时发 `didSave`，clangd 因此重新检查依赖这个头文件的已打开文档。
 
 ## 编辑
 
@@ -61,6 +70,7 @@ soda.lsp.array(t)                             -- 标记 t 是数组
 soda.note(group, {
   { from = { 2, 5 }, to = { 2, 9 }, severity = "warning", text = "..." },  -- 行、字节列，从 1 起
 })                  -- 替换这一组；空表清除。severity 是 error、warning 或 info
+soda.hint(text)     -- 消息行没有消息时显示，直到换掉；nil 清除
 soda.prompt(text)   -- 打开命令行，预填 text
 soda.choose(title, items, function(index) end)  -- 从 items 里选一项，取消时不调用
 soda.popup(text)    -- 光标旁的浮窗，放不下时滚轮或翻页键滚动，边框上显示位置，其他按键关闭
@@ -80,7 +90,8 @@ soda.popup(text)    -- 光标旁的浮窗，放不下时滚轮或翻页键滚动
 ## 限制
 
 - 项目根目录由版本库标记决定，不按 `compile_commands.json` 找；clangd 自己会按文件找。服务器的根目录标记还不能按语言配置。
-- 不发 `didSave`，不取消请求。
+- 不取消请求。
+- 不做 inlay hint 和语义高亮。
 - 调用层级只有一层，不是 ccls 那样可以展开的树。
 - 诊断显示在消息行和 `K` 的浮窗里，不在行尾内联显示。
 - 编辑直接写到磁盘的文件不通知服务器，它要到下次读这些文件时才知道。

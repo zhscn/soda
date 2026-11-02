@@ -93,6 +93,8 @@ pub struct Runtime {
     lua_running: bool,
     dirty: bool,
     /// Text in a box by the caret, until the next input.
+    /// Words for the message row while it has no message, until replaced.
+    hint: Option<String>,
     popup: Option<String>,
     /// How many lines of the popup are scrolled past; drawing keeps it in
     /// range, since only drawing knows how the text wraps.
@@ -153,6 +155,7 @@ impl Runtime {
             lua_queue: Default::default(),
             lua_running: false,
             dirty: true,
+            hint: None,
             popup: None,
             popup_scroll: Default::default(),
             popup_page: Default::default(),
@@ -361,6 +364,9 @@ impl Runtime {
         self.lsp.enable();
     }
     /// The list of candidates to show under the caret.
+    pub fn hint(&self) -> Option<&str> {
+        self.hint.as_deref()
+    }
     pub fn popup(&self) -> Option<&str> {
         self.popup.as_deref()
     }
