@@ -289,6 +289,7 @@ impl Parser {
                 if self.at(K::Less) && !self.template_args() {
                     self.advance();
                 }
+                self.requires_clause();
                 self.close(id);
             }
             k @ (K::IfKw | K::ForKw | K::WhileKw | K::DoKw | K::SwitchKw) => self.control(k),
@@ -560,20 +561,35 @@ impl Parser {
         let is_enum = self.at(K::EnumKw);
         self.advance();
         let mut equals = false;
+        // Parameters just before the brace: `struct tm f(int x) {` defines
+        // a function that returns a struct, `struct alignas(8) A {` does not.
+        let mut function = false;
         while !matches!(
             self.kind(),
             K::EndOfFile | K::LBrace | K::Semicolon | K::RBrace | K::NamespaceKw
         ) {
             if self.at(K::LParen) {
                 self.group(K::LParen);
+                function = true;
             } else if self.at(K::Less) {
                 if !self.template_args() {
                     self.advance();
                 }
+                function = false;
             } else {
                 equals |= self.at(K::Equals);
+                function &= matches!(
+                    self.text(self.pos),
+                    "const" | "volatile" | "noexcept" | "override" | "&" | "&&"
+                );
                 self.advance();
             }
+        }
+        if self.at(K::LBrace) && function && !equals {
+            self.tree.nodes[id].kind = N::OpaqueDeclaration;
+            self.body(N::CompoundStatement);
+            self.close(id);
+            return;
         }
         if self.at(K::LBrace) {
             if equals {
@@ -584,6 +600,19 @@ impl Parser {
                 self.enum_body = is_enum;
                 self.body(N::ClassBody);
                 self.enum_body = saved;
+            }
+            // Declarators after the body, `} specs[] = {...};`, belong to
+            // the declaration as clang-format's line does.
+            while !matches!(
+                self.kind(),
+                K::EndOfFile | K::Semicolon | K::RBrace | K::RParen | K::RBracket
+            ) && !self.kind().sync()
+                && !self.at(K::PreprocessorHash)
+            {
+                match self.kind() {
+                    k @ (K::LParen | K::LBracket | K::LBrace) => self.group(k),
+                    _ => self.advance(),
+                }
             }
             if self.at(K::Semicolon) {
                 self.advance();
@@ -747,7 +776,9 @@ impl Parser {
             }
             if opener == K::LParen
                 && (matches!(k, K::RBrace | K::NamespaceKw)
-                    || (matches!(k, K::ClassKw | K::StructKw) && self.line_start()))
+                    || (matches!(k, K::ClassKw | K::StructKw)
+                        && self.line_start()
+                        && self.defines_class()))
             {
                 break;
             }
@@ -941,6 +972,67 @@ impl Parser {
         }
         self.close(list);
     }
+    /// A requires clause after template parameters belongs with them, as
+    /// clang-format's own line for it does: `requires`, then primaries
+    /// joined by `&&` or `||`, each a name with its template arguments or
+    /// a parenthesized expression.
+    fn requires_clause(&mut self) {
+        if !(self.at(K::Identifier) && self.text(self.pos) == "requires") {
+            return;
+        }
+        self.advance();
+        loop {
+            // A requires expression, `requires (T t) { t.f(); }`.
+            if self.at(K::Identifier) && self.text(self.pos) == "requires" {
+                self.advance();
+            }
+            while self.at(K::Exclaim) {
+                self.advance();
+            }
+            match self.kind() {
+                K::LParen => self.group(K::LParen),
+                // A qualified name, `std::is_same_v<T, U>`, goes on only
+                // through `::`; what follows it is the declaration.
+                K::Identifier | K::ColonColon => loop {
+                    if self.at(K::ColonColon) {
+                        self.advance();
+                    }
+                    if !self.at(K::Identifier) {
+                        break;
+                    }
+                    self.advance();
+                    if self.at(K::Less) && !self.template_args() {
+                        self.advance();
+                    }
+                    if !self.at(K::ColonColon) {
+                        break;
+                    }
+                },
+                _ => return,
+            }
+            if self.at(K::LBrace) {
+                self.group(K::LBrace);
+            }
+            if !matches!(self.kind(), K::AmpAmp | K::PipePipe) {
+                return;
+            }
+            self.advance();
+        }
+    }
+    /// Whether the `class` or `struct` here defines one, reaching a body or
+    /// a base list before what ends a parameter, as `struct addrinfo* ai,`
+    /// does not.
+    fn defines_class(&self) -> bool {
+        self.tree.tokens[self.pos + 1..]
+            .iter()
+            .filter(|t| !t.kind.is_trivia())
+            .find_map(|t| match t.kind {
+                K::LBrace | K::Colon => Some(true),
+                K::Comma | K::RParen | K::Semicolon | K::RBrace | K::EndOfFile => Some(false),
+                _ => None,
+            })
+            .unwrap_or(false)
+    }
     /// Whether the next significant token could begin a statement, as
     /// clang-format's `tokenCanStartNewLine` asks after a macro call: one
     /// that only continues an expression, like `<<` in
@@ -1129,6 +1221,7 @@ impl Parser {
             lambda &= Self::suffix(k);
             let first = prev == K::EndOfFile && k == K::Identifier;
             let spelling = self.text(self.pos);
+            let spelling_len = spelling.len();
             standalone_macro = first && self.statement_macro(spelling);
             label_candidate = first;
             linkage = if first && self.text(self.pos) == "extern" {
@@ -1140,6 +1233,19 @@ impl Parser {
             };
             self.advance();
             prev = k;
+            // `ABSL_NAMESPACE_BEGIN` alone on a line is a statement of its
+            // own, as clang-format takes an all-caps name of five letters or
+            // more before a line that can start one.
+            if standalone_macro
+                && spelling_len >= 5
+                && self.newline_ahead()
+                && significant_after(&self.tree.tokens, self.tree.tokens[self.pos].range.start)
+                    .is_none_or(|next| self.tree.tokens[next].kind != K::LParen)
+                && self.can_start_line()
+            {
+                terminated = true;
+                break;
+            }
         }
         if !terminated {
             self.incomplete(id);

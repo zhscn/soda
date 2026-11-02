@@ -96,15 +96,15 @@ IncludeCategories,std::vector<IncludeCategory>,retained; formatter option
 IncludeIsMainRegex,std::string,retained; formatter option
 IncludeIsMainSourceRegex,std::string,retained; formatter option
 IndentAccessModifiers,IndentAccessModifierStyle,interactive
-IndentCaseBlocks,bool,retained; capability diagnostic
+IndentCaseBlocks,bool,interactive
 IndentCaseLabels,bool,interactive
 IndentExportBlock,bool,retained; capability diagnostic
 IndentExternBlock,IndentExternBlockStyle,interactive
 IndentFunctionDeclarationAfterType,bool,interactive
 IndentGotoLabels,IndentGotoLabelStyle,retained; capability diagnostic
 IndentPPDirectives,PPDirectiveIndentStyle,interactive
-IndentRequires,bool,retained; capability diagnostic
-IndentRequiresClause,bool,retained; capability diagnostic
+IndentRequires,bool,interactive
+IndentRequiresClause,bool,interactive
 IndentWidth,unsigned,interactive
 IndentWrappedFunctionNames,bool,interactive
 InsertBraces,bool,retained; formatter option

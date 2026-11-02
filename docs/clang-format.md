@@ -56,6 +56,8 @@ Rust 内置模块通过 `CppStyle::compile` 生成同一策略表示，返回 `R
 | `AccessModifierOffset` | 保存相对普通成员的偏移，具体列在查询时计算 |
 | `IndentAccessModifiers` | 兼容 bool，以及 Never、Always、AfterFirstAccessModifier |
 | `IndentCaseLabels` | case/default 相对 switch 的缩进 |
+| `IndentRequiresClause` | 独占一行的 requires 子句相对 `template<…>` 缩进一级或与之对齐；旧写法 IndentRequires 先转换成它。子句按 `RequiresClausePosition: OwnLine` 的布局识别，约束是用 `&&`/`||` 连接的名字（可带模板实参）或括号表达式 |
+| `IndentCaseBlocks` | 关闭时 case 标签直接打开的块与标签同级（`BraceWrapping.AfterCaseLabel` 时 `{` 独占一行，标签与 `{` 之间有独占一行的注释时按普通块处理），开启时它是 case 的一条普通语句 |
 | `IndentWrappedFunctionNames` | 换行后的函数声明名称缩进；兼容旧字段 IndentFunctionDeclarationAfterType |
 | `AlignAfterOpenBracket` | 兼容 bool 和旧版枚举，控制用户已经选定换行位置的参数对齐 |
 | `AlignOperands`、`BreakBeforeTernaryOperators` | 操作数和三元表达式续行 |
@@ -77,9 +79,9 @@ Rust 内置模块通过 `CppStyle::compile` 生成同一策略表示，返回 `R
 
 完整选项树保留列宽、排序、换行及其他排版配置，缩进器只使用与当前交互能力相关的字段。配置层不执行完整 formatter 的跨字段约束和全部旧字段归一化。标量和 mapping 的合法兼容形式保留在选项树中；与即时缩进相关的旧字段在策略编译前转换。
 
-显式配置 `IndentCaseBlocks`、`IndentGotoLabels`、`IndentRequiresClause`、`LambdaBodyIndentation`，或预设对这些选项采用不同于 LLVM 基线的值时，会返回尚未参与交互缩进的诊断。`AlignOperands: AlignAfterOperator` 编译为独立的 AfterOperator 策略值，目前执行时采用 Align 的续行规则，并返回诊断。GNU、Whitesmiths 或自定义额外 brace indentation 同样返回能力诊断。显式选择 AlignFirstComment（包括旧 true 写法）时，会说明当前采用 FunctionCall 续行规则，尚未实现首注释锚点的区别。
+显式配置 `IndentGotoLabels`、`LambdaBodyIndentation`，或预设对这些选项采用不同于 LLVM 基线的值时，会返回尚未参与交互缩进的诊断。`AlignOperands: AlignAfterOperator` 编译为独立的 AfterOperator 策略值，目前执行时采用 Align 的续行规则，并返回诊断。GNU、Whitesmiths 或自定义额外 brace indentation 同样返回能力诊断。显式选择 AlignFirstComment（包括旧 true 写法）时，会说明当前采用 FunctionCall 续行规则，尚未实现首注释锚点的区别。
 
-导出块、requires expression、StatementAttributeLikeMacros、TypenameMacros、TypeNames、TemplateNames、VariableTemplates、Macros 和 SkipMacroDefinitionBody 尚未接入语法或缩进策略。显式设置或偏离 LLVM 基线时返回能力诊断；旧 IndentRequires 先转换成 IndentRequiresClause，再参与诊断。枚举写法能通过配置校验不表示相应语法行为已经实现。
+导出块、requires expression、StatementAttributeLikeMacros、TypenameMacros、TypeNames、TemplateNames、VariableTemplates、Macros 和 SkipMacroDefinitionBody 尚未接入语法或缩进策略。显式设置或偏离 LLVM 基线时返回能力诊断。枚举写法能通过配置校验不表示相应语法行为已经实现。
 
 宏块正则采用 Rust `regex` 的语法，对完整标识符执行搜索；需要精确匹配时使用 `^`、`$`。配置加载和 `CppStyle::compile` 校验表达式。常用的分组、分支和字符类可直接使用，LLVM 正则的其他扩展语法不保证兼容。
 

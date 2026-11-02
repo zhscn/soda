@@ -171,9 +171,10 @@ fn invalid_configuration_is_atomic_and_diagnostic() {
     assert_eq!(c.diagnostics[0].option, "IndnetWidth");
     assert_eq!(c.values["IndnetWidth"], 4);
     assert_eq!(
-        parsed("IndentCaseBlocks: true").diagnostics[0].option,
-        "IndentCaseBlocks"
+        parsed("IndentGotoLabels: false").diagnostics[0].option,
+        "IndentGotoLabels"
     );
+    assert!(parsed("IndentCaseBlocks: true").diagnostics.is_empty());
 }
 #[test]
 fn directory_resolution_child_override_and_missing_candidates() {
@@ -699,11 +700,8 @@ fn legacy_indent_aliases_reach_rules_and_capability_diagnostics() {
     );
     let c = parsed("IndentRequires: false");
     assert_eq!(c.values["IndentRequiresClause"], false);
-    assert!(
-        c.diagnostics
-            .iter()
-            .any(|d| d.option == "IndentRequiresClause" && d.document == 1)
-    );
+    assert!(!c.rules.structure().indent_requires_clause);
+    assert!(c.diagnostics.is_empty());
     assert_eq!(
         parsed("BreakConstructorInitializers: AfterComma")
             .rules

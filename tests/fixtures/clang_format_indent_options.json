@@ -1025,6 +1025,18 @@
       "expected": "void f() {\n  EXPECT_EQ(first, second)\n      << \"message \" << value;\n  ASSERT_TRUE(ready)\n      .With(x);\n  LOG_EVENT(x)\n  work();\n}\n"
     },
     {
+      "name": "macro-name-statement",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "BasedOnStyle": "Google"
+      },
+      "expected": "namespace absl {\nABSL_NAMESPACE_BEGIN\n\n// Comment.\nvoid f();\nABSL_NAMESPACE_END\n}  // namespace absl\n"
+    },
+    {
       "name": "conditional-before-True",
       "options": {
         "ColumnLimit": 0,
@@ -1071,6 +1083,106 @@
         "BasedOnStyle": "Google"
       },
       "expected": "#define PRINT(Name)               \\\n  if (counts[Idx])                \\\n    errs() << \"  \" << counts[Idx] \\\n           << #Name << \" types\";  \\\n  ++Idx;\n#define CASE(Id) \\\n  case Kind::Id: \\\n    Width = 0;   \\\n    break;\n#define CHECK_INFO(ci, y)    \\\n  do {                       \\\n    EXPECT_EQ(y, ci.year()); \\\n  } while (0)\n#if defined(FIRST) && \\\n    defined(SECOND)\nint x;\n#elif (THIRD + \\\n       FOURTH) > 3\nint y;\n#endif\n"
+    },
+    {
+      "name": "record-declarators",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "BasedOnStyle": "Google"
+      },
+      "expected": "static inline struct tm local(int t) {\n  struct tm value = convert(t);\n  return value;\n}\nvoid f() {\n  static const struct {\n    const char* in;\n    int out;\n  } specs[] = {\n      {\"\", 0},\n      {\"a\", 1},\n  };\n}\nint convert(\n    struct addrinfo* ai, int host) {\n  return host;\n}\n"
+    },
+    {
+      "name": "case-blocks-False-after-False",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "IndentCaseBlocks": false,
+        "BreakBeforeBraces": "Custom",
+        "BraceWrapping": {
+          "AfterCaseLabel": false
+        }
+      },
+      "expected": "void f() {\n  switch (x) {\n  case 1: {\n    work();\n    break;\n  }\n  case 2: // note\n  {\n    other();\n  }\n  case 3:\n    // comment\n    {\n      more();\n    }\n  }\n}\n"
+    },
+    {
+      "name": "case-blocks-False-after-True",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "IndentCaseBlocks": false,
+        "BreakBeforeBraces": "Custom",
+        "BraceWrapping": {
+          "AfterCaseLabel": true
+        }
+      },
+      "expected": "void f() {\n  switch (x) {\n  case 1:\n  {\n    work();\n    break;\n  }\n  case 2: // note\n  {\n    other();\n  }\n  case 3:\n    // comment\n    {\n      more();\n    }\n  }\n}\n"
+    },
+    {
+      "name": "case-blocks-True-after-False",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "IndentCaseBlocks": true,
+        "BreakBeforeBraces": "Custom",
+        "BraceWrapping": {
+          "AfterCaseLabel": false
+        }
+      },
+      "expected": "void f() {\n  switch (x) {\n  case 1:\n    {\n      work();\n      break;\n    }\n  case 2: // note\n    {\n      other();\n    }\n  case 3:\n    // comment\n    {\n      more();\n    }\n  }\n}\n"
+    },
+    {
+      "name": "case-blocks-True-after-True",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "IndentCaseBlocks": true,
+        "BreakBeforeBraces": "Custom",
+        "BraceWrapping": {
+          "AfterCaseLabel": true
+        }
+      },
+      "expected": "void f() {\n  switch (x) {\n  case 1:\n    {\n      work();\n      break;\n    }\n  case 2: // note\n    {\n      other();\n    }\n  case 3:\n    // comment\n    {\n      more();\n    }\n  }\n}\n"
+    },
+    {
+      "name": "requires-True",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "IndentRequiresClause": true
+      },
+      "expected": "template <class T>\n  requires Executor<std::decay_t<T>>\nvoid run(T t);\nstruct A {\n  template <class C, class E>\n    requires(!Executor<C> &&\n             Executor<E>)\n  A(C c, E e)\n      : e(e) {\n  }\n  E e;\n};\n"
+    },
+    {
+      "name": "requires-False",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "IndentRequiresClause": false
+      },
+      "expected": "template <class T>\nrequires Executor<std::decay_t<T>>\nvoid run(T t);\nstruct A {\n  template <class C, class E>\n  requires(!Executor<C> &&\n           Executor<E>)\n  A(C c, E e)\n      : e(e) {\n  }\n  E e;\n};\n"
     },
     {
       "name": "conditional-wrapped-link",

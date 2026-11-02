@@ -52,6 +52,11 @@ pub struct CppStyle {
     pub indent_type_body: bool,
     pub indent_case_label: bool,
     pub indent_case_body: bool,
+    /// clang-format's IndentCaseBlocks: a block a case label opens is an
+    /// ordinary statement of the case, not one at the label's level.
+    pub indent_case_blocks: bool,
+    /// clang-format's IndentRequiresClause, for a clause on its own line.
+    pub indent_requires_clause: bool,
     /// Signed label offset from the declaration indentation.
     pub access_specifier_offset: isize,
     pub pp_directive_indent: PPDirectiveIndent,
@@ -80,6 +85,8 @@ impl Default for CppStyle {
             indent_type_body: true,
             indent_case_label: false,
             indent_case_body: true,
+            indent_case_blocks: false,
+            indent_requires_clause: true,
             access_specifier_offset: 0,
             pp_directive_indent: PPDirectiveIndent::None,
             pp_indent_width: None,

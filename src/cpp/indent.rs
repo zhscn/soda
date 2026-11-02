@@ -28,6 +28,8 @@ pub enum IndentRole {
     TemplateArgsContinuation,
     BraceInit,
     StatementContinuation,
+    /// A requires clause on its own line under template parameters.
+    RequiresClause,
     PreprocessorDirective,
     OpeningToken,
     ClosingToken,
@@ -204,6 +206,22 @@ impl Computer<'_> {
                     | N::WhileStatement
                     | N::DoStatement
                     | N::SwitchStatement
+            )
+        {
+            return self.tree.range(parent).start;
+        }
+        // The block a case label opens, `case A:` above `{`, starts with it,
+        // as clang-format's parseLabel has it: unless IndentCaseBlocks makes
+        // it an ordinary statement, or comments on lines of their own come
+        // between them.
+        if node.kind == N::CompoundStatement
+            && !self.style.structure.indent_case_blocks
+            && let Some(parent) = node.parent
+            && self.tree.nodes[parent].kind == N::CaseSection
+            && let [label, block, ..] = self.tree.nodes[parent].children[..]
+            && block == id
+            && !own_line_comment(
+                &self.tree.tokens[self.tree.nodes[label].tokens.end..node.tokens.start],
             )
         {
             return self.tree.range(parent).start;
@@ -410,6 +428,24 @@ impl Computer<'_> {
                         self.indent(self.line_of(anchor))
                     };
                     return self.fixed(IndentRole::ClosingToken, column, Some(anchor));
+                }
+                // `requires` under `template<...>`: one level in from the
+                // template with IndentRequiresClause, else beside it.
+                K::Identifier
+                    if self.tree.source()[token.range.clone()] == *"requires"
+                        && self.tree.nodes[id].kind == N::OpaqueDeclaration
+                        && self.tree.tokens[self.tree.nodes[id].tokens.start].kind
+                            == K::TemplateKw =>
+                {
+                    let anchor = self.tree.range(id).start;
+                    let base = self.indent(self.line_of(anchor));
+                    let column = base
+                        + if self.style.structure.indent_requires_clause {
+                            self.style.whitespace.indent_width
+                        } else {
+                            0
+                        };
+                    return self.fixed(IndentRole::RequiresClause, column, Some(anchor));
                 }
                 K::PreprocessorHash => {
                     if self.style.directive.layout == PPDirectiveIndent::Leave {
@@ -910,6 +946,24 @@ pub fn compute_indent(
         return Ok(body);
     }
     Ok(decision)
+}
+
+/// Whether a comment among `tokens` starts its line, rather than trailing
+/// code on it.
+fn own_line_comment(tokens: &[super::Token]) -> bool {
+    let mut line_start = false;
+    tokens.iter().any(|token| match token.kind {
+        K::Newline => {
+            line_start = true;
+            false
+        }
+        K::Whitespace => false,
+        K::LineComment | K::BlockComment if line_start => true,
+        _ => {
+            line_start = false;
+            false
+        }
+    })
 }
 
 /// A continuation line of a directive, laid out as clang-format lays it out.

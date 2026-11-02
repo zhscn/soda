@@ -121,9 +121,7 @@ fn merge(base: &mut Map<String, Value>, patch: &Map<String, Value>) {
 }
 
 const UNSUPPORTED: &[&str] = &[
-    "IndentCaseBlocks",
     "IndentGotoLabels",
-    "IndentRequiresClause",
     "LambdaBodyIndentation",
     "IndentExportBlock",
     "RequiresExpressionIndentation",

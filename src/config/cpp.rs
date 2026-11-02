@@ -89,6 +89,10 @@ pub(super) fn to_rules(v: &Map<String, Value>, doc: usize) -> Result<CppRules, C
     policy.structure.access_offset = offset;
     policy.structure.indent_case_labels =
         boolean(get!("IndentCaseLabels"), doc, "IndentCaseLabels")?;
+    policy.structure.indent_case_blocks =
+        boolean(get!("IndentCaseBlocks"), doc, "IndentCaseBlocks")?;
+    policy.structure.indent_requires_clause =
+        boolean(get!("IndentRequiresClause"), doc, "IndentRequiresClause")?;
     policy.structure.indent_wrapped_function_names = boolean(
         get!("IndentWrappedFunctionNames"),
         doc,

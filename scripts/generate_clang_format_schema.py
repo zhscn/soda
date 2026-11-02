@@ -146,10 +146,10 @@ print(f'Captured {len(options)} options and {len(schema)} YAML types from {revis
 import csv
 cpp_adapter = (ROOT / 'src/config/cpp.rs').read_text()
 mapped = set(re.findall(r'"([A-Za-z]\w*)"', cpp_adapter)) & options.keys()
-mapped.update(['IndentFunctionDeclarationAfterType', 'BreakConstructorInitializersBeforeComma'])
+mapped.update(['IndentFunctionDeclarationAfterType', 'BreakConstructorInitializersBeforeComma', 'IndentRequires'])
 parser = (ROOT / 'src/config/parse.rs').read_text()
 unsupported_block = parser.split('const UNSUPPORTED:')[1].split('];', 1)[0]
-unsupported = set(re.findall(r'"([^"]+)"', unsupported_block)) | {'IndentRequires'}
+unsupported = set(re.findall(r'"([^"]+)"', unsupported_block))
 partial = {'AlignOperands', 'Cpp11BracedListStyle', 'BraceWrapping', 'BreakBeforeBraces', 'MacroBlockBegin', 'MacroBlockEnd'}
 with (ROOT / 'docs/clang-format-options.csv').open('w', newline='') as output:
     writer = csv.writer(output, lineterminator='\n')

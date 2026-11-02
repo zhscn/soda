@@ -47,6 +47,8 @@ pub struct StructurePolicy {
     pub access_offset: isize,
     pub indent_case_labels: bool,
     pub indent_case_body: bool,
+    pub indent_case_blocks: bool,
+    pub indent_requires_clause: bool,
     pub indent_wrapped_function_names: bool,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -135,6 +137,8 @@ impl CppStyle {
                 access_offset: self.access_specifier_offset.saturating_sub(w as isize),
                 indent_case_labels: self.indent_case_label,
                 indent_case_body: self.indent_case_body,
+                indent_case_blocks: self.indent_case_blocks,
+                indent_requires_clause: self.indent_requires_clause,
                 indent_wrapped_function_names: self.indent_wrapped_function_names,
             },
             expression: ExpressionPolicy {

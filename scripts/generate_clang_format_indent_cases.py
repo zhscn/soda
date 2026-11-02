@@ -65,6 +65,9 @@ profiles.append(('argument-alignment', {}, arguments))
 macro_calls = ('void f() {\nEXPECT_EQ(first, second)\n<< "message " << value;\n'
                'ASSERT_TRUE(ready)\n.With(x);\nLOG_EVENT(x)\nwork();\n}\n')
 profiles.append(('macro-call-continuation', {'BasedOnStyle': 'Google'}, macro_calls))
+# So does an all-caps name of five letters or more alone on its line.
+profiles.append(('macro-name-statement', {'BasedOnStyle': 'Google'},
+                 'namespace absl {\nABSL_NAMESPACE_BEGIN\n\n// Comment.\nvoid f();\nABSL_NAMESPACE_END\n}  // namespace absl\n'))
 # Conditionals: a condition ending in a call, a chain whose colons line up with
 # its first condition, and a link of the chain that is itself wrapped.
 conditionals = ('void f() {\nWidth = VT->isPacked(*this)\n? VT->size()\n: 0;\n'
@@ -79,6 +82,26 @@ macros = ('#define PRINT(Name) \\\nif (counts[Idx]) \\\nerrs() << "  " << counts
           '#if defined(FIRST) && \\\ndefined(SECOND)\nint x;\n#elif (THIRD + \\\nFOURTH) > 3\nint y;\n#endif\n')
 for style in ['LLVM', 'Google']:
     profiles.append((f'macro-body-{style}', {'BasedOnStyle': style}, macros))
+# Declarators after a class body belong to its declaration; `struct` in a
+# parameter list or a return type names a type and defines none.
+records = ('static inline struct tm local(int t) {\nstruct tm value = convert(t);\nreturn value;\n}\n'
+           'void f() {\nstatic const struct {\nconst char* in;\nint out;\n} specs[] = {\n{"", 0},\n{"a", 1},\n};\n}\n'
+           'int convert(\nstruct addrinfo* ai, int host) {\nreturn host;\n}\n')
+profiles.append(('record-declarators', {'BasedOnStyle': 'Google'}, records))
+# A block a case label opens stands at the label's level, unless
+# IndentCaseBlocks makes it a statement of the case.
+case_blocks = ('void f() {\nswitch (x) {\ncase 1: {\nwork();\nbreak;\n}\ncase 2: // note\n{\nother();\n}\n'
+               'case 3:\n// comment\n{\nmore();\n}\n}\n}\n')
+for blocks in [False, True]:
+    for after in [False, True]:
+        profiles.append((f'case-blocks-{blocks}-after-{after}',
+                         {'IndentCaseBlocks': blocks, 'BreakBeforeBraces': 'Custom',
+                          'BraceWrapping': {'AfterCaseLabel': after}}, case_blocks))
+# A requires clause on its own line under template parameters.
+requires = ('template <class T>\nrequires Executor<std::decay_t<T>>\nvoid run(T t);\n'
+            'struct A {\ntemplate <class C, class E>\nrequires(!Executor<C> &&\nExecutor<E>)\nA(C c, E e)\n: e(e) {}\nE e;\n};\n')
+for indent in [True, False]:
+    profiles.append((f'requires-{indent}', {'IndentRequiresClause': indent}, requires))
 profiles.append(('conditional-wrapped-link', {},
                  'void f() {\nResult = Context.isHidden()\n? Hidden\n: Context.isProtected()\n? Protected\n: Default;\n}\n'))
 cases = []

@@ -110,7 +110,7 @@ impl CppSession {
         self.rules.enabled()
             && matches!(
                 ch,
-                ':' | '{' | '}' | '#' | 'e' | 'f' | '<' | '>' | '.' | '?'
+                ':' | '{' | '}' | '#' | 'e' | 'f' | '<' | '>' | '.' | '?' | 's'
             )
     }
     fn matches(&self, snapshot: &Snapshot) -> bool {
@@ -248,7 +248,19 @@ impl CppSession {
         // A `?` after a colon that leads its line makes that link of a
         // conditional chain line up with the chain's first condition.
         let mut link = false;
-        if operator {
+        // Finishing `requires` first on a line moves a clause under template
+        // parameters, as Enter after them cannot know that it comes.
+        let requires = request.trigger == IndentTrigger::Typed('s');
+        if requires {
+            let prefix = snapshot.byte_slice(start..request.position).unwrap();
+            let word: Vec<u8> = prefix
+                .bytes()
+                .skip_while(|b| matches!(b, b' ' | b'\t'))
+                .collect();
+            if word != b"require" {
+                return Ok(IndentAdvice::Unavailable);
+            }
+        } else if operator {
             let prefix = snapshot.byte_slice(start..request.position).unwrap();
             let typed: Vec<u8> = prefix
                 .bytes()
@@ -298,6 +310,13 @@ impl CppSession {
                         )
             });
             if !leads {
+                return Ok(IndentAdvice::Unavailable);
+            }
+        } else if requires {
+            let word = first_significant(tree.tokens(), start)
+                .filter(|token| token.range.contains(&request.position))
+                .map(|token| &tree.source()[token.range.clone()]);
+            if word != Some("requires") {
                 return Ok(IndentAdvice::Unavailable);
             }
         } else if pp_word {
