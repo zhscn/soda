@@ -245,6 +245,21 @@ impl Catalog {
     pub fn cpp(&self) -> &Profile {
         &self.cpp
     }
+    /// A language by its id; `text` is plain text.
+    pub fn by_id(&self, id: &str) -> Option<Arc<Profile>> {
+        if id == self.plain.id {
+            return Some(Arc::new(self.plain.clone()));
+        }
+        self.entries
+            .iter()
+            .find(|entry| entry.profile.id == id)
+            .map(|entry| entry.profile.clone())
+    }
+    /// Every language id, plain text first.
+    pub fn ids(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.plain.id.as_str())
+            .chain(self.entries.iter().map(|entry| entry.profile.id.as_str()))
+    }
     /// The language of a file: exact file names first, then the longest
     /// matching extension (extensions may contain dots, as in `.js.map`).
     pub fn detect(&self, path: &Path) -> Option<&Arc<Profile>> {

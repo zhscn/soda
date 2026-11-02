@@ -10,8 +10,12 @@
 use super::Runtime;
 mod buffer;
 mod bundled;
+mod editor;
+mod marks;
+mod server;
+mod setup;
 use crate::interaction::{
-    Command, LuaRequest,
+    LuaRequest,
     completion::{Asked, Item},
 };
 use mlua::{Function, Lua, LuaSerdeExt, SerializeOptions, Table, Value};
@@ -29,6 +33,8 @@ const FUNCTIONS: &[&str] = &[
     "command",
     "val",
     "option",
+    "set",
+    "declare_option",
     "message",
     "flag",
     "unflag",
@@ -41,13 +47,22 @@ const FUNCTIONS: &[&str] = &[
     "inlays",
     "indicator",
     "keys",
+    "map",
+    "unmap",
+    "face",
+    "language",
+    "bindings",
     "hook",
     "define_command",
     "spawn",
+    "defer",
+    "cancel",
     "results",
     "open",
     "clipboard",
     "completion_source",
+    "buffer_list",
+    "window_list",
     "lsp_server",
     "lsp_request",
     "lsp_notify",
@@ -103,6 +118,24 @@ for _, name in ipairs(methods) do
     return lent("buf:" .. name)["buffer_" .. name](self.id, ...)
   end
 end
+local buffer_list, window_list = soda.buffer_list, soda.window_list
+soda.buffer_list, soda.window_list = nil, nil
+-- Every open document, as handles.
+function soda.buffers()
+  local out = {}
+  for _, id in ipairs(buffer_list()) do
+    table.insert(out, setmetatable({ id = id }, Buffer))
+  end
+  return out
+end
+-- Windows on screen, the split ones in reading order, then side windows.
+function soda.windows()
+  local out = window_list()
+  for _, window in ipairs(out) do
+    window.buffer = setmetatable({ id = window.buffer }, Buffer)
+  end
+  return out
+end
 function soda.buffer(path)
   local id = lent("soda.buffer").buffer(path)
   return id and setmetatable({ id = id }, Buffer)
@@ -142,10 +175,21 @@ pub(super) struct Job {
     stderr: String,
 }
 pub(super) enum Request {
-    Chunk { origin: String, code: String },
-    Call { id: u64, argument: String },
+    Chunk {
+        origin: String,
+        code: String,
+    },
+    Call {
+        id: u64,
+        argument: String,
+    },
     Done(Job),
-    Complete { source: u64, asked: Arc<Asked> },
+    /// A `soda.defer` function whose time came.
+    Timer(u64),
+    Complete {
+        source: u64,
+        asked: Arc<Asked>,
+    },
     Lsp(super::lsp::Delivery),
 }
 /// What a source answered, whenever it does.
@@ -171,6 +215,8 @@ pub(super) struct Host {
     answers: (Sender<Answer>, Receiver<Answer>),
     /// When the request running now has to stop.
     deadline: std::rc::Rc<Cell<Option<std::time::Instant>>>,
+    /// `soda.defer` functions: when, which, and the view they run on.
+    timers: RefCell<Vec<(std::time::Instant, u64, Option<crate::application::ViewId>)>>,
 }
 /// How long one request may run. Lua runs on the editor's thread, so a
 /// loop that does not end would hold the editor for good; past this every
@@ -229,6 +275,7 @@ impl Host {
             jobs: channel(),
             answers: channel(),
             deadline,
+            timers: RefCell::default(),
         })
     }
     /// Calls a source with what it is asked and a sink for its answer. The
@@ -298,426 +345,21 @@ impl Host {
         let result = lua.scope(|scope| {
             let soda = lua.create_table()?;
             buffer::register(scope, &soda, &runtime, &edited)?;
-            soda.set(
-                "command",
-                scope.create_function(|_, line: String| {
-                    let mut runtime = runtime.borrow_mut();
-                    runtime.failed = false;
-                    runtime.command(Command::Named(line));
-                    Ok((!runtime.failed, runtime.message.clone()))
-                })?,
-            )?;
-            soda.set(
-                "val",
-                scope.create_function(|_, name: String| {
-                    expand(&runtime.borrow(), &format!("%val{{{name}}}"))
-                })?,
-            )?;
-            soda.set(
-                "option",
-                scope.create_function(|_, name: String| {
-                    expand(&runtime.borrow(), &format!("%opt{{{name}}}"))
-                })?,
-            )?;
-            soda.set(
-                "message",
-                scope.create_function(|_, text: String| {
-                    runtime.borrow_mut().report(text);
-                    Ok(())
-                })?,
-            )?;
-            soda.set(
-                "flag",
-                scope.create_function(
-                    |_, (group, face, sign, lines): (String, String, String, Vec<usize>)| {
-                        let flag = crate::application::Flag::new(&face, &sign)
-                            .map_err(mlua::Error::runtime)?;
-                        let lines = lines
-                            .into_iter()
-                            .filter(|line| *line > 0)
-                            .map(|line| line - 1)
-                            .collect();
-                        let mut runtime = runtime.borrow_mut();
-                        let document = runtime.document().map_err(mlua::Error::runtime)?;
-                        runtime.edit_event(crate::application::Event::Flag {
-                            document,
-                            group,
-                            flag,
-                            lines,
-                        })
-                    },
-                )?,
-            )?;
-            soda.set(
-                "note",
-                scope.create_function(|_, (group, items): (String, Vec<mlua::Table>)| {
-                    let notes = items
-                        .iter()
-                        .map(|item| {
-                            let place = |name: &str| -> mlua::Result<(usize, usize)> {
-                                let [line, column]: [usize; 2] = item.get(name)?;
-                                Ok((line.saturating_sub(1), column.saturating_sub(1)))
-                            };
-                            let severity: String = item.get("severity")?;
-                            Ok(crate::application::NoteSpan {
-                                start: place("from")?,
-                                end: place("to")?,
-                                severity: crate::application::Severity::parse(&severity)
-                                    .map_err(mlua::Error::runtime)?,
-                                text: item.get("text")?,
-                            })
-                        })
-                        .collect::<mlua::Result<Vec<_>>>()?;
-                    let mut runtime = runtime.borrow_mut();
-                    let document = runtime.document().map_err(mlua::Error::runtime)?;
-                    runtime.edit_event(crate::application::Event::Note {
-                        document,
-                        group,
-                        notes,
-                    })
-                })?,
-            )?;
-            soda.set(
-                "indicator",
-                scope.create_function(|_, (line, text): (usize, String)| {
-                    let mut runtime = runtime.borrow_mut();
-                    let document = runtime.document().map_err(mlua::Error::runtime)?;
-                    runtime
-                        .app
-                        .set_indicator(document, line.saturating_sub(1), text);
-                    runtime.dirty = true;
-                    Ok(())
-                })?,
-            )?;
-            soda.set(
-                "keys",
-                scope.create_function(|_, notation: String| {
-                    let keys = crate::interaction::KeyStroke::parse_sequence(&notation)
-                        .map_err(|error| mlua::Error::runtime(format!("{error:?}")))?;
-                    let mut runtime = runtime.borrow_mut();
-                    for key in keys {
-                        runtime.input(crate::interaction::UserInput::Key(key));
-                    }
-                    Ok(())
-                })?,
-            )?;
-            soda.set(
-                "tokens",
-                scope.create_function(|_, (data, names): (Vec<usize>, Vec<String>)| {
-                    let categories: Vec<_> = names
-                        .iter()
-                        .map(|name| crate::syntax::Category::named(name))
-                        .collect();
-                    let tokens = data
-                        .as_chunks::<4>()
-                        .0
-                        .iter()
-                        .filter_map(|token| {
-                            let category = (*categories.get(token[3])?)?;
-                            Some(crate::application::TokenSpan {
-                                line: token[0],
-                                bytes: token[1]..token[2],
-                                category,
-                            })
-                        })
-                        .collect();
-                    let mut runtime = runtime.borrow_mut();
-                    let document = runtime.document().map_err(mlua::Error::runtime)?;
-                    runtime.edit_event(crate::application::Event::Tokens { document, tokens })
-                })?,
-            )?;
-            soda.set(
-                "inlays",
-                scope.create_function(|_, items: Vec<Table>| {
-                    let hints = items
-                        .iter()
-                        .map(|item| {
-                            let line: usize = item.get("line")?;
-                            let column: usize = item.get("column")?;
-                            let text: String = item.get("text")?;
-                            Ok((line.saturating_sub(1), column.saturating_sub(1), text))
-                        })
-                        .collect::<mlua::Result<Vec<_>>>()?;
-                    let mut runtime = runtime.borrow_mut();
-                    let document = runtime.document().map_err(mlua::Error::runtime)?;
-                    runtime.edit_event(crate::application::Event::Inlays { document, hints })
-                })?,
-            )?;
-            soda.set(
-                "hint",
-                scope.create_function(|_, text: Option<String>| {
-                    let mut runtime = runtime.borrow_mut();
-                    runtime.hint = text;
-                    runtime.dirty = true;
-                    Ok(())
-                })?,
-            )?;
-            soda.set(
-                "prompt",
-                scope.create_function(|_, text: String| {
-                    runtime.borrow_mut().command(Command::Ex(text));
-                    Ok(())
-                })?,
-            )?;
-            soda.set(
-                "choose",
-                scope.create_function(
-                    |_, (title, items, function): (String, Vec<String>, Function)| {
-                        let id = self.keep(function)?;
-                        runtime
-                            .borrow_mut()
-                            .command(Command::Offer { id, title, items });
-                        Ok(())
-                    },
-                )?,
-            )?;
-            soda.set(
-                "popup",
-                scope.create_function(|_, text: String| {
-                    let mut runtime = runtime.borrow_mut();
-                    runtime.popup = Some(text);
-                    runtime.popup_scroll.set(0);
-                    runtime.dirty = true;
-                    Ok(())
-                })?,
-            )?;
-            soda.set(
-                "unflag",
-                scope.create_function(|_, group: Option<String>| {
-                    let mut runtime = runtime.borrow_mut();
-                    let document = runtime.document().map_err(mlua::Error::runtime)?;
-                    // Nothing to remove is not a failure for a script.
-                    let _ = runtime
-                        .app
-                        .dispatch(crate::application::Event::Unflag { document, group });
-                    runtime.dirty = true;
-                    Ok(())
-                })?,
-            )?;
-            soda.set(
-                "hook",
-                scope.create_function(
-                    |_, (event, filter, function): (String, String, Function)| {
-                        let id = self.keep(function)?;
-                        runtime
-                            .borrow_mut()
-                            .layers
-                            .add_hook(&event, &filter, format!("lua-call {id} %val{{hook}}"))
-                            .map_err(mlua::Error::runtime)
-                    },
-                )?,
-            )?;
-            soda.set(
-                "define_command",
-                scope.create_function(
-                    |_, (name, second, third): (String, Value, Option<Function>)| {
-                        // `(name, doc, fn)` reads like a docstring;
-                        // `(name, fn)` has none.
-                        let (doc, function) = match (second, third) {
-                            (Value::String(doc), Some(function)) => {
-                                (Some(doc.to_str()?.to_owned()), function)
-                            }
-                            (Value::Function(function), None) => (None, function),
-                            _ => {
-                                return Err(mlua::Error::runtime(
-                                    "define_command takes a name, a description and a function",
-                                ));
-                            }
-                        };
-                        let id = self.keep(function)?;
-                        // The body names a function by number, which says
-                        // nothing to a reader; the name does.
-                        let doc = doc.unwrap_or_else(|| name.clone());
-                        runtime
-                            .borrow_mut()
-                            .layers
-                            .configure(Command::Define {
-                                name,
-                                body: format!("lua-call {id} %arg{{@}}"),
-                                doc: Some(doc),
-                            })
-                            .map_err(mlua::Error::runtime)
-                    },
-                )?,
-            )?;
-            soda.set(
-                "results",
-                scope.create_function(|_, (kind, lines): (String, Vec<String>)| {
-                    if kind.is_empty() || kind == "file" || kind.contains(['*', ' ']) {
-                        return Err(mlua::Error::runtime(format!(
-                            "{kind:?} cannot name results"
-                        )));
-                    }
-                    let mut runtime = runtime.borrow_mut();
-                    runtime.command(Command::Results { kind, lines });
-                    Ok(())
-                })?,
-            )?;
-            soda.set(
-                "open",
-                scope.create_function(
-                    |_, (path, line, column): (String, Option<i64>, Option<i64>)| {
-                        let line = line.unwrap_or(1);
-                        let column = column.unwrap_or(1);
-                        if line < 1 || column < 1 {
-                            return Err(mlua::Error::runtime(format!(
-                                "position {{{line}, {column}}} is outside the buffer"
-                            )));
-                        }
-                        let mut runtime = runtime.borrow_mut();
-                        runtime.layers.expect_jump();
-                        let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-                        let path = crate::interaction::path::resolve_path(
-                            &runtime.app.root(),
-                            home.as_deref(),
-                            std::path::Path::new(&path),
-                        )
-                        .map_err(mlua::Error::runtime)?;
-                        runtime.edit_event(crate::application::Event::OpenAt {
-                            path,
-                            line: line as usize - 1,
-                            column: column as usize - 1,
-                        })
-                    },
-                )?,
-            )?;
-            soda.set(
-                "clipboard",
-                scope.create_function(|_, text: String| {
-                    runtime
-                        .borrow_mut()
-                        .edit_event(crate::application::Event::SetClipboard(text))
-                })?,
-            )?;
-            soda.set(
-                "spawn",
-                scope.create_function(
-                    |_, (argv, function, input): (Vec<String>, Function, Option<String>)| {
-                        if argv.is_empty() {
-                            return Err(mlua::Error::runtime("soda.spawn needs a program"));
-                        }
-                        let id = self.keep(function)?;
-                        let (root, view) = {
-                            let runtime = runtime.borrow();
-                            (runtime.app.root(), runtime.app.active_view())
-                        };
-                        let sender = self.jobs.0.clone();
-                        std::thread::spawn(move || {
-                            let mut job = spawn(id, &argv, &root, input);
-                            job.view = view;
-                            let _ = sender.send(job);
-                        });
-                        Ok(())
-                    },
-                )?,
-            )?;
-            soda.set(
-                "completion_source",
-                scope.create_function(|_, (triggers, function): (String, Function)| {
-                    let id = self.keep(function)?;
-                    runtime
-                        .borrow_mut()
-                        .layers
-                        .completion_source(id, triggers.chars().collect());
-                    Ok(())
-                })?,
-            )?;
-            soda.set(
-                "lsp_server",
-                scope.create_function(
-                    |_, (language, command): (String, Option<Vec<String>>)| {
-                        if command.as_ref().is_some_and(Vec::is_empty) {
-                            return Err(mlua::Error::runtime("a language server needs a program"));
-                        }
-                        runtime.borrow_mut().lsp.set_server(language, command);
-                        Ok(())
-                    },
-                )?,
-            )?;
-            soda.set(
-                "lsp_array",
-                scope.create_function(|lua, table: Table| {
-                    table.set_metatable(Some(lua.array_metatable()))?;
-                    Ok(table)
-                })?,
-            )?;
-            soda.set(
-                "lsp_request",
-                scope.create_function(
-                    |lua, (method, params, function): (String, Value, Function)| {
-                        let params: serde_json::Value = lua.from_value(params)?;
-                        let id = self.keep(function)?;
-                        let mut runtime = runtime.borrow_mut();
-                        let Some(key) = runtime.lsp_key() else {
-                            return Ok(false);
-                        };
-                        let Runtime { lsp, app, .. } = &mut **runtime;
-                        lsp.sync(app, true);
-                        Ok(lsp.request(&key, &method, params, id))
-                    },
-                )?,
-            )?;
-            soda.set(
-                "lsp_notify",
-                scope.create_function(|lua, (method, params): (String, Value)| {
-                    let params: serde_json::Value = lua.from_value(params)?;
-                    let mut runtime = runtime.borrow_mut();
-                    let Some(key) = runtime.lsp_key() else {
-                        return Ok(false);
-                    };
-                    Ok(runtime.lsp.notify(&key, &method, params))
-                })?,
-            )?;
-            soda.set(
-                "lsp_on",
-                scope.create_function(|_, (method, function): (String, Function)| {
-                    let id = self.keep(function)?;
-                    runtime.borrow_mut().lsp.on(method, id);
-                    Ok(())
-                })?,
-            )?;
-            soda.set(
-                "lsp_uri",
-                scope.create_function(|_, ()| {
-                    let runtime = runtime.borrow();
-                    let document = runtime.document().ok();
-                    let path = document
-                        .and_then(|document| runtime.app.workspace().file(document))
-                        .and_then(|file| file.path());
-                    Ok(path.map(super::lsp::uri))
-                })?,
-            )?;
-            soda.set(
-                "lsp_info",
-                scope.create_function(|lua, ()| {
-                    let runtime = runtime.borrow();
-                    let Some(key) = runtime.lsp_key() else {
-                        return Ok(Value::Nil);
-                    };
-                    let Some((encoding, capabilities)) = runtime.lsp.client_of(&key) else {
-                        return Ok(Value::Nil);
-                    };
-                    let info = lua.create_table()?;
-                    info.set("encoding", encoding)?;
-                    info.set("capabilities", to_lua(lua, capabilities)?)?;
-                    Ok(Value::Table(info))
-                })?,
-            )?;
-            soda.set(
-                "lsp_restart",
-                scope.create_function(|_, ()| {
-                    let mut runtime = runtime.borrow_mut();
-                    if let Some(key) = runtime.lsp_key() {
-                        runtime.lsp.restart(&key);
-                    }
-                    Ok(())
-                })?,
-            )?;
+            editor::register(scope, &soda, &runtime, self)?;
+            marks::register(scope, &soda, &runtime)?;
+            setup::register(scope, &soda, &runtime, self)?;
+            server::register(scope, &soda, &runtime, self)?;
             lua.set_named_registry_value(IMPLEMENTATION, soda)?;
             let result = match request {
                 Request::Chunk { origin, code } => lua.load(code).set_name(origin).exec(),
                 Request::Call { id, argument } => {
                     self.callbacks()?.get::<Function>(id)?.call::<()>(argument)
+                }
+                Request::Timer(id) => {
+                    let callbacks = self.callbacks()?;
+                    let function = callbacks.get::<Function>(id)?;
+                    callbacks.set(id, Value::Nil)?;
+                    function.call::<()>(())
                 }
                 Request::Done(job) => {
                     let callbacks = self.callbacks()?;
@@ -967,6 +609,18 @@ impl Runtime {
                 (Request::Done(job), view)
             })
             .collect();
+        let now = std::time::Instant::now();
+        let due: Vec<_> = {
+            let mut timers = host.timers.borrow_mut();
+            let (due, waiting) = timers.drain(..).partition(|(at, ..)| *at <= now);
+            *timers = waiting;
+            due
+        };
+        let due = due
+            .into_iter()
+            .map(|(_, id, view): (_, u64, _)| (Request::Timer(id), view));
+        let mut done = done;
+        done.extend(due);
         if !done.is_empty() {
             self.lua_queue.extend(done);
             self.run_lua();

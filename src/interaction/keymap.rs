@@ -376,7 +376,7 @@ const GLOBAL: &[(&str, &str)] = &[
     ("<c-c>J", "window-down"),
     ("<c-c>K", "window-up"),
     ("<c-c>L", "window-right"),
-    ("<c-c>R", "resize-window"),
+    ("<c-c>W", "resize-window"),
 ];
 /// The keys of `meow`, and Emacs keys for the same moves.
 const NORMAL: &[(&str, &str)] = &[

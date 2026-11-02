@@ -97,10 +97,50 @@ impl LoadedFile {
 #[derive(Clone, Default)]
 pub struct FileService {
     options: ConfigOptions,
+    /// Languages configuration gives file names, or extensions starting
+    /// with a dot, over what the catalog says.
+    languages: Vec<(String, std::sync::Arc<crate::language::Profile>)>,
 }
 impl FileService {
     pub fn new(options: ConfigOptions) -> Self {
-        Self { options }
+        Self {
+            options,
+            languages: vec![],
+        }
+    }
+    /// Files named `name`, or ending in it when it starts with a dot, are
+    /// in the language `id` from now on.
+    pub(crate) fn map_language(&mut self, name: &str, id: &str) -> Result<(), String> {
+        if name.is_empty() || name.contains('/') {
+            return Err(format!("{name:?} is not a file name or an extension"));
+        }
+        let profile = catalog()
+            .by_id(id)
+            .ok_or_else(|| format!("unknown language {id}"))?;
+        self.languages.retain(|(known, _)| known != name);
+        self.languages.push((name.to_owned(), profile));
+        Ok(())
+    }
+    /// The language of a path: a configured name, then the longest
+    /// configured extension, then the catalog.
+    fn detect(&self, path: &Path) -> Option<std::sync::Arc<crate::language::Profile>> {
+        let name = path.file_name()?.to_str()?;
+        let mapped = self
+            .languages
+            .iter()
+            .find(|(known, _)| known == name)
+            .or_else(|| {
+                self.languages
+                    .iter()
+                    .filter(|(known, _)| {
+                        known.starts_with('.') && name.len() > known.len() && name.ends_with(known)
+                    })
+                    .max_by_key(|(known, _)| known.len())
+            });
+        match mapped {
+            Some((_, profile)) => Some(profile.clone()),
+            None => catalog().detect(path).cloned(),
+        }
     }
     pub fn resolve_path(&self, path: &Path) -> Result<PathBuf, FileError> {
         match fs::canonicalize(path) {
@@ -132,7 +172,7 @@ impl FileService {
         }
     }
     pub(crate) fn configuration(&self, path: &Path) -> Result<Option<ResolvedConfig>, FileError> {
-        let cpp = catalog()
+        let cpp = self
             .detect(path)
             .is_some_and(|profile| profile.analyzer == Analyzer::Cpp);
         if cpp {
@@ -160,13 +200,13 @@ impl FileService {
         self.options.fallback = style.to_owned();
     }
     /// The language of a file, given what `configuration` found for it.
-    pub(crate) fn language(path: &Path, configuration: &Option<ResolvedConfig>) -> Language {
+    pub(crate) fn language(&self, path: &Path, configuration: &Option<ResolvedConfig>) -> Language {
         if let Some(config) = configuration {
             return config.config.rules.clone().into();
         }
-        match catalog().detect(path) {
+        match self.detect(path) {
             Some(profile) if matches!(profile.analyzer, Analyzer::TextMate { .. }) => {
-                Language::TextMate(profile.clone())
+                Language::TextMate(profile)
             }
             _ => Language::PlainText,
         }
@@ -303,5 +343,37 @@ impl FileService {
                 .map_err(|e| io_error(path, e.error))?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn configured_names_and_extensions_come_before_the_catalog() {
+        let mut service = FileService::default();
+        let id = |service: &FileService, path: &str| match service.language(Path::new(path), &None)
+        {
+            Language::TextMate(profile) => profile.id.clone(),
+            Language::PlainText => "text".into(),
+            Language::Cpp(_) => "cpp".into(),
+        };
+        assert_eq!(id(&service, "a.foo"), "text");
+        service.map_language(".foo", "rust").unwrap();
+        service.map_language("Justfile", "makefile").unwrap();
+        service.map_language(".rs", "text").unwrap();
+        assert_eq!(id(&service, "a.foo"), "rust");
+        assert_eq!(id(&service, "Justfile"), "makefile");
+        assert_eq!(id(&service, "main.rs"), "text");
+        assert!(service.configuration(Path::new("a.inc")).unwrap().is_none());
+        service.map_language(".inc", "cpp").unwrap();
+        assert!(
+            service
+                .configuration(Path::new("/tmp/a.inc"))
+                .unwrap()
+                .is_some()
+        );
+        assert!(service.map_language(".x", "klingon").is_err());
+        assert!(service.map_language("a/b", "rust").is_err());
     }
 }

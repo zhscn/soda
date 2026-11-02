@@ -11,7 +11,7 @@
 -- Backspace and word deletion are soft in Insert. To keep a built-in key,
 -- unmap it:
 --
---   soda.command("unmap insert <bs>")
+--   soda.unmap("insert", "<bs>")
 
 local function before(a, b)
   return a[1] < b[1] or (a[1] == b[1] and a[2] < b[2])
@@ -295,25 +295,25 @@ soda.define_command("sexp-kill-backward", "Kill the previous expression", functi
 end)
 
 for _, mode in ipairs({ "normal", "insert" }) do
-  soda.command("map " .. mode .. " <c-a-f> sexp-forward")
-  soda.command("map " .. mode .. " <c-a-b> sexp-backward")
-  soda.command("map " .. mode .. " <c-a-u> sexp-up")
-  soda.command("map " .. mode .. " <c-a-a> sexp-beginning")
-  soda.command("map " .. mode .. " <c-a-e> sexp-end")
+  soda.map(mode, "<c-a-f>", "sexp-forward")
+  soda.map(mode, "<c-a-b>", "sexp-backward")
+  soda.map(mode, "<c-a-u>", "sexp-up")
+  soda.map(mode, "<c-a-a>", "sexp-beginning")
+  soda.map(mode, "<c-a-e>", "sexp-end")
 end
 for _, mode in ipairs({ "normal" }) do
-  soda.command("map " .. mode .. " <a-o> sexp-expand")
-  soda.command("map " .. mode .. " <c-a-space> sexp-expand")
+  soda.map(mode, "<a-o>", "sexp-expand")
+  soda.map(mode, "<c-a-space>", "sexp-expand")
 end
 for _, mode in ipairs({ "normal", "insert" }) do
-  soda.command("map " .. mode .. " <c-k> sexp-kill")
-  soda.command("map " .. mode .. " <c-a-k> sexp-kill-forward")
-  soda.command("map " .. mode .. " <c-a-bs> sexp-kill-backward")
-  soda.command("map " .. mode .. " <c-s-right> sexp-slurp")
-  soda.command("map " .. mode .. " <c-s-left> sexp-barf")
+  soda.map(mode, "<c-k>", "sexp-kill")
+  soda.map(mode, "<c-a-k>", "sexp-kill-forward")
+  soda.map(mode, "<c-a-bs>", "sexp-kill-backward")
+  soda.map(mode, "<c-s-right>", "sexp-slurp")
+  soda.map(mode, "<c-s-left>", "sexp-barf")
 end
-soda.command("map insert <bs> soft-backspace")
-soda.command("map insert <c-h> soft-backspace")
-soda.command("map insert <c-w> soft-delete-word")
-soda.command("map insert <c-bs> soft-delete-word")
-soda.command("map insert <a-bs> soft-delete-word")
+soda.map("insert", "<bs>", "soft-backspace")
+soda.map("insert", "<c-h>", "soft-backspace")
+soda.map("insert", "<c-w>", "soft-delete-word")
+soda.map("insert", "<c-bs>", "soft-delete-word")
+soda.map("insert", "<a-bs>", "soft-delete-word")

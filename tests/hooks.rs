@@ -45,14 +45,15 @@ fn hooks_from_configuration_shape_new_and_opened_documents() {
     std::fs::write(&python, "x").unwrap();
     std::fs::write(&text, "y").unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
-    let errors = r.source(
-        "init",
-        "hook new file set-local indent-width 2\n\
-         hook open .*\\.py set-local expand-tab false\n\
-         hook open [ bad\n",
-    );
-    assert_eq!(errors.len(), 1, "{errors:?}");
-    assert_eq!(errors[0].0, 3);
+    r.source_lua(
+        "init.lua",
+        r#"
+        assert(soda.command("hook new file set-local indent-width 2"))
+        assert(soda.command([[hook open .*\.py set-local expand-tab false]]))
+        assert(not soda.command("hook open [ bad"))
+        "#,
+    )
+    .unwrap();
     r.start(None);
     let untitled = active(&r);
     assert_eq!(r.app().options().int(Some(untitled), "indent-width"), 2);

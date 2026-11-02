@@ -143,20 +143,18 @@ fn open_accepts_a_path_argument() {
 #[test]
 fn configuration_maps_defines_and_reports_line_numbers() {
     let mut r = runtime("hello world");
-    let errors = r.source(
-        "init",
-        "# comment\n\
-         define-command shout pipe tr a-z A-Z\n\
-         map normal <space>u shout\n\
-         map insert <c-l> line-end\n\
-         map prompt <c-j> confirm\n\
-         map normal x no-such-command\n\
-         quit\n\
-         map normal <c-x><esc> nop\n",
-    );
-    let lines: Vec<_> = errors.iter().map(|(line, _)| *line).collect();
-    assert_eq!(lines, [6, 7, 8]);
-    assert!(r.message().starts_with("init:6: unknown command"));
+    r.source_lua(
+        "init.lua",
+        r#"
+        assert(soda.command("define-command shout pipe tr a-z A-Z"))
+        soda.map("normal", "<space>u", "shout")
+        soda.map("insert", "<c-l>", "line-end")
+        soda.map("prompt", "<c-j>", "confirm")
+        assert(not pcall(soda.map, "normal", "x", "no-such-command"))
+        assert(not pcall(soda.map, "normal", "<c-x><esc>", "nop"))
+        "#,
+    )
+    .unwrap();
     keys(&mut r, "<c-a><c-l>");
     assert_eq!(state(&r).1, 11);
     keys(&mut r, "<esc><space>u");
@@ -169,7 +167,11 @@ fn configuration_maps_defines_and_reports_line_numbers() {
     assert!(matches!(r.layer(), Some(Layer::CommandLine(_))));
     keys(&mut r, "<esc>");
     // unmap restores the default interpretation; nop hides a default.
-    r.source("init", "unmap insert <c-l>\nmap insert <c-a> nop\n");
+    r.source_lua(
+        "init.lua",
+        r#"soda.unmap("insert", "<c-l>") soda.map("insert", "<c-a>", "nop")"#,
+    )
+    .unwrap();
     keys(&mut r, "i");
     let before = state(&r);
     keys(&mut r, "<c-a><c-l>");
@@ -181,17 +183,15 @@ fn configuration_maps_defines_and_reports_line_numbers() {
 #[test]
 fn defined_commands_take_arguments_and_bound_their_expansion() {
     let mut r = runtime("x");
-    assert!(
-        r.source(
-            "init",
-            "define-command twice %arg{1}; %arg{1}\n\
-             define-command loop loop\n\
-             define-command write nop\n",
-        )
-        .iter()
-        .map(|(line, _)| *line)
-        .eq([3])
-    );
+    r.source_lua(
+        "init.lua",
+        r#"
+        assert(soda.command("define-command twice %arg{1}; %arg{1}"))
+        assert(soda.command("define-command loop loop"))
+        assert(not soda.command("define-command write nop"))
+        "#,
+    )
+    .unwrap();
     r.command(Command::Named("twice paste".into()));
     r.command(Command::Named("loop".into()));
     assert!(r.message().contains("recursively"), "{}", r.message());
@@ -218,10 +218,11 @@ fn palette_runs_commands_and_prefills_required_arguments() {
 #[test]
 fn help_lists_user_bindings_and_commands() {
     let mut r = runtime("");
-    r.source(
-        "init",
-        "define-command greet nop\nmap normal <space>g greet\n",
-    );
+    r.source_lua(
+        "init.lua",
+        r#"soda.command("define-command greet nop") soda.map("normal", "<space>g", "greet")"#,
+    )
+    .unwrap();
     r.resize(10_000, 10);
     keys(&mut r, "<esc><f1>");
     let Some(Layer::Help(session)) = r.layer() else {

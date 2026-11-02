@@ -7,7 +7,7 @@ mod commands;
 pub mod completion;
 pub mod modal;
 pub mod snippet;
-pub use commands::{Command, Departure, Sourced, WindowCommand};
+pub use commands::{Command, Departure, WindowCommand, show};
 mod departure;
 pub use departure::SaveWait;
 pub mod expand;
@@ -457,6 +457,11 @@ impl Layers {
             self.jumps.searched(app);
         }
         Ok(result.map_or(InputResult::Blocked, InputResult::Handled))
+    }
+    /// The bindings in force in a context, user ones over defaults: keys
+    /// and what they show.
+    pub fn bindings(&self, context: Context) -> Vec<(Vec<KeyStroke>, String)> {
+        self.keymap.bindings(context)
     }
     /// Recently used files, newest first.
     pub fn set_recent_files(&mut self, files: Vec<std::path::PathBuf>) {

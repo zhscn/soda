@@ -74,6 +74,8 @@ pub struct Runtime {
     /// its commands act on.
     notices: Vec<(&'static str, String, Option<ViewId>)>,
     hooking: bool,
+    /// When the last key came, until the idle hook has run for it.
+    idle: Option<Duration>,
     /// Recent messages, oldest first, and the one last recorded.
     messages: std::collections::VecDeque<String>,
     logged: String,
@@ -146,6 +148,7 @@ impl Runtime {
             replaying: false,
             notices: vec![],
             hooking: false,
+            idle: None,
             messages: Default::default(),
             logged: String::new(),
             state: Default::default(),
@@ -222,32 +225,6 @@ impl Runtime {
         handler: crate::interaction::CommandHandler,
     ) -> Result<(), String> {
         self.layers.register_command(name, handler)
-    }
-    /// Applies configuration text; the first error is also shown as the
-    /// status message, prefixed by `origin` and its line number.
-    pub fn source(&mut self, origin: &str, text: &str) -> Vec<(usize, String)> {
-        let crate::interaction::Sourced {
-            mut errors,
-            settings,
-        } = self.layers.source(text);
-        for (line, command) in settings {
-            self.message.clear();
-            self.command(command);
-            if !self.message.is_empty() {
-                errors.push((line, std::mem::take(&mut self.message)));
-            }
-        }
-        errors.sort_by_key(|(line, _)| *line);
-        for (line, error) in &errors {
-            self.log(format!("{origin}:{line}: {error}"));
-        }
-        if let Some((line, error)) = errors.first() {
-            self.message = format!("{origin}:{line}: {error}");
-            self.dirty = true;
-            // Every error is in the log already.
-            self.logged = self.message.clone();
-        }
-        errors
     }
     pub fn report(&mut self, message: String) {
         self.message = message;
@@ -345,6 +322,7 @@ impl Runtime {
     }
     pub fn input_at(&mut self, input: UserInput, time: Duration) {
         self.hints_until = Some(time + HINT_TIME);
+        self.idle = Some(time);
         if self.popup.is_some()
             && self.layer().is_none()
             && let UserInput::Key(key) = &input
@@ -631,6 +609,20 @@ impl Runtime {
     }
     fn accept(&mut self, update: Update, time: Duration) -> bool {
         let response = self.layers.observe(&self.app, &update, time);
+        if let Some(edit) = &update.edit {
+            // The view of the edit's session, if one shows it.
+            let view = self
+                .app
+                .views()
+                .find(|view| view.session_id == edit.session_id)
+                .map(|view| view.id);
+            let name = self.app.document_name(edit.document_id);
+            if edit.text_changed {
+                self.notices.push(("change", name, view));
+            } else if edit.selection_changed {
+                self.notices.push(("selection", name, view));
+            }
+        }
         for notice in &update.notices {
             if let Notice::Opened(view) = notice
                 && let Some(problem) = self
@@ -980,6 +972,16 @@ impl Runtime {
         }
         self.poll_lua();
         self.poll_lsp();
+        let now = self.epoch.elapsed();
+        let wait = Duration::from_millis(self.app.options().int(None, "idle-time") as u64);
+        if self.idle.is_some_and(|since| now >= since + wait) {
+            self.idle = None;
+            if let Some(view) = self.app.active_view().and_then(|id| self.app.view(id)) {
+                let name = self.app.document_name(view.document_id);
+                self.notices.push(("idle", name, Some(view.id)));
+                self.run_hooks(now);
+            }
+        }
         for _ in 0..8 {
             match self.files.poll() {
                 Ok(Some(FileCompletion::Open(completion))) => {

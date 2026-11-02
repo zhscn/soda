@@ -18,6 +18,7 @@ mod clipboard;
 mod context;
 pub use clipboard::ClipboardAction;
 mod display;
+pub mod faces;
 mod flags;
 mod highlights;
 mod inlays;
@@ -92,6 +93,17 @@ pub enum Event {
     },
     /// Makes splits equal again and side windows their opening size.
     ResetWindowSizes,
+    /// Gives files of a name, or an extension starting with a dot, a
+    /// language from now on.
+    MapLanguage {
+        name: String,
+        language: String,
+    },
+    /// Sets a face over the theme, or gives it back to the theme.
+    SetFace {
+        name: String,
+        spec: Option<faces::FaceSpec>,
+    },
     /// Moves the right or bottom edge of a window, as a mouse drags it.
     MoveWindowEdge {
         view: ViewId,
@@ -308,6 +320,8 @@ pub enum Error {
     NoHighlight,
     /// `unflag-lines` found nothing to remove.
     NoFlags,
+    /// A face or language that cannot be set.
+    Setting(String),
     Edit(EditError),
     File(FileError),
 }
@@ -330,6 +344,7 @@ impl fmt::Display for Error {
             Self::CannotResize => f.write_str("the window cannot change size that way"),
             Self::NoHighlight => f.write_str("no such highlight"),
             Self::NoFlags => f.write_str("no such flags"),
+            Self::Setting(error) => f.write_str(error),
             Self::Edit(e) => e.fmt(f),
             Self::File(e) => e.fmt(f),
         }
@@ -345,7 +360,8 @@ impl std::error::Error for Error {
             | Self::SideWindow
             | Self::CannotResize
             | Self::NoHighlight
-            | Self::NoFlags => None,
+            | Self::NoFlags
+            | Self::Setting(_) => None,
         }
     }
 }
@@ -385,6 +401,7 @@ pub struct Application {
     /// What was edited since each file was loaded or saved.
     touched: tidy::Touched,
     highlights: highlights::Highlights,
+    faces: faces::Faces,
     grep_pattern: Option<(DocumentId, regex::Regex)>,
     flags: flags::Flags,
     notes: notes::Notes,
@@ -568,6 +585,10 @@ impl Application {
     /// The windows on screen. The active view is always in one of them.
     pub fn windows(&self) -> &Windows {
         &self.windows
+    }
+    /// Face overrides over the frontend's theme.
+    pub fn faces(&self) -> &faces::Faces {
+        &self.faces
     }
     /// Where a window is in the editing area.
     pub fn window_area(&self, view: ViewId) -> Option<Area> {
@@ -1142,6 +1163,14 @@ impl Application {
                 }
             }
             Event::ResetWindowSizes => self.windows.reset(),
+            Event::MapLanguage { name, language } => self
+                .workspace
+                .map_language(&name, &language)
+                .map_err(Error::Setting)?,
+            Event::SetFace { name, spec } => {
+                self.faces.set(&name, spec).map_err(Error::Setting)?;
+                update.options_changed = true;
+            }
             Event::MoveWindowEdge { view, axis, delta } => {
                 // A drag that cannot go further leaves the edge where it is.
                 self.windows.move_edge(view, axis, delta, self.area);

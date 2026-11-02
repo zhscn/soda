@@ -35,12 +35,15 @@ fn shown(r: &Runtime) -> Vec<(String, Face)> {
 #[test]
 fn patterns_highlight_globally_or_in_one_document() {
     let mut r = runtime("foo bar_baz 中文 x");
-    let errors = r.source(
-        "init",
-        "highlight todo \\b(TODO|FIXME)\\b\nhighlight teal x\nhighlight-local mark x\n",
-    );
-    assert_eq!(errors.len(), 2, "{errors:?}");
-    assert!(errors[0].1.contains("unknown face teal"));
+    r.source_lua(
+        "init.lua",
+        r#"
+        assert(soda.command([[highlight todo \b(TODO|FIXME)\b]]))
+        local ok, message = soda.command("highlight teal x")
+        assert(not ok and message:find("unknown face teal"), message)
+        "#,
+    )
+    .unwrap();
     assert_eq!(shown(&r), [("\\b(TODO|FIXME)\\b".into(), Face::Todo)]);
     // Marks of the word at the caret take the next colour each.
     line(

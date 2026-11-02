@@ -37,6 +37,8 @@ pub enum Command {
         context: super::Context,
         keys: Vec<super::KeyStroke>,
         target: String,
+        /// What help and key hints show; `None` shows the target.
+        label: Option<String>,
     },
     Unmap {
         context: super::Context,
@@ -183,6 +185,16 @@ pub enum Command {
     },
     /// Drops the current document's own value of an option.
     UnsetOption(&'static str),
+    /// Gives files of a name or extension a language.
+    MapLanguage {
+        name: String,
+        language: String,
+    },
+    /// Sets a face over the theme; `None` gives it back.
+    Face {
+        name: String,
+        spec: Option<crate::application::faces::FaceSpec>,
+    },
     /// Sets where documents of a kind are shown.
     Display {
         kind: String,
@@ -214,12 +226,6 @@ pub enum WindowCommand {
     ResetSizes,
     /// Resizes step by step until Esc.
     ResizeMode,
-}
-/// The outcome of configuration text, by one-based line number.
-pub struct Sourced {
-    pub errors: Vec<(usize, String)>,
-    /// Settings the application keeps, to be executed in order.
-    pub settings: Vec<(usize, Command)>,
 }
 /// How `close`, `reload` and `quit` treat a document with unsaved changes.
 /// Without one, they ask through the command line.
@@ -328,6 +334,7 @@ impl Layers {
                 context: super::Context::Prompt,
                 keys,
                 target,
+                ..
             } => {
                 let input = super::keymap::prompt_action(target.trim())
                     .ok_or_else(|| format!("unknown prompt action: {target}"))?;
@@ -342,12 +349,14 @@ impl Layers {
                 context,
                 keys,
                 target,
+                label,
             } => {
                 if !self.registry.knows(&target) {
                     return Err(format!("unknown command: {target}"));
                 }
+                let label = label.unwrap_or_else(|| target.clone());
                 self.keymap
-                    .bind(context, &keys, Command::Named(target.clone()), target)
+                    .bind(context, &keys, Command::Named(target), label)
                     .map_err(|e| e.to_string())
             }
             Command::Unmap { context, keys } => self
@@ -378,36 +387,6 @@ impl Layers {
                     .into(),
             ),
         }
-    }
-    /// Applies configuration text line by line. Failed lines are skipped and
-    /// reported with their one-based line numbers. Settings that live in the
-    /// application (`set`, `display`) come back to be executed, with their
-    /// line numbers.
-    pub fn source(&mut self, text: &str) -> Sourced {
-        let mut errors = vec![];
-        let mut settings = vec![];
-        for (index, line) in text.lines().enumerate() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            let result = self
-                .registry
-                .parse_builtin(line)
-                .and_then(|command| match command {
-                    Command::SetOption { local: false, .. }
-                    | Command::Display { .. }
-                    | Command::Highlight { local: false, .. } => {
-                        settings.push((index + 1, command));
-                        Ok(())
-                    }
-                    command => self.configure(command),
-                });
-            if let Err(error) = result {
-                errors.push((index + 1, error));
-            }
-        }
-        Sourced { errors, settings }
     }
     /// The rows of text each window shows.
     pub fn set_window_rows(&mut self, rows: Vec<(crate::application::ViewId, usize)>) {
@@ -1023,6 +1002,10 @@ impl Layers {
             Command::Display { kind, placement } => {
                 response.events.push(Event::SetDisplay { kind, placement })
             }
+            Command::Face { name, spec } => response.events.push(Event::SetFace { name, spec }),
+            Command::MapLanguage { name, language } => {
+                response.events.push(Event::MapLanguage { name, language })
+            }
             Command::Window(command) => {
                 let Some(active) = app.active_view() else {
                     return Ok(super::InputResult::Handled(response));
@@ -1237,7 +1220,8 @@ fn go(
         },
     ]);
 }
-pub(super) fn show(app: &Application, document: crate::editor::DocumentId) -> Event {
+/// Shows a document: focuses a view of it, or adds one.
+pub fn show(app: &Application, document: crate::editor::DocumentId) -> Event {
     let active = active(app).filter(|v| v.document_id == document);
     let view = active.or_else(|| app.views().find(|v| v.document_id == document));
     view.map_or(Event::AddView(document), |v| Event::Focus(v.id))

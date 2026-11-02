@@ -418,6 +418,7 @@ fn the_leader_is_ctrl_c_and_reaches_bindings_of_any_module() {
         context: soda::interaction::Context::Global,
         keys: KeyStroke::parse_sequence("<c-c>y").unwrap(),
         target: "append".into(),
+        label: None,
     });
     keys(&mut r, "<space>y");
     assert_eq!(r.edit_mode(), EditMode::Insert);

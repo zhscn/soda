@@ -1,6 +1,7 @@
-//! Typed options with a global value and per-document overrides. The table
-//! of options is fixed; values are checked against their type when set, so
-//! readers never see an invalid one.
+//! Typed options with a global value and per-document overrides. The
+//! editor's options are a fixed table, and extensions declare theirs at
+//! run time; values are checked against their type when set, so readers
+//! never see an invalid one.
 use crate::editor::DocumentId;
 use std::collections::BTreeMap;
 
@@ -164,6 +165,21 @@ pub const OPTIONS: &[OptionInfo] = &[
         doc: "Lines one mouse wheel step scrolls",
     },
     OptionInfo {
+        name: "idle-time",
+        kind: Kind::Int {
+            min: 10,
+            max: 60_000,
+        },
+        default: Value::Int(500),
+        doc: "Milliseconds without a key before the idle hook runs",
+    },
+    OptionInfo {
+        name: "theme",
+        kind: Kind::Choice(&["auto", "dark", "light"]),
+        default: Value::Choice("auto"),
+        doc: "Colors: dark, light, or auto to follow the terminal's background",
+    },
+    OptionInfo {
         name: "mouse",
         kind: Kind::Bool,
         default: Value::Bool(true),
@@ -194,8 +210,109 @@ pub const OPTIONS: &[OptionInfo] = &[
         doc: "Keep copies in step with the system clipboard, or inside the editor",
     },
 ];
+/// Options extensions declared. They last as long as the process, as the
+/// editor's own do, so their names and words are leaked once.
+static DECLARED: std::sync::RwLock<Vec<&'static OptionInfo>> = std::sync::RwLock::new(vec![]);
 pub fn info(name: &str) -> Option<&'static OptionInfo> {
-    OPTIONS.iter().find(|option| option.name == name)
+    OPTIONS
+        .iter()
+        .find(|option| option.name == name)
+        .or_else(|| {
+            DECLARED
+                .read()
+                .unwrap()
+                .iter()
+                .find(|option| option.name == name)
+                .copied()
+        })
+}
+/// Every option, the editor's first.
+pub fn all() -> Vec<&'static OptionInfo> {
+    OPTIONS
+        .iter()
+        .chain(DECLARED.read().unwrap().iter().copied())
+        .collect()
+}
+/// What an extension asks for when it declares an option.
+pub enum Declared {
+    Bool(bool),
+    Int { default: u32, min: u32, max: u32 },
+    Choice { default: String, words: Vec<String> },
+}
+/// Declares an option. Declaring one again the same way is no change, so
+/// a module may be loaded twice; the editor's options cannot be declared.
+pub fn declare(name: &str, declared: Declared, doc: &str) -> Result<&'static OptionInfo, String> {
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
+        return Err(format!(
+            "{name:?} is not an option name: use a-z, 0-9 and -"
+        ));
+    }
+    if OPTIONS.iter().any(|option| option.name == name) {
+        return Err(format!("{name} is an option of the editor"));
+    }
+    let leak = |text: &str| -> &'static str { Box::leak(text.to_owned().into_boxed_str()) };
+    let (kind, default) = match &declared {
+        Declared::Bool(default) => (Kind::Bool, Value::Bool(*default)),
+        Declared::Int { default, min, max } => {
+            if !(min..=max).contains(&default) {
+                return Err(format!("{name}: {default} is not from {min} to {max}"));
+            }
+            (
+                Kind::Int {
+                    min: *min,
+                    max: *max,
+                },
+                Value::Int(*default),
+            )
+        }
+        Declared::Choice { default, words } => {
+            if !words.contains(default) {
+                return Err(format!("{name}: {default} is not one of its words"));
+            }
+            (Kind::Choice(&[]), Value::Choice(""))
+        }
+    };
+    let mut declared_options = DECLARED.write().unwrap();
+    if let Some(known) = declared_options.iter().find(|option| option.name == name) {
+        let same = match (&declared, known.kind) {
+            (Declared::Choice { default, words }, Kind::Choice(known_words)) => {
+                known_words.iter().eq(words.iter())
+                    && matches!(known.default, Value::Choice(d) if d == default)
+            }
+            _ => known.kind == kind && known.default == default,
+        };
+        return if same {
+            Ok(known)
+        } else {
+            Err(format!("{name} is declared already, another way"))
+        };
+    }
+    let (kind, default) = match declared {
+        Declared::Choice { default, words } => {
+            let words: &'static [&'static str] = Box::leak(
+                words
+                    .iter()
+                    .map(|w| leak(w))
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice(),
+            );
+            let default = words.iter().find(|w| **w == default).unwrap();
+            (Kind::Choice(words), Value::Choice(default))
+        }
+        _ => (kind, default),
+    };
+    let info: &'static OptionInfo = Box::leak(Box::new(OptionInfo {
+        name: leak(name),
+        kind,
+        default,
+        doc: leak(doc),
+    }));
+    declared_options.push(info);
+    Ok(info)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

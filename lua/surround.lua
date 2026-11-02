@@ -28,5 +28,5 @@ soda.define_command("surround", "Put a pair around the selection", function(argu
 end)
 
 for _, key in ipairs({ "(", "[", "{", '"', "'", "`" }) do
-  soda.command("map global <c-c>" .. key .. " surround " .. key)
+  soda.map("global", "<c-c>" .. key, "surround " .. key)
 end

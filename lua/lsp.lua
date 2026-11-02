@@ -635,7 +635,7 @@ soda.define_command("lsp-format", "Format the buffer with the language server", 
   local buf = soda.buffer()
   local origin = { buffer = buf, revision = buf:revision() }
   local uri = soda.lsp.uri()
-  local options = { tabSize = tonumber(soda.option("indent-width")), insertSpaces = true }
+  local options = { tabSize = soda.option("indent-width"), insertSpaces = true }
   ask("textDocument/formatting", { options = options }, function(edits)
     if not edits or #edits == 0 then
       soda.message("Already formatted")
@@ -831,13 +831,13 @@ soda.completion.register({
   end,
 })
 
-soda.command("map normal <a-.> lsp-definition")
-soda.command("map normal <a-?> lsp-references")
-soda.command("map global <c-c>k lsp-hover")
-soda.command("map global <c-c>c lsp-callers")
-soda.command("map global <c-c>C lsp-callees")
-soda.command("map global <c-c>R lsp-rename")
-soda.command("map global <c-c>a lsp-code-action")
-soda.command("map global <c-c>s lsp-symbols")
-soda.command("map global <c-c>S lsp-workspace-symbols")
-soda.command("map global <c-c>h lsp-switch")
+soda.map("normal", "<a-.>", "lsp-definition")
+soda.map("normal", "<a-?>", "lsp-references")
+soda.map("global", "<c-c>k", "lsp-hover")
+soda.map("global", "<c-c>c", "lsp-callers")
+soda.map("global", "<c-c>C", "lsp-callees")
+soda.map("global", "<c-c>R", "lsp-rename")
+soda.map("global", "<c-c>a", "lsp-code-action")
+soda.map("global", "<c-c>s", "lsp-symbols")
+soda.map("global", "<c-c>S", "lsp-workspace-symbols")
+soda.map("global", "<c-c>h", "lsp-switch")

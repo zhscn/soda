@@ -343,8 +343,8 @@ impl CommandLine {
                         mark(row, typed.into_iter().collect(), Some(detail))
                     })
                     .collect(),
-                Target::Slot(SlotKind::Option) => crate::options::OPTIONS
-                    .iter()
+                Target::Slot(SlotKind::Option) => crate::options::all()
+                    .into_iter()
                     .enumerate()
                     .filter(|(_, option)| option.name.starts_with(&query.text))
                     .map(|(i, option)| {
@@ -352,6 +352,26 @@ impl CommandLine {
                         let typed = (!query.text.is_empty()).then_some(0..query.text.len());
                         let row = row(i as u64, label, Some(option.name.into()), false);
                         mark(row, typed.into_iter().collect(), Some(15))
+                    })
+                    .collect(),
+                Target::Slot(SlotKind::Language) => crate::language::catalog()
+                    .ids()
+                    .map(String::from)
+                    .enumerate()
+                    .filter(|(_, id)| id.starts_with(&query.text))
+                    .map(|(i, id)| {
+                        let typed = (!query.text.is_empty()).then_some(0..query.text.len());
+                        let row = row(i as u64, id.clone(), Some(id), false);
+                        mark(row, typed.into_iter().collect(), None)
+                    })
+                    .collect(),
+                Target::Slot(SlotKind::Face) => crate::application::faces::names()
+                    .enumerate()
+                    .filter(|(_, name)| name.starts_with(&query.text))
+                    .map(|(i, name)| {
+                        let typed = (!query.text.is_empty()).then_some(0..query.text.len());
+                        let row = row(i as u64, name.clone(), Some(name), false);
+                        mark(row, typed.into_iter().collect(), None)
                     })
                     .collect(),
                 Target::Slot(SlotKind::Buffer) => buffers(app, &query.text, &mut self.matcher),

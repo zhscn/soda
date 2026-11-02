@@ -277,9 +277,9 @@ for key, command in pairs({
   q = "symbol-query-replace",
   r = "symbol-rename",
 }) do
-  soda.command("map mark " .. key .. " " .. command)
+  soda.map("mark", key, command)
 end
-soda.command("map global <c-c>i symbol-toggle")
-soda.command("map global <c-c>I symbol-clear")
-soda.command("map normal <a-n> symbol-switch-forward")
-soda.command("map normal <a-p> symbol-switch-backward")
+soda.map("global", "<c-c>i", "symbol-toggle")
+soda.map("global", "<c-c>I", "symbol-clear")
+soda.map("normal", "<a-n>", "symbol-switch-forward")
+soda.map("normal", "<a-p>", "symbol-switch-backward")

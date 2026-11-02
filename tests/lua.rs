@@ -785,3 +785,152 @@ fn lua_that_runs_too_long_is_stopped_and_lua_goes_on() {
     );
     assert_eq!(r.message(), "false");
 }
+#[test]
+fn lua_binds_keys_to_functions_and_reads_bindings() {
+    let mut r = runtime();
+    lua(
+        &mut r,
+        r#"
+        soda.map("normal", "<c-c>y", function() soda.message("yes") end, "Say yes")
+        soda.map("normal", "<c-c>Y", "echo why")
+        local found = {}
+        for _, binding in ipairs(soda.bindings("normal")) do
+          found[binding.keys] = binding.command
+        end
+        assert(found["<c-c>y"] == "Say yes", found["<c-c>y"])
+        assert(found["<c-c>Y"] == "echo why")
+        assert(found["h"] == "left")
+        assert(not pcall(soda.map, "nowhere", "a", "left"))
+        assert(not pcall(soda.map, "prompt", "<c-a>", function() end))
+        "#,
+    );
+    keys(&mut r, "<c-c>y");
+    assert_eq!(r.message(), "yes");
+    keys(&mut r, "<c-c>Y");
+    assert_eq!(r.message(), "why");
+    lua(&mut r, r#"soda.unmap("normal", "<c-c>y")"#);
+    lua(
+        &mut r,
+        r#"
+        for _, binding in ipairs(soda.bindings("normal")) do
+          assert(binding.keys ~= "<c-c>y")
+        end
+        "#,
+    );
+}
+#[test]
+fn faces_go_over_the_theme_from_lua_and_the_command_line() {
+    let mut r = runtime();
+    lua(
+        &mut r,
+        r##"
+        soda.face("syntax.keyword", { fg = "#ff0000", bold = true })
+        soda.face("selection", "bg:#333333")
+        assert(not pcall(soda.face, "nothing", "bold"))
+        assert(not pcall(soda.face, "text", { fg = "red" }))
+        "##,
+    );
+    let faces = r.app().faces();
+    let keyword = faces.get("syntax.keyword").unwrap();
+    assert_eq!(
+        keyword.fg,
+        Some(soda::application::faces::Color::Rgb(0xff0000))
+    );
+    assert!(keyword.attributes.unwrap().bold);
+    r.command(Command::Named("face selection".into()));
+    assert!(r.app().faces().get("selection").is_none());
+    r.command(Command::Named("face title fg:default underline".into()));
+    assert!(r.app().faces().get("title").is_some());
+}
+#[test]
+fn hooks_see_changes_moves_and_idleness_and_timers_fire_once() {
+    let mut r = runtime();
+    lua(
+        &mut r,
+        r#"
+        seen = {}
+        soda.hook("change", ".*", function() table.insert(seen, "change") end)
+        soda.hook("selection", ".*", function() table.insert(seen, "move") end)
+        soda.hook("idle", ".*", function() table.insert(seen, "idle") end)
+        soda.command("set idle-time 10")
+        "#,
+    );
+    // The caret starts at the end of the text.
+    keys(&mut r, "h");
+    keys(&mut r, "ix<esc>");
+    lua(&mut r, "soda.message(table.concat(seen, ' '))");
+    let shown = r.message().to_owned();
+    assert!(shown.starts_with("move"), "{shown}");
+    assert!(shown.contains("change"), "{shown}");
+    assert!(!shown.contains("idle"), "{shown}");
+    std::thread::sleep(Duration::from_millis(20));
+    r.poll();
+    r.poll();
+    lua(
+        &mut r,
+        r#"
+        local idle = 0
+        for _, event in ipairs(seen) do if event == "idle" then idle = idle + 1 end end
+        assert(idle == 1, table.concat(seen, " "))
+        fired = 0
+        soda.defer(0, function() fired = fired + 1 end)
+        local cancelled = soda.defer(0, function() fired = fired + 10 end)
+        assert(soda.cancel(cancelled))
+        assert(not soda.cancel(cancelled))
+        "#,
+    );
+    r.poll();
+    r.poll();
+    lua(&mut r, "assert(fired == 1, fired)");
+}
+#[test]
+fn modules_declare_options_and_read_typed_values() {
+    let mut r = runtime();
+    lua(
+        &mut r,
+        r#"
+        soda.declare_option("test-pairs", { default = true, doc = "Pair things" })
+        soda.declare_option("test-depth", { default = 3, min = 1, max = 9 })
+        soda.declare_option("test-style", { default = "a", choices = { "a", "b" } })
+        -- Declaring the same way again is fine; another way is not.
+        soda.declare_option("test-depth", { default = 3, min = 1, max = 9 })
+        assert(not pcall(soda.declare_option, "test-depth", { default = 4 }))
+        assert(not pcall(soda.declare_option, "tab-width", { default = 4 }))
+        assert(soda.option("test-pairs") == true)
+        assert(soda.option("test-depth") == 3)
+        assert(soda.option("tab-width") == 4)
+        soda.set("test-depth", 5)
+        soda.set("test-style", "b", true)
+        soda.set("expand-tab", false)
+        assert(not pcall(soda.set, "test-depth", 10))
+        assert(not pcall(soda.set, "test-style", "c"))
+        assert(soda.option("test-depth") == 5 and soda.option("test-style") == "b")
+        assert(soda.option("expand-tab") == false)
+        "#,
+    );
+    // The command line knows them as well.
+    r.command(Command::Named("set test-depth 7".into()));
+    lua(&mut r, r#"assert(soda.option("test-depth") == 7)"#);
+}
+#[test]
+fn lua_lists_buffers_and_windows() {
+    let mut r = runtime();
+    keys(&mut r, "<c-x>3");
+    r.set_editing_area(81, 20);
+    lua(
+        &mut r,
+        r#"
+        local buffers = soda.buffers()
+        assert(#buffers == 1)
+        local buf = buffers[1]
+        assert(buf == soda.buffer())
+        assert(buf:modified() and buf:path() == nil and buf:language() == "text", buf:name())
+        local windows = soda.windows()
+        assert(#windows == 2, #windows)
+        assert(windows[1].buffer == buf and windows[1].width == 40)
+        assert(not windows[1].active and windows[2].active)
+        soda.message(buf:name())
+        "#,
+    );
+    assert!(!r.message().is_empty());
+}

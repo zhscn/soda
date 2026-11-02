@@ -1,6 +1,8 @@
 //! The built-in color theme. Colors are 24-bit; terminals that do not
-//! announce truecolor get the nearest xterm 256-color index instead. A light
-//! variant is chosen when `COLORFGBG` reports a light background.
+//! announce truecolor get the nearest xterm 256-color index instead. The
+//! `theme` option picks the dark or light variant; `auto` takes the light
+//! one when `COLORFGBG` reports a light background. Faces set with `face`
+//! go over it.
 use crate::syntax::Category;
 use ratatui::style::{Color, Modifier, Style};
 
@@ -111,14 +113,73 @@ const LIGHT: Palette = Palette {
 };
 
 impl Theme {
-    pub fn detect() -> Self {
-        let light = std::env::var("COLORFGBG")
-            .ok()
-            .and_then(|value| value.rsplit(';').next()?.parse::<u8>().ok())
-            .is_some_and(|bg| bg == 7 || bg >= 9);
+    /// The theme a `theme` option value names, with the faces over it.
+    pub fn build(choice: &str, faces: &crate::application::faces::Faces) -> Self {
+        let light = match choice {
+            "light" => true,
+            "dark" => false,
+            _ => std::env::var("COLORFGBG")
+                .ok()
+                .and_then(|value| value.rsplit(';').next()?.parse::<u8>().ok())
+                .is_some_and(|bg| bg == 7 || bg >= 9),
+        };
         let truecolor = std::env::var("COLORTERM")
             .is_ok_and(|value| matches!(value.as_str(), "truecolor" | "24bit"));
-        Self::new(if light { &LIGHT } else { &DARK }, truecolor)
+        let mut theme = Self::new(if light { &LIGHT } else { &DARK }, truecolor);
+        for (name, spec) in faces.iter() {
+            if let Some(style) = theme.slot(name) {
+                *style = apply(*style, spec, truecolor);
+            }
+        }
+        theme
+    }
+    /// The style a face name stands for.
+    fn slot(&mut self, name: &str) -> Option<&mut Style> {
+        if let Some(category) = name.strip_prefix("syntax.") {
+            let index = CATEGORY_ORDER.iter().position(|c| c.name() == category)?;
+            return Some(&mut self.syntax[index]);
+        }
+        if let Some(n) = name.strip_prefix("mark") {
+            let n: usize = n.parse().ok()?;
+            return self.marks.get_mut(n.checked_sub(1)?);
+        }
+        Some(match name {
+            "text" => &mut self.text,
+            "dim" => &mut self.dim,
+            "gutter" => &mut self.gutter,
+            "gutter-current" => &mut self.gutter_current,
+            "cursor-line" => &mut self.cursor_line,
+            "selection" => &mut self.selection,
+            "status" => &mut self.status,
+            "status-strong" => &mut self.status_strong,
+            "modified" => &mut self.modified,
+            "error" => &mut self.error,
+            "mode-normal" => &mut self.mode_normal,
+            "mode-insert" => &mut self.mode_insert,
+            "mode-beacon" => &mut self.mode_visual,
+            "mode-prompt" => &mut self.mode_prompt,
+            "tabs" => &mut self.tabs,
+            "tab-active" => &mut self.tab_active,
+            "border" => &mut self.border,
+            "title" => &mut self.title,
+            "panel" => &mut self.panel,
+            "float" => &mut self.float,
+            "float-border" => &mut self.float_border,
+            "candidate-selected" => &mut self.candidate_selected,
+            "marker" => &mut self.marker,
+            "inlay" => &mut self.inlay,
+            "status-error" => &mut self.status_error,
+            "status-warning" => &mut self.status_warning,
+            "info" => &mut self.info,
+            "matched" => &mut self.matched,
+            "detail" => &mut self.detail,
+            "whitespace" => &mut self.whitespace,
+            "ruler" => &mut self.ruler,
+            "key" => &mut self.key,
+            "label" => &mut self.label,
+            "todo" => &mut self.todo,
+            _ => return None,
+        })
     }
     fn new(p: &Palette, truecolor: bool) -> Self {
         let c = |rgb: u32| color(rgb, truecolor);
@@ -235,33 +296,40 @@ impl Theme {
         self.syntax[CATEGORY_ORDER.iter().position(|c| *c == category).unwrap()]
     }
 }
-const CATEGORIES: usize = 23;
-const CATEGORY_ORDER: [Category; CATEGORIES] = [
-    Category::Comment,
-    Category::String,
-    Category::Escape,
-    Category::Number,
-    Category::Constant,
-    Category::Keyword,
-    Category::Operator,
-    Category::Type,
-    Category::Function,
-    Category::Parameter,
-    Category::Namespace,
-    Category::Macro,
-    Category::Tag,
-    Category::Attribute,
-    Category::Heading,
-    Category::Emphasis,
-    Category::Strong,
-    Category::Link,
-    Category::Inserted,
-    Category::Deleted,
-    Category::Changed,
-    Category::Invalid,
-    Category::Match,
-];
+const CATEGORIES: usize = Category::ALL.len();
+const CATEGORY_ORDER: [Category; CATEGORIES] = Category::ALL;
 
+/// A face's colors and attributes over a theme style.
+fn apply(mut style: Style, spec: &crate::application::faces::FaceSpec, truecolor: bool) -> Style {
+    use crate::application::faces::Color as Face;
+    let pick = |c: Face| match c {
+        Face::Rgb(rgb) => color(rgb, truecolor),
+        Face::Default => Color::Reset,
+    };
+    if let Some(fg) = spec.fg {
+        style.fg = Some(pick(fg));
+    }
+    if let Some(bg) = spec.bg {
+        style.bg = Some(pick(bg));
+    }
+    if let Some(a) = spec.attributes {
+        let mut modifier = Modifier::empty();
+        for (on, m) in [
+            (a.bold, Modifier::BOLD),
+            (a.italic, Modifier::ITALIC),
+            (a.underline, Modifier::UNDERLINED),
+            (a.dim, Modifier::DIM),
+            (a.reverse, Modifier::REVERSED),
+        ] {
+            if on {
+                modifier |= m;
+            }
+        }
+        style.add_modifier = modifier;
+        style.sub_modifier = Modifier::empty();
+    }
+    style
+}
 fn color(rgb: u32, truecolor: bool) -> Color {
     let (r, g, b) = ((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8);
     if truecolor {

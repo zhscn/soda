@@ -20,16 +20,21 @@ fn scratch(r: &Runtime, name: &str) -> String {
 #[test]
 fn messages_are_logged_once_and_shown_in_a_document() {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
-    r.source("init", "set mouse maybe\nfrobnicate\n");
+    assert!(
+        r.source_lua("init.lua", r#"soda.set("mouse", "maybe")"#)
+            .is_err()
+    );
     r.start(None);
     line(&mut r, "set tab-width 99");
     line(&mut r, "set tab-width 99");
     line(&mut r, "set tab-width 2");
     let log: Vec<String> = r.messages().map(String::from).collect();
-    assert_eq!(log.len(), 3, "{log:?}");
-    assert!(log[0].starts_with("init:1: "));
-    assert!(log[1].starts_with("init:2: unknown command"));
-    assert_eq!(log[2], "set: tab-width takes a number from 1 to 16");
+    assert_eq!(log.len(), 2, "{log:?}");
+    assert!(
+        log[0].starts_with("lua: ") && log[0].contains("mouse"),
+        "{log:?}"
+    );
+    assert_eq!(log[1], "set: tab-width takes a number from 1 to 16");
     line(&mut r, "messages");
     let view = r.app().view(r.app().active_view().unwrap()).unwrap();
     assert_eq!(r.app().document_name(view.document_id), "*messages*");

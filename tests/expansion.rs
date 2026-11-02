@@ -88,10 +88,11 @@ fn the_column_limit_comes_from_clang_format() {
     std::fs::write(dir.path().join(".clang-format"), "ColumnLimit: 100\n").unwrap();
     std::fs::write(dir.path().join("a.cpp"), "int x;\n").unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
-    r.source(
-        "init",
-        "hook open .*\\.cpp set-local ruler %val{column-limit}\n",
-    );
+    r.source_lua(
+        "init.lua",
+        r#"assert(soda.command([[hook open .*\.cpp set-local ruler %val{column-limit}]]))"#,
+    )
+    .unwrap();
     r.start(Some(dir.path().join("a.cpp")));
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while r.app().active_view().is_none() {

@@ -150,7 +150,7 @@
 | Rust 注册 | `register_command(name, handler)`，处理函数读取只读 Application 并返回 `Command` | 不可与内置名冲突；重复注册替换 |
 | 用户定义 | `define-command NAME BODY` | 同上；与 Rust 注册共享名字空间；帮助显示命令体，Lua 定义的显示其说明 |
 
-命令行的第一个空白分隔词是命令名，其余部分去掉首尾空白后整体作为参数，由命令自己解释：路径参数保留内部空格，`map` 再拆分模式、按键和目标。`Command::Named(line)` 携带一条命令行，在执行时解析，因此绑定可以引用之后才定义的命令。`:` 命令行、配置文件、键位目标和 `define-command` 的命令体使用同一个解析器；`:42` 这种纯数字输入仍表示跳转到行。
+命令行的第一个空白分隔词是命令名，其余部分去掉首尾空白后整体作为参数，由命令自己解释：路径参数保留内部空格，`map` 再拆分模式、按键和目标。`Command::Named(line)` 携带一条命令行，在执行时解析，因此绑定可以引用之后才定义的命令。`:` 命令行、`soda.command`、键位目标和 `define-command` 的命令体使用同一个解析器；`:42` 这种纯数字输入仍表示跳转到行。
 
 用户定义命令的命令体用 `;` 分隔多条命令行，`\;` 表示字面分号。`%arg{1}` 到 `%arg{9}` 替换为按空白拆分的调用参数，`%arg{@}` 替换为完整参数。展开在执行时进行，嵌套用户命令最多展开 16 层，超过时整条命令失败且不执行任何部分；未知命令名和参数错误同样在执行前报告。展开得到的命令依次执行，与 `Response.commands` 一样在第一次失败时停止；某条命令打开交互组件后，后续命令被阻止。Rust 处理函数在轮到它时才读取 Application，返回 `Named` 会被拒绝，避免处理函数之间的递归分发。
 
@@ -288,24 +288,34 @@ Ctrl-N/Ctrl-P 上下移动；补全列表打开期间由补全使用。
 
 ### 配置文件
 
-启动时读取 `$XDG_CONFIG_HOME/soda/init`，未设置时读取 `~/.config/soda/init`；文件不存在时不报错。每行是一条命令行，空行和 `#` 开头的行被忽略。配置文件只接受 `map`、`unmap`、`define-command`、`hook`、`unhook`、`set`、`display` 和 `highlight`，打开文件、切换模式等操作不能在启动时执行。错误行被跳过并记录行号，其余行照常生效，第一条错误显示在消息行。配置文件在第一个文档创建之前执行，所以其中的钩子也作用于启动时的文档。配置文件之后加载同一目录下的 `init.lua`，见[扩展模型](extension.md)中的 Lua 一节。`--no-config` 跳过两者。
+配置只有一个文件：`$XDG_CONFIG_HOME/soda/init.lua`，未设置时为 `~/.config/soda/init.lua`，不存在时不报错。它是一段 Lua，启动时在内置模块之后、第一个文档创建之前运行，所以能改写内置模块的命令和键位，其中的钩子也作用于启动时的文档。同一目录下的 `lua/` 放自己的模块，用 `require` 加载。`--no-config` 跳过配置。
 
-```
-# ~/.config/soda/init
-map global <c-c>f project
-map global <c-c>b buffers
-map insert <c-s> write
-define-command fmt pipe clang-format --assume-filename="$SODA_FILE"
-map global <c-c>= fmt
-define-command grep-word shell grep -rn %arg{1} .
-set line-numbers relative
-set clipboard internal
-display grep right 60
-hook open .*\.py set-local indent-width 4
-hook open .*/Makefile set-local expand-tab false
+键位、选项、配色和语言映射有对应的 Lua 函数，其余的命令行用 `soda.command("…")` 执行，见[扩展模型](extension.md)中的 Lua 一节。出错时第一个错误以 `lua: ` 开头显示在消息行并写入 `*messages*`，文件在出错处停下。
+
+旧的命令行格式配置文件 `init` 不再读取；它还在时启动会提示把其中的行改写进 `init.lua`，每行写成 `soda.command("…")` 就能原样生效。
+
+```lua
+-- ~/.config/soda/init.lua
+soda.map("global", "<c-c>f", "project")
+soda.map("insert", "<c-s>", "write")
+soda.command([[define-command fmt pipe clang-format --assume-filename="$SODA_FILE"]])
+soda.map("global", "<c-c>=", "fmt")
+soda.map("normal", "<c-c>y", function()
+  soda.message(soda.buffer():name())
+end, "Show the buffer name")
+soda.set("line-numbers", "relative")
+soda.set("clipboard", "internal")
+soda.command("display grep right 60")
+soda.face("syntax.comment", { fg = "#7a88cf", italic = true })
+soda.language(".inc", "cpp")
+soda.hook("open", [[.*\.py]], function()
+  soda.set("indent-width", 4, true)
+end)
 ```
 
 `map MODE KEYS COMMAND`、`unmap MODE KEYS`、`define-command NAME BODY`、`hook` 和 `unhook` 也可以在 `:` 中执行，对当前会话立即生效，不写回配置文件。
+
+Lua 里用 `soda.map(mode, keys, target, [doc])` 绑定，`target` 可以是命令行，也可以直接是一个函数，按键提示和帮助显示 `doc`；`soda.unmap` 去掉绑定，`soda.bindings(mode)` 列出生效的绑定。默认键位写在 `keymap.rs` 的表里，作为用户绑定之下的一层。
 
 ### 外部进程
 
@@ -324,7 +334,7 @@ hook open .*/Makefile set-local expand-tab false
 
 ### 消息
 
-消息行一次只显示一条消息。Runtime 在每次输入、命令或后台完成之后，把新出现的消息记入日志，连续重复的消息只记一次，最多保留 1,000 条。配置文件的每一条错误都单独记录，消息行只显示第一条。`messages` 把日志显示在 scratch 文档 `*messages*` 中（默认底部 12 行），光标放在最新一条；文档打开期间，新消息追加到末尾。
+消息行一次只显示一条消息。Runtime 在每次输入、命令或后台完成之后，把新出现的消息记入日志，连续重复的消息只记一次，最多保留 1,000 条。`messages` 把日志显示在 scratch 文档 `*messages*` 中（默认底部 12 行），光标放在最新一条；文档打开期间，新消息追加到末尾。
 
 ### 内置命令
 
@@ -344,7 +354,7 @@ hook open .*/Makefile set-local expand-tab false
 | `close-window` | 关闭当前窗口，视图保留为隐藏 |
 | `only` | 只保留当前窗口 |
 | `window-left` / `-right` / `-up` / `-down`、`window-next` / `window-previous` | 切换窗口 |
-| `resize-window [wider\|narrower\|taller\|shorter\|reset [CELLS]]` | 调整当前窗口的大小，默认 1 格；不带参数时进入逐步调整模式（`C-x ^`、`SPC R`） |
+| `resize-window [wider\|narrower\|taller\|shorter\|reset [CELLS]]` | 调整当前窗口的大小，默认 1 格；不带参数时进入逐步调整模式（`C-x ^`、`SPC W`） |
 | `half-page-down` / `half-page-up` | 移动半页并滚动 |
 | `grep PATTERN` | 在项目文件中按正则表达式搜索，结果写入 `*grep*` |
 | `jump` | 打开当前行写明的位置；不是位置行时移到下一行首个非空白字符 |
@@ -461,7 +471,7 @@ Enter 依次处理：
 
 ### 会话之间保留的状态
 
-退出时，终端前端把命令行历史、搜索历史和最近 200 个文件的光标位置写入 `$XDG_STATE_HOME/soda/state`（未设置时为 `~/.local/state/soda/state`），下次启动时在配置文件之后、第一个文档之前读回。文件每行一条制表符分隔的记录，写入先到临时文件再替换，损坏的行被忽略。
+退出时，终端前端把命令行历史、搜索历史和最近 200 个文件的光标位置写入 `$XDG_STATE_HOME/soda/state`（未设置时为 `~/.local/state/soda/state`），下次启动时在 `init.lua` 之后、第一个文档之前读回。文件每行一条制表符分隔的记录，写入先到临时文件再替换，损坏的行被忽略。
 
 文件关闭或退出时记下光标所在的行和逻辑列；以后打开同一路径、且打开时没有指定位置（不是 `jump` 或 `goto` 打开的）时回到那里。寄存器、标记和窗口布局不保留。无头 Runtime 不读写这个文件，由前端调用 `restore` 和 `persist`。
 
@@ -615,7 +625,7 @@ Application 拥有一个跨文档共享的剪贴板。ClipboardAction 提供复�
 
 - **外观**：`todo`（加粗黄色）、`error`（红色）、`mark1` 到 `mark4`（四种背景色）；`mark` 依次取下一种背景色，用于逐个标记符号。
 - **替换与删除**：同一模式再次添加时替换原来的外观。`unhighlight PATTERN` 从当前文档和全局中去掉这个模式，不带参数时去掉全部；没有可去掉的高亮时报错。文档关闭时它的高亮一并删除。
-- **配置**：配置文件可以使用 `highlight`；`highlight-local` 需要文档，只能在命令行、键位或钩子中使用。
+- **配置**：`init.lua` 可以用 `soda.command("highlight …")`；`highlight-local` 需要文档，只能在命令行、键位或钩子中使用。
 
 TODO 高亮由这个原语在配置中写成：
 

@@ -37,7 +37,7 @@ C-c C-c stops run, shell and grep; M-g n / M-g p step through their results.
 Printable characters insert text in Insert and prompts.
 Command lines read state with %opt{NAME} and %val{file|name|kind|line|column|selection|word|root|mode|column-limit}.
 Hooks: hook open|new|save|close|mode|focus FILTER COMMAND runs COMMAND when FILTER matches.
-Configuration: ~/.config/soda/init holds map, unmap, define-command, hook, set, display and highlight lines.";
+Configuration: ~/.config/soda/init.lua, with soda.map, soda.set, soda.hook and soda.command(LINE).";
 
 /// Help generated from the effective key tables and command registry.
 pub fn text(keymap: &Keymap, registry: &Registry) -> String {

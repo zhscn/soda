@@ -84,13 +84,15 @@ fn bad_values_are_reported_and_change_nothing() {
 #[test]
 fn configuration_sets_options_and_display_rules_and_reports_lines() {
     let mut r = runtime("");
-    let errors = r.source(
-        "init",
-        "set line-numbers relative\nset mouse maybe\ndisplay grep right 30\nset-local mouse off\n",
-    );
+    r.source_lua(
+        "init.lua",
+        r#"
+        soda.set("line-numbers", "relative")
+        local ok, error = pcall(soda.set, "mouse", "maybe")
+        assert(not ok and tostring(error):find("true or false"), error)
+        assert(soda.command("display grep right 30"))
+        "#,
+    )
+    .unwrap();
     assert_eq!(r.app().options().choice(None, "line-numbers"), "relative");
-    assert_eq!(errors.len(), 2, "{errors:?}");
-    assert_eq!(errors[0].0, 2);
-    assert!(errors[0].1.contains("true or false"));
-    assert_eq!(errors[1].0, 4);
 }

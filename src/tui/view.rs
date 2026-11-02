@@ -979,7 +979,7 @@ mod tests {
     use ratatui::{Terminal, backend::TestBackend};
 
     fn screen(runtime: &mut Runtime, width: u16, height: u16) -> String {
-        let theme = Theme::detect();
+        let theme = Theme::build("auto", &Default::default());
         let areas = Areas::new(runtime, width, height);
         runtime.resize(areas.editor.height.into(), areas.list_rows());
         runtime.set_page_rows(areas.text(runtime).height.into());
@@ -1139,7 +1139,7 @@ mod tests {
         let rows: Vec<_> = text.lines().collect();
         assert_eq!(rows[9].trim_end(), "second word", "{text}");
         assert!(rows[8].contains("E1") && rows[8].contains("W1"), "{text}");
-        let theme = Theme::detect();
+        let theme = Theme::build("auto", &Default::default());
         let areas = Areas::new(&r, 60, 10);
         let texts = super::super::frames(
             &r,

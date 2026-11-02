@@ -4,7 +4,6 @@
 -- Built in: SPC g.
 
 soda.command("display changes bottom")
-soda.command("map global <c-c>g git-changes")
 
 local function locations(diff)
   local list, path = {}, nil
@@ -44,3 +43,4 @@ soda.define_command("git-changes", "List the hunks git has not staged", function
     soda.results("changes", locations(out))
   end)
 end)
+soda.map("global", "<c-c>g", "git-changes")

@@ -29,7 +29,7 @@ Soda 是以 TUI 交付、以 C++ 交互缩进为核心体验的 Rust 编辑器�
 | `options` | 带类型的选项表，全局值与文档覆盖 | [扩展模型](extension.md) |
 | `runtime` | 命令循环：执行响应、观察更新、调度后台任务与外部命令、语言服务器的进程与同步 | [交互层](interaction.md)、[语言服务器](lsp.md) |
 | `syntax` | 分类、C++ 词法着色、TextMate 引擎与增量行缓存、内置语法；只依赖 `core` 和 `cpp` | [语法高亮与导航](syntax.md) |
-| `tui` | crossterm 输入规范化、ratatui 绘制、布局与主题、配置文件加载 | [终端界面](ui.md) |
+| `tui` | crossterm 输入规范化、ratatui 绘制、布局与主题、加载 `init.lua` | [终端界面](ui.md) |
 
 数据单向流动：前端把平台输入交给 Runtime；交互层把按键解析为命令并输出 Application 事件；Application 通过 editor 提交事务；语言服务只读快照并返回建议，修改始终由事务入口统一提交。后台任务读取快照，结果带版本与请求身份回到 owner thread，过期结果被拒绝。
 
@@ -41,7 +41,7 @@ Soda 是以 TUI 交付、以 C++ 交互缩进为核心体验的 Rust 编辑器�
 
 **交互模型。** 选择优先，语义和键位取自 meow：Normal、Insert、Beacon 三个固定模式，每个键是一条命令，分发是 Emacs 式的键位表栈，`x s` 和 `C-x C-s` 走同一棵绑定树。多选区只存在于 Beacon，Normal 永远只有一个选区。Vim 语法已经移除：它是固定的底层，Emacs 键只能翻译成 Vim 键，产出范围的功能（结构化选择、符号标记）接不进 operator 语法。Insert 和所有输入框共享 readline 风格的行编辑键。理由与取舍见[模态编辑的设计](modal.md)。
 
-**扩展模型。** 按 kakoune 的方式组织：所有操作是命名命令，键位、`:` 命令行、配置文件和帮助都引用命令名；扩展通过 `define-command` 组合命令，用 `pipe` / `shell` 调用外部进程。选项、展开和钩子让命令语言能读写状态并响应事件；命令语言只做配置，逻辑写在 Lua 5.4（mlua）里，绑定到同一组命令、展开和通知上，见[扩展模型](extension.md)。
+**扩展模型。** 按 kakoune 的方式组织：所有操作是命名命令，键位、`:` 命令行、配置文件和帮助都引用命令名；扩展通过 `define-command` 组合命令，用 `pipe` / `shell` 调用外部进程。选项、展开和钩子让命令语言能读写状态并响应事件；命令语言不加条件和循环，配置（`init.lua`）和逻辑都写在 Lua 5.4（mlua）里，绑定到同一组命令、展开和通知上，见[扩展模型](extension.md)。
 
 ## 4 质量与性能
 

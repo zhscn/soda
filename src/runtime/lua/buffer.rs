@@ -39,6 +39,11 @@ pub(super) const METHODS: &[&str] = &[
     "next_item",
     "prev_item",
     "in_literal",
+    "name",
+    "path",
+    "modified",
+    "language",
+    "show",
 ];
 
 /// Documents a request edited, with the undo depth each had before its
@@ -153,6 +158,86 @@ pub(super) fn register<'scope, 'r: 'scope>(
                 .documents()
                 .find(|id| workspace.file(*id).and_then(|file| file.path()) == Some(path))
                 .map(|id| id.number()))
+        })?,
+    )?;
+    soda.set(
+        "buffer_list",
+        scope.create_function(|_, ()| {
+            let runtime = runtime.borrow();
+            Ok(runtime
+                .app
+                .workspace()
+                .documents()
+                .map(|id| id.number())
+                .collect::<Vec<_>>())
+        })?,
+    )?;
+    soda.set(
+        "buffer_name",
+        scope.create_function(|_, number: u64| {
+            let runtime = runtime.borrow();
+            Ok(runtime.app.document_name(document(&runtime, number)?))
+        })?,
+    )?;
+    soda.set(
+        "buffer_path",
+        scope.create_function(|_, number: u64| {
+            let runtime = runtime.borrow();
+            let id = document(&runtime, number)?;
+            let workspace = runtime.app.workspace();
+            Ok(workspace
+                .file(id)
+                .and_then(|file| file.path())
+                .map(|path| path.to_string_lossy().into_owned()))
+        })?,
+    )?;
+    soda.set(
+        "buffer_modified",
+        scope.create_function(|_, number: u64| {
+            let runtime = runtime.borrow();
+            let id = document(&runtime, number)?;
+            Ok(runtime.app.workspace().is_dirty(id))
+        })?,
+    )?;
+    soda.set(
+        "buffer_language",
+        scope.create_function(|_, number: u64| {
+            let runtime = runtime.borrow();
+            let id = document(&runtime, number)?;
+            let editor = runtime.app.workspace().editor(id).unwrap();
+            Ok(editor.model().document().language().profile().id.clone())
+        })?,
+    )?;
+    soda.set(
+        "buffer_show",
+        scope.create_function(|_, number: u64| {
+            let mut runtime = runtime.borrow_mut();
+            let id = document(&runtime, number)?;
+            let event = crate::interaction::show(&runtime.app, id);
+            runtime.edit_event(event)
+        })?,
+    )?;
+    soda.set(
+        "window_list",
+        scope.create_function(|lua, ()| {
+            let runtime = runtime.borrow();
+            let app = &runtime.app;
+            let active = app.active_view();
+            let out = lua.create_table()?;
+            for view in app.windows().views() {
+                let (Some(state), Some(area)) = (app.view(view), app.window_area(view)) else {
+                    continue;
+                };
+                let window = lua.create_table()?;
+                window.set("buffer", state.document_id.number())?;
+                window.set("x", area.x)?;
+                window.set("y", area.y)?;
+                window.set("width", area.width)?;
+                window.set("height", area.height)?;
+                window.set("active", Some(view) == active)?;
+                out.push(window)?;
+            }
+            Ok(out)
         })?,
     )?;
     soda.set(

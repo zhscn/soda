@@ -1,13 +1,13 @@
 # 扩展模型
 
-soda 的扩展分两层。命令行沿用 kakoune 的形式，配置文件、键位、用户命令、钩子执行的是同一种东西，用来写配置。需要逻辑和数据结构的扩展写成 Lua（Lua 5.4，经 mlua 嵌入），它与命令行共用同一组接口。
+soda 的扩展分两层。命令行沿用 kakoune 的形式，键位目标、用户命令、钩子和 `:` 执行的是同一种东西。配置和需要逻辑与数据结构的扩展都写成 Lua（Lua 5.4，经 mlua 嵌入），配置文件就是 `init.lua`；Lua 与命令行共用同一组接口。
 
 kakoune 没有脚本语言，所以要用 `%sh{}` 和 `evaluate-commands` 把 shell 的输出再当命令执行，转义层层叠加，数据只能是字符串。soda 不走这条路：命令语言停在配置所需的规模，不加条件、循环或执行 shell 输出；有逻辑的部分交给 Lua。
 
 ## 分层
 
 ```
-配置文件 / 键位 / 命令行 / 钩子          init.lua / lua 命令
+键位 / 命令行 / 钩子              init.lua / 模块 / lua 命令
               │                               │
               └──────────── 命令行 ────────────┘
                              │  展开 %opt{} %val{} %arg{}
@@ -29,7 +29,7 @@ kakoune 没有脚本语言，所以要用 `%sh{}` 和 `evaluate-commands` 把 sh
 
 - **作用域**：全局，以及单个文档。读取时先查文档，再查全局，最后用内置默认值。文档关闭时它的选项一并删除。
 - **类型**：布尔、带范围的整数、固定选项之一。设置时按类型校验，失败时不改变原值。
-- **命令**：`set NAME VALUE` 设置全局值；`set-local NAME VALUE` 只对当前文档生效；`unset-local NAME` 去掉文档值，回到全局值。配置文件只能使用 `set`。
+- **命令**：`set NAME VALUE` 设置全局值；`set-local NAME VALUE` 只对当前文档生效；`unset-local NAME` 去掉文档值，回到全局值。`init.lua` 运行时还没有文档，所以只设置全局值。
 - **生效**：选项变化作为 Application 更新传播。编辑行为相关的选项（缩进）由 Application 推给对应文档的编辑器；显示相关的选项由前端每帧读取。
 
 C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、`tab-width`、`expand-tab` 只作用于其他语言。
@@ -48,6 +48,8 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `cpp-fallback-style` | LLVM/Google/Chromium/Mozilla/WebKit/GNU/Microsoft | LLVM | 没有可用的 `.clang-format` 时的 C++ 风格；只对之后打开的文档生效，用全局的 `set` 设置 |
 | `ruler` | 0–1000 | 0 | 在这一列之后画竖线；0 不画 |
 | `scroll-lines` | 1–100 | 3 | 鼠标滚轮每格滚动的行数 |
+| `idle-time` | 10–60000 | 500 | 最后一次按键之后多少毫秒运行 `idle` 钩子 |
+| `theme` | auto/dark/light | auto | 配色的深浅变体，auto 时跟随终端背景 |
 | `mouse` | true/false | true | 关闭后终端恢复自己的文本选择 |
 | `trim-trailing-whitespace` | true/false | true | 保存时去掉上次加载或保存以来编辑过的行的行尾空白 |
 | `final-newline` | true/false | true | 保存时给有内容的文件补上末尾换行 |
@@ -56,7 +58,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 
 `set` 在解析命令行时就按类型检查取值，所以错误在命令执行前报告，Application 收到的永远是合法值。布尔值也接受 yes/no、on/off。`set` 和 `set-local` 的选项名可以在命令行中补全，候选附带说明。
 
-配置文件中的 `set` 和 `display` 在启动时依次执行，失败的行与其他配置错误一起按行号报告。`set-local` 在配置文件中无效，因为启动时还没有确定的文档。
+`init.lua` 在第一个文档创建之前运行，其中设置的选项都是全局的；按文档的设置写在钩子里。
 
 ## 展开
 
@@ -79,23 +81,42 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `close` | 文档名 | 文档关闭之后 |
 | `mode` | 新模式名 | 编辑模式变化之后 |
 | `focus` | 文档名 | 当前窗口显示的视图变化之后 |
+| `change` | 文档名 | 文档的文本变化之后 |
+| `selection` | 文档名 | 选区或光标移动、文本没变之后 |
+| `idle` | 文档名 | 最后一次按键之后 `idle-time` 毫秒（默认 500）没有按键时，每次按键之后至多一次 |
 
 - **时机**：Application 在更新中带出打开、新建和关闭通知；Runtime 根据保存结果产生 `save`，并在每次输入、命令或后台完成之后比较模式和当前视图，产生 `mode` 和 `focus`。钩子在触发它的整个操作完成之后执行。
 - **作用对象**：`open`、`new` 和 `save` 的命令作用于触发它的文档的视图，即使它不在当前窗口，所以 `set-local` 设置的是那个文档；其余事件作用于当前视图。钩子移动焦点后，后续命令跟随新的焦点。
 - **消息**：钩子命令不设置消息时，保留触发它的操作留下的消息（如 "Saved …"）。
-- **嵌套**：钩子执行的命令可以再触发钩子，连续 16 轮之后停止并报错。
+- **嵌套**：钩子执行的命令可以再触发钩子，连续 16 轮之后停止并报错。所以 `change` 钩子如果每次都修改文本，16 轮后会停下。
 - **展开**：COMMAND 中的 `%opt`、`%val` 在钩子执行时展开。
 
 按语言的设置通过钩子表达，不另设作用域：`hook open .*\.py set-local indent-width 4`。
 
+## 语言映射
+
+`language-map NAME LANGUAGE`（Lua 里是 `soda.language(name, language)`）让之后打开的文件按 LANGUAGE 处理：NAME 是完整的文件名（如 `Justfile`），或以点开头的扩展名（如 `.h`、`.inc`）。完整文件名优先，扩展名取最长的匹配，都先于内置的识别。LANGUAGE 是语言的 id（`cpp`、`rust`、`makefile` 等，命令行里可以补全），`text` 表示纯文本。映射到 `cpp` 的文件同样读取 `.clang-format`。已经打开的文档不变。
+
 ## Lua
 
-启动时先加载内置模块（见下），再读配置文件 `init` 和同一目录下的 `init.lua`，所以配置可以改写内置模块的命令和键位。配置目录下 `lua/` 中的模块可以用 `require` 加载，同名文件优先于内置模块；启动目录不在模块搜索路径上。命令行上 `lua CODE` 执行一段 Lua。Lua 通过全局的 `soda` 表操作编辑器：
+启动时先加载内置模块（见下），再运行配置文件 `init.lua`，所以配置可以改写内置模块的命令和键位。配置目录下 `lua/` 中的模块可以用 `require` 加载，同名文件优先于内置模块；启动目录不在模块搜索路径上。命令行上 `lua CODE` 执行一段 Lua。Lua 通过全局的 `soda` 表操作编辑器：
 
 | 函数 | 作用 |
 | --- | --- |
 | `soda.command(line)` | 执行一条命令行，与 `:` 相同；返回是否成功和当前消息 |
-| `soda.val(name)` / `soda.option(name)` | 读取 `%val{name}` / `%opt{name}` |
+| `soda.val(name)` | 读取 `%val{name}` |
+| `soda.option(name)` | 选项在当前文档的值，按类型返回布尔、整数或字符串 |
+| `soda.set(name, value, [local])` | 设置选项，`local` 为真时只对当前文档；取值按类型检查，不合法时报错 |
+| `soda.declare_option(name, spec)` | 声明模块自己的选项，见下文 |
+| `soda.map(mode, keys, target, [doc])` | 绑定按键：`target` 是命令行，或一个 Lua 函数（prompt 之外）；`doc` 是按键提示和帮助里显示的说明 |
+| `soda.unmap(mode, keys)` | 去掉用户绑定，恢复默认 |
+| `soda.bindings(mode)` | 当前生效的绑定，用户的在默认之上：`{ {keys = "<c-x>o", command = "window-next"}, ... }` |
+| `soda.face(name, spec)` | 设置界面或语法分类的颜色，见[终端界面](ui.md#主题) |
+| `soda.language(name, language)` | 让文件名或扩展名对应一种语言，同 `language-map` |
+| `soda.buffers()` | 所有打开的文档，返回句柄数组 |
+| `soda.windows()` | 屏幕上的窗口：`{buffer, x, y, width, height, active}`，分屏窗口按阅读顺序，然后是侧边窗口 |
+| `soda.defer(ms, fn)` | `ms` 毫秒后在当前视图上调用 `fn` 一次，返回编号 |
+| `soda.cancel(id)` | 取消还没到时间的 `defer`，返回是否取消了 |
 | `soda.message(text)` | 设置状态消息 |
 | `soda.flag(group, face, sign, lines)` / `soda.unflag([group])` | 行标记，`lines` 是从 1 开始的行号数组；`unflag` 没有标记可去时不报错 |
 | `soda.hint(text)` | 消息行没有消息时显示的文字，一直保留到下一次调用；`nil` 清除 |
@@ -109,6 +130,13 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `soda.open(path, [line], [column])` | 打开文件并放置光标，行列从 1 开始，列按字节；打开是异步的，文件内容要在之后的请求里读 |
 | `soda.clipboard(text)` | 替换剪贴板内容，与编辑器自己的复制一样同步到系统剪贴板 |
 | `soda.spawn(argv, fn, [input])` | 在项目根目录后台运行程序（不经过 shell），结束后调用 `fn(code, stdout, stderr)`；`input` 写入标准输入 |
+| `soda.popup(text)` | 在光标旁的浮窗里显示文字，下一个按键关闭 |
+| `soda.note(group, items)` | 给当前文档的一组范围加注（诊断）：`{from, to, severity, text}`，位置同文档句柄 |
+| `soda.tokens(data, names)` / `soda.inlays(items)` | 语义高亮和 inlay hint，供 LSP 模块使用，见[语言服务器](lsp.md) |
+| `soda.completion.register(source)` | 注册补全来源，见[补全](completion.md) |
+| `soda.lsp.*` | 语言服务器接口，见[语言服务器](lsp.md) |
+
+模块的选项用 `soda.declare_option(name, spec)` 声明，之后与内置选项一样可以 `set`、`set-local`、`%opt{}` 和补全。类型由 `spec.default` 决定：布尔；整数，可以给 `min`、`max`；字符串时必须给 `choices`，取值只能是其中之一。`spec.doc` 是说明。同样的声明重复执行没有影响，换一种声明报错；不能声明内置选项的名字。选项名只能用小写字母、数字和 `-`。
 
 - **执行模型**：Lua 运行在编辑器线程上，同一时间只运行一个请求（一段代码、一次钩子或命令调用、一个进程的回调）。请求运行时 `soda` 的函数直接作用于编辑器。请求中引发的 Lua（例如 `soda.command` 触发的钩子、执行的 `lua` 命令）排队，等当前请求返回后运行。
 - **作用对象**：每个请求在它产生时所在的视图上运行，就像钩子一样。所以 `soda.spawn` 的回调作用于调用 `spawn` 时的文档，即使用户已经切换到别的文档；焦点不因此改变。
@@ -118,7 +146,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 
 ### 内置模块
 
-`lua/` 目录的模块编译进二进制，用户无需安装。启动时加载的模块只增加命令和键位，用到时才做事；`git-flags` 每打开或保存一个文件都运行 git，所以要在 `init.lua` 里 `require("git-flags")` 才生效。不想要某个键时用 `unmap`。leader 指 Normal 的 `SPC`，它读作 `<c-c>`，所以这些键在 `global` 表里绑成 `<c-c>` 加一个键，所有模式下 `C-c` 加同一个键也能用。
+`lua/` 目录的模块编译进二进制，用户无需安装。启动时加载的模块只增加命令和键位，用到时才做事；`git-flags` 每打开或保存一个文件都运行 git，所以要在 `init.lua` 里 `require("git-flags")` 才生效。不想要某个键时用 `unmap`（Lua 里是 `soda.unmap`）。leader 指 Normal 的 `SPC`，它读作 `<c-c>`，所以这些键在 `global` 表里绑成 `<c-c>` 加一个键，所有模式下 `C-c` 加同一个键也能用。
 
 | 模块 | 内容 | 键位 |
 | --- | --- | --- |
@@ -150,6 +178,10 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `buf:indent(n)` | 语言给第 n 行的缩进字符串；语言不给出时为 nil |
 | `buf:line_comment()` | 该语言的行注释标记，来自语言档案；没有行注释时为 nil |
 | `buf:offset(position)`、`buf:point(offset)` | 位置与字节偏移互相转换 |
+| `buf:name()`、`buf:path()` | 显示的文档名；文件路径，没有文件时为 nil |
+| `buf:modified()` | 是否有未保存的修改 |
+| `buf:language()` | 语言的 id，如 `cpp`、`rust`，纯文本是 `text` |
+| `buf:show()` | 在当前窗口显示这个文档，与 `buffer` 相同 |
 | `buf:in_literal(position)` | 位置是否在注释、字符串或字符字面量内 |
 | `buf:enclosing(position)` | 包围该位置的最内层平衡括号，返回 `{from, inner_from, inner_to, to}` 四个位置；没有时为 nil |
 | `buf:next_item(position)`、`buf:prev_item(position)` | 紧邻该位置的条目，返回 `{from, to, kind}`；`kind` 是 `group`、`atom`、`literal`、`comment` 或 `directive`。到达所在分组的边界或遇到没有配对的括号时为 nil |
@@ -165,5 +197,5 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 
 1. **选项**：选项表与作用域、`set`/`set-local`/`unset-local`；把现有写死的值改为选项（纯文本缩进、行号、滚轮行数、鼠标、系统剪贴板）。（已完成）
 2. **展开**：`%opt{}`、`%val{}`，用户命令改为逐条展开。（已完成）
-3. **钩子**：通知、`hook`/`unhook`，配置文件中可用。（已完成）
+3. **钩子**：通知、`hook`/`unhook`。（已完成）
 4. **脚本语言**：Lua 5.4（mlua），`soda` 表、函数钩子与命令、后台进程。（已完成）

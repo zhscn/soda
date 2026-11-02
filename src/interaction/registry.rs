@@ -27,6 +27,10 @@ pub enum SlotKind {
     Choice(&'static [Choice]),
     /// The name of an option.
     Option,
+    /// The name of a face.
+    Face,
+    /// A language id.
+    Language,
     /// A recently used file.
     Recent,
     /// One of the items of the question being asked.
@@ -38,7 +42,14 @@ impl SlotKind {
     pub fn requires_match(self) -> bool {
         matches!(
             self,
-            Self::File | Self::Buffer | Self::Choice(_) | Self::Option | Self::Recent | Self::Item
+            Self::File
+                | Self::Buffer
+                | Self::Choice(_)
+                | Self::Option
+                | Self::Face
+                | Self::Language
+                | Self::Recent
+                | Self::Item
         )
     }
 }
@@ -187,6 +198,15 @@ const EVENT: Slot = slot(
         word(
             "focus",
             "The current window shows another view; its buffer name",
+        ),
+        word("change", "A document's text changed; its buffer name"),
+        word(
+            "selection",
+            "The selection or caret moved without the text changing; the buffer name",
+        ),
+        word(
+            "idle",
+            "No key for idle-time milliseconds since the last one; the buffer name",
         ),
     ]),
 );
@@ -955,6 +975,7 @@ pub static BUILTINS: &[Builtin] = &[
                 context: context(mode)?,
                 keys: keys(sequence)?,
                 target: required(target)?,
+                label: None,
             })
         }
     ),
@@ -1099,6 +1120,51 @@ pub static BUILTINS: &[Builtin] = &[
         }],
         "Show TEXT in the message line",
         |a| Ok(Command::Echo(a.to_owned()))
+    ),
+    builtin!(
+        "language-map",
+        [
+            slot("NAME", SlotKind::Word),
+            slot("LANGUAGE", SlotKind::Language)
+        ],
+        "Open files of this name, or extension such as .h, in LANGUAGE (an id, or text)",
+        |a| {
+            let (name, language) = split(a.trim());
+            let language = required(language)?;
+            if crate::language::catalog().by_id(&language).is_none() {
+                return Err(format!("unknown language {language}"));
+            }
+            Ok(Command::MapLanguage {
+                name: name.into(),
+                language,
+            })
+        }
+    ),
+    builtin!(
+        "face",
+        [
+            slot("NAME", SlotKind::Face),
+            Slot {
+                name: "SPEC",
+                kind: SlotKind::Rest,
+                required: false,
+            }
+        ],
+        "Set a face: fg:#rrggbb bg:#rrggbb bold italic underline dim reverse; without SPEC, the theme's",
+        |a| {
+            let (name, spec) = split(a.trim());
+            if !crate::application::faces::known(name) {
+                return Err(format!("unknown face {name}"));
+            }
+            let spec = match spec {
+                "" => None,
+                spec => Some(crate::application::faces::FaceSpec::parse(spec)?),
+            };
+            Ok(Command::Face {
+                name: name.into(),
+                spec,
+            })
+        }
     ),
     builtin!(
         "highlight",

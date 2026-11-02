@@ -55,7 +55,7 @@
 **显示规则。** 参照 Emacs 的 `display-buffer-alist`，把“显示什么”和“显示在哪里”分开，但只做声明式的一小部分（`application/display.rs`）：
 - 按文档种类匹配，而不是名字正则。普通文档的种类是 `file`；scratch 文档按名字去掉星号，`*grep*` 的种类是 `grep`。
 - 规则只在文档还没显示时起作用；已显示的文档直接切换到它所在的窗口。
-- 配置写法是 `display KIND PLACEMENT`，可以写在配置文件里。
+- 配置写法是 `display KIND PLACEMENT`，在 `init.lua` 里写成 `soda.command("display …")`。
 
 | 位置 | 行为 |
 | --- | --- |
@@ -102,7 +102,13 @@
 
 ## 主题
 
-内置一套真彩主题，深色与浅色两个变体。`COLORFGBG` 报告浅色背景时使用浅色变体，否则使用深色。`COLORTERM` 为 `truecolor` 或 `24bit` 时输出 24 位颜色，否则换算为最接近的 xterm 256 色。主题设置整屏背景，不依赖终端自身的配色。
+内置一套真彩主题，深色与浅色两个变体。选项 `theme` 选择变体：`dark`、`light`，或 `auto`（默认），`auto` 时 `COLORFGBG` 报告浅色背景用浅色变体，否则用深色。
+
+`face NAME [SPEC]`（Lua 里是 `soda.face(name, spec)`）把一个具名部分的颜色和属性改掉，盖在主题上。SPEC 是若干个词：`fg:#rrggbb`、`bg:#rrggbb`（颜色写 `default` 时用终端自己的颜色），以及属性 `bold`、`italic`、`underline`、`dim`、`reverse`。没写的颜色沿用主题；只要写了任何属性，就用这些属性替换主题的属性，`plain` 表示不要任何属性。不带 SPEC 时恢复主题的样子。Lua 里 spec 也可以是表：`{ fg = "#ff0000", bold = true }`，`nil` 恢复主题。
+
+可以设置的名字有界面部分（`text`、`selection`、`cursor-line`、`gutter`、`status`、`mode-normal`、`mode-insert`、`mode-beacon`、`mode-prompt`、`title`、`border`、`float`、`label`、`todo`、`mark1`…`mark8` 等，命令行里可以补全，说明见 `src/application/faces.rs`），以及每个语法分类 `syntax.comment`、`syntax.keyword`、`syntax.string` 等。`face` 可以写在 `init.lua` 里，也可以随时执行，下一帧生效。
+
+`COLORTERM` 为 `truecolor` 或 `24bit` 时输出 24 位颜色，否则换算为最接近的 xterm 256 色。主题设置整屏背景，不依赖终端自身的配色。
 
 光标形状跟随模式：Normal 和 Beacon 为方块，Insert 和所有输入为竖线。
 

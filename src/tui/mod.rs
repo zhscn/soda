@@ -230,13 +230,14 @@ fn follow(runtime: &mut Runtime, areas: &view::Areas) -> io::Result<()> {
     Ok(())
 }
 
-/// `$XDG_CONFIG_HOME/soda/init`, falling back to `~/.config/soda/init`.
+/// `$XDG_CONFIG_HOME/soda/init.lua`, falling back to
+/// `~/.config/soda/init.lua`.
 pub fn config_path() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .filter(|dir| !dir.is_empty())
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
-    Some(base.join("soda").join("init"))
+    Some(base.join("soda").join("init.lua"))
 }
 /// Histories and caret positions kept between sessions.
 pub fn state_path() -> Option<PathBuf> {
@@ -277,7 +278,8 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
     let mut screen = Terminal::enter()?;
     let mut terminal =
         ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(io::stdout()))?;
-    let theme = theme::Theme::detect();
+    let mut theme = theme::Theme::build("auto", &Default::default());
+    let mut theme_key = None;
     let mut highlighter = Highlighter::with_budget(Duration::from_millis(12));
     let mut catching_up = false;
     // A directory argument is a project; otherwise the working directory
@@ -299,22 +301,22 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
     runtime.load_startup_lua();
     runtime.enable_lsp();
     // Configuration comes before the first document so that its hooks see
-    // it: the command file, then init.lua beside it.
+    // it.
     if let Some(config) = config {
+        let old = config.with_file_name("init");
+        if old.is_file() {
+            runtime.report(format!(
+                "{} is no longer read; write its lines in {} as soda.command(\"…\")",
+                old.display(),
+                config.display()
+            ));
+        }
         match std::fs::read_to_string(&config) {
-            Ok(text) => {
-                runtime.source(&config.display().to_string(), &text);
+            Ok(code) => {
+                let _ = runtime.source_lua(&config.display().to_string(), &code);
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => runtime.report(format!("{}: {error}", config.display())),
-        }
-        let script = config.with_extension("lua");
-        match std::fs::read_to_string(&script) {
-            Ok(code) => {
-                let _ = runtime.source_lua(&script.display().to_string(), &code);
-            }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => runtime.report(format!("{}: {error}", script.display())),
         }
     }
     let state = state_path();
@@ -379,6 +381,12 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
                 // The gutter widens with the line count, so measure again.
                 let areas = view::Areas::new(&runtime, width, height);
                 highlighter.retain(runtime.app());
+                let app = runtime.app();
+                let key = (app.options().choice(None, "theme"), app.faces().revision());
+                if theme_key != Some(key) {
+                    theme = theme::Theme::build(key.0, app.faces());
+                    theme_key = Some(key);
+                }
                 draw(&mut terminal, &runtime, &mut highlighter, &theme, &areas)?;
                 runtime.take_redraw();
                 catching_up = highlighter.take_pending();
