@@ -59,9 +59,11 @@ fn splits_copy_the_view_and_focus_moves_between_windows() {
                 Node::Split {
                     axis: Axis::Rows,
                     children: vec![Node::Window(first), Node::Window(third)],
+                    weights: vec![1; 2],
                 },
                 Node::Window(second),
             ],
+            weights: vec![1; 2],
         })
     );
     keys(&mut r, "<c-c>K");
@@ -249,4 +251,39 @@ fn jump_respects_the_rows_of_each_window() {
     r.set_window_rows(rows);
     keys(&mut r, "<space>jzz");
     assert_eq!(r.message(), "No zz on screen");
+}
+
+#[test]
+fn resize_mode_moves_the_edge_until_escape_and_reset_evens_it() {
+    let mut r = runtime("one\ntwo");
+    r.set_editing_area(81, 20);
+    let first = r.app().active_view().unwrap();
+    keys(&mut r, "<c-x>3");
+    let second = r.app().active_view().unwrap();
+    let width = |r: &Runtime, view| r.app().window_area(view).unwrap().width;
+    assert_eq!((width(&r, first), width(&r, second)), (40, 40));
+    keys(&mut r, "<c-x>^");
+    assert!(r.layer().is_some());
+    // Two columns a step, four with Ctrl; the window to the left gives them.
+    keys(&mut r, "w<c-w>");
+    assert_eq!((width(&r, first), width(&r, second)), (34, 46));
+    keys(&mut r, "n");
+    assert_eq!(width(&r, second), 44);
+    let shown = r.layer().unwrap().presentation().text;
+    assert!(
+        shown.contains("20 rows 44 cols (was 20 rows 40 cols)"),
+        "{shown}"
+    );
+    // Nothing is above or below: the size stays and the mode goes on.
+    keys(&mut r, "t");
+    assert!(r.layer().is_some());
+    keys(&mut r, "<esc>");
+    assert!(r.layer().is_none());
+    // Sizes are kept as weights, so a smaller terminal scales both.
+    r.set_editing_area(41, 20);
+    assert_eq!((width(&r, first), width(&r, second)), (18, 22));
+    r.command(Command::Named("resize-window reset".into()));
+    assert_eq!((width(&r, first), width(&r, second)), (20, 20));
+    r.command(Command::Named("resize-window narrower 30".into()));
+    assert_eq!((width(&r, first), width(&r, second)), (32, 8));
 }

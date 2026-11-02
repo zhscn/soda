@@ -20,6 +20,12 @@ pub enum Pointer {
     Document(DocumentId),
     /// Focuses the window showing a view.
     Window(ViewId),
+    /// Moves the right or bottom edge of a window by cells.
+    Edge {
+        view: ViewId,
+        axis: crate::application::Axis,
+        delta: i32,
+    },
 }
 
 impl Layers {
@@ -52,6 +58,12 @@ impl Layers {
             }
             Pointer::Window(view) => {
                 response.events.push(Event::Focus(view));
+                return InputResult::Handled(response);
+            }
+            Pointer::Edge { view, axis, delta } => {
+                response
+                    .events
+                    .push(Event::MoveWindowEdge { view, axis, delta });
                 return InputResult::Handled(response);
             }
             Pointer::Click(offset) => Selection::caret(offset),

@@ -318,6 +318,7 @@ const GLOBAL: &[(&str, &str)] = &[
     ("<c-x>2", "split"),
     ("<c-x>3", "vsplit"),
     ("<c-x>o", "window-next"),
+    ("<c-x>^", "resize-window"),
     ("<c-x><c-o>", "window-pick"),
     ("<c-x>u", "undo"),
     ("<c-x>`", "next-result"),
@@ -375,6 +376,7 @@ const GLOBAL: &[(&str, &str)] = &[
     ("<c-c>J", "window-down"),
     ("<c-c>K", "window-up"),
     ("<c-c>L", "window-right"),
+    ("<c-c>R", "resize-window"),
 ];
 /// The keys of `meow`, and Emacs keys for the same moves.
 const NORMAL: &[(&str, &str)] = &[

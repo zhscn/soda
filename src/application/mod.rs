@@ -85,6 +85,19 @@ pub enum Event {
     CycleWindow {
         backward: bool,
     },
+    /// Grows the active window by cells along an axis, or shrinks it.
+    ResizeWindow {
+        axis: Axis,
+        delta: i32,
+    },
+    /// Makes splits equal again and side windows their opening size.
+    ResetWindowSizes,
+    /// Moves the right or bottom edge of a window, as a mouse drags it.
+    MoveWindowEdge {
+        view: ViewId,
+        axis: Axis,
+        delta: i32,
+    },
     CloseDocument {
         document: DocumentId,
         discard: bool,
@@ -290,6 +303,8 @@ pub enum Error {
     UnknownView,
     LastWindow,
     SideWindow,
+    /// No edge of the window can move that way.
+    CannotResize,
     NoHighlight,
     /// `unflag-lines` found nothing to remove.
     NoFlags,
@@ -312,6 +327,7 @@ impl fmt::Display for Error {
             Self::UnknownView => f.write_str("unknown view"),
             Self::LastWindow => f.write_str("cannot close the last window"),
             Self::SideWindow => f.write_str("side windows cannot be split"),
+            Self::CannotResize => f.write_str("the window cannot change size that way"),
             Self::NoHighlight => f.write_str("no such highlight"),
             Self::NoFlags => f.write_str("no such flags"),
             Self::Edit(e) => e.fmt(f),
@@ -327,6 +343,7 @@ impl std::error::Error for Error {
             Self::UnknownView
             | Self::LastWindow
             | Self::SideWindow
+            | Self::CannotResize
             | Self::NoHighlight
             | Self::NoFlags => None,
         }
@@ -551,6 +568,13 @@ impl Application {
     /// The windows on screen. The active view is always in one of them.
     pub fn windows(&self) -> &Windows {
         &self.windows
+    }
+    /// Where a window is in the editing area.
+    pub fn window_area(&self, view: ViewId) -> Option<Area> {
+        self.windows
+            .layout(self.area)
+            .into_iter()
+            .find_map(|(id, area)| (id == view).then_some(area))
     }
 
     /// Focusing a view shown in a window moves to that window; a hidden
@@ -1012,7 +1036,7 @@ impl Application {
     /// document validates dirty/pending-save constraints before removing views.
     pub fn dispatch(&mut self, event: Event) -> Result<Update, Error> {
         let before = self.active;
-        let windows = self.windows.root().cloned();
+        let windows = self.windows.clone();
         let mut update = Update::default();
         match event {
             Event::NewDocument(language) => {
@@ -1110,6 +1134,17 @@ impl Application {
                 {
                     self.focus(Some(next));
                 }
+            }
+            Event::ResizeWindow { axis, delta } => {
+                let view = self.active.ok_or(Error::UnknownView)?;
+                if !self.windows.resize(view, axis, delta, self.area) {
+                    return Err(Error::CannotResize);
+                }
+            }
+            Event::ResetWindowSizes => self.windows.reset(),
+            Event::MoveWindowEdge { view, axis, delta } => {
+                // A drag that cannot go further leaves the edge where it is.
+                self.windows.move_edge(view, axis, delta, self.area);
             }
             Event::CycleWindow { backward } => {
                 let windows = self.windows.views();
@@ -1320,7 +1355,7 @@ impl Application {
             }
         }
         update.active_changed = before != self.active;
-        update.windows_changed = windows.as_ref() != self.windows.root();
+        update.windows_changed = windows != self.windows;
         update.changed_views.sort_unstable();
         update.changed_views.dedup();
         Ok(update)

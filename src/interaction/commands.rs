@@ -208,6 +208,12 @@ pub enum WindowCommand {
     Cycle {
         backward: bool,
     },
+    /// Grows the window by cells along an axis, or shrinks it.
+    Resize(Axis, i32),
+    /// Makes splits equal and side windows their opening size.
+    ResetSizes,
+    /// Resizes step by step until Esc.
+    ResizeMode,
 }
 /// The outcome of configuration text, by one-based line number.
 pub struct Sourced {
@@ -1021,7 +1027,16 @@ impl Layers {
                 let Some(active) = app.active_view() else {
                     return Ok(super::InputResult::Handled(response));
                 };
+                if matches!(command, WindowCommand::ResizeMode) {
+                    if let Some(session) = super::resize::ResizeSession::new(app) {
+                        response = self.enter(Layer::Resize(session), app, time)?;
+                    }
+                    return Ok(super::InputResult::Handled(response));
+                }
                 response.events.push(match command {
+                    WindowCommand::Resize(axis, delta) => Event::ResizeWindow { axis, delta },
+                    WindowCommand::ResetSizes => Event::ResetWindowSizes,
+                    WindowCommand::ResizeMode => unreachable!(),
                     WindowCommand::Split(axis, path) => {
                         response.commands.extend(path.map(Command::OpenPath));
                         Event::Split(axis)

@@ -20,6 +20,7 @@ pub enum Layer {
         session: SearchSession,
     },
     Labels(LabelSession),
+    Resize(super::resize::ResizeSession),
 }
 impl Layer {
     pub(super) fn handle(
@@ -33,6 +34,8 @@ impl Layer {
             Self::Saving(wait) => wait.handle(input),
             Self::Help(session) => session.handle(input),
             Self::Labels(session) => session.handle(input, app, time),
+            // Keys reach it unconverted, through `Layers::route`.
+            Self::Resize(_) => Transition::Blocked,
             Self::Replace(session) => session.handle(input, app, time)?,
             Self::Search {
                 input: field,
@@ -53,6 +56,7 @@ impl Layer {
             Self::Search { session, .. } => session.observe_transition(app, update, time)?,
             Self::Help(_) => Transition::active(Response::default()),
             Self::Labels(session) => session.observe(update),
+            Self::Resize(session) => session.observe(app, update),
         })
     }
     /// The history a prompt uses and its text, for prompts that have one.
@@ -93,6 +97,7 @@ impl Layer {
             Self::Replace(session) => session.presentation(),
             Self::Search { input, session } => session.presentation(input),
             Self::Labels(session) => session.presentation(),
+            Self::Resize(session) => session.presentation(),
         }
     }
 }

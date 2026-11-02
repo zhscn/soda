@@ -38,6 +38,7 @@ mod keymap;
 pub use keymap::{BindingError, Context, Keymap, KeypadStart, LineEdit};
 mod registry;
 pub use registry::{BUILTINS, Choice, CommandHandler, CommandInfo, Registry, Slot, SlotKind};
+mod resize;
 mod session;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

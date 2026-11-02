@@ -219,6 +219,7 @@ Emacs 的键和模态键并存。键位取自 Emacs 默认值，再加上这几�
 | `C-x C-s`、`C-x C-w`、`C-x C-f`、`C-x C-r` | `write`、`saveas`、`open`、`recent` |
 | `C-x b`、`C-x C-b`、`C-x k`、`C-x C-c` | `buffer`、`close`、`quit` |
 | `C-x 0`、`1`、`2`、`3`、`o`、`C-x C-o` | `close-window`、`only`、`split`、`vsplit`、`window-next`、`window-pick` |
+| `C-x ^` | `resize-window` |
 | `C-x p f`、`C-x p b`、`C-x p g` | `project`、`buffer`、`grep` |
 | `M-x`、`M-!`、`M-\|`、`M-%` | `commands`、`shell`、`pipe`、`replace` |
 | `M-g g`、`M-g M-g` | `goto` |
@@ -343,6 +344,7 @@ hook open .*/Makefile set-local expand-tab false
 | `close-window` | 关闭当前窗口，视图保留为隐藏 |
 | `only` | 只保留当前窗口 |
 | `window-left` / `-right` / `-up` / `-down`、`window-next` / `window-previous` | 切换窗口 |
+| `resize-window [wider\|narrower\|taller\|shorter\|reset [CELLS]]` | 调整当前窗口的大小，默认 1 格；不带参数时进入逐步调整模式（`C-x ^`、`SPC R`） |
 | `half-page-down` / `half-page-up` | 移动半页并滚动 |
 | `grep PATTERN` | 在项目文件中按正则表达式搜索，结果写入 `*grep*` |
 | `jump` | 打开当前行写明的位置；不是位置行时移到下一行首个非空白字符 |
@@ -670,6 +672,8 @@ highlight todo \b(TODO|FIXME|XXX)\b
 - 只看窗口可见的行；水平滚出窗口的位置也会分到标签，但不显示。
 
 `window-pick`（`SPC w`）对应 ace-window：每个窗口的左上角显示一个标签，输入后聚焦那个窗口。只有两个窗口时直接切到另一个，只有一个时什么也不做。
+
+`resize-window` 不带参数时进入 kitty 式的调整模式（`Layer::Resize`，状态栏显示 RESIZE）：`w` 加宽、`n` 变窄、`t` 加高、`s` 变矮，每步 2 列或 1 行，按住 Ctrl 加倍；`r` 让所有分屏恢复等分、侧边窗口恢复打开时的大小；Esc、Enter 或 `q` 退出。消息行显示当前窗口现在的行列数和进入模式时的行列数。模式直接读按键，不经过输入框的键位，所以 Ctrl 能改变步长。焦点换到别的窗口或窗口关闭时模式结束。
 
 标签由交互层的 `Layer::Labels` 持有，前端用 `cell_of` 把文档位置换算成窗口内的格子再绘制。
 

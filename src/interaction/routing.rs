@@ -319,6 +319,16 @@ impl Layers {
         if matches!(&input, UserInput::Key(key) if key.release) {
             return Ok(InputResult::Blocked);
         }
+        if let (Some(super::Layer::Resize(session)), UserInput::Key(key)) =
+            (&mut self.active, &input)
+        {
+            // Ctrl changes the step, so the mode reads keys before the
+            // prompt keys turn them into editing.
+            let transition = session.key(*key);
+            return Ok(self
+                .transition(transition)
+                .map_or(InputResult::Blocked, InputResult::Handled));
+        }
         if self.active().is_some() {
             let input = match input {
                 UserInput::Key(key) => self.keymap.input(key),

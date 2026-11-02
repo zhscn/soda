@@ -1,8 +1,9 @@
 //! The window tree: how visible views split the editing area. Each window
 //! shows one view; views outside the tree stay open but hidden. Splits
-//! divide their area equally among children, and a split never holds a
-//! single child. Beside the tree, a bottom and a right side window, as in
-//! Emacs, show result lists at a fixed size and are never split.
+//! divide their area among children by weight, equal until a window is
+//! resized, and a split never holds a single child. Beside the tree, a
+//! bottom and a right side window, as in Emacs, show result lists at a
+//! size of their own and are never split.
 use super::ViewId;
 
 /// How a split arranges its children.
@@ -39,7 +40,88 @@ impl Area {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Node {
     Window(ViewId),
-    Split { axis: Axis, children: Vec<Node> },
+    /// `weights` has one entry per child. Resizing sets them to the cells
+    /// each child had, so a later change of the area scales every child.
+    Split {
+        axis: Axis,
+        children: Vec<Node>,
+        weights: Vec<u32>,
+    },
+}
+impl Node {
+    /// The areas of a split's children within `area`. Side-by-side
+    /// children leave a column between them.
+    fn areas(&self, area: Area) -> Vec<Area> {
+        let Node::Split {
+            axis,
+            children,
+            weights,
+        } = self
+        else {
+            return vec![];
+        };
+        let n = children.len() as u16;
+        let (total, gap) = match axis {
+            Axis::Columns => (area.width.saturating_sub(n - 1), 1),
+            Axis::Rows => (area.height, 0),
+        };
+        let mut offset = 0;
+        shares(total, weights)
+            .into_iter()
+            .map(|size| {
+                let child = match axis {
+                    Axis::Columns => Area {
+                        x: area.x + offset,
+                        width: size,
+                        ..area
+                    },
+                    Axis::Rows => Area {
+                        y: area.y + offset,
+                        height: size,
+                        ..area
+                    },
+                };
+                offset += size + gap;
+                child
+            })
+            .collect()
+    }
+    fn split(axis: Axis, children: Vec<Node>) -> Self {
+        let weights = vec![1; children.len()];
+        Self::Split {
+            axis,
+            children,
+            weights,
+        }
+    }
+}
+/// The fewest cells a resize leaves a window: a title and a line of text,
+/// or a few columns.
+const MIN_ROWS: u16 = 2;
+const MIN_COLUMNS: u16 = 8;
+fn minimum(axis: Axis) -> u16 {
+    match axis {
+        Axis::Rows => MIN_ROWS,
+        Axis::Columns => MIN_COLUMNS,
+    }
+}
+/// Splits `total` cells by weight. Remainders go to the largest fractions,
+/// earlier children first, so equal weights give earlier children the
+/// extra cell.
+fn shares(total: u16, weights: &[u32]) -> Vec<u16> {
+    let sum: u64 = weights.iter().map(|w| u64::from(*w)).sum::<u64>().max(1);
+    let total = u64::from(total);
+    let mut sizes: Vec<u64> = weights
+        .iter()
+        .map(|w| total * u64::from(*w) / sum)
+        .collect();
+    let mut order: Vec<usize> = (0..weights.len()).collect();
+    order.sort_by_key(|&i| std::cmp::Reverse(total * u64::from(weights[i]) % sum));
+    let left = total - sizes.iter().sum::<u64>();
+    for &i in order.iter().take(left as usize) {
+        sizes[i] += 1;
+    }
+    sizes.into_iter().map(|size| size as u16).collect()
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Side {
@@ -52,6 +134,8 @@ pub struct Windows {
     /// Side windows with their height or width.
     bottom: Option<(ViewId, u16)>,
     right: Option<(ViewId, u16)>,
+    /// The sizes the side windows were opened at, which a reset restores.
+    opened: [u16; 2],
 }
 impl Windows {
     /// The split windows, without the side windows.
@@ -76,11 +160,12 @@ impl Windows {
     }
     /// Shows `view` in a side window of `size` rows or columns.
     pub fn set_side(&mut self, side: Side, view: ViewId, size: u16) {
-        let slot = match side {
-            Side::Bottom => &mut self.bottom,
-            Side::Right => &mut self.right,
+        let (slot, opened) = match side {
+            Side::Bottom => (&mut self.bottom, &mut self.opened[0]),
+            Side::Right => (&mut self.right, &mut self.opened[1]),
         };
         *slot = Some((view, size.max(1)));
+        *opened = size.max(1);
     }
     /// Shows `view` in the open side window, the bottom one if both are.
     pub fn reuse_side(&mut self, view: ViewId) -> bool {
@@ -154,23 +239,30 @@ impl Windows {
         fn walk(node: &mut Node, at: ViewId, new: ViewId, axis: Axis) -> bool {
             match node {
                 Node::Window(id) if *id == at => {
-                    *node = Node::Split {
-                        axis,
-                        children: vec![Node::Window(at), Node::Window(new)],
-                    };
+                    *node = Node::split(axis, vec![Node::Window(at), Node::Window(new)]);
                     true
                 }
                 Node::Window(_) => false,
                 Node::Split {
                     axis: own,
                     children,
+                    weights,
                 } => {
                     // A split along the same axis gains a sibling instead
-                    // of nesting, so repeated splits stay equal.
+                    // of nesting, so repeated splits stay equal. Once
+                    // resized, the new window takes half of the old one.
                     if *own == axis
                         && let Some(index) = children.iter().position(|c| *c == Node::Window(at))
                     {
+                        let weight = if weights.iter().all(|w| *w == weights[0]) {
+                            weights[index]
+                        } else {
+                            let half = weights[index] / 2;
+                            weights[index] -= half;
+                            half.max(1)
+                        };
                         children.insert(index + 1, Node::Window(new));
+                        weights.insert(index + 1, weight);
                         return true;
                     }
                     children.iter_mut().any(|c| walk(c, at, new, axis))
@@ -190,11 +282,15 @@ impl Windows {
             }
         }
         fn walk(node: &mut Node, view: ViewId) -> bool {
-            let Node::Split { children, .. } = node else {
+            let Node::Split {
+                children, weights, ..
+            } = node
+            else {
                 return false;
             };
             if let Some(index) = children.iter().position(|c| *c == Node::Window(view)) {
                 children.remove(index);
+                weights.remove(index);
             } else if !children.iter_mut().any(|c| walk(c, view)) {
                 return false;
             }
@@ -222,6 +318,13 @@ impl Windows {
     /// the width; the right one, the height above it. Each keeps at least
     /// half the room for the split windows.
     pub fn layout(&self, area: Area) -> Vec<(ViewId, Area)> {
+        let (main, sides) = self.frame(area);
+        let mut out = self.layout_tree(main);
+        out.extend(sides);
+        out
+    }
+    /// The area left to the split windows, and the side windows' areas.
+    fn frame(&self, area: Area) -> (Area, Vec<(ViewId, Area)>) {
         let mut main = area;
         let mut sides = vec![];
         if let Some((view, size)) = self.bottom {
@@ -261,38 +364,15 @@ impl Windows {
             );
             main.width = main.width.saturating_sub(gap);
         }
-        let mut out = self.layout_tree(main);
-        out.extend(sides);
-        out
+        (main, sides)
     }
     fn layout_tree(&self, area: Area) -> Vec<(ViewId, Area)> {
         fn walk(node: &Node, area: Area, out: &mut Vec<(ViewId, Area)>) {
             match node {
                 Node::Window(view) => out.push((*view, area)),
-                Node::Split { axis, children } => {
-                    let n = children.len() as u16;
-                    let (total, gap) = match axis {
-                        Axis::Columns => (area.width.saturating_sub(n - 1), 1),
-                        Axis::Rows => (area.height, 0),
-                    };
-                    let mut offset = 0;
-                    for (index, child) in children.iter().enumerate() {
-                        let index = index as u16;
-                        let size = total / n + u16::from(index < total % n);
-                        let child_area = match axis {
-                            Axis::Columns => Area {
-                                x: area.x + offset,
-                                width: size,
-                                ..area
-                            },
-                            Axis::Rows => Area {
-                                y: area.y + offset,
-                                height: size,
-                                ..area
-                            },
-                        };
+                Node::Split { children, .. } => {
+                    for (child, child_area) in children.iter().zip(node.areas(area)) {
                         walk(child, child_area, out);
-                        offset += size + gap;
                     }
                 }
             }
@@ -302,6 +382,162 @@ impl Windows {
             walk(root, area, &mut out);
         }
         out
+    }
+    /// Grows the window of `view` by `delta` cells along `axis`, or shrinks
+    /// it when negative, within `area`: the nearest split along that axis
+    /// that holds it moves the edge, taking cells from the siblings nearest
+    /// it, after it first; a side window changes its own size. False when
+    /// nothing can move.
+    pub fn resize(&mut self, view: ViewId, axis: Axis, delta: i32, area: Area) -> bool {
+        match (self.side(view), axis) {
+            (Some(Side::Bottom), Axis::Rows) | (Some(Side::Right), Axis::Columns) => {
+                self.resize_side(axis, delta, area)
+            }
+            (Some(_), _) => false,
+            (None, _) => self.grow(view, axis, delta, area, false) == Some(true),
+        }
+    }
+    /// Moves the right or bottom edge of the window of `view` by `delta`
+    /// cells, as a mouse drags it: only the windows beyond that edge give
+    /// or take cells, or the side window there.
+    pub fn move_edge(&mut self, view: ViewId, axis: Axis, delta: i32, area: Area) -> bool {
+        if self.side(view).is_none()
+            && let Some(moved) = self.grow(view, axis, delta, area, true)
+        {
+            return moved;
+        }
+        // Past the split windows' edge lies a side window, which the right
+        // one's bottom edge also meets.
+        match axis {
+            Axis::Rows if self.bottom.is_some() && self.side(view) != Some(Side::Bottom) => {
+                self.resize_side(axis, -delta, area)
+            }
+            Axis::Columns if self.right.is_some() && self.side(view).is_none() => {
+                self.resize_side(axis, -delta, area)
+            }
+            _ => false,
+        }
+    }
+    fn resize_side(&mut self, axis: Axis, delta: i32, area: Area) -> bool {
+        let (slot, limit) = match axis {
+            Axis::Rows => (&mut self.bottom, area.height / 2),
+            Axis::Columns => (&mut self.right, area.width / 2),
+        };
+        let Some((_, size)) = slot.as_mut() else {
+            return false;
+        };
+        // The layout caps the size at half the area, so grow from what
+        // shows.
+        let limit = i32::from(limit.max(1));
+        let shown = i32::from(*size).min(limit);
+        let new = (shown + delta).clamp(1, limit);
+        *size = new as u16;
+        new != shown
+    }
+    /// Resizes a split window: whether it changed, or none when no split
+    /// along `axis` can take the move. With `edge`, only its right or
+    /// bottom edge moves, so a split where it comes last leaves the move
+    /// to an outer one.
+    fn grow(
+        &mut self,
+        view: ViewId,
+        axis: Axis,
+        delta: i32,
+        area: Area,
+        edge: bool,
+    ) -> Option<bool> {
+        let (main, _) = self.frame(area);
+        fn walk(
+            node: &mut Node,
+            view: ViewId,
+            axis: Axis,
+            delta: i32,
+            area: Area,
+            edge: bool,
+        ) -> Option<bool> {
+            let areas = node.areas(area);
+            let Node::Split {
+                axis: own,
+                children,
+                weights,
+            } = node
+            else {
+                return (*node == Node::Window(view)).then_some(false);
+            };
+            let index = (0..children.len()).find_map(|i| {
+                walk(&mut children[i], view, axis, delta, areas[i], edge).map(|moved| (i, moved))
+            })?;
+            match index {
+                (_, true) => Some(true),
+                (index, false) if *own == axis && !(edge && index + 1 == children.len()) => {
+                    let mut sizes: Vec<i32> = areas
+                        .iter()
+                        .map(|a| {
+                            i32::from(match axis {
+                                Axis::Rows => a.height,
+                                Axis::Columns => a.width,
+                            })
+                        })
+                        .collect();
+                    let min = i32::from(minimum(axis));
+                    // Siblings after the window, nearest first, then
+                    // those before it unless only the edge moves.
+                    let before = if edge { 0..0 } else { 0..index };
+                    let others: Vec<usize> = (index + 1..sizes.len()).chain(before.rev()).collect();
+                    let moved = if delta > 0 {
+                        let mut left = delta;
+                        for &i in &others {
+                            let take = left.min((sizes[i] - min).max(0));
+                            sizes[i] -= take;
+                            left -= take;
+                        }
+                        delta - left
+                    } else {
+                        let give = (-delta).min((sizes[index] - min).max(0));
+                        sizes[others[0]] += give;
+                        give
+                    };
+                    if moved == 0 {
+                        // An outer split along the axis may still move
+                        // this whole group; a dragged edge stays put.
+                        return Some(edge);
+                    }
+                    sizes[index] += if delta > 0 { moved } else { -moved };
+                    *weights = sizes.iter().map(|s| *s as u32).collect();
+                    Some(true)
+                }
+                (_, false) => Some(false),
+            }
+        }
+        let root = self.root.as_mut()?;
+        let before = root.clone();
+        walk(root, view, axis, delta, main, edge)
+            .filter(|handled| *handled)
+            .map(|_| *root != before)
+    }
+    /// Gives every split equal children and the side windows the sizes
+    /// they were opened at.
+    pub fn reset(&mut self) {
+        fn walk(node: &mut Node) {
+            if let Node::Split {
+                children, weights, ..
+            } = node
+            {
+                weights.iter_mut().for_each(|w| *w = 1);
+                children.iter_mut().for_each(walk);
+            }
+        }
+        if let Some(root) = &mut self.root {
+            walk(root);
+        }
+        for (slot, opened) in [
+            (&mut self.bottom, self.opened[0]),
+            (&mut self.right, self.opened[1]),
+        ] {
+            if let Some((_, size)) = slot {
+                *size = opened;
+            }
+        }
     }
     /// The window next to `view` in a direction: among those beyond its
     /// edge that overlap it, the nearest, then the one closest to its
@@ -409,6 +645,7 @@ mod tests {
             Some(&Node::Split {
                 axis: Axis::Columns,
                 children: vec![Node::Window(v(1)), Node::Window(v(2)), Node::Window(v(4))],
+                weights: vec![1; 3],
             })
         );
         windows.replace(Some(v(4)), v(5));
@@ -467,5 +704,94 @@ mod tests {
         windows.remove(v(1));
         windows.remove(v(3));
         assert_eq!(windows.layout(area), [(v(4), area)]);
+    }
+    #[test]
+    fn resizing_moves_the_nearest_edge_along_the_axis() {
+        let mut windows = Windows::default();
+        windows.replace(None, v(1));
+        windows.split(v(1), v(2), Axis::Columns);
+        windows.split(v(2), v(3), Axis::Rows);
+        let area = Area {
+            x: 0,
+            y: 0,
+            width: 41,
+            height: 20,
+        };
+        let size = |windows: &Windows, view| {
+            let (_, area) = windows
+                .layout(area)
+                .into_iter()
+                .find(|(id, _)| *id == view)
+                .unwrap();
+            (area.width, area.height)
+        };
+        // The lower right window is taller at the cost of the one above,
+        // and wider at the cost of the column to the left.
+        assert!(windows.resize(v(3), Axis::Rows, 4, area));
+        assert_eq!(size(&windows, v(2)), (20, 6));
+        assert_eq!(size(&windows, v(3)), (20, 14));
+        assert!(windows.resize(v(3), Axis::Columns, 5, area));
+        assert_eq!(size(&windows, v(1)), (15, 20));
+        assert_eq!(size(&windows, v(2)), (25, 6));
+        // A window keeps a minimum, and a resize that moves nothing fails.
+        assert!(windows.resize(v(2), Axis::Rows, -10, area));
+        assert_eq!(size(&windows, v(2)), (25, MIN_ROWS));
+        assert!(!windows.resize(v(2), Axis::Rows, -1, area));
+        assert!(!windows.resize(v(1), Axis::Rows, 1, area));
+        // Splitting a resized window halves it; the new separator comes
+        // from everyone.
+        windows.split(v(1), v(4), Axis::Columns);
+        assert_eq!((size(&windows, v(1)).0, size(&windows, v(4)).0), (8, 7));
+        windows.reset();
+        assert_eq!(size(&windows, v(1)).0, 13);
+        // A side window changes its own size, up to half the area.
+        windows.set_side(Side::Bottom, v(5), 4);
+        assert!(windows.resize(v(5), Axis::Rows, 3, area));
+        assert_eq!(size(&windows, v(5)).1, 7);
+        assert!(!windows.resize(v(5), Axis::Columns, 3, area));
+        assert!(windows.resize(v(5), Axis::Rows, 30, area));
+        assert_eq!(size(&windows, v(5)).1, 10);
+        windows.reset();
+        assert_eq!(size(&windows, v(5)).1, 4);
+    }
+    #[test]
+    fn a_dragged_edge_moves_only_the_windows_beyond_it() {
+        let mut windows = Windows::default();
+        windows.replace(None, v(1));
+        windows.split(v(1), v(2), Axis::Columns);
+        windows.split(v(1), v(3), Axis::Columns);
+        windows.split(v(2), v(4), Axis::Rows);
+        windows.set_side(Side::Right, v(5), 10);
+        let area = Area {
+            x: 0,
+            y: 0,
+            width: 64,
+            height: 20,
+        };
+        let width = |windows: &Windows, view| {
+            let (_, area) = windows
+                .layout(area)
+                .into_iter()
+                .find(|(id, _)| *id == view)
+                .unwrap();
+            area.width
+        };
+        assert_eq!(
+            [1, 3, 2, 5].map(|n| width(&windows, v(n))),
+            [17, 17, 17, 10]
+        );
+        // The middle window's right edge takes from the one after it only.
+        assert!(windows.move_edge(v(3), Axis::Columns, 5, area));
+        assert_eq!([1, 3, 2].map(|n| width(&windows, v(n))), [17, 22, 12]);
+        // It stops where the window after it is smallest; the one before
+        // it keeps its size.
+        assert!(windows.move_edge(v(3), Axis::Columns, 20, area));
+        assert_eq!([1, 2].map(|n| width(&windows, v(n))), [17, MIN_COLUMNS]);
+        assert!(!windows.move_edge(v(3), Axis::Columns, 1, area));
+        // Past the last split window lies the right side window.
+        assert!(windows.move_edge(v(4), Axis::Columns, -4, area));
+        assert_eq!(width(&windows, v(5)), 14);
+        // The bottom edge of the last window in a column has nothing below.
+        assert!(!windows.move_edge(v(4), Axis::Rows, 2, area));
     }
 }

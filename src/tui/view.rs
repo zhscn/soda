@@ -657,6 +657,7 @@ fn status(
         Some(Layer::Saving(_)) => ("SAVING", theme.mode_prompt),
         Some(Layer::Help(_)) => ("HELP", theme.mode_prompt),
         Some(Layer::Labels(_)) => ("JUMP", theme.mode_prompt),
+        Some(Layer::Resize(_)) => ("RESIZE", theme.mode_prompt),
         None => match runtime.edit_mode() {
             EditMode::Normal => ("NORMAL", theme.mode_normal),
             EditMode::Insert => ("INSERT", theme.mode_insert),
@@ -757,7 +758,13 @@ fn message(
 ) -> Option<Position> {
     let width = usize::from(area.width);
     match runtime.layer() {
-        Some(Layer::Search { .. } | Layer::Replace(_) | Layer::Saving(_) | Layer::Labels(_)) => {
+        Some(
+            Layer::Search { .. }
+            | Layer::Replace(_)
+            | Layer::Saving(_)
+            | Layer::Labels(_)
+            | Layer::Resize(_),
+        ) => {
             let presentation = runtime.layer().unwrap().presentation();
             let (row, cursor) = layout::prompt_row(&presentation, width);
             spans(buf, area.x, area.y, area.width, &row, theme.text, theme);

@@ -247,6 +247,47 @@ fn path_or(args: &str, path: fn(std::path::PathBuf) -> Command, bare: Command) -
         path(args.into())
     }
 }
+/// `resize-window [HOW [CELLS]]`: without HOW, the step-by-step mode.
+fn window_resize(args: &str) -> Result<Command, String> {
+    let (how, cells) = split(args.trim());
+    let cells = match cells {
+        "" => 1,
+        cells => cells
+            .parse::<u16>()
+            .ok()
+            .filter(|n| *n > 0)
+            .ok_or_else(|| format!("{cells} is not a number of cells"))?,
+    };
+    let cells = i32::from(cells);
+    Ok(Command::Window(match how {
+        "" => WindowCommand::ResizeMode,
+        "wider" => WindowCommand::Resize(Axis::Columns, cells),
+        "narrower" => WindowCommand::Resize(Axis::Columns, -cells),
+        "taller" => WindowCommand::Resize(Axis::Rows, cells),
+        "shorter" => WindowCommand::Resize(Axis::Rows, -cells),
+        "reset" => WindowCommand::ResetSizes,
+        how => return Err(format!("unknown resize {how}")),
+    }))
+}
+const HOW: Slot = Slot {
+    name: "HOW",
+    kind: SlotKind::Choice(&[
+        word("wider", "More columns, from the windows beside it"),
+        word("narrower", "Fewer columns, to the window beside it"),
+        word("taller", "More rows, from the windows above or below it"),
+        word("shorter", "Fewer rows, to the window above or below it"),
+        word(
+            "reset",
+            "Equal splits, and side windows at their opening size",
+        ),
+    ]),
+    required: false,
+};
+const CELLS: Slot = Slot {
+    name: "CELLS",
+    kind: SlotKind::Word,
+    required: false,
+};
 fn window_split(args: &str, axis: Axis) -> Command {
     let path = (!args.is_empty()).then(|| args.into());
     Command::Window(WindowCommand::Split(axis, path))
@@ -434,6 +475,12 @@ pub static BUILTINS: &[Builtin] = &[
         "only",
         "Close every other window",
         Command::Window(WindowCommand::Only)
+    ),
+    builtin!(
+        "resize-window",
+        [HOW, CELLS],
+        "Resize the window by CELLS (1), or step by step: w n t s r, Ctrl doubles, Esc quits",
+        window_resize
     ),
     builtin!(
         "window-left",
