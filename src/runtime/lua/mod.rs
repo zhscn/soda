@@ -777,6 +777,25 @@ fn item(table: &Table) -> mlua::Result<Item> {
         item.text = snippet;
         item.snippet = true;
     }
+    // `{ {line, column}, {line, column}, text }` as `buffer:edit` takes them.
+    if let Some(edits) = table.get::<Option<Table>>("edits")? {
+        let place = |point: Table| -> mlua::Result<(usize, usize)> {
+            let line: usize = point.get(1)?;
+            let column: usize = point.get(2)?;
+            if line == 0 || column == 0 {
+                return Err(mlua::Error::runtime("lines and columns count from 1"));
+            }
+            Ok((line - 1, column - 1))
+        };
+        for edit in edits.sequence_values::<Table>() {
+            let edit = edit?;
+            item.edits.push(crate::interaction::completion::Extra {
+                from: place(edit.get(1)?)?,
+                to: place(edit.get(2)?)?,
+                text: edit.get(3)?,
+            });
+        }
+    }
     Ok(item)
 }
 fn expand(runtime: &Runtime, text: &str) -> mlua::Result<String> {

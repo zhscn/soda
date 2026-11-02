@@ -391,7 +391,7 @@ fn the_server_completes_with_snippets() {
     keys(&mut f.r, "serv");
     wait(&mut f.r, |r| {
         r.completion_popup()
-            .is_some_and(|popup| popup.rows.len() == 2)
+            .is_some_and(|popup| popup.rows.len() == 3)
     });
     let popup = f.r.completion_popup().unwrap();
     assert_eq!(popup.rows[0].label, "server_call(int a)");
@@ -399,6 +399,23 @@ fn the_server_completes_with_snippets() {
     assert_eq!(text(&f.r), "server_call(int a)\n");
     keys(&mut f.r, "1");
     assert_eq!(text(&f.r), "server_call(1)\n");
+}
+#[test]
+fn a_candidate_brings_its_include_in_the_same_step() {
+    let Some(mut f) = open("// top\n\n") else {
+        return;
+    };
+    f.r.command(Command::SetMode(EditMode::Insert));
+    keys(&mut f.r, "<down>server_v");
+    wait(&mut f.r, |r| {
+        r.completion_popup()
+            .is_some_and(|popup| popup.rows.len() == 1)
+    });
+    keys(&mut f.r, "<tab>x");
+    assert_eq!(text(&f.r), "#include <vector>\n// top\nserver_vectorx\n");
+    // The `x` typed after it is a step of its own.
+    keys(&mut f.r, "<esc>uu");
+    assert_eq!(text(&f.r), "// top\nserver_v\n");
 }
 #[test]
 fn diagnostics_flag_lines_and_list() {

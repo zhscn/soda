@@ -718,7 +718,7 @@ impl Layers {
                         .unwrap()
                         .selection();
                     let range = selection.range();
-                    self.expand_snippet(view, range, &body, app, time, &mut response);
+                    self.expand_snippet(view, range, vec![], &body, app, time, &mut response);
                 }
             }
             Command::SnippetStep { backward } => {
@@ -1245,6 +1245,18 @@ pub(super) fn show(app: &Application, document: crate::editor::DocumentId) -> Ev
     view.map_or(Event::AddView(document), |v| Event::Focus(v.id))
 }
 
+/// How far changes before `at` move it: in bytes, and in lines.
+fn shift(text: &str, changes: &[crate::core::Change], at: usize) -> (isize, isize) {
+    let mut bytes = 0isize;
+    let mut lines = 0isize;
+    for change in changes.iter().filter(|change| change.range.end <= at) {
+        let removed = &text[change.range.clone()];
+        bytes += change.insert.len() as isize - removed.len() as isize;
+        lines +=
+            change.insert.matches('\n').count() as isize - removed.matches('\n').count() as isize;
+    }
+    (bytes, lines)
+}
 impl Layers {
     /// Puts a candidate in the document, and records for `.` and macros the
     /// keys that would have typed it: their replays do not complete.
@@ -1259,6 +1271,7 @@ impl Layers {
         use crate::core::{Change, Selection, Transaction};
         let super::completion::Accepted {
             view,
+            edits,
             range,
             caret,
             text,
@@ -1278,11 +1291,14 @@ impl Layers {
                 .record(UserInput::Key(KeyStroke::plain(key)));
         }
         let typed = if snippet {
-            self.expand_snippet(view, range, &text, app, time, response)
+            self.expand_snippet(view, range, edits, &text, app, time, response)
         } else {
-            let start = range.start;
-            let mut tx =
-                Transaction::new(snapshot.version(), vec![Change::new(range, text.clone())]);
+            let start = range
+                .start
+                .saturating_add_signed(shift(whole, &edits, range.start).0);
+            let mut changes = edits;
+            changes.push(Change::new(range, text.clone()));
+            let mut tx = Transaction::new(snapshot.version(), changes);
             tx.selection = Some(Selection::caret(start + text.len()));
             response.events.push(Event::Edit {
                 view,
@@ -1293,12 +1309,15 @@ impl Layers {
         };
         self.modal.replay.record(UserInput::Paste(typed));
     }
-    /// Expands a snippet in place of a range as one undoable step; returns
-    /// its text. Lines after the first get the language's indentation.
+    /// Expands a snippet in place of a range as one undoable step, with
+    /// other edits; returns its text. Lines after the first get the
+    /// language's indentation.
+    #[allow(clippy::too_many_arguments)]
     fn expand_snippet(
         &mut self,
         view: crate::application::ViewId,
         range: std::ops::Range<usize>,
+        edits: Vec<crate::core::Change>,
         body: &str,
         app: &Application,
         time: Duration,
@@ -1315,13 +1334,16 @@ impl Layers {
         let parsed = super::snippet::parse(body).indented(&indent, &unit);
         let depth = model.history_depth();
         let first = parsed.stops[0].clone();
-        let mut tx = Transaction::new(
-            snapshot.version(),
-            vec![Change::new(range.clone(), parsed.text.clone())],
-        );
+        // Where the snippet lands once the edits before it are made.
+        let (bytes, lines) = shift(snapshot.text(), &edits, range.start);
+        let start = range.start.saturating_add_signed(bytes);
+        let line = line.saturating_add_signed(lines);
+        let mut changes = edits;
+        changes.push(Change::new(range.clone(), parsed.text.clone()));
+        let mut tx = Transaction::new(snapshot.version(), changes);
         tx.selection = Some(Selection {
-            anchor: range.start + first.start,
-            head: range.start + first.end,
+            anchor: start + first.start,
+            head: start + first.end,
         });
         let lines = parsed.lines();
         let event = |command| Event::Edit {
@@ -1341,7 +1363,7 @@ impl Layers {
         self.snippet.pending = Some(super::snippet::Pending {
             view,
             document,
-            offset: range.start,
+            offset: start,
             stops: parsed.stops,
         });
         parsed.text

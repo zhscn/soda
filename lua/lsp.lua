@@ -13,7 +13,7 @@
 -- and source.
 -- Completion follows from the server being there.
 
-soda.lsp.server("cpp", { "clangd", "--header-insertion=never", "--function-arg-placeholders=1" })
+soda.lsp.server("cpp", { "clangd", "--function-arg-placeholders=1" })
 
 local diagnostics = {}
 local severities = { "error", "warning" }
@@ -799,6 +799,9 @@ soda.completion.register({
     local asked = soda.lsp.request("textDocument/completion", params, function(result)
       local list = result and (result.items or result) or {}
       local items = {}
+      local buf = soda.buffer()
+      local info = soda.lsp.info()
+      local encoding = info and info.encoding or "utf-8"
       for _, item in ipairs(list) do
         local edit = item.textEdit
         local text = edit and edit.newText or item.insertText or item.label
@@ -811,6 +814,11 @@ soda.completion.register({
           candidate.snippet = text
         else
           candidate.text = text
+        end
+        -- Made with the candidate in one step, such as the `#include` the
+        -- name needs.
+        if item.additionalTextEdits and #item.additionalTextEdits > 0 then
+          candidate.edits = buffer_changes(buf, item.additionalTextEdits, encoding)
         end
         table.insert(items, candidate)
       end

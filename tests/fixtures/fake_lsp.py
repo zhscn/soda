@@ -87,6 +87,9 @@ while True:
              "insertTextFormat": 2, "textEdit": {
                  "newText": "server_call(${1:int a})", "range": spot("", 0, 0)["range"]}},
             {"label": "server_plain", "insertText": "server_plain", "detail": "int"},
+            {"label": "\u2022server_vector", "filterText": "server_vector",
+             "insertText": "server_vector", "additionalTextEdits": [
+                 {"newText": "#include <vector>\n", "range": spot("", 0, 0)["range"]}]},
         ]})
     elif method == "textDocument/semanticTokens/full":
         # On line 0, column 1 for 2 units; then line 1, column 0 for 3, of a

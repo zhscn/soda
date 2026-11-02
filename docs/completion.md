@@ -55,7 +55,7 @@ soda.completion.register({
 })
 ```
 
-`complete` 在编辑线程上运行，要做慢的事就交给 `soda.spawn`，在回调里继续写 `sink`；会话结束后才到的结果被丢弃。候选的字段：`label`（必需）、`detail`、`filter`（匹配用的文字，默认是 `label`）、`text`（插入的文字，默认是 `label`）、`snippet`（插入一段 snippet，优先于 `text`）、`back`（比当前单词多替换的字节数）。
+`complete` 在编辑线程上运行，要做慢的事就交给 `soda.spawn`，在回调里继续写 `sink`；会话结束后才到的结果被丢弃。候选的字段：`label`（必需）、`detail`、`filter`（匹配用的文字，默认是 `label`）、`text`（插入的文字，默认是 `label`）、`snippet`（插入一段 snippet，优先于 `text`）、`back`（比当前单词多替换的字节数）、`edits`（同时做的其他修改，格式同 `buffer:edit`：`{ {行, 列}, {行, 列}, 文字 }`，从 1 开始的行号和字节列，比如名字需要的 `#include`）。`edits` 和替换在同一个撤销步里；其中任何一处超出文档或碰到被替换的范围时，全部不做。
 
 没有字符触发时询问所有来源和内置来源；由字符触发时只询问声明了这个字符的来源，单词没有意义。相同匹配度下 Lua 来源排在内置来源之前。
 
@@ -75,11 +75,11 @@ require("snippets").add("cpp", {
 })
 ```
 
-限制：`.` 和宏重放时写入 snippet 展开的文字，之后在位置里打的字和 `Tab` 不按 snippet 重放；snippet 里再展开 snippet 时，新的会话替换旧的；位置没有高亮，只有当前位置靠选区显示；紧挨着的两个位置，在前一个末尾打字会落进后一个。
+限制：`.` 和宏重放时写入 snippet 展开的文字（候选的 `edits` 不重放），之后在位置里打的字和 `Tab` 不按 snippet 重放；snippet 里再展开 snippet 时，新的会话替换旧的；位置没有高亮，只有当前位置靠选区显示；紧挨着的两个位置，在前一个末尾打字会落进后一个。
 
 ## 后续
 
-- 候选还缺 `extra_edits`（自动 include，所以 clangd 默认带 `--header-insertion=never`）、`commit_chars`、延迟解析和 insert/replace 两个范围。
+- 候选还缺 `commit_chars`、延迟解析和 insert/replace 两个范围。
 - 灰字预览：选中项在光标处用绘制层显示，不写入文档。
 
 ## 与 capf 的区别

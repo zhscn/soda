@@ -354,6 +354,26 @@ fn a_snippet_goes_through_its_places_with_tab() {
     assert_eq!(text(&r), "for (z; k)  ;\n");
 }
 #[test]
+fn edits_of_a_candidate_move_its_snippet() {
+    let (_dir, mut r) = bundled("top\n|\n");
+    lua(
+        &mut r,
+        r##"soda.completion.register({ complete = function(context, sink)
+            sink:add({ { label = "fori", snippet = "for (${1:i}) {\n\t$0\n}",
+                         edits = { { { 1, 1 }, { 1, 1 }, "#a\n#b\n" } } } })
+            sink:done()
+        end })"##,
+    );
+    keys(&mut r, "fo");
+    listed(&mut r);
+    keys(&mut r, "<tab>");
+    assert_eq!(text(&r), "#a\n#b\ntop\nfor (i) {\n    \n}\n");
+    keys(&mut r, "k");
+    assert_eq!(shown(&r), "#a\n#b\ntop\nfor (k|) {\n    \n}\n");
+    keys(&mut r, "<esc>uu");
+    assert_eq!(text(&r), "top\nfo\n");
+}
+#[test]
 fn leaving_a_snippet_ends_it() {
     let (_dir, mut r) = bundled("|\nnext\n");
     r.command(Command::Named("snippet a${1:b} ${2:c}".into()));

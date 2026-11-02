@@ -45,8 +45,17 @@ pub struct Item {
     /// Bytes before the anchor that this candidate also replaces: a file
     /// name holds more than the word at the caret.
     pub back: usize,
+    /// Other edits made with it, such as an `#include` the name needs:
+    /// zero-based lines and byte columns of the start and end, and the text.
+    pub edits: Vec<Extra>,
     /// Who gave it, filled in on arrival.
     pub source: u64,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Extra {
+    pub from: (usize, usize),
+    pub to: (usize, usize),
+    pub text: String,
 }
 impl Item {
     pub fn plain(label: impl Into<String>, detail: impl Into<String>, back: usize) -> Self {
@@ -58,6 +67,7 @@ impl Item {
             snippet: false,
             detail: detail.into(),
             back,
+            edits: vec![],
             source: BUILTIN,
         }
     }
@@ -534,9 +544,11 @@ impl State {
         } else {
             caret
         };
+        let range = from..to;
         Some(Accepted {
             view: session.view,
-            range: from..to,
+            edits: extra_changes(&snapshot, &item.edits, &range),
+            range,
             caret,
             text: item.text.clone(),
             snippet: item.snippet,
@@ -588,9 +600,35 @@ impl Session {
         }
     }
 }
+/// The other edits of a candidate in bytes of the document as it is now;
+/// none when any of them is out of the document or meets the replaced range.
+fn extra_changes(
+    snapshot: &Snapshot,
+    edits: &[Extra],
+    range: &std::ops::Range<usize>,
+) -> Vec<crate::core::Change> {
+    let offset = |(line, column): (usize, usize)| {
+        let start = snapshot.line_start(line)?;
+        let at = start + column;
+        (at <= snapshot.len_bytes() && snapshot.is_char_boundary(at)).then_some(at)
+    };
+    let mut changes = vec![];
+    for edit in edits {
+        let (Some(from), Some(to)) = (offset(edit.from), offset(edit.to)) else {
+            return vec![];
+        };
+        if from > to || (from < range.end && to > range.start) || from == range.start {
+            return vec![];
+        }
+        changes.push(crate::core::Change::new(from..to, edit.text.clone()));
+    }
+    changes
+}
 /// A candidate on its way into the document.
 pub(super) struct Accepted {
     pub view: ViewId,
+    /// Changes beside the replaced range, made in the same step.
+    pub edits: Vec<crate::core::Change>,
     pub range: std::ops::Range<usize>,
     pub caret: usize,
     pub text: String,
