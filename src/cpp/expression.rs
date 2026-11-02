@@ -458,7 +458,11 @@ impl Replay<'_> {
         let f = self.top();
         let cont = self.style.expression.continuation_width as i64;
         let continuation = f.last.max(f.indent) + cont;
-        if matches!(t.kind, K::RBrace | K::RBracket | K::RParen) && self.stack.len() > 1 {
+        let unfinished = prev.is_some_and(|prev| awaits_operand(t.kind, prev.kind));
+        if matches!(t.kind, K::RBrace | K::RBracket | K::RParen)
+            && self.stack.len() > 1
+            && !unfinished
+        {
             return self.stack[self.stack.len() - 2].last;
         }
         if t.string() && self.string != 0 {
@@ -526,6 +530,26 @@ pub(super) struct ContinuationColumn {
     pub continuation: usize,
 }
 
+/// Whether a closer at the start of a line stands after text that needs more:
+/// Enter in `call(a,|)`, where automatic pairing put the closer there. What
+/// is typed next goes before it, so the line is laid out for that, not as a
+/// closer on a line of its own. Braces close blocks and lists, where a
+/// trailing comma is ordinary.
+pub(super) fn awaits_operand(closer: K, before: K) -> bool {
+    matches!(closer, K::RParen | K::RBracket)
+        && !matches!(
+            before,
+            K::Identifier
+                | K::Number
+                | K::StringLiteral
+                | K::RawStringLiteral
+                | K::CharacterLiteral
+                | K::RParen
+                | K::RBracket
+                | K::RBrace
+                | K::Greater
+        )
+}
 pub(super) fn continuation(
     snapshot: &Snapshot,
     tree: &SyntaxTree,

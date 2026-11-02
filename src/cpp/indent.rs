@@ -236,6 +236,12 @@ impl Computer<'_> {
             }
         }
     }
+    fn awaits_operand(&self, closer: usize) -> bool {
+        let tokens = &self.tree.tokens;
+        significant_before(tokens, tokens[closer].range.start).is_some_and(|before| {
+            super::expression::awaits_operand(tokens[closer].kind, tokens[before].kind)
+        })
+    }
     /// clang-format's NestedBlockIndent for a lambda body (the Signature
     /// LambdaBodyIndentation): the body is one level deeper and the closing
     /// brace aligns with it.
@@ -382,7 +388,7 @@ impl Computer<'_> {
                             | N::ClassBody
                             | N::ParenGroup
                             | N::BracketGroup
-                    ) =>
+                    ) && !self.awaits_operand(i) =>
                 {
                     let anchor = self.origin(id);
                     let column = if self.lambda_body(id) {

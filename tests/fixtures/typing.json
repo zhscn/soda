@@ -1,0 +1,362 @@
+[
+ {
+  "name": "llvm/call-arguments",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\n",
+  "expected": "void f() {\n  call(aaa,\n       bbb,\n       ccc);\n}\n"
+ },
+ {
+  "name": "llvm/nested-calls",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\n",
+  "expected": "void f() {\n  outer(inner(aaa,\n              bbb),\n        ccc);\n}\n"
+ },
+ {
+  "name": "llvm/argument-after-open",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\n",
+  "expected": "void f() {\n  call(\n      aaa,\n      bbb);\n}\n"
+ },
+ {
+  "name": "llvm/condition",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\n",
+  "expected": "void f() {\n  if (aaa &&\n      bbb) {\n    call();\n  }\n}\n"
+ },
+ {
+  "name": "llvm/continued-assignment",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\n",
+  "expected": "void f() {\n  int y =\n      1;\n  int z = 2;\n}\n"
+ },
+ {
+  "name": "llvm/subscript",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\n",
+  "expected": "void f() {\n  int v = table[aaa +\n                bbb];\n}\n"
+ },
+ {
+  "name": "llvm/parameters",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\n",
+  "expected": "int add(int first,\n        int second) {\n  return first + second;\n}\n"
+ },
+ {
+  "name": "llvm/class",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\n",
+  "expected": "class A {\npublic:\n  void f(int a,\n         int b);\n\nprivate:\n  int x;\n};\n"
+ },
+ {
+  "name": "llvm/else",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\n",
+  "expected": "void f() {\n  if (a) {\n    b();\n  } else {\n    c();\n  }\n}\n"
+ },
+ {
+  "name": "google/call-arguments",
+  "yaml": "BasedOnStyle: Google\nColumnLimit: 0\n",
+  "expected": "void f() {\n  call(aaa,\n       bbb,\n       ccc);\n}\n"
+ },
+ {
+  "name": "google/nested-calls",
+  "yaml": "BasedOnStyle: Google\nColumnLimit: 0\n",
+  "expected": "void f() {\n  outer(inner(aaa,\n              bbb),\n        ccc);\n}\n"
+ },
+ {
+  "name": "google/argument-after-open",
+  "yaml": "BasedOnStyle: Google\nColumnLimit: 0\n",
+  "expected": "void f() {\n  call(\n      aaa,\n      bbb);\n}\n"
+ },
+ {
+  "name": "google/condition",
+  "yaml": "BasedOnStyle: Google\nColumnLimit: 0\n",
+  "expected": "void f() {\n  if (aaa &&\n      bbb) {\n    call();\n  }\n}\n"
+ },
+ {
+  "name": "google/continued-assignment",
+  "yaml": "BasedOnStyle: Google\nColumnLimit: 0\n",
+  "expected": "void f() {\n  int y =\n      1;\n  int z = 2;\n}\n"
+ },
+ {
+  "name": "google/subscript",
+  "yaml": "BasedOnStyle: Google\nColumnLimit: 0\n",
+  "expected": "void f() {\n  int v = table[aaa +\n                bbb];\n}\n"
+ },
+ {
+  "name": "google/parameters",
+  "yaml": "BasedOnStyle: Google\nColumnLimit: 0\n",
+  "expected": "int add(int first,\n        int second) {\n  return first + second;\n}\n"
+ },
+ {
+  "name": "google/class",
+  "yaml": "BasedOnStyle: Google\nColumnLimit: 0\n",
+  "expected": "class A {\n public:\n  void f(int a,\n         int b);\n\n private:\n  int x;\n};\n"
+ },
+ {
+  "name": "google/else",
+  "yaml": "BasedOnStyle: Google\nColumnLimit: 0\n",
+  "expected": "void f() {\n  if (a) {\n    b();\n  } else {\n    c();\n  }\n}\n"
+ },
+ {
+  "name": "webkit/call-arguments",
+  "yaml": "BasedOnStyle: WebKit\nColumnLimit: 0\n",
+  "expected": "void f()\n{\n    call(aaa,\n        bbb,\n        ccc);\n}\n"
+ },
+ {
+  "name": "webkit/nested-calls",
+  "yaml": "BasedOnStyle: WebKit\nColumnLimit: 0\n",
+  "expected": "void f()\n{\n    outer(inner(aaa,\n              bbb),\n        ccc);\n}\n"
+ },
+ {
+  "name": "webkit/argument-after-open",
+  "yaml": "BasedOnStyle: WebKit\nColumnLimit: 0\n",
+  "expected": "void f()\n{\n    call(\n        aaa,\n        bbb);\n}\n"
+ },
+ {
+  "name": "webkit/condition",
+  "yaml": "BasedOnStyle: WebKit\nColumnLimit: 0\n",
+  "expected": "void f()\n{\n    if (aaa && bbb) {\n        call();\n    }\n}\n"
+ },
+ {
+  "name": "webkit/continued-assignment",
+  "yaml": "BasedOnStyle: WebKit\nColumnLimit: 0\n",
+  "expected": "void f()\n{\n    int y = 1;\n    int z = 2;\n}\n"
+ },
+ {
+  "name": "webkit/subscript",
+  "yaml": "BasedOnStyle: WebKit\nColumnLimit: 0\n",
+  "expected": "void f()\n{\n    int v = table[aaa + bbb];\n}\n"
+ },
+ {
+  "name": "webkit/parameters",
+  "yaml": "BasedOnStyle: WebKit\nColumnLimit: 0\n",
+  "expected": "int add(int first,\n    int second)\n{\n    return first + second;\n}\n"
+ },
+ {
+  "name": "webkit/class",
+  "yaml": "BasedOnStyle: WebKit\nColumnLimit: 0\n",
+  "expected": "class A {\npublic:\n    void f(int a,\n        int b);\n\nprivate:\n    int x;\n};\n"
+ },
+ {
+  "name": "webkit/else",
+  "yaml": "BasedOnStyle: WebKit\nColumnLimit: 0\n",
+  "expected": "void f()\n{\n    if (a) {\n        b();\n    } else {\n        c();\n    }\n}\n"
+ },
+ {
+  "name": "mozilla/call-arguments",
+  "yaml": "BasedOnStyle: Mozilla\nColumnLimit: 0\n",
+  "expected": "void\nf()\n{\n  call(aaa,\n       bbb,\n       ccc);\n}\n"
+ },
+ {
+  "name": "mozilla/nested-calls",
+  "yaml": "BasedOnStyle: Mozilla\nColumnLimit: 0\n",
+  "expected": "void\nf()\n{\n  outer(inner(aaa,\n              bbb),\n        ccc);\n}\n"
+ },
+ {
+  "name": "mozilla/argument-after-open",
+  "yaml": "BasedOnStyle: Mozilla\nColumnLimit: 0\n",
+  "expected": "void\nf()\n{\n  call(\n    aaa,\n    bbb);\n}\n"
+ },
+ {
+  "name": "mozilla/condition",
+  "yaml": "BasedOnStyle: Mozilla\nColumnLimit: 0\n",
+  "expected": "void\nf()\n{\n  if (aaa &&\n      bbb) {\n    call();\n  }\n}\n"
+ },
+ {
+  "name": "mozilla/continued-assignment",
+  "yaml": "BasedOnStyle: Mozilla\nColumnLimit: 0\n",
+  "expected": "void\nf()\n{\n  int y =\n    1;\n  int z = 2;\n}\n"
+ },
+ {
+  "name": "mozilla/subscript",
+  "yaml": "BasedOnStyle: Mozilla\nColumnLimit: 0\n",
+  "expected": "void\nf()\n{\n  int v = table[aaa +\n                bbb];\n}\n"
+ },
+ {
+  "name": "mozilla/parameters",
+  "yaml": "BasedOnStyle: Mozilla\nColumnLimit: 0\n",
+  "expected": "int\nadd(int first,\n    int second)\n{\n  return first + second;\n}\n"
+ },
+ {
+  "name": "mozilla/class",
+  "yaml": "BasedOnStyle: Mozilla\nColumnLimit: 0\n",
+  "expected": "class A\n{\npublic:\n  void f(int a,\n         int b);\n\nprivate:\n  int x;\n};\n"
+ },
+ {
+  "name": "mozilla/else",
+  "yaml": "BasedOnStyle: Mozilla\nColumnLimit: 0\n",
+  "expected": "void\nf()\n{\n  if (a) {\n    b();\n  } else {\n    c();\n  }\n}\n"
+ },
+ {
+  "name": "tabs-Never/call-arguments",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: Never\n",
+  "expected": "void f() {\n    call(aaa,\n         bbb,\n         ccc);\n}\n"
+ },
+ {
+  "name": "tabs-Never/nested-calls",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: Never\n",
+  "expected": "void f() {\n    outer(inner(aaa,\n                bbb),\n          ccc);\n}\n"
+ },
+ {
+  "name": "tabs-Never/argument-after-open",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: Never\n",
+  "expected": "void f() {\n    call(\n        aaa,\n        bbb);\n}\n"
+ },
+ {
+  "name": "tabs-Never/condition",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: Never\n",
+  "expected": "void f() {\n    if (aaa &&\n        bbb) {\n        call();\n    }\n}\n"
+ },
+ {
+  "name": "tabs-Never/continued-assignment",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: Never\n",
+  "expected": "void f() {\n    int y =\n        1;\n    int z = 2;\n}\n"
+ },
+ {
+  "name": "tabs-Never/subscript",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: Never\n",
+  "expected": "void f() {\n    int v = table[aaa +\n                  bbb];\n}\n"
+ },
+ {
+  "name": "tabs-Never/parameters",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: Never\n",
+  "expected": "int add(int first,\n        int second) {\n    return first + second;\n}\n"
+ },
+ {
+  "name": "tabs-Never/class",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: Never\n",
+  "expected": "class A {\n  public:\n    void f(int a,\n           int b);\n\n  private:\n    int x;\n};\n"
+ },
+ {
+  "name": "tabs-Never/else",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: Never\n",
+  "expected": "void f() {\n    if (a) {\n        b();\n    } else {\n        c();\n    }\n}\n"
+ },
+ {
+  "name": "tabs-ForIndentation/call-arguments",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: ForIndentation\n",
+  "expected": "void f() {\n\tcall(aaa,\n\t     bbb,\n\t     ccc);\n}\n"
+ },
+ {
+  "name": "tabs-ForIndentation/nested-calls",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: ForIndentation\n",
+  "expected": "void f() {\n\touter(inner(aaa,\n\t            bbb),\n\t      ccc);\n}\n"
+ },
+ {
+  "name": "tabs-ForIndentation/argument-after-open",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: ForIndentation\n",
+  "expected": "void f() {\n\tcall(\n\t    aaa,\n\t    bbb);\n}\n"
+ },
+ {
+  "name": "tabs-ForIndentation/condition",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: ForIndentation\n",
+  "expected": "void f() {\n\tif (aaa &&\n\t    bbb) {\n\t\tcall();\n\t}\n}\n"
+ },
+ {
+  "name": "tabs-ForIndentation/continued-assignment",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: ForIndentation\n",
+  "expected": "void f() {\n\tint y =\n\t    1;\n\tint z = 2;\n}\n"
+ },
+ {
+  "name": "tabs-ForIndentation/subscript",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: ForIndentation\n",
+  "expected": "void f() {\n\tint v = table[aaa +\n\t              bbb];\n}\n"
+ },
+ {
+  "name": "tabs-ForIndentation/parameters",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: ForIndentation\n",
+  "expected": "int add(int first,\n        int second) {\n\treturn first + second;\n}\n"
+ },
+ {
+  "name": "tabs-ForIndentation/class",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: ForIndentation\n",
+  "expected": "class A {\n  public:\n\tvoid f(int a,\n\t       int b);\n\n  private:\n\tint x;\n};\n"
+ },
+ {
+  "name": "tabs-ForIndentation/else",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: ForIndentation\n",
+  "expected": "void f() {\n\tif (a) {\n\t\tb();\n\t} else {\n\t\tc();\n\t}\n}\n"
+ },
+ {
+  "name": "tabs-ForContinuationAndIndentation/call-arguments",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: ForContinuationAndIndentation\n",
+  "expected": "void f() {\n\tcall(aaa,\n\t\t bbb,\n\t\t ccc);\n}\n"
+ },
+ {
+  "name": "tabs-ForContinuationAndIndentation/nested-calls",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: ForContinuationAndIndentation\n",
+  "expected": "void f() {\n\touter(inner(aaa,\n\t\t\t\tbbb),\n\t\t  ccc);\n}\n"
+ },
+ {
+  "name": "tabs-ForContinuationAndIndentation/argument-after-open",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: ForContinuationAndIndentation\n",
+  "expected": "void f() {\n\tcall(\n\t\taaa,\n\t\tbbb);\n}\n"
+ },
+ {
+  "name": "tabs-ForContinuationAndIndentation/condition",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: ForContinuationAndIndentation\n",
+  "expected": "void f() {\n\tif (aaa &&\n\t\tbbb) {\n\t\tcall();\n\t}\n}\n"
+ },
+ {
+  "name": "tabs-ForContinuationAndIndentation/continued-assignment",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: ForContinuationAndIndentation\n",
+  "expected": "void f() {\n\tint y =\n\t\t1;\n\tint z = 2;\n}\n"
+ },
+ {
+  "name": "tabs-ForContinuationAndIndentation/subscript",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: ForContinuationAndIndentation\n",
+  "expected": "void f() {\n\tint v = table[aaa +\n\t\t\t\t  bbb];\n}\n"
+ },
+ {
+  "name": "tabs-ForContinuationAndIndentation/parameters",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: ForContinuationAndIndentation\n",
+  "expected": "int add(int first,\n\t\tint second) {\n\treturn first + second;\n}\n"
+ },
+ {
+  "name": "tabs-ForContinuationAndIndentation/class",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: ForContinuationAndIndentation\n",
+  "expected": "class A {\n  public:\n\tvoid f(int a,\n\t\t   int b);\n\n  private:\n\tint x;\n};\n"
+ },
+ {
+  "name": "tabs-ForContinuationAndIndentation/else",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: ForContinuationAndIndentation\n",
+  "expected": "void f() {\n\tif (a) {\n\t\tb();\n\t} else {\n\t\tc();\n\t}\n}\n"
+ },
+ {
+  "name": "tabs-Always/call-arguments",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: Always\n",
+  "expected": "void f() {\n\tcall(aaa,\n\t\t bbb,\n\t\t ccc);\n}\n"
+ },
+ {
+  "name": "tabs-Always/nested-calls",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: Always\n",
+  "expected": "void f() {\n\touter(inner(aaa,\n\t\t\t\tbbb),\n\t\t  ccc);\n}\n"
+ },
+ {
+  "name": "tabs-Always/argument-after-open",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: Always\n",
+  "expected": "void f() {\n\tcall(\n\t\taaa,\n\t\tbbb);\n}\n"
+ },
+ {
+  "name": "tabs-Always/condition",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: Always\n",
+  "expected": "void f() {\n\tif (aaa &&\n\t\tbbb) {\n\t\tcall();\n\t}\n}\n"
+ },
+ {
+  "name": "tabs-Always/continued-assignment",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: Always\n",
+  "expected": "void f() {\n\tint y =\n\t\t1;\n\tint z = 2;\n}\n"
+ },
+ {
+  "name": "tabs-Always/subscript",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: Always\n",
+  "expected": "void f() {\n\tint v = table[aaa +\n\t\t\t\t  bbb];\n}\n"
+ },
+ {
+  "name": "tabs-Always/parameters",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: Always\n",
+  "expected": "int add(int first,\n\t\tint second) {\n\treturn first + second;\n}\n"
+ },
+ {
+  "name": "tabs-Always/class",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: Always\n",
+  "expected": "class A {\n  public:\n\tvoid f(int a,\n\t\t   int b);\n\n  private:\n\tint x;\n};\n"
+ },
+ {
+  "name": "tabs-Always/else",
+  "yaml": "BasedOnStyle: LLVM\nColumnLimit: 0\nIndentWidth: 4\nTabWidth: 4\nContinuationIndentWidth: 4\nUseTab: Always\n",
+  "expected": "void f() {\n\tif (a) {\n\t\tb();\n\t} else {\n\t\tc();\n\t}\n}\n"
+ }
+]
