@@ -19,8 +19,8 @@ pub use parser::{AnalysisFallback, AnalysisWork, ParseStrategy};
 pub use parser::{parse, parse_snapshot, parse_snapshot_with_options, parse_with_options};
 pub use service::CppSession;
 pub use style::{
-    AccessIndent, ConstructorInitializers, CppStyle, GotoLabelIndent, NamespaceIndentation,
-    PPDirectiveIndent, StyleError, TabPolicy,
+    AccessIndent, BraceIndent, ConstructorInitializers, CppStyle, GotoLabelIndent,
+    NamespaceIndentation, PPDirectiveIndent, StyleError, TabPolicy,
 };
 
 pub use rules::{

@@ -10,6 +10,9 @@ pub struct ParserOptions {
     pub namespace_macros: Vec<String>,
     pub attribute_macros: Vec<String>,
     pub whitespace_sensitive_macros: Vec<String>,
+    /// Names whose `<` always opens template arguments, clang-format's
+    /// TemplateNames, even where an expression would read a comparison.
+    pub template_names: Vec<String>,
     pub macro_block_begin: String,
     pub macro_block_end: String,
 }
@@ -51,6 +54,10 @@ pub struct StructurePolicy {
     pub indent_requires_clause: bool,
     pub goto_labels: super::GotoLabelIndent,
     pub lambda_outer_scope: bool,
+    pub indent_export_block: bool,
+    pub requires_expression_keyword: bool,
+    pub brace_indent: super::BraceIndent,
+    pub skip_macro_definition_body: bool,
     pub indent_wrapped_function_names: bool,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -62,6 +69,9 @@ pub enum InitializerLayout {
 pub struct InitializerPolicy {
     pub width: usize,
     pub layout: InitializerLayout,
+    /// A line comment right after the brace is the first element, and the
+    /// elements below line up with it; otherwise the list breaks after `{`.
+    pub first_comment: bool,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConstructorPolicy {
@@ -143,6 +153,10 @@ impl CppStyle {
                 indent_requires_clause: self.indent_requires_clause,
                 goto_labels: self.goto_labels,
                 lambda_outer_scope: self.lambda_outer_scope,
+                indent_export_block: self.indent_export_block,
+                requires_expression_keyword: self.requires_expression_keyword,
+                brace_indent: self.brace_indent,
+                skip_macro_definition_body: self.skip_macro_definition_body,
                 indent_wrapped_function_names: self.indent_wrapped_function_names,
             },
             expression: ExpressionPolicy {
@@ -162,6 +176,7 @@ impl CppStyle {
                 } else {
                     InitializerLayout::Block
                 },
+                first_comment: self.braced_first_comment,
             },
             constructor: ConstructorPolicy {
                 width: self.constructor_indent.unwrap_or(cont),

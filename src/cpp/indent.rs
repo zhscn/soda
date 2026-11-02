@@ -165,10 +165,16 @@ impl Computer<'_> {
                         .find(|&&child| self.tree.nodes[child].kind == N::CtorInitializer)
                         .map(|&child| self.tree.range(child).start),
                     AlignmentAnchor::FirstElement => {
+                        // A line comment right after `{` stands for the first
+                        // element unless the style breaks after the brace.
+                        let first_comment =
+                            slot == S::BracedInitializer && self.style.initializer.first_comment;
                         self.tree.tokens[self.tree.nodes[owner].tokens.start + 1
                             ..self.tree.nodes[owner].tokens.end]
                             .iter()
-                            .find(|t| !t.kind.is_trivia())
+                            .find(|t| {
+                                !t.kind.is_trivia() || (first_comment && t.kind == K::LineComment)
+                            })
                             .filter(|t| {
                                 self.line_of(t.range.start)
                                     == self.line_of(self.tree.range(owner).start)
@@ -232,12 +238,110 @@ impl Computer<'_> {
     }
     fn lambda_body(&self, id: usize) -> bool {
         self.tree.nodes[id].kind == N::CompoundStatement
-            && self.tree.nodes[id].parent.is_some_and(|parent| {
+            && (self.tree.nodes[id].parent.is_some_and(|parent| {
                 matches!(
                     self.tree.nodes[parent].kind,
                     N::ParenGroup | N::BracketGroup | N::BraceGroup | N::OpaqueDeclaration
                 )
-            })
+            }) || self.requires_keyword(id).is_some())
+    }
+    /// How far the braces of block `id`, on lines of their own, stand in
+    /// from where they would otherwise go: BreakBeforeBraces GNU and
+    /// BraceWrapping.IndentBraces indent those of control statements, case
+    /// blocks and lambdas; Whitesmiths those of every block but lambdas.
+    fn brace_shift(&self, id: usize) -> usize {
+        use super::BraceIndent;
+        let mode = self.style.structure.brace_indent;
+        let node = &self.tree.nodes[id];
+        if mode == BraceIndent::None
+            || !matches!(
+                node.kind,
+                N::CompoundStatement | N::NamespaceBody | N::ClassBody
+            )
+        {
+            return 0;
+        }
+        let open = node.tokens.start;
+        if self.tree.tokens.get(open).map(|t| t.kind) != Some(K::LBrace)
+            || self.first(self.line_of(self.tree.tokens[open].range.start)) != Some(open)
+            || self.requires_keyword(id).is_some()
+        {
+            return 0;
+        }
+        let lambda = node.kind == N::CompoundStatement
+            && self.lambda_body(id)
+            && self.lambda_introducer(open).is_some();
+        let control = node.parent.is_some_and(|parent| {
+            matches!(
+                self.tree.nodes[parent].kind,
+                N::IfStatement
+                    | N::ElseClause
+                    | N::ForStatement
+                    | N::WhileStatement
+                    | N::DoStatement
+                    | N::SwitchStatement
+                    | N::CaseSection
+            )
+        });
+        let applies = match mode {
+            BraceIndent::None => false,
+            BraceIndent::Control => control || lambda,
+            BraceIndent::All => !lambda,
+        };
+        if applies {
+            self.style.whitespace.indent_width
+        } else {
+            0
+        }
+    }
+    /// The move a block's indented braces give the lines inside it: GNU
+    /// keeps the body a level in from the brace, Whitesmiths puts it under
+    /// the brace, so a block standing alone moves back by the shift.
+    fn body_shift(&self, id: usize) -> isize {
+        use super::BraceIndent;
+        let shift = self.brace_shift(id) as isize;
+        match self.style.structure.brace_indent {
+            BraceIndent::Control => shift,
+            BraceIndent::All
+                if self.origin(id) == self.tree.range(id).start && !self.lambda_body(id) =>
+            {
+                -shift
+            }
+            _ => 0,
+        }
+    }
+    /// Where a body laid out like a lambda's, and its closing brace,
+    /// measure from. A lambda whose brace begins its line, BraceWrapping's
+    /// BeforeLambdaBody, measures from that line; a body that only looks
+    /// like a lambda's, as that of `struct tm f()`, has its brace's column,
+    /// which Whitesmiths indents, for its own.
+    fn lambda_block_base(&self, id: usize) -> usize {
+        let open = self.tree.nodes[id].tokens.start;
+        if self.lambda_introducer(open).is_none() {
+            return self.lambda_base(id).saturating_sub(self.brace_shift(id));
+        }
+        let line = self.line_of(self.tree.tokens[open].range.start);
+        if self.first(line) == Some(open) {
+            self.indent(line)
+        } else {
+            self.lambda_base(id)
+        }
+    }
+    /// The `requires` of a requires expression whose body is `body`.
+    fn requires_keyword(&self, body: usize) -> Option<usize> {
+        let tokens = &self.tree.tokens;
+        let open = self.tree.nodes[body].tokens.start;
+        if tokens.get(open)?.kind != K::LBrace {
+            return None;
+        }
+        let mut i = significant_before(tokens, tokens[open].range.start)?;
+        if tokens[i].kind == K::RParen {
+            let group = self.tree.nodes[self.tree.token_owner(i)].tokens.start;
+            i = significant_before(tokens, tokens[group].range.start)?;
+        }
+        (tokens[i].kind == K::Identifier
+            && self.tree.source()[tokens[i].range.clone()] == *"requires")
+            .then_some(i)
     }
     /// The `[` introducing the lambda whose body opens at token `open`, and
     /// whether the lambda declares a trailing return type.
@@ -279,6 +383,20 @@ impl Computer<'_> {
     /// LambdaBodyIndentation): the body is one level deeper and the closing
     /// brace aligns with it.
     fn lambda_base(&self, body: usize) -> usize {
+        // A requires expression: RequiresExpressionIndentation Keyword
+        // measures from the keyword, OuterScope like a lambda's signature.
+        if let Some(keyword) = self.requires_keyword(body) {
+            let at = self.tree.tokens[keyword].range.start;
+            if self.style.structure.requires_expression_keyword {
+                return self.column(at);
+            }
+            let scope = self.tree.nodes[body].parent.unwrap();
+            return if self.tree.nodes[scope].kind.is_group() {
+                self.nested_block_indent(scope, keyword, false)
+            } else {
+                self.indent(self.line_of(at))
+            };
+        }
         // LambdaBodyIndentation: OuterScope measures from the line the
         // statement holding the lambda starts on, whatever its signature.
         if self.style.structure.lambda_outer_scope {
@@ -476,11 +594,40 @@ impl Computer<'_> {
                         N::CompoundStatement | N::NamespaceBody | N::ClassBody
                     ) =>
                 {
+                    // A lambda's brace on its own line, BraceWrapping's
+                    // BeforeLambdaBody, stands where its closing brace will.
+                    // Among arguments it lines up with them, as clang-format
+                    // gives a line that starts in parentheses their indent.
+                    if self.tree.nodes[id].kind == N::CompoundStatement
+                        && self.lambda_body(id)
+                        && let Some((introducer, _)) = self.lambda_introducer(i)
+                    {
+                        let anchor = Some(self.tree.tokens[introducer].range.start);
+                        let scope = self.tree.nodes[id].parent.unwrap();
+                        let column = if self.tree.nodes[scope].kind.is_group() {
+                            let base = self.indent(self.line_of(self.origin(scope)));
+                            self.aligned_slot(
+                                IndentRole::OpeningToken,
+                                S::ParameterContinuation,
+                                scope,
+                                base,
+                                anchor,
+                            )
+                            .target_column
+                        } else {
+                            self.lambda_base(id)
+                        };
+                        return self.fixed(
+                            IndentRole::OpeningToken,
+                            column + self.brace_shift(id),
+                            anchor,
+                        );
+                    }
                     let anchor = self.origin(id);
                     if self.line_of(anchor) < self.line {
                         return self.fixed(
                             IndentRole::OpeningToken,
-                            self.indent(self.line_of(anchor)),
+                            self.indent(self.line_of(anchor)) + self.brace_shift(id),
                             Some(anchor),
                         );
                     }
@@ -498,19 +645,37 @@ impl Computer<'_> {
                 {
                     let anchor = self.origin(id);
                     let column = if self.lambda_body(id) {
-                        self.lambda_base(id)
+                        self.lambda_block_base(id)
                     } else {
                         self.indent(self.line_of(anchor))
                     };
-                    return self.fixed(IndentRole::ClosingToken, column, Some(anchor));
+                    // A block that stands alone has its brace as its origin.
+                    let shift = if self.lambda_body(id) || anchor == self.tree.range(id).start {
+                        0
+                    } else {
+                        self.brace_shift(id)
+                    };
+                    return self.fixed(IndentRole::ClosingToken, column + shift, Some(anchor));
                 }
-                // `requires` under `template<...>`: one level in from the
-                // template with IndentRequiresClause, else beside it.
+                // `requires` under `template<...>`, or after a declarator:
+                // one level in from the declaration with
+                // IndentRequiresClause, else beside it.
                 K::Identifier
                     if self.tree.source()[token.range.clone()] == *"requires"
-                        && self.tree.nodes[id].kind == N::OpaqueDeclaration
-                        && self.tree.tokens[self.tree.nodes[id].tokens.start].kind
-                            == K::TemplateKw =>
+                        && ((self.tree.nodes[id].kind == N::OpaqueDeclaration
+                            && self.tree.tokens[self.tree.nodes[id].tokens.start].kind
+                                == K::TemplateKw)
+                            || (matches!(
+                                self.tree.nodes[id].kind,
+                                N::OpaqueDeclaration | N::FunctionDefinition
+                            ) && significant_before(&self.tree.tokens, token.range.start)
+                                .is_some_and(|before| {
+                                    before >= self.tree.nodes[id].tokens.start
+                                        && matches!(
+                                            self.tree.tokens[before].kind,
+                                            K::RParen | K::Identifier | K::Greater | K::RBracket
+                                        )
+                                }))) =>
                 {
                     let anchor = self.tree.range(id).start;
                     let base = self.indent(self.line_of(anchor));
@@ -571,10 +736,16 @@ impl Computer<'_> {
                 K::CaseKw | K::DefaultKw => {
                     if let Some(switch) = self.tree.ancestor(id, N::SwitchStatement) {
                         let anchor = self.tree.range(switch).start;
+                        let shift = self.tree.nodes[switch]
+                            .children
+                            .iter()
+                            .find(|&&child| self.tree.nodes[child].kind == N::CompoundStatement)
+                            .map_or(0, |&body| self.body_shift(body));
                         return self.slot(
                             IndentRole::CaseLabel,
                             S::CaseLabel,
-                            self.indent(self.line_of(anchor)),
+                            self.indent(self.line_of(anchor))
+                                .saturating_add_signed(shift),
                             Some(anchor),
                         );
                     }
@@ -679,7 +850,9 @@ impl Computer<'_> {
         }
         let node = &self.tree.nodes[id];
         let anchor = self.origin(id);
-        let base = self.indent(self.line_of(anchor));
+        let base = self
+            .indent(self.line_of(anchor))
+            .saturating_add_signed(self.body_shift(id));
         let w = self.style.whitespace.indent_width;
         let fixed = |role, col| self.fixed(role, col, Some(anchor));
         let expression = |role| {
@@ -703,7 +876,16 @@ impl Computer<'_> {
                 let is_extern = node
                     .parent
                     .is_some_and(|parent| self.tree.nodes[parent].extern_linkage);
+                // `export {`, not `export namespace`.
+                let export = node.parent.is_some_and(|parent| {
+                    let first = self.tree.nodes[parent].tokens.start;
+                    &self.tree.source()[self.tree.tokens[first].range.clone()] == "export"
+                        && self.tree.tokens[first + 1..node.tokens.start]
+                            .iter()
+                            .all(|t| t.kind.is_trivia())
+                });
                 let slot = match (is_extern, nested) {
+                    _ if export => S::ExportBody,
                     (false, false) => S::NamespaceOuter,
                     (false, true) => S::NamespaceInner,
                     (true, false) => S::ExternOuter,
@@ -751,7 +933,9 @@ impl Computer<'_> {
                     return d;
                 }
                 let (role, base) = match parent {
-                    _ if self.lambda_body(id) => (IndentRole::LambdaBody, self.lambda_base(id)),
+                    _ if self.lambda_body(id) => {
+                        (IndentRole::LambdaBody, self.lambda_block_base(id))
+                    }
                     Some(N::FunctionDefinition) => (IndentRole::FunctionBody, base),
                     _ => (IndentRole::CompoundBody, base),
                 };
@@ -818,7 +1002,15 @@ impl Computer<'_> {
             N::IfStatement if first.is_some_and(|i| self.tree.tokens[i].kind == K::ElseKw) => {
                 fixed(IndentRole::Opaque, base)
             }
-            N::DoStatement if first.is_some_and(|i| self.tree.tokens[i].kind == K::WhileKw) => {
+            // After the body of a `do` comes its `while`.
+            N::DoStatement
+                if first.is_some_and(|i| self.tree.tokens[i].kind == K::WhileKw)
+                    || node.children.iter().any(|&child| {
+                        self.tree.nodes[child].kind != N::ParenGroup
+                            && !self.tree.nodes[child].incomplete
+                            && self.tree.range(child).end <= query
+                    }) =>
+            {
                 fixed(IndentRole::Opaque, base)
             }
             N::IfStatement
@@ -1008,13 +1200,33 @@ pub fn compute_indent(
     if line >= snapshot.line_count() {
         return Err(EditError::InvalidRange);
     }
-    let decision = Computer {
+    let computer = Computer {
         snapshot,
         tree,
         line,
         style,
+    };
+    let decision = computer.run();
+    // A block standing alone among statements, its brace indented.
+    if !decision.preserve
+        && decision.role != IndentRole::OpeningToken
+        && let Some(open) = computer.first(line)
+        && tree.tokens()[open].kind == K::LBrace
+    {
+        let block = tree.token_owner(open);
+        if tree.nodes()[block].tokens.start == open
+            && computer.origin(block) == tree.tokens()[open].range.start
+        {
+            let shift = computer.brace_shift(block);
+            if shift > 0 {
+                return Ok(computer.fixed(
+                    IndentRole::OpeningToken,
+                    decision.target_column + shift,
+                    decision.anchor,
+                ));
+            }
+        }
     }
-    .run();
     if !decision.preserve
         && let Some(body) = macro_body(snapshot, tree, line, style)
     {
@@ -1029,12 +1241,6 @@ pub fn compute_indent(
             super::GotoLabelIndent::Outer => statements.saturating_sub(width),
             super::GotoLabelIndent::Inner => statements,
             super::GotoLabelIndent::Half => statements.saturating_sub(width / 2),
-        };
-        let computer = Computer {
-            snapshot,
-            tree,
-            line,
-            style,
         };
         return Ok(computer.fixed(IndentRole::GotoLabel, column, None));
     }
@@ -1119,6 +1325,26 @@ fn macro_body(
         return None;
     }
     let define = super::preprocessor::keyword(source, tokens, hash) == Some("define");
+    // SkipMacroDefinitionBody leaves the lines of a definition as they are.
+    if define
+        && style.structure.skip_macro_definition_body
+        && line > snapshot.line_of(tokens[hash].range.start)?
+    {
+        let computer = Computer {
+            snapshot,
+            tree,
+            line,
+            style,
+        };
+        let mut decision = computer.fixed(
+            IndentRole::PreservedMacro,
+            computer.indent(line),
+            Some(tokens[hash].range.start),
+        );
+        decision.preserve = true;
+        decision.whitespace = leading(&snapshot.line(line)?).into();
+        return Some(decision);
+    }
     let significant = |from: usize| (from..end).find(|&i| !tokens[i].kind.is_trivia());
     let keyword = significant(hash + 1)?;
     // Other directives, `#if A && \` above all, continue an expression.

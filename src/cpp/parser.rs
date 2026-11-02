@@ -64,6 +64,8 @@ enum LinkageHead {
     Other,
     Extern,
     ExternString,
+    /// `export` of a module, which `{` makes a block of declarations.
+    Export,
 }
 
 #[derive(Clone, Copy)]
@@ -332,6 +334,17 @@ impl Parser {
             K::LBracket => (N::BracketGroup, K::RBracket),
             K::LBrace => (N::BraceGroup, K::RBrace),
             _ => unreachable!("group requires an opening delimiter"),
+        }
+    }
+    /// A requires expression at `requires`: its parameters, if any, and its
+    /// body, a block of requirements laid out like a lambda body.
+    fn requires_expression(&mut self) {
+        self.advance();
+        if self.at(K::LParen) {
+            self.group(K::LParen);
+        }
+        if self.at(K::LBrace) {
+            self.body(N::CompoundStatement);
         }
     }
     fn suffix(k: K) -> bool {
@@ -764,6 +777,12 @@ impl Parser {
                 prev = Self::delimiter(k).1;
                 continue;
             }
+            if k == K::Identifier && opener != K::LBrace && self.text(self.pos) == "requires" {
+                self.requires_expression();
+                pending = false;
+                prev = K::RBrace;
+                continue;
+            }
             if k == K::LBrace && opener != K::LBracket {
                 if pending {
                     self.body(N::CompoundStatement);
@@ -848,11 +867,33 @@ impl Parser {
                 _ => self.advance(),
             }
         }
+        // Arguments of a template name still being typed.
+        if self.at(K::EndOfFile)
+            && !self.tree.tokens[..end]
+                .iter()
+                .rfind(|t| !t.kind.is_trivia() && t.kind != K::EndOfFile)
+                .is_some_and(|t| matches!(t.kind, K::Greater | K::GreaterGreater))
+        {
+            self.missing(K::Greater);
+        }
         self.close(id);
     }
     /// The token index after the `>` closing the argument list at the cursor.
     fn template_end(&mut self, expression: bool) -> Option<usize> {
         self.skip();
+        let named = self.tree.tokens[..self.pos]
+            .iter()
+            .rposition(|t| !t.kind.is_trivia())
+            .is_some_and(|before| {
+                self.tree.tokens[before].kind == K::Identifier
+                    && self
+                        .tree
+                        .parser_options
+                        .template_names
+                        .iter()
+                        .any(|name| name == self.text(before))
+            });
+        let expression = expression && !named;
         let mut angle = 0isize;
         let mut paren = 0;
         let mut bracket = 0;
@@ -899,6 +940,12 @@ impl Parser {
                         break;
                     }
                     bracket -= 1;
+                }
+                // The arguments of a template name go on to the end of
+                // input, where they are being typed.
+                K::EndOfFile if named => {
+                    end = Some(i);
+                    break;
                 }
                 K::Semicolon | K::LBrace | K::RBrace | K::EndOfFile => break,
                 K::PipePipe | K::AmpAmp if paren == 0 && bracket == 0 => {
@@ -1129,6 +1176,30 @@ impl Parser {
                 }
                 break;
             }
+            // In an expression a `requires` starts a requires expression;
+            // after a declarator it starts a clause.
+            if k == K::Identifier
+                && self.text(self.pos) == "requires"
+                && (matches!(
+                    prev,
+                    K::Equals
+                        | K::AmpAmp
+                        | K::PipePipe
+                        | K::Exclaim
+                        | K::Comma
+                        | K::ReturnKw
+                        | K::Question
+                ) || (prev == K::Identifier
+                    && self.tree.tokens[..self.pos]
+                        .iter()
+                        .rposition(|t| !t.kind.is_trivia())
+                        .is_some_and(|before| self.text(before) == "requires")))
+            {
+                self.requires_expression();
+                label_candidate = false;
+                prev = K::RBrace;
+                continue;
+            }
             if k == K::LParen {
                 let parameters = lambda;
                 self.group(k);
@@ -1164,9 +1235,9 @@ impl Parser {
                 continue;
             }
             if k == K::LBrace {
-                if linkage == LinkageHead::ExternString {
+                if matches!(linkage, LinkageHead::ExternString | LinkageHead::Export) {
                     self.tree.nodes[id].kind = N::NamespaceDecl;
-                    self.tree.nodes[id].extern_linkage = true;
+                    self.tree.nodes[id].extern_linkage = linkage == LinkageHead::ExternString;
                     self.body(N::NamespaceBody);
                     terminated = true;
                     break;
@@ -1226,6 +1297,8 @@ impl Parser {
             label_candidate = first;
             linkage = if first && self.text(self.pos) == "extern" {
                 LinkageHead::Extern
+            } else if first && self.text(self.pos) == "export" {
+                LinkageHead::Export
             } else if linkage == LinkageHead::Extern && k == K::StringLiteral {
                 LinkageHead::ExternString
             } else {

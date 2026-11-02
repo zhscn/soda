@@ -40,7 +40,7 @@ BinPackArguments,BinPackArgumentsStyle,retained; formatter option
 BinPackLongBracedList,bool,retained; formatter option
 BinPackParameters,BinPackParametersStyle,retained; formatter option
 BitFieldColonSpacing,BitFieldColonSpacingStyle,retained; formatter option
-BraceWrapping,BraceWrappingFlags,interactive; partial strategies
+BraceWrapping,BraceWrappingFlags,interactive
 BracedInitializerIndentWidth,int,interactive
 BreakAdjacentStringLiterals,bool,retained; formatter option
 BreakAfterAttributes,AttributeBreakingStyle,retained; formatter option
@@ -53,7 +53,7 @@ BreakAfterOpenBracketSwitch,bool,retained; formatter option
 BreakAfterReturnType,ReturnTypeBreakingStyle,retained; formatter option
 BreakArrays,bool,retained; formatter option
 BreakBeforeBinaryOperators,BinaryOperatorStyle,retained; formatter option
-BreakBeforeBraces,BraceBreakingStyle,interactive; partial strategies
+BreakBeforeBraces,BraceBreakingStyle,interactive
 BreakBeforeCloseBracketBracedList,bool,retained; formatter option
 BreakBeforeCloseBracketFunction,bool,retained; formatter option
 BreakBeforeCloseBracketIf,bool,retained; formatter option
@@ -79,7 +79,7 @@ CompactNamespaces,bool,retained; formatter option
 ConstructorInitializerAllOnOneLineOrOnePerLine,bool,retained; formatter option
 ConstructorInitializerIndentWidth,unsigned,interactive
 ContinuationIndentWidth,unsigned,interactive
-Cpp11BracedListStyle,BracedListStyle,interactive; partial strategies
+Cpp11BracedListStyle,BracedListStyle,interactive
 DeriveLineEnding,bool,retained; formatter option
 DerivePointerAlignment,bool,retained; formatter option
 DerivePointerBinding,bool,retained; formatter option
@@ -98,7 +98,7 @@ IncludeIsMainSourceRegex,std::string,retained; formatter option
 IndentAccessModifiers,IndentAccessModifierStyle,interactive
 IndentCaseBlocks,bool,interactive
 IndentCaseLabels,bool,interactive
-IndentExportBlock,bool,retained; capability diagnostic
+IndentExportBlock,bool,interactive
 IndentExternBlock,IndentExternBlockStyle,interactive
 IndentFunctionDeclarationAfterType,bool,interactive
 IndentGotoLabels,IndentGotoLabelStyle,interactive
@@ -123,7 +123,7 @@ Language,LanguageKind,configuration
 LineEnding,LineEndingStyle,retained; formatter option
 MacroBlockBegin,std::string,interactive; partial strategies
 MacroBlockEnd,std::string,interactive; partial strategies
-Macros,std::vector<std::string>,retained; capability diagnostic
+Macros,std::vector<std::string>,interactive; partial strategies
 MacrosSkippedByRemoveParentheses,std::vector<std::string>,retained; formatter option
 MainIncludeChar,MainIncludeCharDiscriminator,retained; formatter option
 MaxEmptyLinesToKeep,unsigned,retained; formatter option
@@ -166,10 +166,10 @@ RemoveEmptyLinesInUnwrappedLines,bool,retained; formatter option
 RemoveParentheses,RemoveParenthesesStyle,retained; formatter option
 RemoveSemicolon,bool,retained; formatter option
 RequiresClausePosition,RequiresClausePositionStyle,retained; formatter option
-RequiresExpressionIndentation,RequiresExpressionIndentationKind,retained; capability diagnostic
+RequiresExpressionIndentation,RequiresExpressionIndentationKind,interactive
 SeparateDefinitionBlocks,SeparateDefinitionStyle,retained; formatter option
 ShortNamespaceLines,unsigned,retained; formatter option
-SkipMacroDefinitionBody,bool,retained; capability diagnostic
+SkipMacroDefinitionBody,bool,interactive
 SortIncludes,SortIncludesOptions,retained; formatter option
 SortJavaStaticImport,SortJavaStaticImportOptions,retained; formatter option
 SortUsingDeclarations,SortUsingDeclarationsOptions,retained; formatter option
@@ -205,17 +205,17 @@ SpacesInParensOptions,SpacesInParensCustom,retained; formatter option
 SpacesInParentheses,bool,retained; formatter option
 SpacesInSquareBrackets,bool,retained; formatter option
 Standard,LanguageStandard,retained; formatter option
-StatementAttributeLikeMacros,std::vector<std::string>,retained; capability diagnostic
+StatementAttributeLikeMacros,std::vector<std::string>,retained; formatter option
 StatementMacros,std::vector<std::string>,interactive
 TabWidth,unsigned,interactive
 TableGenBreakInsideDAGArg,DAGArgStyle,retained; formatter option
 TableGenBreakingDAGArgOperators,std::vector<std::string>,retained; formatter option
-TemplateNames,std::vector<std::string>,retained; capability diagnostic
-TypeNames,std::vector<std::string>,retained; capability diagnostic
-TypenameMacros,std::vector<std::string>,retained; capability diagnostic
+TemplateNames,std::vector<std::string>,interactive
+TypeNames,std::vector<std::string>,retained; formatter option
+TypenameMacros,std::vector<std::string>,retained; formatter option
 UseCRLF,bool,retained; formatter option
 UseTab,UseTabStyle,interactive
-VariableTemplates,std::vector<std::string>,retained; capability diagnostic
+VariableTemplates,std::vector<std::string>,retained; formatter option
 VerilogBreakBetweenInstancePorts,bool,retained; formatter option
 WhitespaceSensitiveMacros,std::vector<std::string>,interactive
 WrapNamespaceBodyWithEmptyLines,WrapNamespaceBodyWithEmptyLinesStyle,retained; formatter option

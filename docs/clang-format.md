@@ -58,19 +58,25 @@ Rust 内置模块通过 `CppStyle::compile` 生成同一策略表示，返回 `R
 | `IndentCaseLabels` | case/default 相对 switch 的缩进 |
 | `LambdaBodyIndentation` | Signature 时 lambda 体以签名所在的嵌套块基准缩进一级；OuterScope 时以包含 lambda 的语句所在行为基准，与签名在哪一列无关 |
 | `IndentGotoLabels` | goto 标签相对所在块语句的位置：NoIndent 在第 0 列，OuterIndent 少一级，InnerIndent 同列，HalfIndent 少半级；兼容旧的 true（OuterIndent）和 false（NoIndent） |
-| `IndentRequiresClause` | 独占一行的 requires 子句相对 `template<…>` 缩进一级或与之对齐；旧写法 IndentRequires 先转换成它。子句按 `RequiresClausePosition: OwnLine` 的布局识别，约束是用 `&&`/`||` 连接的名字（可带模板实参）或括号表达式 |
+| `IndentRequiresClause` | 独占一行的 requires 子句（在 `template<…>` 之后或函数声明符之后）相对声明缩进一级或与之对齐；旧写法 IndentRequires 先转换成它。子句按 `RequiresClausePosition: OwnLine` 的布局识别，约束是用 `&&`/`||` 连接的名字（可带模板实参）或括号表达式 |
+| `RequiresExpressionIndentation` | OuterScope 时 requires 表达式的体像 lambda 体一样以所在语句（或括号内的嵌套块基准）缩进一级，Keyword 时以 `requires` 所在列缩进一级，`}` 回到该列 |
+| `IndentExportBlock` | `export { … }` 内的声明是否缩进一级；`export namespace` 仍按 NamespaceIndentation，export 块内的 namespace 算作内层 |
 | `IndentCaseBlocks` | 关闭时 case 标签直接打开的块与标签同级（`BraceWrapping.AfterCaseLabel` 时 `{` 独占一行，标签与 `{` 之间有独占一行的注释时按普通块处理），开启时它是 case 的一条普通语句 |
 | `IndentWrappedFunctionNames` | 换行后的函数声明名称缩进；兼容旧字段 IndentFunctionDeclarationAfterType |
 | `AlignAfterOpenBracket` | 兼容 bool 和旧版枚举，控制用户已经选定换行位置的参数对齐 |
 | `AlignOperands`、`BreakBeforeTernaryOperators` | 操作数和三元表达式续行；AlignAfterOperator 时，`=` 或 `return` 之后的表达式中以运算符开头的续行左移运算符的宽度，使操作数对齐 |
-| `Cpp11BracedListStyle`、`BracedInitializerIndentWidth` | 区分块式与函数参数式初始化列表及独立宽度 |
+| `Cpp11BracedListStyle`、`BracedInitializerIndentWidth` | 区分块式与函数参数式初始化列表及独立宽度；Block 与 AlignFirstComment（包括旧 true 写法）把 `{` 之后紧跟的行注释当作第一个元素，下面的元素与注释对齐，FunctionCall 在 `{` 之后换行 |
 | `ConstructorInitializerIndentWidth`、`BreakConstructorInitializers` | 初始化列表独立宽度、首项与逗号对齐，接受 AfterComma；旧 BeforeComma 开关按 LLVM 的有效布局转换 |
 | `IndentPPDirectives`、`PPIndentWidth` | BeforeHash 调整前导空白；AfterHash 按 UseTab 在 # 后生成缩进；ForIndentation 的 Tab 范围仍由层级乘 IndentWidth 决定，PPIndentWidth 决定目标列；Leave 保留两侧空白；包含 include guard 处理 |
+| `BreakBeforeBraces`、`BraceWrapping.IndentBraces` | 独占一行的花括号缩进一级：GNU 与自定义的 IndentBraces 缩进控制语句、case 块和 lambda 的花括号，块体再相对花括号缩进一级；Whitesmiths 缩进除 lambda 外所有块的花括号，块体与花括号同列。花括号写在行尾时不受影响。lambda 的 `{` 独占一行（BeforeLambdaBody）时，在参数中与参数对齐，否则以 lambda 体的基准为准，体与收尾 `}` 以这个 `{` 所在行为基准 |
 | `IndentExternBlock` | 与有效 BraceWrapping.AfterExternBlock 组合决定 extern body 缩进，兼容 true=Indent、false=NoIndent |
 | `DisableFormat` | 保留既有缩进；Enter 沿用已有行首空白 |
 | `ForEachMacros`、`IfMacros`、`NamespaceMacros` | 识别循环、条件和 namespace 结构 |
 | `StatementMacros`、`AttributeMacros` | 区分独立宏语句和声明修饰宏 |
 | `WhitespaceSensitiveMacros` | 保留宏内部已有缩进 |
+| `SkipMacroDefinitionBody` | `#define` 之后的续行保留原有缩进，Enter 沿用行首空白 |
+| `TemplateNames` | 这些名字后的 `<` 总是打开模板实参，不按表达式里的比较运算符判断；实参还在输入、`>` 尚未出现时按未闭合的实参列表处理 |
+| `Macros` | 函数式宏的展开以 `for`、`while` 或 `if` 开头时，宏按 ForEachMacros 或 IfMacros 处理；其他展开只保存 |
 | `MacroBlockBegin`、`MacroBlockEnd` | 将匹配的宏标识符作为块开闭边界，支持带参数调用 |
 
 选项名、类型、枚举和嵌套字段由独立的 `schema.json` 校验，来源是 LLVM 的 YAML mapping/enum traits，不依赖预设是否输出某个字段。序列元素也按声明类型校验。带 enumInput 的 mapping 同时接受其指定的枚举写法，如 `AllowShortFunctionsOnASingleLine: Empty`、`BreakBinaryOperations: Never`。未知顶层选项默认报错，调用者可以选择警告并保留；未知嵌套字段返回带完整字段路径的错误。
@@ -81,13 +87,11 @@ Rust 内置模块通过 `CppStyle::compile` 生成同一策略表示，返回 `R
 
 完整选项树保留列宽、排序、换行及其他排版配置，缩进器只使用与当前交互能力相关的字段。配置层不执行完整 formatter 的跨字段约束和全部旧字段归一化。标量和 mapping 的合法兼容形式保留在选项树中；与即时缩进相关的旧字段在策略编译前转换。
 
-GNU、Whitesmiths 或自定义额外 brace indentation 同样返回能力诊断。显式选择 AlignFirstComment（包括旧 true 写法）时，会说明当前采用 FunctionCall 续行规则，尚未实现首注释锚点的区别。
-
-导出块、requires expression、StatementAttributeLikeMacros、TypenameMacros、TypeNames、TemplateNames、VariableTemplates、Macros 和 SkipMacroDefinitionBody 尚未接入语法或缩进策略。显式设置或偏离 LLVM 基线时返回能力诊断。枚举写法能通过配置校验不表示相应语法行为已经实现。
+StatementAttributeLikeMacros、TypenameMacros、TypeNames 和 VariableTemplates 只影响 clang-format 对 `*`、`&`、类型转换的标注和空格，用 clang-format 23 对照时不改变任何行首缩进，所以与其他排版选项一样只保存不执行。Macros 中不是展开为循环或 `if` 头部的定义不参与缩进，存在这样的定义时返回能力诊断。枚举写法能通过配置校验不表示相应语法行为已经实现。
 
 宏块正则采用 Rust `regex` 的语法，对完整标识符执行搜索；需要精确匹配时使用 `^`、`$`。配置加载和 `CppStyle::compile` 校验表达式。常用的分组、分支和字符类可直接使用，LLVM 正则的其他扩展语法不保证兼容。
 
-能力诊断根据最终有效配置重新生成，覆盖语言分段、目录继承和预设选择。覆盖为受支持的策略后，先前的能力诊断消失。诊断保留有效选项的 YAML 文档编号，预设自带的诊断使用编号 0。
+能力诊断根据最终有效配置重新生成，覆盖语言分段、目录继承和预设选择。覆盖为受支持的策略后，先前的能力诊断消失。诊断保留有效选项的 YAML 文档编号，预设自带的诊断使用编号 0；目前所有预设都不产生能力诊断。
 
 查询以用户指定的换行位置为输入，不根据排版配置另行选择换行位置。旧版 AlwaysBreak/BlockIndent 配置在解析层按新版兼容语义保存，参数对齐使用转换后的设置。
 
@@ -101,7 +105,7 @@ GNU、Whitesmiths 或自定义额外 brace indentation 同样返回能力诊断�
 
 运行 `python3 scripts/generate_clang_format_schema.py ~/project/llvm-project` 更新类型表、枚举输入用例和选项应用对照表。生成器解析 Format.cpp/Format.h 和 IncludeStyle.cpp/IncludeStyle.h 的声明，以及 TokenKinds.def 的 token 拼写；未识别的类型中止生成。生成结果记录 LLVM revision。升级时仍需阅读条件兼容转换及选项使用点，分别检查 `config/cpp.rs` 的策略映射和语言求解器行为。
 
-运行 `python3 scripts/generate_clang_format_indent_cases.py clang-format-23` 捕获参考布局。测试固定参考实现已经选定的布局，只扰动并恢复非空行的前导空白，不改变换行位置。编辑中的空行保留供下一次输入使用的缩进，不套用完整 formatter 的空行清理规则。独占一行的结构左括号以所属声明或控制语句的行首为基准，输入 `{` 时的前导空白调整与字符插入合并为一个撤销单元；额外括号缩进策略受上述能力诊断限制。
+运行 `python3 scripts/generate_clang_format_indent_cases.py clang-format-23` 捕获参考布局。测试固定参考实现已经选定的布局，只扰动并恢复非空行的前导空白，不改变换行位置。编辑中的空行保留供下一次输入使用的缩进，不套用完整 formatter 的空行清理规则。独占一行的结构左括号以所属声明或控制语句的行首为基准（GNU、Whitesmiths 再缩进一级），输入 `{` 时的前导空白调整与字符插入合并为一个撤销单元。
 
 `cargo test --test clang_format_options --test config` 验证枚举兼容、可选字段和序列类型、策略映射以及编辑结果。类型定义取自本地 LLVM 的记录 revision，布局用例及预设记录其 clang-format 可执行文件版本；二者可能处于不同版本，新增取值需以对应来源分别核对。
 

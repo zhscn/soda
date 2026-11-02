@@ -19,6 +19,17 @@ pub enum GotoLabelIndent {
     /// Half a level out.
     Half,
 }
+/// Braces on lines of their own that stand a level in: BreakBeforeBraces
+/// GNU and BraceWrapping.IndentBraces, or Whitesmiths.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BraceIndent {
+    None,
+    /// Those of control statements, case blocks and lambdas; the body is
+    /// a level in from them.
+    Control,
+    /// Those of every block but lambdas; the body stays under them.
+    All,
+}
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PPDirectiveIndent {
     None,
@@ -58,6 +69,9 @@ pub struct CppStyle {
     pub tabs: TabPolicy,
     pub align_open_bracket: bool,
     pub brace_init_continuation: bool,
+    /// Cpp11BracedListStyle other than FunctionCall: a line comment right
+    /// after `{` anchors the elements below it.
+    pub braced_first_comment: bool,
     pub indent_wrapped_function_names: bool,
     pub operand_alignment: super::OperandAlignment,
     pub break_before_ternary: bool,
@@ -73,6 +87,15 @@ pub struct CppStyle {
     pub goto_labels: GotoLabelIndent,
     /// clang-format's `LambdaBodyIndentation: OuterScope`.
     pub lambda_outer_scope: bool,
+    /// clang-format's IndentExportBlock: the declarations of `export { }`.
+    pub indent_export_block: bool,
+    pub brace_indent: BraceIndent,
+    /// clang-format's SkipMacroDefinitionBody: the lines of a `#define`
+    /// keep their indentation.
+    pub skip_macro_definition_body: bool,
+    /// `RequiresExpressionIndentation: Keyword`: a requires expression's
+    /// body is indented from its `requires`, not from the outer scope.
+    pub requires_expression_keyword: bool,
     /// Signed label offset from the declaration indentation.
     pub access_specifier_offset: isize,
     pub pp_directive_indent: PPDirectiveIndent,
@@ -94,6 +117,7 @@ impl Default for CppStyle {
             tabs: TabPolicy::Never,
             align_open_bracket: true,
             brace_init_continuation: false,
+            braced_first_comment: true,
             indent_wrapped_function_names: true,
             operand_alignment: super::OperandAlignment::FirstOperand,
             break_before_ternary: true,
@@ -105,6 +129,10 @@ impl Default for CppStyle {
             indent_requires_clause: true,
             goto_labels: GotoLabelIndent::Outer,
             lambda_outer_scope: false,
+            indent_export_block: true,
+            brace_indent: BraceIndent::None,
+            skip_macro_definition_body: false,
+            requires_expression_keyword: false,
             access_specifier_offset: 0,
             pp_directive_indent: PPDirectiveIndent::None,
             pp_indent_width: None,

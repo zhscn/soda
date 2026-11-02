@@ -120,17 +120,9 @@ fn merge(base: &mut Map<String, Value>, patch: &Map<String, Value>) {
     }
 }
 
-const UNSUPPORTED: &[&str] = &[
-    "IndentExportBlock",
-    "RequiresExpressionIndentation",
-    "StatementAttributeLikeMacros",
-    "TypenameMacros",
-    "TypeNames",
-    "TemplateNames",
-    "VariableTemplates",
-    "Macros",
-    "SkipMacroDefinitionBody",
-];
+/// Options parsed and kept whose behavior interactive indentation lacks.
+/// Macros counts only for definitions it cannot use.
+const UNSUPPORTED: &[&str] = &["Macros"];
 
 fn record_explicit(
     origins: &mut BTreeMap<String, usize>,
@@ -150,13 +142,9 @@ fn record_explicit(
 /// unsupported choices and deviations from the implementation's baseline are
 /// reported; sources remain attached to the effective options.
 fn refresh_diagnostics(config: &mut ClangConfig) {
-    config.diagnostics.retain(|diagnostic| {
-        !UNSUPPORTED.contains(&diagnostic.option.as_str())
-            && !matches!(
-                diagnostic.option.as_str(),
-                "AlignOperands" | "BraceWrapping" | "Cpp11BracedListStyle"
-            )
-    });
+    config
+        .diagnostics
+        .retain(|diagnostic| !UNSUPPORTED.contains(&diagnostic.option.as_str()));
     let source = |key: &str| {
         config
             .explicit_options
@@ -164,55 +152,24 @@ fn refresh_diagnostics(config: &mut ClangConfig) {
             .copied()
             .unwrap_or(config.preset_document)
     };
-    for &key in UNSUPPORTED {
-        if config.explicit_options.contains_key(key)
-            || config.values.get(key) != presets()["llvm"].get(key)
-        {
-            config.diagnostics.push(ConfigDiagnostic {
-                document: source(key), option: key.into(),
-                message: "parsed and retained; interactive indentation does not yet implement this option".into(),
-            });
-        }
-    }
-    if matches!(
-        config
-            .values
-            .get("Cpp11BracedListStyle")
-            .and_then(Value::as_str),
-        Some("AlignFirstComment" | "true")
-    ) && (config.explicit_options.contains_key("Cpp11BracedListStyle")
-        || config.values.get("Cpp11BracedListStyle")
-            != presets()["llvm"].get("Cpp11BracedListStyle"))
-    {
-        config.diagnostics.push(ConfigDiagnostic {
-            document: source("Cpp11BracedListStyle"),
-            option: "Cpp11BracedListStyle".into(),
-            message: "AlignFirstComment currently uses FunctionCall continuation rules; first-comment alignment is not implemented".into(),
-        });
-    }
-    let brace_style = config
+    // Only definitions that expand to the head of a loop or an `if` take
+    // part in indentation.
+    let unused = config
         .values
-        .get("BreakBeforeBraces")
-        .and_then(Value::as_str);
-    let extra_indent = matches!(brace_style, Some("GNU" | "Whitesmiths"))
-        || (brace_style == Some("Custom")
-            && boolean(
-                &config.values["BraceWrapping"]["IndentBraces"],
-                0,
-                "BraceWrapping.IndentBraces",
-            )
-            .unwrap_or(false));
-    if extra_indent {
+        .get("Macros")
+        .and_then(Value::as_array)
+        .is_some_and(|definitions| {
+            definitions.iter().any(|definition| {
+                definition
+                    .as_str()
+                    .is_none_or(|text| super::cpp::control_macro(text).is_none())
+            })
+        });
+    if unused {
         config.diagnostics.push(ConfigDiagnostic {
-            document: source(if brace_style == Some("Custom") {
-                "BraceWrapping.IndentBraces"
-            } else {
-                "BreakBeforeBraces"
-            }),
-            option: "BraceWrapping".into(),
-            message:
-                "brace indentation is retained; not yet implemented in interactive indentation"
-                    .into(),
+            document: source("Macros"),
+            option: "Macros".into(),
+            message: "parsed and retained; interactive indentation uses only definitions that expand to the head of a for, while or if statement".into(),
         });
     }
 }

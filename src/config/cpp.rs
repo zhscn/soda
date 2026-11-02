@@ -5,8 +5,8 @@ use super::{
     value::{boolean, choice, integer, size, string, width_or_default},
 };
 use crate::cpp::{
-    AccessIndent, ConstructorInitializers, CppRules, ExternIndentation, InitializerLayout,
-    NamespaceIndentation, PPDirectiveIndent, TabPolicy,
+    AccessIndent, BraceIndent, ConstructorInitializers, CppRules, ExternIndentation,
+    InitializerLayout, NamespaceIndentation, PPDirectiveIndent, TabPolicy,
 };
 use serde_json::{Map, Value};
 use std::num::NonZeroUsize;
@@ -117,6 +117,19 @@ pub(super) fn to_rules(v: &Map<String, Value>, doc: usize) -> Result<CppRules, C
         "LambdaBodyIndentation",
         &["Signature", "OuterScope"],
     )? == "OuterScope";
+    policy.structure.requires_expression_keyword = choice(
+        get!("RequiresExpressionIndentation"),
+        doc,
+        "RequiresExpressionIndentation",
+        &["OuterScope", "Keyword"],
+    )? == "Keyword";
+    policy.structure.skip_macro_definition_body = boolean(
+        get!("SkipMacroDefinitionBody"),
+        doc,
+        "SkipMacroDefinitionBody",
+    )?;
+    policy.structure.indent_export_block =
+        boolean(get!("IndentExportBlock"), doc, "IndentExportBlock")?;
     policy.structure.indent_wrapped_function_names = boolean(
         get!("IndentWrappedFunctionNames"),
         doc,
@@ -159,17 +172,19 @@ pub(super) fn to_rules(v: &Map<String, Value>, doc: usize) -> Result<CppRules, C
             )? != "DontAlign"
         }
     };
-    let initializer_continuation = match get!("Cpp11BracedListStyle") {
+    // The old `true` is AlignFirstComment.
+    let (initializer_continuation, first_comment) = match get!("Cpp11BracedListStyle") {
         v if boolean(v, doc, "Cpp11BracedListStyle").is_ok() => {
-            boolean(v, doc, "Cpp11BracedListStyle")?
+            (boolean(v, doc, "Cpp11BracedListStyle")?, true)
         }
         v => {
-            choice(
+            let layout = choice(
                 v,
                 doc,
                 "Cpp11BracedListStyle",
                 &["Block", "FunctionCall", "AlignFirstComment"],
-            )? != "Block"
+            )?;
+            (layout != "Block", layout != "FunctionCall")
         }
     };
     let initializer_width = width_or_default(
@@ -237,11 +252,28 @@ pub(super) fn to_rules(v: &Map<String, Value>, doc: usize) -> Result<CppRules, C
             _ => false,
         },
     };
+    // GNU indents the braces of control statements, as IndentBraces does
+    // for a custom style; Whitesmiths those of every block.
+    policy.structure.brace_indent = match get!("BreakBeforeBraces").as_str() {
+        Some("GNU") => BraceIndent::Control,
+        Some("Whitesmiths") => BraceIndent::All,
+        Some("Custom")
+            if boolean(
+                &v["BraceWrapping"]["IndentBraces"],
+                doc,
+                "BraceWrapping.IndentBraces",
+            )? =>
+        {
+            BraceIndent::Control
+        }
+        _ => BraceIndent::None,
+    };
     policy.structure.extern_body = if indent_extern_body {
         ExternIndentation::Indent
     } else {
         ExternIndentation::None
     };
+    policy.initializer.first_comment = first_comment;
     policy.initializer.layout = if initializer_continuation {
         InitializerLayout::Continuation
     } else {
@@ -262,6 +294,7 @@ pub(super) fn to_rules(v: &Map<String, Value>, doc: usize) -> Result<CppRules, C
             "WhitespaceSensitiveMacros",
             &mut policy.parser.whitespace_sensitive_macros,
         ),
+        ("TemplateNames", &mut policy.parser.template_names),
     ] {
         if let Some(value) = v.get(key) {
             let values = value
@@ -286,6 +319,27 @@ pub(super) fn to_rules(v: &Map<String, Value>, doc: usize) -> Result<CppRules, C
             list.dedup();
         }
     }
+    // A function-like macro that clang-format's Macros expands to the head
+    // of a loop or an `if` works as one, as ForEachMacros and IfMacros do.
+    if let Some(definitions) = v.get("Macros").and_then(Value::as_array) {
+        for definition in definitions {
+            let definition = string(definition, doc, "Macros")?;
+            if let Some((name, control)) = control_macro(definition) {
+                if control == "if" {
+                    policy.parser.conditional_macros.push(name.into());
+                } else {
+                    policy.parser.loop_macros.push(name.into());
+                }
+            }
+        }
+        for list in [
+            &mut policy.parser.loop_macros,
+            &mut policy.parser.conditional_macros,
+        ] {
+            list.sort();
+            list.dedup();
+        }
+    }
     for (key, pattern) in [
         ("MacroBlockBegin", &mut policy.parser.macro_block_begin),
         ("MacroBlockEnd", &mut policy.parser.macro_block_end),
@@ -297,4 +351,22 @@ pub(super) fn to_rules(v: &Map<String, Value>, doc: usize) -> Result<CppRules, C
         }
     }
     Ok(policy)
+}
+
+/// The name of a function-like macro definition, `NAME(params)=expansion`,
+/// whose expansion starts with `for`, `while` or `if`, and that keyword.
+pub(super) fn control_macro(definition: &str) -> Option<(&str, &str)> {
+    let (head, expansion) = definition.split_once('=')?;
+    let (name, _) = head.split_once('(')?;
+    let name = name.trim();
+    let identifier = !name.is_empty()
+        && name
+            .bytes()
+            .enumerate()
+            .all(|(i, b)| b.is_ascii_alphabetic() || b == b'_' || (i > 0 && b.is_ascii_digit()));
+    let keyword = expansion
+        .trim_start()
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .next()?;
+    (identifier && matches!(keyword, "for" | "while" | "if")).then_some((name, keyword))
 }

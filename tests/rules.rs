@@ -170,6 +170,7 @@ fn file_and_editor_styles_produce_identical_atomic_edits_with_mixed_tabs() {
             access_specifier_offset: 1,
             indent_extern_body: Some(false),
             brace_init_continuation: true,
+            braced_first_comment: false,
             constructor_indent: Some(6),
             constructor_initializers: ConstructorInitializers::AlignWithColon,
             ..CppStyle::default()

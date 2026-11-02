@@ -40,6 +40,7 @@ pub(super) enum IndentSlot {
     NamespaceInner,
     ExternOuter,
     ExternInner,
+    ExportBody,
     MembersBeforeAccess,
     MembersAfterAccess,
     AccessLabel,
@@ -87,6 +88,11 @@ pub(super) fn rule(policy: &CppRules, slot: IndentSlot) -> IndentRule {
         S::NamespaceInner => structural(namespace(false)),
         S::ExternOuter => structural(extern_body(true)),
         S::ExternInner => structural(extern_body(false)),
+        S::ExportBody => structural(if policy.structure.indent_export_block {
+            w
+        } else {
+            0
+        }),
         S::MembersBeforeAccess | S::MembersAfterAccess => {
             structural(if !policy.structure.indent_type_body {
                 0

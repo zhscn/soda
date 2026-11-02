@@ -170,12 +170,9 @@ fn invalid_configuration_is_atomic_and_diagnostic() {
         .unwrap();
     assert_eq!(c.diagnostics[0].option, "IndnetWidth");
     assert_eq!(c.values["IndnetWidth"], 4);
-    assert_eq!(
-        parsed("IndentExportBlock: false").diagnostics[0].option,
-        "IndentExportBlock"
-    );
+    assert_eq!(parsed("Macros: ['A=B']").diagnostics[0].option, "Macros");
     assert!(
-        parsed("IndentGotoLabels: HalfIndent")
+        parsed("IndentGotoLabels: HalfIndent\nIndentExportBlock: false\nRequiresExpressionIndentation: Keyword")
             .diagnostics
             .is_empty()
     );
@@ -461,22 +458,26 @@ fn indent(rules: &CppRules, text: &str, line: usize) -> usize {
 #[test]
 fn capability_diagnostics_follow_effective_presets_overrides_and_sources() {
     let base = preset("LLVM").unwrap();
-    let from_preset = preset("GNU").unwrap();
-    assert!(
-        from_preset
-            .diagnostics
-            .iter()
-            .any(|d| d.option == "BraceWrapping" && d.document == 0)
-    );
-    for yaml in ["BasedOnStyle: GNU", "BreakBeforeBraces: GNU"] {
+    // Brace indentation is implemented, from a preset or an override.
+    for (yaml, mode) in [
+        ("BasedOnStyle: GNU", BraceIndent::Control),
+        ("BreakBeforeBraces: GNU", BraceIndent::Control),
+        ("BreakBeforeBraces: Whitesmiths", BraceIndent::All),
+        (
+            "BreakBeforeBraces: Custom\nBraceWrapping: {IndentBraces: true}",
+            BraceIndent::Control,
+        ),
+        (
+            "BasedOnStyle: GNU\nBreakBeforeBraces: Attach",
+            BraceIndent::None,
+        ),
+    ] {
         let c = parsed(yaml);
-        assert!(
-            c.diagnostics
-                .iter()
-                .any(|d| d.option == "BraceWrapping" && d.document == 1)
-        );
+        assert!(c.diagnostics.is_empty(), "{yaml}");
+        assert_eq!(c.rules.structure().brace_indent, mode, "{yaml}");
     }
-    let inherited = parsed("BreakBeforeBraces: GNU\nCpp11BracedListStyle: AlignFirstComment");
+    assert!(preset("GNU").unwrap().diagnostics.is_empty());
+    let inherited = parsed("BreakBeforeBraces: GNU\nMacros: ['A=B']");
     let c = parse_config(
         "IndentWidth: 3",
         &inherited,
@@ -486,28 +487,9 @@ fn capability_diagnostics_follow_effective_presets_overrides_and_sources() {
     )
     .unwrap()
     .unwrap();
-    assert!(c.diagnostics.iter().any(|d| d.option == "BraceWrapping"));
-    assert!(
-        c.diagnostics
-            .iter()
-            .any(|d| d.option == "Cpp11BracedListStyle")
-    );
+    assert!(c.diagnostics.iter().any(|d| d.option == "Macros"));
     let c = parse_config(
-        "BreakBeforeBraces: Attach\nCpp11BracedListStyle: Block",
-        &inherited,
-        "Cpp",
-        false,
-        UnknownOptions::Error,
-    )
-    .unwrap()
-    .unwrap();
-    assert!(
-        !c.diagnostics
-            .iter()
-            .any(|d| matches!(d.option.as_str(), "BraceWrapping" | "Cpp11BracedListStyle"))
-    );
-    let c = parse_config(
-        "Cpp11BracedListStyle: AlignFirstComment\n---\nLanguage: Cpp\nIndentWidth: 3",
+        "Macros: ['A=B']\n---\nLanguage: Cpp\nIndentWidth: 3",
         &base,
         "Cpp",
         false,
@@ -518,24 +500,11 @@ fn capability_diagnostics_follow_effective_presets_overrides_and_sources() {
     assert_eq!(
         c.diagnostics
             .iter()
-            .find(|d| d.option == "Cpp11BracedListStyle")
+            .find(|d| d.option == "Macros")
             .unwrap()
             .document,
         1
     );
-    let c = parsed(
-        "BraceWrapping: {IndentBraces: true}\n---\nLanguage: Cpp\nBreakBeforeBraces: Custom",
-    );
-    assert_eq!(
-        c.diagnostics
-            .iter()
-            .find(|d| d.option == "BraceWrapping")
-            .unwrap()
-            .document,
-        1
-    );
-    let c = parsed("BasedOnStyle: GNU\nBreakBeforeBraces: Attach");
-    assert!(!c.diagnostics.iter().any(|d| d.option == "BraceWrapping"));
 }
 
 #[test]
@@ -763,21 +732,34 @@ fn preprocessor_leave_preserves_both_sides_of_hash_and_after_hash_uses_tabs() {
 
 #[test]
 fn accepted_grammar_and_brace_options_report_unimplemented_behavior() {
+    // Implemented, or only about spacing, which indentation never sees.
     for yaml in [
-        "IndentExportBlock: false",
-        "RequiresExpressionIndentation: Keyword",
         "StatementAttributeLikeMacros: [SIGNAL]",
         "TypenameMacros: [TYPE]",
         "TypeNames: [Type]",
         "TemplateNames: [List]",
         "VariableTemplates: [variable]",
-        "Macros: ['A=B']",
         "SkipMacroDefinitionBody: true",
         "BreakBeforeBraces: Whitesmiths",
+        "Macros: ['EACH(x)=for (auto x : xs)', 'WHEN(c)=if (c)']",
     ] {
         let c = parsed(yaml);
-        assert!(!c.diagnostics.is_empty(), "{yaml}");
+        assert!(c.diagnostics.is_empty(), "{yaml}");
     }
+    let c = parsed("Macros: ['EACH(x)=for (auto x : xs)', 'WHEN(c)=if (c)', 'A=B']");
+    assert!(c.diagnostics.iter().any(|d| d.option == "Macros"));
+    assert!(
+        c.rules
+            .parser_options()
+            .loop_macros
+            .contains(&"EACH".into())
+    );
+    assert!(
+        c.rules
+            .parser_options()
+            .conditional_macros
+            .contains(&"WHEN".into())
+    );
 }
 
 #[test]
@@ -790,28 +772,21 @@ fn negative_optional_widths_use_llvm_fallbacks_and_partial_style_diagnostics_cle
             );
         }
     }
-    let partial = parsed("Cpp11BracedListStyle: AlignFirstComment");
-    assert!(
-        partial
-            .diagnostics
-            .iter()
-            .any(|d| d.option == "Cpp11BracedListStyle")
-    );
-    let supported = parse_config(
-        "Cpp11BracedListStyle: FunctionCall",
-        &partial,
-        "Cpp",
-        false,
-        UnknownOptions::Error,
-    )
-    .unwrap()
-    .unwrap();
-    assert!(
-        !supported
-            .diagnostics
-            .iter()
-            .any(|d| d.option == "Cpp11BracedListStyle")
-    );
+    // Every braced-list style is implemented, the old `true` included.
+    for layout in [
+        "AlignFirstComment",
+        "FunctionCall",
+        "Block",
+        "true",
+        "false",
+    ] {
+        assert!(
+            !parsed(&format!("Cpp11BracedListStyle: {layout}"))
+                .diagnostics
+                .iter()
+                .any(|d| d.option == "Cpp11BracedListStyle")
+        );
+    }
 }
 
 #[test]

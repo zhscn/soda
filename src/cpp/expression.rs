@@ -673,7 +673,13 @@ pub(super) fn continuation(
         let token_line = snapshot.line_of(t.range.start)?;
         // Trailing line comments do not take part in layout; block comments
         // such as `/*Arg=*/` are ordinary tokens and can anchor alignment.
-        if t.kind == K::LineComment && token_line == previous_line {
+        // A line comment right after a brace, though, is its first element
+        // unless the braced-list style breaks after `{`.
+        if t.kind == K::LineComment
+            && token_line == previous_line
+            && !(style.initializer.first_comment
+                && sim.last().is_some_and(|s| s.scope == 1 && s.braced))
+        {
             continue;
         }
         if t.range.start >= line_start {
@@ -810,7 +816,14 @@ pub(super) fn continuation(
     for i in 0..count {
         // Line comments are never operands and leave the layout unchanged;
         // the following line continues from the preceding code token.
-        if sim[i].kind == K::LineComment {
+        // A comment right after a brace may stand for its first element.
+        if sim[i].kind == K::LineComment
+            && !(style.initializer.first_comment
+                && !sim[i].newline
+                && i > 0
+                && sim[i - 1].scope == 1
+                && sim[i - 1].braced)
+        {
             continue;
         }
         replay.step(

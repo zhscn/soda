@@ -415,6 +415,42 @@
       "expected": "void f() {\n  call(argument,\n       next_argument);\n  int a[] = {first,\n             second};\n}\n"
     },
     {
+      "name": "initializer-comment-Block",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "Cpp11BracedListStyle": "Block"
+      },
+      "expected": "void f() {\n  std::vector<int> x{ // comment\n                      1, 2, 3, 4\n  };\n  foo(a, { // c\n           1, 2 });\n  int z[] = { /* c */\n              1, 2\n  };\n  call({ // comment\n         1,\n         2 });\n  S s{\n    // leading\n    1, 2\n  };\n}\n"
+    },
+    {
+      "name": "initializer-comment-FunctionCall",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "Cpp11BracedListStyle": "FunctionCall"
+      },
+      "expected": "void f() {\n  std::vector<int> x{ // comment\n      1, 2, 3, 4};\n  foo(a, { // c\n             1, 2});\n  int z[] = {/* c */\n             1, 2};\n  call({ // comment\n      1,\n      2});\n  S s{\n      // leading\n      1, 2};\n}\n"
+    },
+    {
+      "name": "initializer-comment-AlignFirstComment",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "Cpp11BracedListStyle": "AlignFirstComment"
+      },
+      "expected": "void f() {\n  std::vector<int> x{// comment\n                     1, 2, 3, 4};\n  foo(a, {// c\n          1, 2});\n  int z[] = {/* c */\n             1, 2};\n  call({// comment\n        1,\n        2});\n  S s{\n      // leading\n      1, 2};\n}\n"
+    },
+    {
       "name": "extern-NoIndent-Attach",
       "options": {
         "ColumnLimit": 0,
@@ -1183,7 +1219,7 @@
         "AllowShortBlocksOnASingleLine": "Never",
         "IndentRequiresClause": true
       },
-      "expected": "template <class T>\n  requires Executor<std::decay_t<T>>\nvoid run(T t);\nstruct A {\n  template <class C, class E>\n    requires(!Executor<C> &&\n             Executor<E>)\n  A(C c, E e)\n      : e(e) {\n  }\n  E e;\n};\n"
+      "expected": "template <class T>\n  requires Executor<std::decay_t<T>>\nvoid run(T t);\nstruct A {\n  template <class C, class E>\n    requires(!Executor<C> &&\n             Executor<E>)\n  A(C c, E e)\n      : e(e) {\n  }\n  E e;\n};\ntemplate <typename T>\nvoid f(T t)\n  requires C<T>\n{\n  work();\n}\ntemplate <typename T>\nvoid g(T t) const\n  requires C<T>;\n"
     },
     {
       "name": "requires-False",
@@ -1195,7 +1231,187 @@
         "AllowShortBlocksOnASingleLine": "Never",
         "IndentRequiresClause": false
       },
-      "expected": "template <class T>\nrequires Executor<std::decay_t<T>>\nvoid run(T t);\nstruct A {\n  template <class C, class E>\n  requires(!Executor<C> &&\n           Executor<E>)\n  A(C c, E e)\n      : e(e) {\n  }\n  E e;\n};\n"
+      "expected": "template <class T>\nrequires Executor<std::decay_t<T>>\nvoid run(T t);\nstruct A {\n  template <class C, class E>\n  requires(!Executor<C> &&\n           Executor<E>)\n  A(C c, E e)\n      : e(e) {\n  }\n  E e;\n};\ntemplate <typename T>\nvoid f(T t)\nrequires C<T>\n{\n  work();\n}\ntemplate <typename T>\nvoid g(T t) const\nrequires C<T>;\n"
+    },
+    {
+      "name": "requires-expression-OuterScope",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "RequiresExpressionIndentation": "OuterScope"
+      },
+      "expected": "template <typename T>\nconcept C = requires(T t) {\n  t.foo();\n  { t.bar() } -> std::same_as<int>;\n};\ntemplate <typename T>\nconcept D = std::is_integral_v<T> && requires(T t) {\n  t.foo();\n};\ntemplate <typename T>\nvoid f(T t)\n  requires requires(T x) {\n    x.go();\n  }\n{\n  work();\n}\nvoid g() {\n  if constexpr (requires(int x) {\n                  x + 1;\n                }) {\n    go();\n  }\n  auto v = foo(requires {\n    typename T::type;\n  });\n}\n"
+    },
+    {
+      "name": "requires-expression-Keyword",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "RequiresExpressionIndentation": "Keyword"
+      },
+      "expected": "template <typename T>\nconcept C = requires(T t) {\n              t.foo();\n              { t.bar() } -> std::same_as<int>;\n            };\ntemplate <typename T>\nconcept D = std::is_integral_v<T> && requires(T t) {\n                                       t.foo();\n                                     };\ntemplate <typename T>\nvoid f(T t)\n  requires requires(T x) {\n             x.go();\n           }\n{\n  work();\n}\nvoid g() {\n  if constexpr (requires(int x) {\n                  x + 1;\n                }) {\n    go();\n  }\n  auto v = foo(requires {\n                 typename T::type;\n               });\n}\n"
+    },
+    {
+      "name": "export-block-True",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "IndentExportBlock": true,
+        "NamespaceIndentation": "Inner"
+      },
+      "expected": "export module m;\nexport {\n  int f();\n  void g() {\n    work();\n  }\n  namespace a {\n    int x;\n    namespace b {\n      int y;\n    }\n  } // namespace a\n}\nexport namespace n {\nint h();\n}\nexport int k();\nnamespace c {\nexport {\n  int z;\n}\n} // namespace c\n"
+    },
+    {
+      "name": "export-block-False",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "IndentExportBlock": false,
+        "NamespaceIndentation": "Inner"
+      },
+      "expected": "export module m;\nexport {\nint f();\nvoid g() {\n  work();\n}\nnamespace a {\n  int x;\n  namespace b {\n    int y;\n  }\n} // namespace a\n}\nexport namespace n {\nint h();\n}\nexport int k();\nnamespace c {\nexport {\nint z;\n}\n} // namespace c\n"
+    },
+    {
+      "name": "braces-GNU-2",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "BreakBeforeBraces": "GNU",
+        "IndentWidth": 2
+      },
+      "expected": "namespace n\n{\nclass A\n{\npublic:\n  void f(int x)\n  {\n    if (x)\n      {\n        work();\n      }\n    else\n      {\n        other();\n      }\n    for (;;)\n      {\n        step();\n      }\n    switch (x)\n      {\n      case 1:\n        {\n          one();\n          break;\n        }\n      default:\n        two();\n      }\n    while (x)\n      {\n        go();\n      }\n    do\n      {\n        it();\n      }\n    while (x);\n    {\n      inner();\n    }\n    auto l = [&]\n      {\n        lam();\n      };\n    call(first,\n         [&](int y)\n           {\n             use(y);\n             more(y);\n           });\n  }\n  int m;\n};\nstruct B\n{\n  int y;\n};\nenum E\n{\n  X,\n  Y\n};\nextern \"C\"\n{\n  int c();\n}\n} // namespace n\n"
+    },
+    {
+      "name": "braces-GNU-4",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "BreakBeforeBraces": "GNU",
+        "IndentWidth": 4
+      },
+      "expected": "namespace n\n{\nclass A\n{\n  public:\n    void f(int x)\n    {\n        if (x)\n            {\n                work();\n            }\n        else\n            {\n                other();\n            }\n        for (;;)\n            {\n                step();\n            }\n        switch (x)\n            {\n            case 1:\n                {\n                    one();\n                    break;\n                }\n            default:\n                two();\n            }\n        while (x)\n            {\n                go();\n            }\n        do\n            {\n                it();\n            }\n        while (x);\n        {\n            inner();\n        }\n        auto l = [&]\n            {\n                lam();\n            };\n        call(first,\n             [&](int y)\n                 {\n                     use(y);\n                     more(y);\n                 });\n    }\n    int m;\n};\nstruct B\n{\n    int y;\n};\nenum E\n{\n    X,\n    Y\n};\nextern \"C\"\n{\n    int c();\n}\n} // namespace n\n"
+    },
+    {
+      "name": "braces-Whitesmiths-2",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "BreakBeforeBraces": "Whitesmiths",
+        "IndentWidth": 2
+      },
+      "expected": "namespace n\n  {\nclass A\n  {\npublic:\n  void f(int x)\n    {\n    if (x)\n      {\n      work();\n      }\n    else\n      {\n      other();\n      }\n    for (;;)\n      {\n      step();\n      }\n    switch (x)\n      {\n    case 1:\n      {\n      one();\n      break;\n      }\n    default:\n      two();\n      }\n    while (x)\n      {\n      go();\n      }\n    do\n      {\n      it();\n      } while (x);\n      {\n      inner();\n      }\n    auto l = [&]\n    {\n      lam();\n    };\n    call(first,\n         [&](int y)\n         {\n           use(y);\n           more(y);\n         });\n    }\n  int m;\n  };\nstruct B\n  {\n  int y;\n  };\nenum E\n  {\n  X,\n  Y\n  };\nextern \"C\"\n  {\n  int c();\n  }\n  } // namespace n\n"
+    },
+    {
+      "name": "braces-Whitesmiths-4",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "BreakBeforeBraces": "Whitesmiths",
+        "IndentWidth": 4
+      },
+      "expected": "namespace n\n    {\nclass A\n    {\n  public:\n    void f(int x)\n        {\n        if (x)\n            {\n            work();\n            }\n        else\n            {\n            other();\n            }\n        for (;;)\n            {\n            step();\n            }\n        switch (x)\n            {\n        case 1:\n            {\n            one();\n            break;\n            }\n        default:\n            two();\n            }\n        while (x)\n            {\n            go();\n            }\n        do\n            {\n            it();\n            } while (x);\n            {\n            inner();\n            }\n        auto l = [&]\n        {\n            lam();\n        };\n        call(first,\n             [&](int y)\n             {\n                 use(y);\n                 more(y);\n             });\n        }\n    int m;\n    };\nstruct B\n    {\n    int y;\n    };\nenum E\n    {\n    X,\n    Y\n    };\nextern \"C\"\n    {\n    int c();\n    }\n    } // namespace n\n"
+    },
+    {
+      "name": "braces-Allman-2",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "BreakBeforeBraces": "Allman",
+        "IndentWidth": 2
+      },
+      "expected": "namespace n\n{\nclass A\n{\npublic:\n  void f(int x)\n  {\n    if (x)\n    {\n      work();\n    }\n    else\n    {\n      other();\n    }\n    for (;;)\n    {\n      step();\n    }\n    switch (x)\n    {\n    case 1:\n    {\n      one();\n      break;\n    }\n    default:\n      two();\n    }\n    while (x)\n    {\n      go();\n    }\n    do\n    {\n      it();\n    } while (x);\n    {\n      inner();\n    }\n    auto l = [&]\n    {\n      lam();\n    };\n    call(first,\n         [&](int y)\n         {\n           use(y);\n           more(y);\n         });\n  }\n  int m;\n};\nstruct B\n{\n  int y;\n};\nenum E\n{\n  X,\n  Y\n};\nextern \"C\"\n{\n  int c();\n}\n} // namespace n\n"
+    },
+    {
+      "name": "braces-Allman-4",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "BreakBeforeBraces": "Allman",
+        "IndentWidth": 4
+      },
+      "expected": "namespace n\n{\nclass A\n{\n  public:\n    void f(int x)\n    {\n        if (x)\n        {\n            work();\n        }\n        else\n        {\n            other();\n        }\n        for (;;)\n        {\n            step();\n        }\n        switch (x)\n        {\n        case 1:\n        {\n            one();\n            break;\n        }\n        default:\n            two();\n        }\n        while (x)\n        {\n            go();\n        }\n        do\n        {\n            it();\n        } while (x);\n        {\n            inner();\n        }\n        auto l = [&]\n        {\n            lam();\n        };\n        call(first,\n             [&](int y)\n             {\n                 use(y);\n                 more(y);\n             });\n    }\n    int m;\n};\nstruct B\n{\n    int y;\n};\nenum E\n{\n    X,\n    Y\n};\nextern \"C\"\n{\n    int c();\n}\n} // namespace n\n"
+    },
+    {
+      "name": "template-names-0",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "TemplateNames": []
+      },
+      "expected": "void f() {\n  bool v = foo < bar &&\n           baz > (qux);\n}\n"
+    },
+    {
+      "name": "template-names-1",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "TemplateNames": [
+          "foo"
+        ]
+      },
+      "expected": "void f() {\n  bool v = foo<bar &&\n               baz>(qux);\n}\n"
+    },
+    {
+      "name": "macros-0",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "Macros": []
+      },
+      "expected": "void f() {\n  FOREACH(x)\n  work(x);\n  CALL(a,\n       b);\n}\n"
+    },
+    {
+      "name": "macros-1",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "Macros": [
+          "FOREACH(x)=for (auto x : xs)"
+        ]
+      },
+      "expected": "void f() {\n  FOREACH(x)\n    work(x);\n  CALL(a,\n       b);\n}\n"
     },
     {
       "name": "goto-labels-NoIndent",

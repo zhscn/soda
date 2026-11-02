@@ -556,3 +556,57 @@ fn comments_right_of_a_line_start_continue_its_trailing_comment() {
 ";
     assert_eq!(col(text, 3, &s).target_column, 8);
 }
+#[test]
+fn a_name_typed_as_a_label_returns_with_the_scope_operator() {
+    let mut editor = soda::editor::Editor::new("", CppRules::default());
+    for ch in "void f() {\nstd:".chars() {
+        if ch == '\n' {
+            editor.execute(soda::editor::Command::Enter).unwrap();
+        } else {
+            editor.execute(soda::editor::Command::TypeChar(ch)).unwrap();
+        }
+    }
+    assert_eq!(editor.state().snapshot().text(), "void f() {\nstd:");
+    editor
+        .execute(soda::editor::Command::TypeChar(':'))
+        .unwrap();
+    assert_eq!(editor.state().snapshot().text(), "void f() {\n    std::");
+}
+#[test]
+fn enter_after_the_body_of_a_do_goes_to_its_while() {
+    for brace_indent in [BraceIndent::None, BraceIndent::Control] {
+        let style = CppStyle {
+            indent_width: 2,
+            brace_indent,
+            ..CppStyle::default()
+        };
+        let mut editor = soda::editor::Editor::new("", style.compile().unwrap());
+        for ch in "void f()\n{\ndo\n{\nit();\n}\n".chars() {
+            if ch == '\n' {
+                editor.execute(soda::editor::Command::Enter).unwrap();
+            } else {
+                editor.execute(soda::editor::Command::TypeChar(ch)).unwrap();
+            }
+        }
+        assert!(
+            editor.state().snapshot().text().ends_with("}\n  "),
+            "{:?}",
+            editor.state().snapshot().text()
+        );
+    }
+}
+#[test]
+fn skipped_macro_definitions_keep_their_lines() {
+    let text = "#define A(x)   \\\n     do {      \\\n  x;           \\\n        } while (0)\nvoid f() {\nint y;\n}\n";
+    let style = CppStyle {
+        skip_macro_definition_body: true,
+        ..CppStyle::default()
+    };
+    for line in 1..4 {
+        let d = col(text, line, &style);
+        assert!(d.preserve, "{line}");
+        assert_eq!(d.role, IndentRole::PreservedMacro);
+    }
+    assert_eq!(col(text, 5, &style).target_column, 4);
+    assert!(!col(text, 1, &CppStyle::default()).preserve);
+}

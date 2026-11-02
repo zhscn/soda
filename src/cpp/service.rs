@@ -318,6 +318,18 @@ impl CppSession {
             && first_significant(tree.tokens(), start).is_some_and(|token| {
                 token.kind == K::Colon && token.range.start == request.position
             });
+        // `std:` read as a goto label moved the line; the second colon of
+        // `std::` moves it back.
+        let label_undone = request.trigger == IndentTrigger::Typed(':')
+            && first_significant(tree.tokens(), start).is_some_and(|token| {
+                let first = tree
+                    .tokens()
+                    .partition_point(|t| t.range.end <= token.range.end);
+                tree.tokens()[first..]
+                    .iter()
+                    .find(|t| !t.kind.is_trivia())
+                    .is_some_and(|t| t.kind == K::ColonColon && t.range.end == request.position + 1)
+            });
         if operator {
             let leads = first_significant(tree.tokens(), start).is_some_and(|token| {
                 (link && token.kind == K::Colon)
@@ -380,9 +392,11 @@ impl CppSession {
                 '#' => K::PreprocessorHash,
                 _ => return Ok(IndentAdvice::Unavailable),
             };
-            if !token_at(tree.tokens(), request.position).is_some_and(|token| {
-                token.range.start == request.position && token.kind == expected
-            }) {
+            if !label_undone
+                && !token_at(tree.tokens(), request.position).is_some_and(|token| {
+                    token.range.start == request.position && token.kind == expected
+                })
+            {
                 return Ok(IndentAdvice::Unavailable);
             }
         }
@@ -410,6 +424,7 @@ impl CppSession {
         }
         if request.trigger == IndentTrigger::Typed(':')
             && !leading_colon
+            && !label_undone
             && !matches!(
                 decision.role,
                 IndentRole::CaseLabel

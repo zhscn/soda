@@ -150,14 +150,14 @@ mapped.update(['IndentFunctionDeclarationAfterType', 'BreakConstructorInitialize
 parser = (ROOT / 'src/config/parse.rs').read_text()
 unsupported_block = parser.split('const UNSUPPORTED:')[1].split('];', 1)[0]
 unsupported = set(re.findall(r'"([^"]+)"', unsupported_block))
-partial = {'Cpp11BracedListStyle', 'BraceWrapping', 'BreakBeforeBraces', 'MacroBlockBegin', 'MacroBlockEnd'}
+partial = {'MacroBlockBegin', 'MacroBlockEnd', 'Macros'}
 with (ROOT / 'docs/clang-format-options.csv').open('w', newline='') as output:
     writer = csv.writer(output, lineterminator='\n')
     writer.writerow(['option', 'yaml_type', 'application'])
     for key, typ in sorted(options.items()):
         if key in ('BasedOnStyle', 'Language'):
             scope = 'configuration'
-        elif key in unsupported:
+        elif key in unsupported and key not in mapped:
             scope = 'retained; capability diagnostic'
         elif key in mapped:
             scope = 'interactive; partial strategies' if key in partial else 'interactive'

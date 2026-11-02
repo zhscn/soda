@@ -31,6 +31,13 @@ for layout in ['BeforeColon', 'BeforeComma', 'AfterColon', 'AfterComma']:
     profiles.append((f'constructor-{layout}', {'BreakConstructorInitializers': layout, 'ConstructorInitializerIndentWidth': 6}, constructor))
 for layout in ['Block', 'FunctionCall', 'AlignFirstComment']:
     profiles.append((f'initializer-{layout}', {'Cpp11BracedListStyle': layout, 'BracedInitializerIndentWidth': 5}, call))
+# A comment right after the brace: AlignFirstComment lines the elements up with
+# it, the other styles break after the brace.
+braced_comments = ('void f() {\nstd::vector<int> x{ // comment\n1, 2, 3, 4};\n'
+                   'foo(a, {// c\n1, 2});\nint z[] = { /* c */\n1, 2};\n'
+                   'call({ // comment\n1,\n2});\nS s{\n// leading\n1, 2};\n}\n')
+for layout in ['Block', 'FunctionCall', 'AlignFirstComment']:
+    profiles.append((f'initializer-comment-{layout}', {'Cpp11BracedListStyle': layout}, braced_comments))
 for extern in ['NoIndent', 'Indent', 'AfterExternBlock']:
     for braces in ['Attach', 'Allman']:
         profiles.append((f'extern-{extern}-{braces}', {'IndentExternBlock': extern, 'BreakBeforeBraces': braces}, 'extern "C" { void f() { work(); } }\n'))
@@ -100,10 +107,46 @@ for blocks in [False, True]:
                          {'IndentCaseBlocks': blocks, 'BreakBeforeBraces': 'Custom',
                           'BraceWrapping': {'AfterCaseLabel': after}}, case_blocks))
 # A requires clause on its own line under template parameters.
+# So is one after a function declarator.
 requires = ('template <class T>\nrequires Executor<std::decay_t<T>>\nvoid run(T t);\n'
-            'struct A {\ntemplate <class C, class E>\nrequires(!Executor<C> &&\nExecutor<E>)\nA(C c, E e)\n: e(e) {}\nE e;\n};\n')
+            'struct A {\ntemplate <class C, class E>\nrequires(!Executor<C> &&\nExecutor<E>)\nA(C c, E e)\n: e(e) {}\nE e;\n};\n'
+            'template <typename T>\nvoid f(T t) requires C<T> {\nwork();\n}\n'
+            'template <typename T>\nvoid g(T t) const requires C<T>;\n')
 for indent in [True, False]:
     profiles.append((f'requires-{indent}', {'IndentRequiresClause': indent}, requires))
+# The body of a requires expression, from the outer scope or its keyword.
+expressions = ('template <typename T>\nconcept C = requires(T t) {\nt.foo();\n{ t.bar() } -> std::same_as<int>;\n};\n'
+               'template <typename T>\nconcept D = std::is_integral_v<T> && requires(T t) {\nt.foo();\n};\n'
+               'template <typename T>\nvoid f(T t) requires requires(T x) {\nx.go();\n} {\nwork();\n}\n'
+               'void g() {\nif constexpr (requires(int x) {\nx + 1;\n}) {\ngo();\n}\n'
+               'auto v = foo(requires {\ntypename T::type;\n});\n}\n')
+for layout in ['OuterScope', 'Keyword']:
+    profiles.append((f'requires-expression-{layout}', {'RequiresExpressionIndentation': layout}, expressions))
+# The declarations of a module's export block; namespaces inside it are inner.
+exports = ('export module m;\nexport {\nint f();\nvoid g() {\nwork();\n}\nnamespace a {\nint x;\n'
+           'namespace b {\nint y;\n}\n}\n}\nexport namespace n {\nint h();\n}\nexport int k();\n'
+           'namespace c {\nexport {\nint z;\n}\n}\n')
+for indent in [True, False]:
+    profiles.append((f'export-block-{indent}', {'IndentExportBlock': indent, 'NamespaceIndentation': 'Inner'}, exports))
+# Braces that stand a level in: GNU indents those of control statements,
+# case blocks and lambdas, Whitesmiths those of every block but lambdas. A
+# lambda's brace, wrapped before its body, lines up with the arguments.
+braces = ('namespace n {\nclass A {\npublic:\nvoid f(int x) {\nif (x) {\nwork();\n} else {\nother();\n}\n'
+          'for (;;) {\nstep();\n}\nswitch (x) {\ncase 1: {\none();\nbreak;\n}\ndefault:\ntwo();\n}\n'
+          'while (x) {\ngo();\n}\ndo {\nit();\n} while (x);\n{\ninner();\n}\n'
+          'auto l = [&] {\nlam();\n};\ncall(first,\n[&](int y) {\nuse(y);\nmore(y);\n});\n}\nint m;\n};\n'
+          'struct B {\nint y;\n};\nenum E {\nX,\nY\n};\nextern "C" {\nint c();\n}\n}\n')
+for style in ['GNU', 'Whitesmiths', 'Allman']:
+    for width in [2, 4]:
+        profiles.append((f'braces-{style}-{width}', {'BreakBeforeBraces': style, 'IndentWidth': width}, braces))
+# A name of TemplateNames opens template arguments where an expression would
+# compare; a function-like macro of Macros that expands to a loop works as one.
+template_names = 'void f() {\nbool v = foo < bar &&\nbaz > (qux);\n}\n'
+for names in [[], ['foo']]:
+    profiles.append((f'template-names-{len(names)}', {'TemplateNames': names}, template_names))
+macros = 'void f() {\nFOREACH(x)\nwork(x);\nCALL(a,\nb);\n}\n'
+for definitions in [[], ['FOREACH(x)=for (auto x : xs)']]:
+    profiles.append((f'macros-{len(definitions)}', {'Macros': definitions}, macros))
 goto = 'int f() {\nif (foo()) {\nlabel1:\nbar();\n}\nlabel2:\nreturn 1;\n}\n'
 for labels in ['NoIndent', 'OuterIndent', 'InnerIndent', 'HalfIndent', True, False]:
     profiles.append((f'goto-labels-{labels}', {'IndentGotoLabels': labels, 'IndentWidth': 4}, goto))
