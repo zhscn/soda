@@ -245,8 +245,6 @@ fn run(shared: Arc<Shared>, sender: SyncSender<PickerCompletion>) {
             &task,
             PickerCompletion {
                 key: task.key,
-                data_revision: 0,
-                sequence: 0,
                 result,
             },
         );
@@ -263,14 +261,16 @@ mod tests {
         let session = PickerSession::new(directory.path().into(), PickerLimits::default()).unwrap();
         let task = session.task();
         let (sender, receiver) = mpsc::sync_channel(1);
-        let packet = |sequence| PickerCompletion {
+        // The first holds a match, so that the two can be told apart.
+        let packet = |matched| PickerCompletion {
             key: task.key(),
-            data_revision: 0,
-            sequence,
-            result: Ok(PickerResults::default()),
+            result: Ok(PickerResults {
+                matched,
+                ..PickerResults::default()
+            }),
         };
-        sender.send(packet(0)).unwrap();
-        let pending = packet(1);
+        sender.send(packet(1)).unwrap();
+        let pending = packet(0);
         let (done, finished) = mpsc::channel();
         let (started, running) = mpsc::channel();
         let worker = thread::spawn(move || {
@@ -286,7 +286,7 @@ mod tests {
         drop(session);
         finished.recv_timeout(Duration::from_secs(2)).unwrap();
         worker.join().unwrap();
-        assert_eq!(receiver.try_recv().unwrap().sequence, 0);
+        assert_eq!(receiver.try_recv().unwrap().result.unwrap().matched, 1);
         assert!(receiver.try_recv().is_err());
     }
 }

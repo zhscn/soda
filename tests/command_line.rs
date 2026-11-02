@@ -387,10 +387,6 @@ fn candidates_carry_matched_ranges_and_description_offsets() {
     assert!(label.starts_with("saveas PATH"));
     assert_eq!(marked, "svas");
     assert_eq!(&label[detail.unwrap()..], "Save to another path");
-    // An alias ranks first even though it is not in the label.
-    keys(&mut r, "<c-u>");
-    r.input(UserInput::Paste("bd".into()));
-    assert!(first(&r).0.starts_with("close "));
     // Descriptions match as substrings when no name does.
     keys(&mut r, "<c-u>");
     r.input(UserInput::Paste("logical".into()));

@@ -112,7 +112,7 @@ fn command_line_resolves_names_aliases_and_line_numbers() {
     let text = r.layer().unwrap().presentation().text;
     assert!(text.contains("unknown command"), "{text}");
     keys(&mut r, "<esc><a-x>");
-    r.input(UserInput::Paste("ls".into()));
+    r.input(UserInput::Paste("buffer".into()));
     keys(&mut r, "<ret>");
     assert!(matches!(r.layer(), Some(Layer::CommandLine(_))));
     keys(&mut r, "<esc><a-x>");
@@ -164,7 +164,7 @@ fn configuration_maps_defines_and_reports_line_numbers() {
     assert_eq!(state(&r).0, "HELLO WORLD");
     // The prompt binding confirms the command line.
     keys(&mut r, "<a-x>");
-    r.input(UserInput::Paste("ls".into()));
+    r.input(UserInput::Paste("buffer".into()));
     keys(&mut r, "<c-j>");
     assert!(matches!(r.layer(), Some(Layer::CommandLine(_))));
     keys(&mut r, "<esc>");

@@ -27,6 +27,26 @@ impl Place<'_> {
             time: self.time,
         }
     }
+    /// Deletes `range`, leaving the caret where it started.
+    fn erase(&self, range: std::ops::Range<usize>) -> Event {
+        let start = range.start;
+        self.event(Edit::Apply(tx(
+            self.text,
+            vec![Change::new(range, "")],
+            start,
+        )))
+    }
+    /// Drops the selection, keeping its head.
+    fn caret(&self) -> Event {
+        self.event(Edit::SetSelection(Selection::caret(self.selection.head)))
+    }
+    fn clipboard(&self, action: ClipboardAction) -> Event {
+        Event::Clipboard {
+            view: self.view,
+            action,
+            time: self.time,
+        }
+    }
 }
 pub(super) fn place<'a>(app: &'a Application, time: Duration) -> Option<Place<'a>> {
     let view: &View = app.active_view().and_then(|id| app.view(id))?;
@@ -47,6 +67,32 @@ pub(super) fn position(
     document
         .position(ByteOffset(offset), Association::After)
         .ok()
+}
+/// Where `count` words or symbols from `from` end.
+fn walk_things(
+    text: &Snapshot,
+    mut from: usize,
+    symbol: bool,
+    backward: bool,
+    count: usize,
+) -> Option<usize> {
+    for _ in 0..count {
+        from = if backward {
+            text::thing_start(text, from, symbol)?
+        } else {
+            text::thing_end(text, from, symbol)?
+        };
+    }
+    Some(from)
+}
+/// Where a find or till selection ends at a found character: past it going
+/// forward to it, or going back till it.
+fn found_end(found: usize, ch: char, till: bool, backward: bool) -> usize {
+    if till == backward {
+        found + ch.len_utf8()
+    } else {
+        found
+    }
 }
 fn tx(text: &Snapshot, changes: Vec<Change>, caret: usize) -> Transaction {
     let mut tx = Transaction::new(text.version(), changes);
@@ -204,8 +250,7 @@ impl Layers {
                     self.leave_beacon();
                 }
                 if !at.selection.range().is_empty() {
-                    let caret = Selection::caret(at.selection.head);
-                    response.events.push(at.event(Edit::SetSelection(caret)));
+                    response.events.push(at.caret());
                 }
             }
             Action::PopSelection { all } => {
@@ -256,12 +301,7 @@ impl Layers {
                 response
                     .events
                     .push(at.event(Edit::BeginUndoGroup(at.selection)));
-                let start = range.start;
-                response.events.push(at.event(Edit::Apply(tx(
-                    at.text,
-                    vec![Change::new(range, "")],
-                    start,
-                ))));
+                response.events.push(at.erase(range));
             }
             Action::Delete => {
                 if self.join_tagged(&at) {
@@ -272,13 +312,7 @@ impl Layers {
                         smart: false,
                     }));
                 } else {
-                    let range = at.selection.range();
-                    let start = range.start;
-                    response.events.push(at.event(Edit::Apply(tx(
-                        at.text,
-                        vec![Change::new(range, "")],
-                        start,
-                    ))));
+                    response.events.push(at.erase(at.selection.range()));
                 }
                 self.modal.tag = None;
             }
@@ -286,38 +320,23 @@ impl Layers {
                 if at.selection.range().is_empty() {
                     return self.fail(response, "No selection");
                 }
-                response.events.push(Event::Clipboard {
-                    view: at.view,
-                    action: ClipboardAction::Copy,
-                    time,
-                });
+                response.events.push(at.clipboard(ClipboardAction::Copy));
             }
             Action::Yank => {
-                let caret = Selection::caret(at.selection.head);
-                response.events.push(at.event(Edit::SetSelection(caret)));
-                response.events.push(Event::Clipboard {
-                    view: at.view,
-                    action: ClipboardAction::Paste,
-                    time,
-                });
+                response.events.push(at.caret());
+                response.events.push(at.clipboard(ClipboardAction::Paste));
             }
-            Action::Replace => response.events.push(Event::Clipboard {
-                view: at.view,
-                action: ClipboardAction::Paste,
-                time,
-            }),
+            Action::Replace => response.events.push(at.clipboard(ClipboardAction::Paste)),
             Action::Join => return self.join(&at, response),
             Action::Search => return self.search(&at, negative, count, response),
             Action::PopSearch => {
                 self.modal.searches.pop();
                 self.modal.tag = None;
-                let caret = Selection::caret(at.selection.head);
-                response.events.push(at.event(Edit::SetSelection(caret)));
+                response.events.push(at.caret());
             }
             Action::Undo { redo } => {
                 self.modal.tag = None;
-                let caret = Selection::caret(at.selection.head);
-                response.events.push(at.event(Edit::SetSelection(caret)));
+                response.events.push(at.caret());
                 for _ in 0..count {
                     let edit = if redo { Edit::Redo } else { Edit::Undo };
                     response.events.push(at.event(edit));
@@ -338,20 +357,12 @@ impl Layers {
                 let head = at.selection.head;
                 let start =
                     word_boundary(at.text, ByteOffset(head), true).map_or(head, |offset| offset.0);
-                response.events.push(at.event(Edit::Apply(tx(
-                    at.text,
-                    vec![Change::new(start..head, "")],
-                    start,
-                ))));
+                response.events.push(at.erase(start..head));
             }
             Action::EraseLineStart => {
                 let head = at.selection.head;
                 let start = at.text.line_start(at.text.line_of(head).unwrap()).unwrap();
-                response.events.push(at.event(Edit::Apply(tx(
-                    at.text,
-                    vec![Change::new(start..head, "")],
-                    start,
-                ))));
+                response.events.push(at.erase(start..head));
             }
             Action::SetMark => {
                 self.select(
@@ -515,19 +526,7 @@ impl Layers {
         let kind = if symbol { Kind::Symbol } else { Kind::Word };
         let tag = self.modal.tag(at.selection).filter(|tag| tag.kind == kind);
         let head = at.selection.head;
-        let walk = |mut from: usize| {
-            let mut last = None;
-            for _ in 0..count {
-                from = if backward {
-                    text::thing_start(at.text, from, symbol)?
-                } else {
-                    text::thing_end(at.text, from, symbol)?
-                };
-                last = Some(from);
-            }
-            last
-        };
-        let Some(to) = walk(head) else {
+        let Some(to) = walk_things(at.text, head, symbol, backward, count) else {
             return self.fail(response, "No more words");
         };
         let expand = tag.is_some_and(|tag| tag.expand);
@@ -622,11 +621,7 @@ impl Layers {
         let Some(found) = text::find(at.text, from, ch, count, backward) else {
             return self.fail(response, &format!("{ch} not found"));
         };
-        let to = match (till, backward) {
-            (false, false) => found + ch.len_utf8(),
-            (false, true) | (true, false) => found,
-            (true, true) => found + ch.len_utf8(),
-        };
+        let to = found_end(found, ch, till, backward);
         let kind = if till { Kind::Till } else { Kind::Find };
         self.select(
             at,
@@ -645,18 +640,7 @@ impl Layers {
         let head = at.selection.head;
         match tag.kind {
             Kind::Word | Kind::Symbol => {
-                let symbol = tag.kind == Kind::Symbol;
-                let mut to = Some(head);
-                for _ in 0..count {
-                    to = to.and_then(|from| {
-                        if backward {
-                            text::thing_start(at.text, from, symbol)
-                        } else {
-                            text::thing_end(at.text, from, symbol)
-                        }
-                    });
-                }
-                to
+                walk_things(at.text, head, tag.kind == Kind::Symbol, backward, count)
             }
             Kind::Line => {
                 let line = at.text.line_of(head).unwrap();
@@ -679,10 +663,7 @@ impl Layers {
                     head
                 };
                 let found = text::find(at.text, from, find.ch, count, backward)?;
-                Some(match (find.till, backward) {
-                    (false, false) | (true, true) => found + find.ch.len_utf8(),
-                    _ => found,
-                })
+                Some(found_end(found, find.ch, find.till, backward))
             }),
             _ => None,
         }
@@ -848,14 +829,10 @@ impl Layers {
         self.modal.tag = None;
         let mut range = at.selection.range();
         if range.is_empty() {
-            response.events.push(Event::Clipboard {
-                view: at.view,
-                action: ClipboardAction::Kill {
-                    backward: false,
-                    word: false,
-                },
-                time: at.time,
-            });
+            response.events.push(at.clipboard(ClipboardAction::Kill {
+                backward: false,
+                word: false,
+            }));
             return;
         }
         // A forward line selection takes its line break with it.
@@ -866,15 +843,11 @@ impl Layers {
             range.end = text::next(at.text, range.end);
         }
         let start = range.start;
-        response.events.push(Event::Clipboard {
-            view: at.view,
-            action: ClipboardAction::Operate {
-                range: range.clone(),
-                edit: Change::new(range, ""),
-                selection: Selection::caret(start),
-            },
-            time: at.time,
-        });
+        response.events.push(at.clipboard(ClipboardAction::Operate {
+            range: range.clone(),
+            edit: Change::new(range, ""),
+            selection: Selection::caret(start),
+        }));
     }
     /// `'`: the blanks between this line and the last line with text.
     fn join(&mut self, at: &Place, mut response: Response) -> Response {

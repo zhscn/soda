@@ -73,7 +73,7 @@ fn regaining_focus_reloads_clean_files_and_reports_the_rest() {
         "buffer ".to_owned() + &kept.display().to_string(),
     ));
     r.command(Command::Named("set-local auto-reload false".into()));
-    r.command(Command::Named("checktime".into()));
+    r.command(Command::Named("check-files".into()));
     assert_eq!(text_of(&r, &kept).unwrap(), "old\n");
     assert!(
         r.message().contains("kept.txt changed on disk"),

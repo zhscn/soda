@@ -119,16 +119,20 @@ pub(super) const LINE_EDITS: &[(&str, LineEdit, &str)] = &[
     ("yank", LineEdit::Yank, "Paste the last cut text"),
 ];
 impl LineEdit {
+    /// The motion of a moving edit, in a document and in an input field.
+    fn motion(self) -> Option<(Motion, InputMotion)> {
+        Some(match self {
+            Self::CharLeft => (Motion::Backward, InputMotion::Left),
+            Self::CharRight => (Motion::Forward, InputMotion::Right),
+            Self::WordLeft => (Motion::WordBackward, InputMotion::WordLeft),
+            Self::WordRight => (Motion::WordForward, InputMotion::WordRight),
+            Self::LineStart => (Motion::LineStart, InputMotion::Start),
+            Self::LineEnd => (Motion::LineEnd, InputMotion::End),
+            _ => return None,
+        })
+    }
     pub(super) fn is_motion(self) -> bool {
-        matches!(
-            self,
-            Self::CharLeft
-                | Self::CharRight
-                | Self::WordLeft
-                | Self::WordRight
-                | Self::LineStart
-                | Self::LineEnd
-        )
+        self.motion().is_some()
     }
     /// Parses a line edit name, optionally prefixed by `extend-` for motions.
     pub(super) fn parse(name: &str) -> Option<(Self, bool)> {
@@ -139,14 +143,10 @@ impl LineEdit {
         (!extend || edit.is_motion()).then_some((*edit, extend))
     }
     pub(super) fn command(self, extend: bool) -> Command {
-        let motion = |motion| Command::Edit(Edit::Move { motion, extend });
+        if let Some((motion, _)) = self.motion() {
+            return Command::Edit(Edit::Move { motion, extend });
+        }
         match self {
-            Self::CharLeft => motion(Motion::Backward),
-            Self::CharRight => motion(Motion::Forward),
-            Self::WordLeft => motion(Motion::WordBackward),
-            Self::WordRight => motion(Motion::WordForward),
-            Self::LineStart => motion(Motion::LineStart),
-            Self::LineEnd => motion(Motion::LineEnd),
             Self::DeleteBackward => Command::Edit(Edit::Delete {
                 direction: Direction::Backward,
                 smart: true,
@@ -163,17 +163,14 @@ impl LineEdit {
                 word: false,
             }),
             Self::Yank => Command::Clipboard(ClipboardAction::Paste),
+            _ => unreachable!("motions are handled above"),
         }
     }
     pub(super) fn input(self, extend: bool) -> InputKey {
-        let motion = |motion| InputKey::Move { motion, extend };
+        if let Some((_, motion)) = self.motion() {
+            return InputKey::Move { motion, extend };
+        }
         match self {
-            Self::CharLeft => motion(InputMotion::Left),
-            Self::CharRight => motion(InputMotion::Right),
-            Self::WordLeft => motion(InputMotion::WordLeft),
-            Self::WordRight => motion(InputMotion::WordRight),
-            Self::LineStart => motion(InputMotion::Start),
-            Self::LineEnd => motion(InputMotion::End),
             Self::DeleteBackward => InputKey::Delete {
                 backward: true,
                 word: false,
@@ -190,6 +187,7 @@ impl LineEdit {
             Self::KillLineStart => InputKey::Kill(InputMotion::Start),
             Self::KillLineEnd => InputKey::Kill(InputMotion::End),
             Self::Yank => InputKey::Yank,
+            _ => unreachable!("motions are handled above"),
         }
     }
 }
@@ -312,8 +310,8 @@ const GLOBAL: &[(&str, &str)] = &[
     ("<c-x><c-f>", "open"),
     ("<c-x><c-r>", "recent"),
     ("<c-x><c-c>", "quit"),
-    ("<c-x>b", "buffers"),
-    ("<c-x><c-b>", "buffers"),
+    ("<c-x>b", "buffer"),
+    ("<c-x><c-b>", "buffer"),
     ("<c-x>k", "close"),
     ("<c-x>0", "close-window"),
     ("<c-x>1", "only"),
@@ -324,7 +322,7 @@ const GLOBAL: &[(&str, &str)] = &[
     ("<c-x>u", "undo"),
     ("<c-x>`", "next-result"),
     ("<c-x>pf", "project"),
-    ("<c-x>pb", "buffers"),
+    ("<c-x>pb", "buffer"),
     ("<c-x>pg", "grep"),
     ("<a-x>", "commands"),
     ("<a-!>", "shell"),
@@ -368,7 +366,7 @@ const GLOBAL: &[(&str, &str)] = &[
     ("<c-c>0", "digit-argument 0"),
     ("<c-c>f", "project"),
     ("<c-c>o", "window-pick"),
-    ("<c-c>b", "buffers"),
+    ("<c-c>b", "buffer"),
     ("<c-c>:", "commands"),
     ("<c-c>j", "jump-to"),
     ("<c-c>w", "window-pick"),

@@ -142,12 +142,12 @@
 
 ### 命令表
 
-`interaction::registry` 保存命令。每个条目包含名字、别名、参数形式和一行说明；条目有三种来源：
+`interaction::registry` 保存命令。每个条目包含名字、参数形式和一行说明；条目有三种来源：
 
 | 来源 | 定义方式 | 名字规则 |
 | --- | --- | --- |
 | 内置 | 静态表，参数解析为类型化 `Command` | 固定，不可替换 |
-| Rust 注册 | `register_command(name, handler)`，处理函数读取只读 Application 并返回 `Command` | 不可与内置名或别名冲突；重复注册替换 |
+| Rust 注册 | `register_command(name, handler)`，处理函数读取只读 Application 并返回 `Command` | 不可与内置名冲突；重复注册替换 |
 | 用户定义 | `define-command NAME BODY` | 同上；与 Rust 注册共享名字空间；帮助显示命令体，Lua 定义的显示其说明 |
 
 命令行的第一个空白分隔词是命令名，其余部分去掉首尾空白后整体作为参数，由命令自己解释：路径参数保留内部空格，`map` 再拆分模式、按键和目标。`Command::Named(line)` 携带一条命令行，在执行时解析，因此绑定可以引用之后才定义的命令。`:` 命令行、配置文件、键位目标和 `define-command` 的命令体使用同一个解析器；`:42` 这种纯数字输入仍表示跳转到行。
@@ -312,7 +312,7 @@ hook open .*/Makefile set-local expand-tab false
 
 `pipe`/`shell` 在后台线程运行，同一时间只有一个；运行期间编辑照常进行。完成后若文档已经变化，`pipe` 的结果被丢弃并提示。非零退出不修改文档，消息行显示标准错误的第一行。输出限制为 16 MiB，超出时丢弃结果；非 UTF-8 输出同样拒绝。
 
-`run CMD`（别名 `make`）用于构建、测试这类长时间运行的命令：
+`run CMD`用于构建、测试这类长时间运行的命令：
 - 标准输出和标准错误合并，按行流式写入 scratch 文档 `*run*`。第一行是 `$ CMD`，结束时追加退出状态，消息行显示 `CMD: exited N`。
 - 光标在最后一行的视图跟随新输出；把光标移开后停止跟随。
 - `*run*` 默认显示在底部 12 行的侧边窗口，可用 `display run …` 改变。
@@ -327,64 +327,64 @@ hook open .*/Makefile set-local expand-tab false
 
 ### 内置命令
 
-| 命令 | 别名 | 行为 |
-| --- | --- | --- |
-| `edit [PATH]` | `e` | 打开指定文件；无参数时重新加载当前文件 |
-| `open PATH` | `o` | 打开指定文件；新文件在保存时创建 |
-| `write [PATH]` | `w` | 保存；指定路径时保存到该路径 |
-| `saveas PATH` | | 保存到指定路径；交互入口预填当前路径 |
-| `quit [DECISION] [PATH]` | `q` | 退出；逐个决定未保存的文档 |
-| `write-quit` | `wq`、`x` | 当前文档未保存时等同 `quit save` |
-| `close [DECISION] [PATH]` | `bd`、`bdelete` | 关闭当前文档 |
-| `reload [DECISION] [PATH]` | | 从磁盘重新加载当前文件 |
-| `buffer NAME` | `b`、`buffers`、`ls`、`files` | 切换到已打开的文档 |
-| `next-view` | `bn`、`bnext` | 在当前窗口显示下一个视图；其他窗口中的视图跳过 |
-| `split [PATH]` / `vsplit [PATH]` | `sp` / `vs` | 上下或左右分屏，新窗口复制当前视图；给出路径时在新窗口打开 |
-| `close-window` | `clo` | 关闭当前窗口，视图保留为隐藏 |
-| `only` | `on` | 只保留当前窗口 |
-| `window-left` / `-right` / `-up` / `-down`、`window-next` / `window-previous` | | 切换窗口 |
-| `half-page-down` / `half-page-up` | | 移动半页并滚动 |
-| `grep PATTERN` | | 在项目文件中按正则表达式搜索，结果写入 `*grep*` |
-| `jump` | | 打开当前行写明的位置；不是位置行时移到下一行首个非空白字符 |
-| `jump-back` / `jump-forward` | | 沿跳转历史后退或前进（`<c-o>` / `<c-i>`） |
-| `next-result` / `previous-result` | `cn` / `cp` | 在最近的结果文档（`*grep*` 或 `*run*`）中打开下一个或上一个位置 |
-| `run CMD` | `make` | 后台运行命令，输出流式写入 `*run*` |
-| `stop` | | 停止 `run`、`shell`/`pipe` 和项目搜索 |
-| `suspend` | | 挂起编辑器回到 shell，用 `fg` 继续 |
-| `lua CODE` | | 执行一段 Lua，见[扩展模型](extension.md) |
-| `lua-call ID [ARGUMENT]` | | 调用 Lua 注册的钩子或命令函数（由 `soda.hook`/`soda.define_command` 生成） |
-| `messages` | | 在 `*messages*` 中显示最近的消息 |
-| `highlight FACE PATTERN` / `highlight-local FACE PATTERN` | | 在所有文档 / 当前文档中高亮正则表达式 |
-| `flag-lines GROUP FACE SIGN LINES` / `unflag-lines [GROUP]` | | 在当前文档的行号栏给行打上标记 / 去掉一组或全部标记 |
-| `unhighlight [PATTERN]` | | 去掉某个模式的高亮，或者全部 |
-| `each-line KEYS` | | 在每个选中行的行首以 Normal 模式输入 KEYS |
-| `each-match PATTERN KEYS` | | 在每处匹配以 Normal 模式输入 KEYS；有选区时只在选中的行中 |
-| `recent FILE` | | 打开最近用过的文件（`SPC r`） |
-| `jump-to` | | 输入两个字符，再按屏幕上的标签跳到那里（`SPC j`） |
-| `window-pick` | | 按标签选择窗口；只有两个窗口时直接切换（`SPC w`） |
-| `echo [TEXT]` | | 在消息行显示文字，常与 `%val{}` 一起用 |
-| `check-files` | `checktime` | 重新加载磁盘上变化了的干净文件，报告其余的 |
-| `display KIND PLACEMENT` | | 设置某种文档的显示位置，见[终端界面](ui.md#窗口) |
-| `set OPTION VALUE` | | 设置全局选项，见[扩展模型](extension.md#选项) |
-| `set-local OPTION VALUE` / `unset-local OPTION` | | 设置或去掉当前文档自己的选项值 |
-| `new` | `enew` | 新文档 |
-| `project FILE` | | 打开项目中的文件 |
-| `goto LINE[:COLUMN]` | | 跳转到行列，从 1 开始，列为逻辑列 |
-| `search` / `search-backward` / `replace` | | 搜索与替换会话 |
-| `recenter` | | 把光标所在行滚动到窗口中间 |
-| `snippet BODY` | | 在光标处展开 snippet，见[补全](completion.md#snippet) |
-| `help` | | 帮助 |
-| `commands` | `command-line` | 打开空的命令行，即命令面板 |
-| `undo` / `redo`、`copy` / `cut` / `paste` | | 历史与剪贴板 |
-| `move-up` / `move-down`、`document-start` / `document-end` | | 移动；`extend-move-up` / `extend-move-down` 扩展选区 |
-| `page-up` / `page-down`、`select-all` | | 翻页与全选 |
-| `normal-mode` / `insert-mode` | | 切换编辑模式 |
-| `indent` / `outdent`、`insert-tab` / `insert-literal-tab`、`newline` | | 缩进、Tab 和语言感知换行 |
-| 行编辑命令 | | 见上表 |
-| `map` / `unmap` / `define-command` | | 键位与命令定义 |
-| `hook EVENT FILTER COMMAND` / `unhook EVENT [FILTER]` | | 添加或去掉钩子，见[扩展模型](extension.md#钩子) |
-| `pipe` / `shell` | | 外部进程 |
-| `nop` | | 不执行任何操作，用于屏蔽默认键 |
+| 命令 | 行为 |
+| --- | --- |
+| `edit [PATH]` | 打开指定文件；无参数时重新加载当前文件 |
+| `open PATH` | 打开指定文件；新文件在保存时创建 |
+| `write [PATH]` | 保存；指定路径时保存到该路径 |
+| `saveas PATH` | 保存到指定路径；交互入口预填当前路径 |
+| `quit [DECISION] [PATH]` | 退出；逐个决定未保存的文档 |
+| `write-quit` | 当前文档未保存时等同 `quit save` |
+| `close [DECISION] [PATH]` | 关闭当前文档 |
+| `reload [DECISION] [PATH]` | 从磁盘重新加载当前文件 |
+| `buffer NAME` | 切换到已打开的文档 |
+| `next-view` | 在当前窗口显示下一个视图；其他窗口中的视图跳过 |
+| `split [PATH]` / `vsplit [PATH]` | 上下或左右分屏，新窗口复制当前视图；给出路径时在新窗口打开 |
+| `close-window` | 关闭当前窗口，视图保留为隐藏 |
+| `only` | 只保留当前窗口 |
+| `window-left` / `-right` / `-up` / `-down`、`window-next` / `window-previous` | 切换窗口 |
+| `half-page-down` / `half-page-up` | 移动半页并滚动 |
+| `grep PATTERN` | 在项目文件中按正则表达式搜索，结果写入 `*grep*` |
+| `jump` | 打开当前行写明的位置；不是位置行时移到下一行首个非空白字符 |
+| `jump-back` / `jump-forward` | 沿跳转历史后退或前进（`<c-o>` / `<c-i>`） |
+| `next-result` / `previous-result` | 在最近的结果文档（`*grep*` 或 `*run*`）中打开下一个或上一个位置 |
+| `run CMD` | 后台运行命令，输出流式写入 `*run*` |
+| `stop` | 停止 `run`、`shell`/`pipe` 和项目搜索 |
+| `suspend` | 挂起编辑器回到 shell，用 `fg` 继续 |
+| `lua CODE` | 执行一段 Lua，见[扩展模型](extension.md) |
+| `lua-call ID [ARGUMENT]` | 调用 Lua 注册的钩子或命令函数（由 `soda.hook`/`soda.define_command` 生成） |
+| `messages` | 在 `*messages*` 中显示最近的消息 |
+| `highlight FACE PATTERN` / `highlight-local FACE PATTERN` | 在所有文档 / 当前文档中高亮正则表达式 |
+| `flag-lines GROUP FACE SIGN LINES` / `unflag-lines [GROUP]` | 在当前文档的行号栏给行打上标记 / 去掉一组或全部标记 |
+| `unhighlight [PATTERN]` | 去掉某个模式的高亮，或者全部 |
+| `each-line KEYS` | 在每个选中行的行首以 Normal 模式输入 KEYS |
+| `each-match PATTERN KEYS` | 在每处匹配以 Normal 模式输入 KEYS；有选区时只在选中的行中 |
+| `recent FILE` | 打开最近用过的文件（`SPC r`） |
+| `jump-to` | 输入两个字符，再按屏幕上的标签跳到那里（`SPC j`） |
+| `window-pick` | 按标签选择窗口；只有两个窗口时直接切换（`SPC w`） |
+| `echo [TEXT]` | 在消息行显示文字，常与 `%val{}` 一起用 |
+| `check-files` | 重新加载磁盘上变化了的干净文件，报告其余的 |
+| `display KIND PLACEMENT` | 设置某种文档的显示位置，见[终端界面](ui.md#窗口) |
+| `set OPTION VALUE` | 设置全局选项，见[扩展模型](extension.md#选项) |
+| `set-local OPTION VALUE` / `unset-local OPTION` | 设置或去掉当前文档自己的选项值 |
+| `new` | 新文档 |
+| `project FILE` | 打开项目中的文件 |
+| `goto LINE[:COLUMN]` | 跳转到行列，从 1 开始，列为逻辑列 |
+| `search` / `search-backward` / `replace` | 搜索与替换会话 |
+| `recenter` | 把光标所在行滚动到窗口中间 |
+| `snippet BODY` | 在光标处展开 snippet，见[补全](completion.md#snippet) |
+| `help` | 帮助 |
+| `commands` | 打开空的命令行，即命令面板 |
+| `undo` / `redo`、`copy` / `cut` / `paste` | 历史与剪贴板 |
+| `move-up` / `move-down`、`document-start` / `document-end` | 移动；`extend-move-up` / `extend-move-down` 扩展选区 |
+| `page-up` / `page-down`、`select-all` | 翻页与全选 |
+| `normal-mode` / `insert-mode` | 切换编辑模式 |
+| `indent` / `outdent`、`insert-tab` / `insert-literal-tab`、`newline` | 缩进、Tab 和语言感知换行 |
+| 行编辑命令 | 见上表 |
+| `map` / `unmap` / `define-command` | 键位与命令定义 |
+| `hook EVENT FILTER COMMAND` / `unhook EVENT [FILTER]` | 添加或去掉钩子，见[扩展模型](extension.md#钩子) |
+| `pipe` / `shell` | 外部进程 |
+| `nop` | 不执行任何操作，用于屏蔽默认键 |
 
 打开、保存和离开文档沿用 Soda 的异步任务、冲突检测与保存/丢弃/取消流程。窗口键见 [Emacs 键位](#emacs-键位)。`write-quit` 只自动保存当前文档，其他未保存文档仍需明确处理。相对路径以当前文档的目录解析，支持 `~/`。
 
@@ -421,7 +421,7 @@ hook open .*/Makefile set-local expand-tab false
 
 | 候选 | 匹配方式 | 排序 |
 | --- | --- | --- |
-| 命令名 | 名字模糊匹配；名字都不匹配时再按说明的子串匹配 | 名字或别名完全相同的最前，然后按模糊匹配得分，同分保持命令表顺序，说明匹配排在最后 |
+| 命令名 | 名字模糊匹配；名字都不匹配时再按说明的子串匹配 | 名字完全相同的最前，然后按模糊匹配得分，同分保持命令表顺序，说明匹配排在最后 |
 | 缓冲区 | 显示名模糊匹配 | 按得分，同分时当前文档在后 |
 | 项目文件 | 相对路径模糊匹配 | 按得分 |
 | 目录项、`Choice` | 前缀匹配，高亮前缀 | 目录优先 / 声明顺序 |
@@ -555,7 +555,7 @@ Runtime 在更新中观察 SaveId，并将带 Operation 身份的失败交给等
 
 ### 磁盘上的变化
 
-终端重新获得焦点时（以及执行 `check-files`，别名 `checktime`），逐个比较打开的文件与加载或保存时的磁盘内容：
+终端重新获得焦点时（以及执行 `check-files`），逐个比较打开的文件与加载或保存时的磁盘内容：
 - 内容变了、文档没有未保存的编辑、选项 `auto-reload` 为 true（默认）时，直接重新加载，光标和撤销历史保留。
 - 文档有未保存的编辑，或者 `auto-reload` 为 false 时，只在消息行报告 `PATH changed on disk`；之后可以 `reload discard` 采用磁盘内容，或者保存（保存会因内容冲突而失败，需要先决定）。
 - 文件被删除时报告 `PATH was deleted`，文档保持不变。
@@ -762,19 +762,17 @@ Picker 默认将文字输入焦点留在 `TextInput`。当前候选与输入光�
 
 候选任务属于交互会话。`Response.effects` 返回 `PickerEffect`，后台完成以 `PickerCompletion` 回到 owner thread。`Layers::start_picker` 先结束此前的模态会话，再安装 picker；`picker_finished` 只将结果交给当前 picker。Runtime 分别接收文件完成和 PickerCompletion；picker 结果只交给对应交互会话，文档核心不接收临时 widget 结果。
 
-请求携带会话身份、来源代次和查询代次。来源代次区分搜索根目录、数据来源的更换及失败后的候选集合重建。候选结果还携带数据修订和同修订内的结果序号。接收规则为：
+请求携带会话身份、来源代次和查询代次。来源代次区分搜索根目录、数据来源的更换及失败后的候选集合重建。接收规则为：
 
 1. 接收会话仍存在，且三项请求身份均与当前状态一致。
-2. 数据修订不能早于已应用的修订；同修订内只应用更新的结果序号。
+2. 每个请求只应用第一个结果。
 3. 数据与排序、高亮属于同一次结果快照，不能分别替换。
-
-数据修订允许以后逐步更新候选集，而不把一次候选追加当成用户改写查询。较旧的部分结果可以在新结果尚未应用时展示；一旦应用更新修订，就不会退回较旧候选集。
 
 新查询立即使旧查询候选失效：旧候选留在屏幕上直到结果到达，避免每次按键列表闪烁，但不再有效，Enter 和 Tab 都不采用它们，也不关闭会话。这时不显示加载状态；没有旧候选可显示时才显示。当前查询已有有效结果时，即使任务尚未完成，也可确认其中的候选。
 
 取消用于停止计算，接收校验保证正确性。关闭会话立即使身份失效，再取消所属任务；迟到结果、错误和完成通知不能重新创建会话。任务取消须覆盖遍历、匹配和等待发送容量的过程。
 
-`PickerRunner` 使用一个常驻 worker、一个最新待执行请求槽和容量为四的完成队列。默认最多收集 100,000 个文件，候选记录、Arc 计数器、字符串容量与候选向量实际容量的记账预算为 64 MiB，展示最多 1,000 个匹配。预算限制候选数据，不表示整个进程的内存上限；遍历器、匹配器和消息容器也有内存开销。查询超过 4,096 字节或 2,048 个 grapheme 时停止调度匹配并显示错误。这两个上限分别限制输入成本和匹配器 `u16` 分数的增长。预算检查先为候选对象及路径、展示文字的实际容量记账，再计算候选向量可保留的容量；向量按预算约束增长。达到候选集限制时报告截断；队列满时使用可取消的背压。匹配调度最多保留一个正在执行的请求和一个最新待执行请求，输入不会积累无限任务。Runtime 每轮按预算处理完成事件，保留处理键盘输入的机会。当前采用完整有序结果快照；每个文件查询发布一个快照，数据修订和序号均为零。接收端保留多快照的版本校验。Runtime 每轮分别处理最多八个文件、项目 picker 和路径补全完成结果。
+`PickerRunner` 使用一个常驻 worker、一个最新待执行请求槽和容量为四的完成队列。默认最多收集 100,000 个文件，候选记录、Arc 计数器、字符串容量与候选向量实际容量的记账预算为 64 MiB，展示最多 1,000 个匹配。预算限制候选数据，不表示整个进程的内存上限；遍历器、匹配器和消息容器也有内存开销。查询超过 4,096 字节或 2,048 个 grapheme 时停止调度匹配并显示错误。这两个上限分别限制输入成本和匹配器 `u16` 分数的增长。预算检查先为候选对象及路径、展示文字的实际容量记账，再计算候选向量可保留的容量；向量按预算约束增长。达到候选集限制时报告截断；队列满时使用可取消的背压。匹配调度最多保留一个正在执行的请求和一个最新待执行请求，输入不会积累无限任务。Runtime 每轮按预算处理完成事件，保留处理键盘输入的机会。每个文件查询发布一个完整有序的结果快照。遍历中读不到的条目直接略过。Runtime 每轮分别处理最多八个文件、项目 picker 和路径补全完成结果。
 
 取消在遍历项之间、匹配候选之间和等待完成队列容量时检查。关闭与更换来源使旧任务失效；取消也清除待执行请求及缓存集合。Session 丢弃时通过取消标志和 Waker 唤醒 worker，即使没有另行发送取消效果，idle 缓存也会释放。大批候选的析构在调度锁外执行。Runtime 释放时关闭 worker 并回收线程。单次操作系统文件调用不由该取消机制强制中断。
 

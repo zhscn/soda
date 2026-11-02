@@ -11,7 +11,7 @@ use crate::{
     application::Application,
     core::{Change, Selection, Transaction, offset_at_logical_column},
     editor::Command as Edit,
-    interaction::{Command, EditMode, Layers, Response, UserInput},
+    interaction::{EditMode, Layers, Response, UserInput},
 };
 use std::{ops::Range, time::Duration};
 
@@ -335,20 +335,18 @@ impl Layers {
     pub(super) fn apply_macro(&mut self, at: &Place, response: &mut Response) {
         let keys: Vec<UserInput> = self.modal.replay.last().to_vec();
         let targets: Vec<_> = resolved(&self.modal.beacons, at);
-        let depth = self.modal.macro_depth;
-        let mut commands = vec![];
-        for range in targets.into_iter().rev() {
-            commands.push(Command::SetMode(EditMode::Normal));
-            commands.push(Command::Edit(Edit::SetSelection(Selection {
-                anchor: range.start,
-                head: range.end,
-            })));
-            commands.push(Command::Replay(keys.clone()));
-        }
-        commands.push(Command::SetMode(EditMode::Normal));
-        commands.push(Command::Edit(Edit::SquashHistory(depth)));
+        let selections = targets.into_iter().map(|range| Selection {
+            anchor: range.start,
+            head: range.end,
+        });
         self.leave_beacon();
-        response.commands.extend(commands);
+        response
+            .commands
+            .extend(crate::interaction::commands::replay_each(
+                selections,
+                &keys,
+                self.modal.macro_depth,
+            ));
     }
 }
 /// What a key does at every caret.

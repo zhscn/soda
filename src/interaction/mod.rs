@@ -28,7 +28,7 @@ pub mod path;
 mod pointer;
 pub use pointer::Pointer;
 mod replace;
-pub use replace::{ReplacePhase, ReplaceSession};
+pub use replace::ReplaceSession;
 mod routing;
 pub use routing::{Key, KeyStroke, UserInput, emacs_notation, key_notation};
 mod search;
@@ -218,12 +218,6 @@ impl Layers {
         handler: CommandHandler,
     ) -> Result<(), String> {
         self.registry.register(name, handler)
-    }
-    pub fn keymap(&self) -> &Keymap {
-        &self.keymap
-    }
-    pub fn registry(&self) -> &Registry {
-        &self.registry
     }
     /// Whether a command failed since `clear_failed`.
     pub fn failed(&self) -> bool {

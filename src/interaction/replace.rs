@@ -7,7 +7,7 @@ use crate::{
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ReplacePhase {
+pub(super) enum ReplacePhase {
     Query,
     Replacement,
     Review,
@@ -27,9 +27,6 @@ impl ReplaceSession {
             phase: ReplacePhase::Query,
             replacement: String::new(),
         })
-    }
-    pub fn phase(&self) -> ReplacePhase {
-        self.phase
     }
     pub fn input(&self) -> &TextInput {
         &self.input

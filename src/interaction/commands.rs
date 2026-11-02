@@ -223,6 +223,46 @@ pub enum Departure {
     Discard,
 }
 
+/// Replays keys in Normal at each selection, last first so that earlier
+/// places hold, as one undoable step.
+pub(super) fn replay_each(
+    selections: impl DoubleEndedIterator<Item = crate::core::Selection>,
+    keys: &[super::UserInput],
+    depth: usize,
+) -> Vec<Command> {
+    let mut commands = vec![];
+    for selection in selections.rev() {
+        commands.extend([
+            Command::SetMode(super::EditMode::Normal),
+            Command::Edit(EditCommand::SetSelection(selection)),
+            Command::Replay(keys.to_vec()),
+        ]);
+    }
+    commands.extend([
+        Command::SetMode(super::EditMode::Normal),
+        Command::Edit(EditCommand::SquashHistory(depth)),
+    ]);
+    commands
+}
+/// Reloads the active view's document, or closes `document`.
+fn leaving(app: &Application, document: DocumentId, reload: bool, discard: bool) -> Event {
+    if reload {
+        Event::Reload {
+            view: app.active_view().unwrap(),
+            discard,
+        }
+    } else {
+        Event::CloseDocument { document, discard }
+    }
+}
+fn active(app: &Application) -> Option<&crate::application::View> {
+    app.active_view().and_then(|id| app.view(id))
+}
+/// A path typed by the user, against the current directory and `~`.
+fn resolve(app: &Application, path: &Path) -> Result<std::path::PathBuf, String> {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    super::path::resolve_path(&app.directory(), home.as_deref(), path)
+}
 /// A directory as a path to start from: under `~` when it can be, and
 /// ending in a slash so that a file name follows.
 fn prompt_directory(directory: &Path) -> String {
@@ -483,7 +523,7 @@ impl Layers {
                 match app
                     .workspace()
                     .documents()
-                    .find(|id| super::command_line::buffer_name(app, *id) == name)
+                    .find(|id| app.document_name(*id) == name)
                 {
                     Some(document) => response.events.push(show(app, document)),
                     None => response.message = Message::Set(format!("No buffer named {name}")),
@@ -538,14 +578,14 @@ impl Layers {
                 }
             }
             Command::Pipe(shell) => {
-                if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
+                if let Some(view) = active(app) {
                     let directory = app.directory();
                     response.shell =
                         Some(Box::new(super::shell::pipe(app, view, shell, &directory)));
                 }
             }
             Command::Shell(shell) => {
-                let view = app.active_view().and_then(|id| app.view(id));
+                let view = active(app);
                 let directory = app.directory();
                 response.shell = Some(Box::new(super::shell::run(app, view, shell, &directory)));
             }
@@ -561,15 +601,12 @@ impl Layers {
                 });
             }
             Command::ProjectRoot(Some(path)) => {
-                let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-                match super::path::resolve_path(&app.directory(), home.as_deref(), &path).and_then(
-                    |path| {
-                        std::fs::canonicalize(&path)
-                            .ok()
-                            .filter(|path| path.is_dir())
-                            .ok_or_else(|| format!("{} is not a directory", path.display()))
-                    },
-                ) {
+                match resolve(app, &path).and_then(|path| {
+                    std::fs::canonicalize(&path)
+                        .ok()
+                        .filter(|path| path.is_dir())
+                        .ok_or_else(|| format!("{} is not a directory", path.display()))
+                }) {
                     Ok(directory) => {
                         response.message = Message::Set(format!("Project {}", directory.display()));
                         response.events.push(Event::SetProject(directory));
@@ -584,26 +621,22 @@ impl Layers {
                 response.events.push(Event::Open(file_root.join(path)));
             }
             Command::OpenPath(path) | Command::SavePath(path) => {
-                let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-                match super::path::resolve_path(&app.directory(), home.as_deref(), &path) {
+                match resolve(app, &path) {
                     Ok(path) => {
                         if opening_path {
                             // Nothing on screen changes, so say why.
-                            if let Some(document) = app
-                                .active_view()
-                                .and_then(|id| app.view(id))
-                                .map(|v| v.document_id)
+                            if let Some(document) = active(app).map(|v| v.document_id)
                                 && let Some(current) =
                                     app.workspace().file(document).and_then(|f| f.path())
                                 && std::fs::canonicalize(&path).is_ok_and(|p| p == current)
                             {
                                 response.message = Message::Set(format!(
                                     "Already at {}",
-                                    super::command_line::buffer_name(app, document)
+                                    app.document_name(document)
                                 ));
                             }
                             response.events.push(Event::Open(path));
-                        } else if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
+                        } else if let Some(view) = active(app) {
                             response.events.push(Event::Save {
                                 document: view.document_id,
                                 target: Some(path),
@@ -617,10 +650,8 @@ impl Layers {
                 }
             }
             Command::WriteQuit => {
-                let dirty = app
-                    .active_view()
-                    .and_then(|id| app.view(id))
-                    .is_some_and(|view| app.workspace().is_dirty(view.document_id));
+                let dirty =
+                    active(app).is_some_and(|view| app.workspace().is_dirty(view.document_id));
                 let decision = dirty.then_some(Departure::Save(None));
                 return self.execute(Command::Quit(decision), app, time, file_root);
             }
@@ -635,7 +666,7 @@ impl Layers {
                 )?
             }
             Command::Page { backward, extend } => {
-                if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
+                if let Some(view) = active(app) {
                     let count = self.page_rows.saturating_sub(1).max(1);
                     let snapshot = app
                         .workspace()
@@ -743,7 +774,7 @@ impl Layers {
                 .events
                 .push(Event::NewDocument(Language::PlainText)),
             Command::Close(decision) => {
-                if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
+                if let Some(view) = active(app) {
                     let document = view.document_id;
                     if app.workspace().is_dirty(document) && !app.workspace().is_saving(document) {
                         return self.depart("close", document, decision, app, time, file_root);
@@ -752,7 +783,7 @@ impl Layers {
                 }
             }
             Command::Reload(decision) => {
-                if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
+                if let Some(view) = active(app) {
                     let document = view.document_id;
                     if app.workspace().file(document).unwrap().path().is_none() {
                         response.message =
@@ -767,7 +798,7 @@ impl Layers {
                 }
             }
             Command::Save { choose_path } => {
-                if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
+                if let Some(view) = active(app) {
                     let document = view.document_id;
                     let path = app.workspace().file(document).unwrap().path();
                     if choose_path || path.is_none() {
@@ -792,10 +823,7 @@ impl Layers {
                 }
             }
             Command::Quit(decision) => {
-                let active = app
-                    .active_view()
-                    .and_then(|id| app.view(id))
-                    .map(|view| view.document_id);
+                let active = active(app).map(|view| view.document_id);
                 let dirty = active
                     .filter(|id| app.workspace().is_dirty(*id))
                     .or_else(|| {
@@ -825,7 +853,7 @@ impl Layers {
             }
             Command::Jump => {
                 // Enter on the results visits that line, as `]q` would.
-                let document = app.active_view().and_then(|id| app.view(id));
+                let document = active(app);
                 if document.map(|view| view.document_id) == app.workspace().scratch(&self.results) {
                     self.results_fresh = false;
                 }
@@ -864,7 +892,7 @@ impl Layers {
             }
             Command::Run(shell) => {
                 self.set_results(super::grep::RUN.to_owned());
-                let view = app.active_view().and_then(|id| app.view(id));
+                let view = active(app);
                 response.run = Some(Box::new(super::shell::run(app, view, shell, file_root)));
             }
             Command::Stop => response.stop = true,
@@ -896,10 +924,7 @@ impl Layers {
                 face,
                 pattern,
             } => {
-                let document = app
-                    .active_view()
-                    .and_then(|id| app.view(id))
-                    .map(|view| view.document_id);
+                let document = active(app).map(|view| view.document_id);
                 if local && document.is_none() {
                     response.message = Message::Set("No document to highlight in".into());
                 } else {
@@ -911,27 +936,22 @@ impl Layers {
                 }
             }
             Command::Unhighlight(pattern) => {
-                let document = app
-                    .active_view()
-                    .and_then(|id| app.view(id))
-                    .map(|view| view.document_id);
+                let document = active(app).map(|view| view.document_id);
                 response
                     .events
                     .push(Event::Unhighlight { document, pattern });
             }
-            Command::FlagLines { group, flag, lines } => {
-                match app.active_view().and_then(|id| app.view(id)) {
-                    Some(view) => response.events.push(Event::Flag {
-                        document: view.document_id,
-                        group,
-                        flag,
-                        lines,
-                    }),
-                    None => response.message = Message::Set("No document to flag".into()),
-                }
-            }
+            Command::FlagLines { group, flag, lines } => match active(app) {
+                Some(view) => response.events.push(Event::Flag {
+                    document: view.document_id,
+                    group,
+                    flag,
+                    lines,
+                }),
+                None => response.message = Message::Set("No document to flag".into()),
+            },
             Command::UnflagLines(group) => {
-                if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
+                if let Some(view) = active(app) {
                     response.events.push(Event::Unflag {
                         document: view.document_id,
                         group,
@@ -939,7 +959,7 @@ impl Layers {
                 }
             }
             Command::EachLine(_) | Command::EachMatch { .. } | Command::EachAt { .. } => {
-                if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
+                if let Some(view) = active(app) {
                     response.commands = self.each(app, view, command);
                 }
             }
@@ -973,10 +993,7 @@ impl Layers {
                 return Ok(super::InputResult::Handled(response));
             }
             Command::SetOption { local, name, value } => {
-                let document = app
-                    .active_view()
-                    .and_then(|id| app.view(id))
-                    .map(|view| view.document_id);
+                let document = active(app).map(|view| view.document_id);
                 let scope = match (local, document) {
                     (false, _) => Some(crate::options::Scope::Global),
                     (true, Some(document)) => Some(crate::options::Scope::Document(document)),
@@ -990,7 +1007,7 @@ impl Layers {
                 }
             }
             Command::UnsetOption(name) => {
-                if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
+                if let Some(view) = active(app) {
                     response.events.push(Event::UnsetOption {
                         document: view.document_id,
                         name,
@@ -1048,7 +1065,6 @@ impl Layers {
         view: &crate::application::View,
         command: Command,
     ) -> Vec<Command> {
-        use super::EditMode;
         let editor = app.workspace().editor(view.document_id).unwrap();
         let document = editor.model().document();
         let snapshot = document.snapshot();
@@ -1081,21 +1097,11 @@ impl Layers {
             Command::EachAt { targets, keys } => (targets, keys),
             _ => unreachable!(),
         };
-        let mut commands = vec![];
-        for target in targets.into_iter().rev().take(10_000) {
-            commands.extend([
-                Command::SetMode(EditMode::Normal),
-                Command::Edit(EditCommand::SetSelection(crate::core::Selection::caret(
-                    target,
-                ))),
-                Command::Replay(keys.clone()),
-            ]);
-        }
-        commands.extend([
-            Command::SetMode(EditMode::Normal),
-            Command::Edit(EditCommand::SquashHistory(document.history_depth())),
-        ]);
-        commands
+        // The last 10,000, which go first.
+        let skip = targets.len().saturating_sub(10_000);
+        let carets = targets.into_iter().skip(skip);
+        let carets = carets.map(crate::core::Selection::caret);
+        replay_each(carets, &keys, document.history_depth())
     }
     /// Makes a results document the one `]q` and `[q` step through.
     fn set_results(&mut self, name: String) {
@@ -1112,17 +1118,8 @@ impl Layers {
         if app.workspace().is_saving(document) {
             response.message =
                 Message::Set("Save in progress; wait before leaving document".into());
-        } else if reload {
-            let view = app.active_view().unwrap();
-            response.events.push(Event::Reload {
-                view,
-                discard: false,
-            });
         } else {
-            response.events.push(Event::CloseDocument {
-                document,
-                discard: false,
-            });
+            response.events.push(leaving(app, document, reload, false));
         }
         response
     }
@@ -1138,7 +1135,7 @@ impl Layers {
         time: Duration,
         file_root: &Path,
     ) -> Result<super::InputResult, EditError> {
-        let name = super::command_line::buffer_name(app, document);
+        let name = app.document_name(document);
         let mut response = Response {
             redraw: true,
             message: Message::Clear,
@@ -1153,17 +1150,9 @@ impl Layers {
                 return self.execute(ask, app, time, file_root);
             }
             Some(Departure::Discard) => {
-                if action == "reload" {
-                    response.events.push(Event::Reload {
-                        view: app.active_view().unwrap(),
-                        discard: true,
-                    });
-                } else {
-                    response.events.push(Event::CloseDocument {
-                        document,
-                        discard: true,
-                    });
-                }
+                response
+                    .events
+                    .push(leaving(app, document, action == "reload", true));
                 // Quitting continues with the next unsaved document.
                 if action == "quit" {
                     response.commands.push(Command::Named("quit".into()));
@@ -1179,17 +1168,14 @@ impl Layers {
                 return self.execute(ask, app, time, file_root);
             }
             Some(Departure::Save(path)) => {
-                let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
                 let target = match path {
-                    Some(path) => {
-                        match super::path::resolve_path(&app.directory(), home.as_deref(), &path) {
-                            Ok(target) => Some(target),
-                            Err(error) => {
-                                response.message = Message::Set(error);
-                                return Ok(super::InputResult::Handled(response));
-                            }
+                    Some(path) => match resolve(app, &path) {
+                        Ok(target) => Some(target),
+                        Err(error) => {
+                            response.message = Message::Set(error);
+                            return Ok(super::InputResult::Handled(response));
                         }
-                    }
+                    },
                     None => None,
                 };
                 let retry = target.as_ref().map_or_else(
@@ -1237,10 +1223,7 @@ fn go(
     ]);
 }
 pub(super) fn show(app: &Application, document: crate::editor::DocumentId) -> Event {
-    let active = app
-        .active_view()
-        .and_then(|id| app.view(id))
-        .filter(|v| v.document_id == document);
+    let active = active(app).filter(|v| v.document_id == document);
     let view = active.or_else(|| app.views().find(|v| v.document_id == document));
     view.map_or(Event::AddView(document), |v| Event::Focus(v.id))
 }

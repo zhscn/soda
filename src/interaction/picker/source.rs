@@ -5,7 +5,6 @@ pub(super) struct Catalog {
     pub source: Arc<Source>,
     pub entries: Vec<Arc<Candidate<PathBuf>>>,
     pub truncated: bool,
-    pub warnings: Vec<String>,
 }
 pub(super) fn collect(source: Arc<Source>) -> Result<Option<Catalog>, String> {
     let root = &source.root;
@@ -28,7 +27,6 @@ pub(super) fn collect(source: Arc<Source>) -> Result<Option<Catalog>, String> {
     let mut entries = Vec::<Arc<Candidate<PathBuf>>>::new();
     let mut bytes = 0_usize;
     let mut truncated = false;
-    let mut warnings = Vec::new();
     let PickerLimits {
         max_candidates,
         max_catalog_bytes,
@@ -38,20 +36,10 @@ pub(super) fn collect(source: Arc<Source>) -> Result<Option<Catalog>, String> {
         if source.closed() {
             return Ok(None);
         }
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(error) => {
-                if warnings.len() < 8 {
-                    warnings.push(error.to_string());
-                }
-                continue;
-            }
+        // Unreadable entries are left out.
+        let Ok(entry) = entry else {
+            continue;
         };
-        if let Some(error) = entry.error()
-            && warnings.len() < 8
-        {
-            warnings.push(error.to_string());
-        }
         // Do not follow symlinks, sockets or devices into the candidate set.
         if !entry.file_type().is_some_and(|kind| kind.is_file()) {
             continue;
@@ -109,6 +97,5 @@ pub(super) fn collect(source: Arc<Source>) -> Result<Option<Catalog>, String> {
         source,
         entries,
         truncated,
-        warnings,
     }))
 }

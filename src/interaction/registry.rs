@@ -212,7 +212,6 @@ pub fn synopsis(slots: &[Slot]) -> String {
 
 pub struct Builtin {
     pub name: &'static str,
-    pub aliases: &'static [&'static str],
     pub slots: &'static [Slot],
     pub doc: &'static str,
     build: fn(&str) -> Result<Command, String>,
@@ -312,6 +311,15 @@ fn digit(text: &str) -> Result<usize, String> {
 fn typed(text: &str) -> Result<Vec<super::UserInput>, String> {
     Ok(keys(text)?.into_iter().map(super::UserInput::Key).collect())
 }
+fn modal(action: Action) -> Command {
+    Command::Modal(action)
+}
+const fn step(step: Step, extend: bool) -> Action {
+    Action::Move { step, extend }
+}
+const fn thing(symbol: bool, backward: bool) -> Action {
+    Action::Thing { symbol, backward }
+}
 fn move_line(backward: bool, extend: bool) -> Command {
     Command::Edit(Edit::Move {
         motion: if backward { Motion::Up } else { Motion::Down },
@@ -320,22 +328,21 @@ fn move_line(backward: bool, extend: bool) -> Command {
 }
 
 macro_rules! builtin {
-    ($name:literal $(| $alias:literal)*, [$($slot:expr),*], $doc:literal, $build:expr) => {
+    ($name:literal, [$($slot:expr),*], $doc:literal, $build:expr) => {
         Builtin {
             name: $name,
-            aliases: &[$($alias),*],
             slots: &[$($slot),*],
             doc: $doc,
             build: $build,
         }
     };
-    ($name:literal $(| $alias:literal)*, $doc:literal, $command:expr) => {
-        builtin!($name $(| $alias)*, [], $doc, |args| bare($command)(args))
+    ($name:literal, $doc:literal, $command:expr) => {
+        builtin!($name, [], $doc, |args| bare($command)(args))
     };
 }
 pub static BUILTINS: &[Builtin] = &[
     builtin!(
-        "edit" | "e",
+        "edit",
         [OPTIONAL_PATH],
         "Open a file; reload the current file without PATH",
         |a| { Ok(path_or(a, Command::OpenPath, Command::Reload(None))) }
@@ -347,7 +354,7 @@ pub static BUILTINS: &[Builtin] = &[
         |a| departure(a).map(Command::Reload)
     ),
     builtin!(
-        "open" | "o",
+        "open",
         [PATH],
         "Open a file; a new file is created when saved",
         |a| { Ok(path_or(a, Command::OpenPath, Command::OpenPrompt)) }
@@ -359,7 +366,7 @@ pub static BUILTINS: &[Builtin] = &[
         |a| { Ok(path_or(a, Command::OpenProjectFile, interactive("recent"))) }
     ),
     builtin!(
-        "write" | "w",
+        "write",
         [OPTIONAL_PATH],
         "Save; save to PATH when given",
         |a| {
@@ -378,24 +385,24 @@ pub static BUILTINS: &[Builtin] = &[
         ))
     }),
     builtin!(
-        "quit" | "q",
+        "quit",
         [DEPARTURE[0], DEPARTURE[1]],
         "Quit, deciding for each unsaved document",
         |a| departure(a).map(Command::Quit)
     ),
     builtin!(
-        "write-quit" | "wq" | "x",
+        "write-quit",
         "Save the current document and quit",
         Command::WriteQuit
     ),
     builtin!(
-        "close" | "bd" | "bdelete",
+        "close",
         [DEPARTURE[0], DEPARTURE[1]],
         "Close the current document",
         |a| departure(a).map(Command::Close)
     ),
     builtin!(
-        "buffer" | "b" | "buffers" | "ls" | "files",
+        "buffer",
         [slot("NAME", SlotKind::Buffer)],
         "Switch to an open document",
         |a| Ok(if a.is_empty() {
@@ -404,31 +411,27 @@ pub static BUILTINS: &[Builtin] = &[
             Command::Buffer(a.into())
         })
     ),
+    builtin!("next-view", "Focus the next view", Command::NextView),
+    builtin!("new", "Create an untitled document", Command::New),
     builtin!(
-        "next-view" | "bn" | "bnext",
-        "Focus the next view",
-        Command::NextView
-    ),
-    builtin!("new" | "enew", "Create an untitled document", Command::New),
-    builtin!(
-        "split" | "sp",
+        "split",
         [OPTIONAL_PATH],
         "Split the window into two above each other; open PATH in the new one",
         |a| Ok(window_split(a, Axis::Rows))
     ),
     builtin!(
-        "vsplit" | "vs",
+        "vsplit",
         [OPTIONAL_PATH],
         "Split the window into two side by side; open PATH in the new one",
         |a| Ok(window_split(a, Axis::Columns))
     ),
     builtin!(
-        "close-window" | "clo",
+        "close-window",
         "Close the window; its document stays open",
         Command::Window(WindowCommand::Close)
     ),
     builtin!(
-        "only" | "on",
+        "only",
         "Close every other window",
         Command::Window(WindowCommand::Only)
     ),
@@ -493,12 +496,12 @@ pub static BUILTINS: &[Builtin] = &[
     ),
     builtin!("help", "Show key bindings and commands", Command::Help),
     builtin!(
-        "commands" | "command-line",
+        "commands",
         "Open the command line to choose a command",
         Command::Ex(String::new())
     ),
-    builtin!("undo", "Undo", Command::Modal(Action::Undo { redo: false })),
-    builtin!("redo", "Redo", Command::Modal(Action::Undo { redo: true })),
+    builtin!("undo", "Undo", modal(Action::Undo { redo: false })),
+    builtin!("redo", "Redo", modal(Action::Undo { redo: true })),
     builtin!(
         "completion-trigger",
         "List candidates for the word at the caret",
@@ -548,17 +551,17 @@ pub static BUILTINS: &[Builtin] = &[
     builtin!(
         "recenter",
         "Scroll so the caret's line is in the middle of the window",
-        Command::Modal(Action::Recenter)
+        modal(Action::Recenter)
     ),
     builtin!(
         "half-page-down",
         "Move down half a page and scroll with it",
-        Command::Modal(Action::HalfPage { down: true })
+        modal(Action::HalfPage { down: true })
     ),
     builtin!(
         "half-page-up",
         "Move up half a page and scroll with it",
-        Command::Modal(Action::HalfPage { down: false })
+        modal(Action::HalfPage { down: false })
     ),
     builtin!(
         "copy",
@@ -645,278 +648,242 @@ pub static BUILTINS: &[Builtin] = &[
         "Outdent the current or selected lines",
         Command::Edit(Edit::IndentSelection { outdent: true })
     ),
-    builtin!("normal-mode", "Leave Insert", Command::Modal(Action::Leave)),
+    builtin!("normal-mode", "Leave Insert", modal(Action::Leave)),
     builtin!(
         "insert-mode",
         "Insert before the cursor",
-        Command::Modal(Action::Insert(InsertAt::Before))
+        modal(Action::Insert(InsertAt::Before))
     ),
     builtin!(
         "left",
         "Move left, keeping a character selection",
-        Command::Modal(Action::Move {
-            step: Step::Left,
-            extend: false
-        })
+        modal(step(Step::Left, false))
     ),
     builtin!(
         "right",
         "Move right, keeping a character selection",
-        Command::Modal(Action::Move {
-            step: Step::Right,
-            extend: false
-        })
+        modal(step(Step::Right, false))
     ),
     builtin!(
         "up",
         "Move up, keeping a character selection",
-        Command::Modal(Action::Move {
-            step: Step::Up,
-            extend: false
-        })
+        modal(step(Step::Up, false))
     ),
     builtin!(
         "down",
         "Move down, keeping a character selection",
-        Command::Modal(Action::Move {
-            step: Step::Down,
-            extend: false
-        })
+        modal(step(Step::Down, false))
     ),
     builtin!(
         "left-expand",
         "Extend a character selection left",
-        Command::Modal(Action::Move {
-            step: Step::Left,
-            extend: true
-        })
+        modal(step(Step::Left, true))
     ),
     builtin!(
         "right-expand",
         "Extend a character selection right",
-        Command::Modal(Action::Move {
-            step: Step::Right,
-            extend: true
-        })
+        modal(step(Step::Right, true))
     ),
     builtin!(
         "up-expand",
         "Extend a character selection up",
-        Command::Modal(Action::Move {
-            step: Step::Up,
-            extend: true
-        })
+        modal(step(Step::Up, true))
     ),
     builtin!(
         "down-expand",
         "Extend a character selection down",
-        Command::Modal(Action::Move {
-            step: Step::Down,
-            extend: true
-        })
+        modal(step(Step::Down, true))
     ),
     builtin!(
         "next-word",
         "Select to the end of the next word",
-        Command::Modal(Action::Thing {
-            symbol: false,
-            backward: false
-        })
+        modal(thing(false, false))
     ),
     builtin!(
         "back-word",
         "Select to the start of the previous word",
-        Command::Modal(Action::Thing {
-            symbol: false,
-            backward: true
-        })
+        modal(thing(false, true))
     ),
     builtin!(
         "next-symbol",
         "Select to the end of the next symbol",
-        Command::Modal(Action::Thing {
-            symbol: true,
-            backward: false
-        })
+        modal(thing(true, false))
     ),
     builtin!(
         "back-symbol",
         "Select to the start of the previous symbol",
-        Command::Modal(Action::Thing {
-            symbol: true,
-            backward: true
-        })
+        modal(thing(true, true))
     ),
     builtin!(
         "mark-word",
         "Select the word here and search for it",
-        Command::Modal(Action::Mark { symbol: false })
+        modal(Action::Mark { symbol: false })
     ),
     builtin!(
         "mark-symbol",
         "Select the symbol here and search for it",
-        Command::Modal(Action::Mark { symbol: true })
+        modal(Action::Mark { symbol: true })
     ),
     builtin!(
         "select-line",
         "Select the line; again extends",
-        Command::Modal(Action::Line)
+        modal(Action::Line)
     ),
     builtin!(
         "block",
         "Select the group around the selection; again takes its parent",
-        Command::Modal(Action::Query(Query::Block))
+        modal(Action::Query(Query::Block))
     ),
     builtin!(
         "to-block",
         "Extend to the end of the next group",
-        Command::Modal(Action::Query(Query::ToBlock))
+        modal(Action::Query(Query::ToBlock))
     ),
     builtin!(
         "find",
         "Select through the next occurrence of a character",
-        Command::Modal(Action::Find { till: false })
+        modal(Action::Find { till: false })
     ),
     builtin!(
         "till",
         "Select up to the next occurrence of a character",
-        Command::Modal(Action::Find { till: true })
+        modal(Action::Find { till: true })
     ),
     builtin!(
         "inner-of-thing",
         "Select inside a thing: r s c a brackets, g string, e w symbol word, p l b",
-        Command::Modal(Action::ThingAt { inner: true })
+        modal(Action::ThingAt { inner: true })
     ),
     builtin!(
         "bounds-of-thing",
         "Select around a thing",
-        Command::Modal(Action::ThingAt { inner: false })
+        modal(Action::ThingAt { inner: false })
     ),
     builtin!(
         "reverse",
         "Swap the ends of the selection",
-        Command::Modal(Action::Reverse)
+        modal(Action::Reverse)
     ),
     builtin!(
         "cancel",
         "Drop the selection; in Beacon with none, leave",
-        Command::Modal(Action::Cancel)
+        modal(Action::Cancel)
     ),
     builtin!(
         "pop-selection",
         "Go back to the previous selection",
-        Command::Modal(Action::PopSelection { all: false })
+        modal(Action::PopSelection { all: false })
     ),
     builtin!(
         "pop-all-selection",
         "Go back to the first selection",
-        Command::Modal(Action::PopSelection { all: true })
+        modal(Action::PopSelection { all: true })
     ),
     builtin!(
         "negative-argument",
         "Reverse the next command",
-        Command::Modal(Action::Negative)
+        modal(Action::Negative)
     ),
     builtin!(
         "insert",
         "Insert at the start of the selection",
-        Command::Modal(Action::Insert(InsertAt::Before))
+        modal(Action::Insert(InsertAt::Before))
     ),
     builtin!(
         "append",
         "Insert at the end of the selection",
-        Command::Modal(Action::Insert(InsertAt::After))
+        modal(Action::Insert(InsertAt::After))
     ),
     builtin!(
         "open-below",
         "Open a line below and insert",
-        Command::Modal(Action::Insert(InsertAt::Below))
+        modal(Action::Insert(InsertAt::Below))
     ),
     builtin!(
         "open-above",
         "Open a line above and insert",
-        Command::Modal(Action::Insert(InsertAt::Above))
+        modal(Action::Insert(InsertAt::Above))
     ),
     builtin!(
         "kill",
         "Cut the selection, or to the line end",
-        Command::Modal(Action::Kill)
+        modal(Action::Kill)
     ),
     builtin!(
         "change",
         "Delete the selection, or a character, and insert",
-        Command::Modal(Action::Change)
+        modal(Action::Change)
     ),
     builtin!(
         "delete",
         "Delete the selection or a character, leaving the clipboard alone",
-        Command::Modal(Action::Delete)
+        modal(Action::Delete)
     ),
-    builtin!("save", "Copy the selection", Command::Modal(Action::Save)),
+    builtin!("save", "Copy the selection", modal(Action::Save)),
     builtin!(
         "put",
         "Paste at the caret, leaving the selection in place",
-        Command::Modal(Action::Yank)
+        modal(Action::Yank)
     ),
     builtin!(
         "replace-selection",
         "Paste over the selection",
-        Command::Modal(Action::Replace)
+        modal(Action::Replace)
     ),
     builtin!(
         "join",
         "Select the blanks between this line and the one above",
-        Command::Modal(Action::Join)
+        modal(Action::Join)
     ),
     builtin!(
         "search-next",
         "Select the next match of the search, or of the selection",
-        Command::Modal(Action::Search)
+        modal(Action::Search)
     ),
     builtin!(
         "search-pop",
         "Forget the search for the one before it",
-        Command::Modal(Action::PopSearch)
+        modal(Action::PopSearch)
     ),
     builtin!(
         "set-mark",
         "Start a character selection at the caret",
-        Command::Modal(Action::SetMark)
+        modal(Action::SetMark)
     ),
     builtin!(
         "grab",
         "Enter Beacon inside the selection, or leave a marker",
-        Command::Modal(Action::Grab)
+        modal(Action::Grab)
     ),
     builtin!(
         "swap-grab",
         "Swap the selection with what was grabbed",
-        Command::Modal(Action::SwapGrab)
+        modal(Action::SwapGrab)
     ),
     builtin!(
         "macro-start",
         "Start recording keys",
-        Command::Modal(Action::MacroStart)
+        modal(Action::MacroStart)
     ),
     builtin!(
         "macro-end",
         "End recording, or play the last macro",
-        Command::Modal(Action::MacroEnd)
+        modal(Action::MacroEnd)
     ),
     builtin!(
         "macro-lines",
         "Play the last macro on each selected line",
-        Command::Modal(Action::MacroLines)
+        modal(Action::MacroLines)
     ),
     builtin!(
         "macro-matches",
         "Play the last macro on each match of the search",
-        Command::Modal(Action::MacroMatches)
+        modal(Action::MacroMatches)
     ),
     builtin!(
         "repeat",
         "Run the last command again",
-        Command::Modal(Action::Repeat)
+        modal(Action::Repeat)
     ),
     builtin!(
         "expand",
@@ -1057,23 +1024,23 @@ pub static BUILTINS: &[Builtin] = &[
         Command::JumpForward
     ),
     builtin!(
-        "next-result" | "cn" | "cnext",
+        "next-result",
         "Open the next location in the latest search or run output",
         Command::ResultStep { backward: false }
     ),
     builtin!(
-        "previous-result" | "cp" | "cprevious",
+        "previous-result",
         "Open the previous location in the latest search or run output",
         Command::ResultStep { backward: true }
     ),
     builtin!(
-        "run" | "make",
+        "run",
         [slot("SHELL-COMMAND", SlotKind::Rest)],
         "Run a command in the background; its output streams into *run*",
         |a| { Ok(Command::Run(required(a)?)) }
     ),
     builtin!(
-        "check-files" | "checktime",
+        "check-files",
         "Reload files changed on disk without unsaved edits; report the others",
         Command::CheckFiles
     ),
@@ -1281,7 +1248,6 @@ enum Entry {
 #[derive(Clone)]
 pub struct CommandInfo {
     pub name: String,
-    pub aliases: &'static [&'static str],
     pub slots: &'static [Slot],
     pub doc: String,
     builtin: Option<&'static Builtin>,
@@ -1289,9 +1255,6 @@ pub struct CommandInfo {
 impl CommandInfo {
     pub fn synopsis(&self) -> String {
         synopsis(self.slots)
-    }
-    pub fn named(&self, name: &str) -> bool {
-        self.name == name || self.aliases.contains(&name)
     }
 }
 pub enum CheckError {
@@ -1317,7 +1280,7 @@ pub fn check(catalog: &[CommandInfo], line: &str) -> Result<(), CheckError> {
     let (name, args) = split(line);
     let info = catalog
         .iter()
-        .find(|info| info.named(name))
+        .find(|info| info.name == name)
         .ok_or_else(|| CheckError::Invalid(format!("unknown command: {name}")))?;
     let mut rest = args;
     for (index, slot) in info.slots.iter().enumerate() {
@@ -1346,9 +1309,7 @@ pub struct Registry {
     entries: BTreeMap<String, Entry>,
 }
 fn builtin(name: &str) -> Option<&'static Builtin> {
-    BUILTINS
-        .iter()
-        .find(|b| b.name == name || b.aliases.contains(&name))
+    BUILTINS.iter().find(|b| b.name == name)
 }
 /// Commands whose arguments are command lines run later; expansions in them
 /// wait until then.
@@ -1482,14 +1443,12 @@ impl Registry {
     pub fn commands(&self) -> Vec<CommandInfo> {
         let builtins = BUILTINS.iter().map(|b| CommandInfo {
             name: b.name.into(),
-            aliases: b.aliases,
             slots: b.slots,
             doc: b.doc.into(),
             builtin: Some(b),
         });
         let edits = LINE_EDITS.iter().map(|(name, _, doc)| CommandInfo {
             name: (*name).into(),
-            aliases: &[],
             slots: &[],
             doc: (*doc).into(),
             builtin: None,
@@ -1497,14 +1456,12 @@ impl Registry {
         let custom = self.entries.iter().map(|(name, entry)| match entry {
             Entry::Native(_) => CommandInfo {
                 name: name.clone(),
-                aliases: &[],
                 slots: &[],
                 doc: "Registered command".into(),
                 builtin: None,
             },
             Entry::User { body, doc } => CommandInfo {
                 name: name.clone(),
-                aliases: &[],
                 slots: ARGUMENTS,
                 doc: doc.clone().unwrap_or_else(|| body.clone()),
                 builtin: None,

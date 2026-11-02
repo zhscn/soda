@@ -5,7 +5,6 @@ mod matching;
 pub(crate) use matching::fuzzy_match;
 mod source;
 mod worker;
-use super::TextInput;
 pub use list::{Candidate, CandidateKey, CandidateListState, ListMotion, MatchedCandidate};
 use std::{
     io,
@@ -108,27 +107,21 @@ pub enum PickerEffect {
 pub struct PickerResults<T> {
     pub rows: Vec<MatchedCandidate<T>>,
     pub matched: usize,
-    pub catalog_count: usize,
     pub truncated: bool,
-    pub warnings: Vec<String>,
 }
 impl<T> Default for PickerResults<T> {
     fn default() -> Self {
         Self {
             rows: Vec::new(),
             matched: 0,
-            catalog_count: 0,
             truncated: false,
-            warnings: Vec::new(),
         }
     }
 }
-/// Each completion replaces a whole ordered snapshot. Revisions and sequence
-/// numbers order snapshots within one request; request identities are exact.
+/// A completion replaces the whole result list; only the first for the
+/// session's current request identity is taken.
 pub struct PickerCompletion {
     pub key: RequestKey,
-    pub data_revision: u64,
-    pub sequence: u64,
     pub result: Result<PickerResults<PathBuf>, String>,
 }
 #[derive(Debug)]
@@ -138,12 +131,12 @@ pub enum PickerStatus {
     Failed(String),
 }
 pub struct PickerSession {
-    input: TextInput,
+    query: String,
     source: Arc<Source>,
     key: RequestKey,
     results: PickerResults<PathBuf>,
-    version: Option<(u64, u64)>,
-    list: CandidateListState,
+    /// The current request has its results.
+    answered: bool,
     status: PickerStatus,
 }
 impl PickerSession {
@@ -175,7 +168,7 @@ impl PickerSession {
             query_generation: 0,
         };
         Ok(Self {
-            input: TextInput::default(),
+            query: String::new(),
             source: Arc::new(Source {
                 key: key.source,
                 root,
@@ -186,8 +179,7 @@ impl PickerSession {
             }),
             key,
             results: PickerResults::default(),
-            version: None,
-            list: CandidateListState::default(),
+            answered: false,
             status: PickerStatus::Loading,
         })
     }
@@ -197,14 +189,8 @@ impl PickerSession {
     pub fn key(&self) -> RequestKey {
         self.key
     }
-    pub fn input(&self) -> &TextInput {
-        &self.input
-    }
     pub fn results(&self) -> &PickerResults<PathBuf> {
         &self.results
-    }
-    pub fn list(&self) -> &CandidateListState {
-        &self.list
     }
     pub fn status(&self) -> &PickerStatus {
         &self.status
@@ -212,19 +198,16 @@ impl PickerSession {
     pub fn task(&self) -> PickerTask {
         PickerTask {
             key: self.key,
-            query: self.input.text().into(),
+            query: self.query.clone(),
             source: self.source.clone(),
         }
     }
     /// Replaces the query; returns the matching task when it is valid.
     pub(super) fn set_query(&mut self, text: &str) -> Option<PickerTask> {
-        if self.input.text() == text {
+        if self.query == text {
             return None;
         }
-        self.input = TextInput::new(text);
-        self.query_changed()
-    }
-    pub(super) fn query_changed(&mut self) -> Option<PickerTask> {
+        self.query = text.into();
         self.key.query_generation = self
             .key
             .query_generation
@@ -234,9 +217,8 @@ impl PickerSession {
             .query_generation
             .store(self.key.query_generation, Ordering::Relaxed);
         self.results = PickerResults::default();
-        self.version = None;
-        self.list.reset();
-        if let Err(error) = validate_query(self.input.text()) {
+        self.answered = false;
+        if let Err(error) = validate_query(&self.query) {
             self.status = PickerStatus::Failed(error.into());
             None
         } else {
@@ -268,23 +250,17 @@ impl PickerSession {
             waker: Mutex::new(None),
         });
         self.results = PickerResults::default();
-        self.version = None;
-        self.list.reset();
+        self.answered = false;
         self.status = PickerStatus::Loading;
         Ok(self.task())
     }
     pub fn accept(&mut self, completion: PickerCompletion) -> bool {
-        let version = (completion.data_revision, completion.sequence);
-        if completion.key != self.key
-            || self.source.closed()
-            || self.version.is_some_and(|old| version <= old)
-        {
+        if completion.key != self.key || self.source.closed() || self.answered {
             return false;
         }
-        self.version = Some(version);
+        self.answered = true;
         match completion.result {
             Ok(results) => {
-                self.list.update(&self.results.rows, &results.rows);
                 self.results = results;
                 self.status = PickerStatus::Ready;
             }
@@ -301,21 +277,9 @@ impl PickerSession {
             Err(reset_error) => {
                 self.source.close();
                 self.results = PickerResults::default();
-                self.list.reset();
                 self.status = PickerStatus::Failed(format!("{error}; {reset_error}"));
             }
         }
-    }
-    pub fn resize(&mut self, rows: usize) -> bool {
-        self.list.resize(&self.results.rows, rows)
-    }
-    pub fn navigate(&mut self, motion: ListMotion, wrap: bool) -> bool {
-        self.list.navigate(&self.results.rows, motion, wrap)
-    }
-    pub fn selected_path(&self) -> Option<&std::path::Path> {
-        self.list
-            .index(&self.results.rows)
-            .map(|index| self.results.rows[index].candidate.payload.as_path())
     }
 }
 impl Drop for PickerSession {

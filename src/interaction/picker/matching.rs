@@ -144,8 +144,6 @@ pub(super) fn filter(
     Some(PickerResults {
         rows,
         matched,
-        catalog_count: catalog.entries.len(),
         truncated: catalog.truncated,
-        warnings: catalog.warnings.clone(),
     })
 }

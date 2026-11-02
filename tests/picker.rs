@@ -26,21 +26,13 @@ fn row(key: u64, label: &str, path: &str) -> MatchedCandidate<PathBuf> {
         highlights: vec![],
     }
 }
-fn packet(
-    task: &PickerTask,
-    sequence: u64,
-    rows: Vec<MatchedCandidate<PathBuf>>,
-) -> PickerCompletion {
+fn packet(task: &PickerTask, rows: Vec<MatchedCandidate<PathBuf>>) -> PickerCompletion {
     PickerCompletion {
         key: task.key(),
-        data_revision: 0,
-        sequence,
         result: Ok(PickerResults {
             matched: rows.len(),
-            catalog_count: rows.len(),
             rows,
             truncated: false,
-            warnings: vec![],
         }),
     }
 }
@@ -192,7 +184,7 @@ fn query_aba_rejects_old_result_and_loading_cannot_confirm() {
     assert!(!last_a.obsolete());
     assert!(
         !layers
-            .picker_finished(packet(&a, 1, vec![row(1, "a", "/wrong")]))
+            .picker_finished(packet(&a, vec![row(1, "a", "/wrong")]))
             .redraw
     );
     let InputResult::Handled(response) =
@@ -204,7 +196,7 @@ fn query_aba_rejects_old_result_and_loading_cannot_confirm() {
     assert!(layers.active().is_some());
     assert!(
         layers
-            .picker_finished(packet(&last_a, 0, vec![row(2, "a", "/right")]))
+            .picker_finished(packet(&last_a, vec![row(2, "a", "/right")]))
             .redraw
     );
     let InputResult::Handled(response) =
@@ -220,7 +212,7 @@ fn query_aba_rejects_old_result_and_loading_cannot_confirm() {
     assert!(last_a.obsolete());
     assert!(
         !layers
-            .picker_finished(packet(&last_a, 2, vec![row(2, "a", "/right")]))
+            .picker_finished(packet(&last_a, vec![row(2, "a", "/right")]))
             .redraw
     );
 }
@@ -233,7 +225,6 @@ fn input_cursor_and_candidate_navigation_are_independent() {
     let task = query(&mut layers, "query", &app);
     layers.picker_finished(packet(
         &task,
-        0,
         vec![row(1, "same", "/one"), row(2, "same", "/two")],
     ));
     layers
@@ -259,7 +250,6 @@ fn input_cursor_and_candidate_navigation_are_independent() {
     assert_eq!(selected_path(&layers).as_deref(), Some(Path::new("/two")));
     layers.picker_finished(packet(
         &task,
-        1,
         vec![row(2, "same", "/two"), row(1, "same", "/one")],
     ));
     assert_eq!(selected_path(&layers).as_deref(), Some(Path::new("/two")));
@@ -267,21 +257,17 @@ fn input_cursor_and_candidate_navigation_are_independent() {
 }
 
 #[test]
-fn snapshot_versions_source_changes_and_closed_sessions_are_checked() {
+fn first_answers_source_changes_and_closed_sessions_are_checked() {
     let root = tempfile::tempdir().unwrap();
     let mut session = PickerSession::new(root.path().into(), PickerLimits::default()).unwrap();
     let first = session.task();
-    assert!(session.accept(packet(&first, 2, vec![row(1, "one", "/one")])));
-    assert!(!session.accept(packet(&first, 1, vec![])));
-    assert!(!session.accept(packet(&first, 2, vec![])));
-    let mut new_revision = packet(&first, 0, vec![row(2, "two", "/two")]);
-    new_revision.data_revision = 1;
-    assert!(session.accept(new_revision));
-    assert!(!session.accept(packet(&first, 3, vec![])));
+    assert!(session.accept(packet(&first, vec![row(1, "one", "/one")])));
+    // A request is answered once.
+    assert!(!session.accept(packet(&first, vec![])));
     let next = session.change_source(root.path().join("other")).unwrap();
     assert!(first.obsolete());
-    assert!(!session.accept(packet(&first, 4, vec![])));
-    assert!(session.accept(packet(&next, 0, vec![])));
+    assert!(!session.accept(packet(&first, vec![])));
+    assert!(session.accept(packet(&next, vec![])));
     drop(session);
     assert!(next.obsolete());
 }
@@ -296,7 +282,7 @@ fn cancellation_and_reopening_do_not_accept_previous_session() {
     start(&mut layers, root.path(), &app);
     assert!(
         !layers
-            .picker_finished(packet(&task, 100, vec![row(1, "stale", "/stale")]))
+            .picker_finished(packet(&task, vec![row(1, "stale", "/stale")]))
             .redraw
     );
     assert!(matches!(session(&layers).status(), PickerStatus::Loading));
@@ -727,14 +713,13 @@ fn task_failure_invalidates_catalog_identity_and_stale_snapshots() {
     let root = tempfile::tempdir().unwrap();
     let mut session = PickerSession::new(root.path().into(), PickerLimits::default()).unwrap();
     let task = session.task();
-    assert!(session.accept(packet(&task, 0, vec![row(1, "a", "/a")])));
-    let mut failure = packet(&task, 1, vec![]);
+    let mut failure = packet(&task, vec![]);
     failure.result = Err("task failed".into());
     assert!(session.accept(failure));
     assert!(task.obsolete());
-    assert!(session.selected_path().is_none());
+    assert!(session.results().rows.is_empty());
     assert_ne!(session.key().source, task.key().source);
-    assert!(!session.accept(packet(&task, 2, vec![row(1, "b", "/b")])));
+    assert!(!session.accept(packet(&task, vec![row(1, "b", "/b")])));
 }
 
 fn insert_layers() -> Layers {

@@ -147,9 +147,6 @@ fn split_path(text: &str) -> (&str, &str) {
     text.rfind('/')
         .map_or(("", text), |i| (&text[..=i], &text[i + 1..]))
 }
-pub(super) fn buffer_name(app: &Application, document: crate::editor::DocumentId) -> String {
-    app.document_name(document)
-}
 /// How a file name answers typed text, after orderless: each word separated
 /// by spaces appears somewhere, in any order, and case counts only if the
 /// text has capitals. Gives whether the name begins with the text, and the
@@ -264,7 +261,7 @@ impl CommandLine {
         self.list.resize(&self.rows, rows);
     }
     fn info(&self, name: &str) -> Option<&CommandInfo> {
-        self.catalog.iter().find(|info| info.named(name))
+        self.catalog.iter().find(|info| info.name == name)
     }
     /// Parses the text around the cursor. Slots past the declared ones and
     /// arguments of unknown commands have no target.
@@ -405,11 +402,7 @@ impl CommandLine {
             .enumerate()
             .filter_map(|(index, item)| {
                 let shown = printable(item);
-                let (score, highlights) = if query.is_empty() {
-                    (0, vec![])
-                } else {
-                    fuzzy_match(&mut self.matcher, query, &shown)?
-                };
+                let (score, highlights) = matched(&mut self.matcher, query, &shown)?;
                 let number = (index + 1).to_string();
                 let row = row(index as u64, shown, Some(number), false);
                 Some((score, mark(row, highlights, None)))
@@ -430,9 +423,8 @@ impl CommandLine {
             let detail = label.len() - info.doc.len();
             let (rank, highlights) = if query.is_empty() {
                 (0, vec![])
-            } else if info.named(query) {
-                let exact = info.name == query;
-                (u32::MAX, if exact { one(0..query.len()) } else { vec![] })
+            } else if info.name == query {
+                (u32::MAX, one(0..query.len()))
             } else if let Some((score, highlights)) =
                 fuzzy_match(&mut self.matcher, query, &info.name)
             {
@@ -856,8 +848,14 @@ impl CommandLine {
     }
 }
 
-/// Buffer names match fuzzily; other buffers rank before the current one
-/// among equal scores.
+/// Everything matches an empty query; otherwise a fuzzy match with its score.
+fn matched(matcher: &mut Matcher, query: &str, shown: &str) -> Option<(u32, Vec<Range<usize>>)> {
+    if query.is_empty() {
+        Some((0, vec![]))
+    } else {
+        fuzzy_match(matcher, query, shown).map(|(score, ranges)| (u32::from(score), ranges))
+    }
+}
 /// Recent files, newest first, shown relative to the project root.
 fn recent(
     paths: &[PathBuf],
@@ -871,11 +869,7 @@ fn recent(
         .enumerate()
         .filter_map(|(age, path)| {
             let shown = printable(&path.strip_prefix(root).unwrap_or(path).to_string_lossy());
-            let (score, highlights) = if query.is_empty() {
-                (0, vec![])
-            } else {
-                fuzzy_match(matcher, query, &shown)?
-            };
+            let (score, highlights) = matched(matcher, query, &shown)?;
             Some((age, path, shown, score, highlights))
         })
         .collect();
@@ -891,6 +885,8 @@ fn recent(
         })
         .collect()
 }
+/// Buffer names match fuzzily; other buffers rank before the current one
+/// among equal scores.
 fn buffers(
     app: &Application,
     query: &str,
@@ -905,13 +901,9 @@ fn buffers(
         .workspace()
         .documents()
         .filter_map(|id| {
-            let name = buffer_name(app, id);
+            let name = app.document_name(id);
             let shown = printable(&name);
-            let (score, highlights) = if query.is_empty() {
-                (0, vec![])
-            } else {
-                fuzzy_match(matcher, query, &shown)?
-            };
+            let (score, highlights) = matched(matcher, query, &shown)?;
             Some((id, name, shown, score, highlights))
         })
         .collect();

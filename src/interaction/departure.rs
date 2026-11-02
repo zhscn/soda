@@ -26,7 +26,7 @@ impl SaveWait {
             document,
             view: app.active_view(),
             request: None,
-            name: super::command_line::buffer_name(app, document),
+            name: app.document_name(document),
             then,
             retry,
         }

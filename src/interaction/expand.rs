@@ -2,7 +2,7 @@
 //! when it runs, so it reads the state that the statements before it left.
 //! Values replace the expansion as they are; they are not split again.
 use super::EditMode;
-use crate::{application::Application, interaction::command_line::buffer_name};
+use crate::application::Application;
 use std::path::Path;
 
 /// The state `%val{NAME}` reads, for help.
@@ -97,7 +97,7 @@ fn value(name: &str, state: &State) -> Result<String, String> {
             .file(document)
             .and_then(|file| file.path())
             .map_or_else(String::new, |path| path.to_string_lossy().into_owned()),
-        "name" => buffer_name(app, document),
+        "name" => app.document_name(document),
         "kind" => app.document_kind(document).to_owned(),
         "column-limit" => app
             .workspace()
