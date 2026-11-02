@@ -389,6 +389,31 @@ fn segments(text: &str, width: Option<usize>, tab: NonZeroUsize) -> Vec<Segment>
     });
     out
 }
+/// Lines longer than this, minified code most often, are not wrapped:
+/// wrapping measures a whole line again for each row it shows, so a long
+/// one costs a frame seconds, while an unwrapped line costs what is seen.
+const WRAP_LIMIT: usize = 4096;
+/// Rows a screen may show on either side of a place, more than any has.
+const WRAP_REACH: usize = 256;
+/// Whether a line too long to wrap could be on screen around `places`,
+/// the viewport's top and the caret: `wrap` falls back to unwrapped rows
+/// while one is.
+fn long_line_near(snapshot: &crate::core::Snapshot, places: &[usize]) -> bool {
+    places.iter().any(|offset| {
+        let line = snapshot
+            .line_of((*offset).min(snapshot.len_bytes()))
+            .unwrap_or(0);
+        let first = line.saturating_sub(WRAP_REACH);
+        let last = (line + WRAP_REACH).min(snapshot.line_count());
+        let mut start = snapshot.line_start(first).unwrap_or(0);
+        (first + 1..=last).any(|next| {
+            let end = snapshot.line_start(next).unwrap_or(snapshot.len_bytes());
+            let long = end - start > WRAP_LIMIT;
+            start = end;
+            long
+        })
+    })
+}
 /// A screen row: a line and which of its segments.
 type Place = (usize, usize);
 /// How one view's lines meet its text area.
@@ -401,6 +426,8 @@ struct Rows<'a> {
     lines: usize,
     /// Hints by line, when they are shown.
     inlays: std::collections::BTreeMap<usize, Vec<Inlay>>,
+    /// Rows of wrapped lines measured so far.
+    measured: std::cell::RefCell<std::collections::HashMap<usize, std::rc::Rc<[Segment]>>>,
 }
 impl<'a> Rows<'a> {
     fn new(app: &'a Application, view: &crate::application::View, width: u16) -> Option<Self> {
@@ -409,7 +436,15 @@ impl<'a> Rows<'a> {
         let wrap = app
             .options()
             .bool(Some(view.document_id), "wrap")
-            .then_some(usize::from(width));
+            .then_some(usize::from(width))
+            .filter(|_| {
+                let session = app
+                    .workspace()
+                    .editor(view.document_id)
+                    .and_then(|editor| editor.model().session(view.session_id));
+                let head = session.map_or(0, |session| session.state().selection().head);
+                !long_line_near(snapshot, &[view.viewport.anchor.offset.0, head])
+            });
         let tab = document.whitespace().tab_width;
         let mut inlays = std::collections::BTreeMap::<usize, Vec<Inlay>>::new();
         if app.options().bool(Some(view.document_id), "inlay-hints") {
@@ -430,6 +465,7 @@ impl<'a> Rows<'a> {
             wrap,
             lines: snapshot.line_count(),
             inlays,
+            measured: Default::default(),
         })
     }
     /// The cells hints take from `left` up to a character at `column`. A
@@ -467,15 +503,24 @@ impl<'a> Rows<'a> {
         }
         left + cells - used
     }
-    fn segments(&self, line: usize) -> Vec<Segment> {
+    /// A line's rows. Moving over rows asks for the same lines again and
+    /// again, so each is measured once.
+    fn segments(&self, line: usize) -> std::rc::Rc<[Segment]> {
         if self.wrap.is_none() {
-            return segments("", None, self.tab);
+            return segments("", None, self.tab).into();
         }
-        segments(
-            &self.snapshot.line(line).unwrap_or_default(),
-            self.wrap,
-            self.tab,
-        )
+        self.measured
+            .borrow_mut()
+            .entry(line)
+            .or_insert_with(|| {
+                segments(
+                    &self.snapshot.line(line).unwrap_or_default(),
+                    self.wrap,
+                    self.tab,
+                )
+                .into()
+            })
+            .clone()
     }
     /// The row showing `offset` and the logical column there.
     fn place(&self, offset: usize) -> (Place, usize) {
@@ -1248,6 +1293,50 @@ mod tests {
         assert_eq!(rows("界界界", 5), [(0, 0..4), (6, 4..6)]);
         assert_eq!(rows("", 5), [(0, 0..0)]);
         assert_eq!(rows("abc", 3), [(0, 0..3)]);
+    }
+    #[test]
+    fn lines_too_long_to_wrap_turn_wrapping_off_while_near() {
+        let long = "x ".repeat(super::WRAP_LIMIT);
+        let mut near = app(
+            &format!("short words here\n{long}\nend"),
+            Language::PlainText,
+        );
+        near.dispatch(Event::SetOption {
+            scope: crate::options::Scope::Global,
+            name: "wrap",
+            value: crate::options::Value::Bool(true),
+        })
+        .unwrap();
+        // The long line is on screen: every line takes one row, as unwrapped.
+        let shown = frame(&mut near, 10, 5).unwrap();
+        let lines: Vec<_> = shown
+            .rows
+            .iter()
+            .map(|row| (row.line, row.continued))
+            .collect();
+        assert_eq!(lines, [(0, false), (1, false), (2, false)]);
+        // Far from it, lines wrap again.
+        let text = format!(
+            "{long}\n{}short words here",
+            "\n".repeat(2 * super::WRAP_REACH)
+        );
+        let mut far = app(&text, Language::PlainText);
+        far.dispatch(Event::SetOption {
+            scope: crate::options::Scope::Global,
+            name: "wrap",
+            value: crate::options::Value::Bool(true),
+        })
+        .unwrap();
+        let view = far.active_view().unwrap();
+        far.dispatch(Event::Edit {
+            view,
+            command: Command::SetSelection(Selection::caret(text.len())),
+            time: Duration::ZERO,
+        })
+        .unwrap();
+        frame(&mut far, 10, 5).unwrap();
+        let shown = frame(&mut far, 10, 5).unwrap();
+        assert!(shown.rows.iter().any(|row| row.continued));
     }
     #[test]
     fn wrapping_shows_long_lines_on_several_rows() {

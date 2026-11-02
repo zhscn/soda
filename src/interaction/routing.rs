@@ -419,7 +419,11 @@ impl Layers {
         let typed = {
             let keys = super::emacs_notation(self.sequence.keys());
             let plain = matches!(key.code, Key::Char(_)) && !key.control && !key.alt;
-            let hint = if plain { self.sequence.keypad_hint() } else { "" };
+            let hint = if plain {
+                self.sequence.keypad_hint()
+            } else {
+                ""
+            };
             let key = format!("{hint}{}", key.emacs());
             if keys.is_empty() {
                 key

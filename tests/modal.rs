@@ -484,7 +484,10 @@ fn beacon_delete_and_change_reach_every_selection() {
 fn keypad_hints_list_what_m_and_g_reach() {
     let mut r = runtime("|a\n");
     let hints = |r: &soda::runtime::Runtime| -> Vec<String> {
-        r.key_continuations().into_iter().map(|(key, _)| key).collect()
+        r.key_continuations()
+            .into_iter()
+            .map(|(key, _)| key)
+            .collect()
     };
     // `m` alone reaches chords with Meta of every table: `M-g` is global,
     // `M-<` Normal's; each shows as the key to press.
@@ -496,7 +499,10 @@ fn keypad_hints_list_what_m_and_g_reach() {
     keys(&mut r, "g");
     let after_mg = hints(&r);
     assert!(after_mg.contains(&"p".into()));
-    assert!(after_mg.iter().all(|key| !key.contains('-')), "{after_mg:?}");
+    assert!(
+        after_mg.iter().all(|key| !key.contains('-')),
+        "{after_mg:?}"
+    );
     keys(&mut r, "<esc>");
     // `g` alone is Ctrl and Meta together: `C-M-,`, not `M-g`.
     keys(&mut r, "g");
