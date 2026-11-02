@@ -143,6 +143,32 @@ fn enter_selects_the_row_only_once_a_path_row_is_chosen() {
 }
 
 #[test]
+fn a_typed_parent_lists_and_opens_though_it_is_no_candidate() {
+    let root = tree();
+    let path = root.path().join("src/main.cpp");
+    let mut r = runtime(root.path());
+    r.command(Command::OpenPath(root.path().join("src/sub/a.h")));
+    wait(&mut r, |r| {
+        let view = r.app().view(r.app().active_view().unwrap()).unwrap();
+        r.app()
+            .workspace()
+            .file(view.document_id)
+            .unwrap()
+            .path()
+            .is_some()
+    });
+    r.command(Command::Ex("open ".into()));
+    r.input(UserInput::Paste("../".into()));
+    wait(&mut r, |r| rows(r) == ["sub/", "main.cpp"]);
+    r.input(UserInput::Paste("main.cpp".into()));
+    keys(&mut r, "<ret>");
+    wait(&mut r, |r| {
+        let view = r.app().view(r.app().active_view().unwrap()).unwrap();
+        r.app().workspace().file(view.document_id).unwrap().path() == Some(path.as_path())
+    });
+}
+
+#[test]
 fn opening_the_focused_file_says_so() {
     let root = tree();
     let path = root.path().join("src/main.cpp");
