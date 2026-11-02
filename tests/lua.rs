@@ -779,6 +779,9 @@ fn lua_that_runs_too_long_is_stopped_and_lua_goes_on() {
         assert!(started.elapsed() < Duration::from_secs(10), "{code}");
     }
     // The next request has its own time.
-    lua(&mut r, "local ok = pcall(error, 'x'); soda.message(tostring(ok))");
+    lua(
+        &mut r,
+        "local ok = pcall(error, 'x'); soda.message(tostring(ok))",
+    );
     assert_eq!(r.message(), "false");
 }

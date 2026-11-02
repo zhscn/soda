@@ -193,6 +193,12 @@ impl Fake<'_> {
             }
             self.pos += 1;
             self.parse(2);
+            // Input that ends after the `?` is a conditional being typed;
+            // clang-format sees only finished ones, an editor sees this too.
+            if self.pos >= self.tokens.len() && self.pending == 0 {
+                self.add(start, 3);
+                return;
+            }
             if !self.tokens.get(self.pos).is_some_and(|t| t.colon) {
                 return;
             }
@@ -341,7 +347,13 @@ impl Replay<'_> {
         {
             self.top_mut().question = col;
         }
-        if t.question && (t.newline || next.is_some_and(|t| t.newline)) {
+        // clang-format's IsWrappedConditional asks for a break that is
+        // forced, `MustBreakBefore`, as after a line comment; the breaks it
+        // chooses itself, which a replay sees as line breaks, keep a chain.
+        if t.question
+            && (prev.is_some_and(|p| p.kind == K::LineComment)
+                || next.is_some_and(|n| n.kind == K::LineComment))
+        {
             self.top_mut().wrapped = true;
         }
         if t.member {
@@ -387,10 +399,10 @@ impl Replay<'_> {
             if level != 3 && !t.unary && self.style.expression.align_parentheses {
                 state.start_call = t.column;
             }
-            let chained = level == 3
-                && prev_nc.is_some_and(|p| p.colon)
-                && index + 1 == t.fake_left.len()
-                && !self.top().wrapped;
+            // clang-format walks the parentheses outermost first and asks
+            // about the outermost one, its `FakeLParens.back()`.
+            let chained =
+                level == 3 && prev_nc.is_some_and(|p| p.colon) && index == 0 && !self.top().wrapped;
             if !chained && (level == 3 || (!skip && level > 2)) {
                 state.indent += self.style.expression.continuation_width as i64;
             }
@@ -454,7 +466,7 @@ impl Replay<'_> {
             self.string = 0;
         }
     }
-    fn column(&self, t: &Sim, prev: Option<&Sim>) -> i64 {
+    fn column(&self, t: &Sim, prev: Option<&Sim>, next: Option<&Sim>) -> i64 {
         let f = self.top();
         let cont = self.style.expression.continuation_width as i64;
         let continuation = f.last.max(f.indent) + cont;
@@ -475,8 +487,12 @@ impl Replay<'_> {
             return if f.call == 0 { continuation } else { f.call };
         }
         if f.question != 0 && (t.colon || prev.is_some_and(|p| p.question || p.colon)) {
-            let chained = (t.colon || prev.is_some_and(|p| p.colon))
-                && t.fake_left.last() == Some(&3)
+            // A chain of conditionals, `a ? x : b ? y : z`, lines its colons
+            // up with the first condition: the conditional the colon leads
+            // into starts at the token after it.
+            let opens = |s: &Sim| s.fake_left.last() == Some(&3);
+            let chained = ((t.colon && next.is_some_and(opens))
+                || (prev.is_some_and(|p| p.colon) && opens(t)))
                 && !f.wrapped;
             if chained {
                 return f.indent
@@ -515,7 +531,12 @@ impl Replay<'_> {
         {
             return continuation;
         }
-        if prev.is_some_and(|p| p.kind == K::RParen) && !t.binary && t.kind != K::Colon {
+        // clang-format counts `?` among binary operators by its precedence.
+        if prev.is_some_and(|p| p.kind == K::RParen)
+            && !t.binary
+            && !t.question
+            && t.kind != K::Colon
+        {
             return continuation;
         }
         if f.indent == self.first && prev.is_some_and(|p| p.kind != K::RBrace) {
@@ -744,6 +765,7 @@ pub(super) fn continuation(
     }
     .parse(0);
     let synthetic = Sim::new(K::Identifier);
+    let after = query.and_then(|i| sim.get(i + 1));
     let query = query.map(|i| &sim[i]).unwrap_or(&synthetic);
     let first_line_text = snapshot.line(first_line)?;
     let first_indent = column_width(
@@ -785,7 +807,7 @@ pub(super) fn continuation(
             nc = Some(&sim[i]);
         }
     }
-    let target = replay.column(query, nc).max(0) as usize;
+    let target = replay.column(query, nc, after).max(0) as usize;
     let structural = replay.top().structural.max(0) as usize;
     let aligned = replay.top().aligned
         || (query.string() && replay.string != 0)

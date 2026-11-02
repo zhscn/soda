@@ -162,7 +162,9 @@ fn reference_layouts_survive_typing_from_scratch() {
     for case in fixture["cases"].as_array().unwrap() {
         // Enter after a wrapped return type cannot know that a function name,
         // not an ordinary continuation, follows; reindent covers that layout.
-        if case["name"] == "wrapped-name-False" {
+        // Likewise a link of a conditional chain whose condition wraps
+        // shows that it is a link only when the `?` on the next line comes.
+        if case["name"] == "wrapped-name-False" || case["name"] == "conditional-wrapped-link" {
             continue;
         }
         let expected = case["expected"].as_str().unwrap();

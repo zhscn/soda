@@ -941,6 +941,44 @@ impl Parser {
         }
         self.close(list);
     }
+    /// Whether the next significant token could begin a statement, as
+    /// clang-format's `tokenCanStartNewLine` asks after a macro call: one
+    /// that only continues an expression, like `<<` in
+    /// `EXPECT_EQ(a, b)` and `<< "message";` below it, keeps the call going.
+    fn can_start_line(&self) -> bool {
+        let Some(next) =
+            significant_after(&self.tree.tokens, self.tree.tokens[self.pos].range.start)
+        else {
+            return true;
+        };
+        !matches!(
+            self.tree.tokens[next].kind,
+            K::Semicolon
+                | K::LBrace
+                | K::Period
+                | K::PeriodStar
+                | K::Arrow
+                | K::ArrowStar
+                | K::Less
+                | K::Greater
+                | K::Slash
+                | K::Percent
+                | K::LessLess
+                | K::GreaterGreater
+                | K::Equals
+                | K::PlusEqual
+                | K::MinusEqual
+                | K::StarEqual
+                | K::SlashEqual
+                | K::PercentEqual
+                | K::AmpEqual
+                | K::PipeEqual
+                | K::CaretEqual
+                | K::GreaterGreaterEqual
+                | K::LessLessEqual
+                | K::Colon
+        ) && self.text(next) != "noexcept"
+    }
     fn statement_macro(&self, spelling: &str) -> bool {
         let options = &self.tree.parser_options;
         if options.attribute_macros.iter().any(|name| name == spelling) {
@@ -1002,7 +1040,7 @@ impl Parser {
             if k == K::LParen {
                 let parameters = lambda;
                 self.group(k);
-                if standalone_macro && self.newline_ahead() {
+                if standalone_macro && self.newline_ahead() && self.can_start_line() {
                     terminated = true;
                     break;
                 }

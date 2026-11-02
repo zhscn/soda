@@ -107,7 +107,11 @@ impl CppSession {
         self.work
     }
     pub fn triggers(&self, ch: char) -> bool {
-        self.rules.enabled() && matches!(ch, ':' | '{' | '}' | '#' | 'e' | 'f')
+        self.rules.enabled()
+            && matches!(
+                ch,
+                ':' | '{' | '}' | '#' | 'e' | 'f' | '<' | '>' | '.' | '?'
+            )
     }
     fn matches(&self, snapshot: &Snapshot) -> bool {
         self.analysis.as_ref().is_some_and(|tree| {
@@ -237,7 +241,26 @@ impl CppSession {
         // PP branch keywords end in e/f. Filter ordinary typing before parsing;
         // finishing endif/else/elif changes the current directive's own level.
         let pp_word = matches!(request.trigger, IndentTrigger::Typed('e' | 'f'));
-        if pp_word {
+        // An operator that cannot start a statement, typed first on a line,
+        // makes it a continuation: Enter after `EXPECT_EQ(a, b)` cannot know
+        // that `<< "message"` comes next, so typing it moves the line.
+        let operator = matches!(request.trigger, IndentTrigger::Typed('<' | '>' | '.' | '?'));
+        // A `?` after a colon that leads its line makes that link of a
+        // conditional chain line up with the chain's first condition.
+        let mut link = false;
+        if operator {
+            let prefix = snapshot.byte_slice(start..request.position).unwrap();
+            let typed: Vec<u8> = prefix
+                .bytes()
+                .skip_while(|b| matches!(b, b' ' | b'\t'))
+                .collect();
+            link = request.trigger == IndentTrigger::Typed('?')
+                && typed.first() == Some(&b':')
+                && typed.get(1) != Some(&b':');
+            if !link && !matches!(typed[..], [] | [b'<'] | [b'-'] | [b'>']) {
+                return Ok(IndentAdvice::Unavailable);
+            }
+        } else if pp_word {
             let prefix = snapshot.byte_slice(start..request.position).unwrap();
             if prefix.bytes().find(|b| !matches!(b, b' ' | b'\t')) != Some(b'#') {
                 return Ok(IndentAdvice::Unavailable);
@@ -253,7 +276,31 @@ impl CppSession {
             return Ok(IndentAdvice::Unavailable);
         }
         let tree = self.analyze(snapshot);
-        if pp_word {
+        // The colon typed first on its line, which may be a conditional's.
+        let leading_colon = request.trigger == IndentTrigger::Typed(':')
+            && first_significant(tree.tokens(), start).is_some_and(|token| {
+                token.kind == K::Colon && token.range.start == request.position
+            });
+        if operator {
+            let leads = first_significant(tree.tokens(), start).is_some_and(|token| {
+                (link && token.kind == K::Colon)
+                    || token.range.contains(&request.position)
+                        && matches!(
+                            token.kind,
+                            K::Less
+                                | K::Question
+                                | K::LessLess
+                                | K::GreaterGreater
+                                | K::Period
+                                | K::PeriodStar
+                                | K::Arrow
+                                | K::ArrowStar
+                        )
+            });
+            if !leads {
+                return Ok(IndentAdvice::Unavailable);
+            }
+        } else if pp_word {
             if !token_at(tree.tokens(), request.position).is_some_and(|token| {
                 let word = &tree.source()[token.range.clone()];
                 token.preprocessor
@@ -302,6 +349,7 @@ impl CppSession {
             return Ok(IndentAdvice::Unavailable);
         }
         if request.trigger == IndentTrigger::Typed(':')
+            && !leading_colon
             && !matches!(
                 decision.role,
                 IndentRole::CaseLabel
@@ -316,6 +364,12 @@ impl CppSession {
             auxiliary: decision.directive_spacing,
         })
     }
+}
+
+/// The first token of the line starting at `start` that is not blank.
+fn first_significant(tokens: &[super::Token], start: usize) -> Option<&super::Token> {
+    let first = tokens.partition_point(|t| t.range.end <= start);
+    tokens[first..].iter().find(|t| !t.kind.is_trivia())
 }
 
 #[cfg(test)]

@@ -60,6 +60,27 @@ arguments = ('void f(unsigned Level,\nconst Map<A *, B<C>>\n&Active,\nfunction_r
              'if (Ready)\nreturn First() &&\n!Second();\nValue =\n// comment\ncompute(x);\n'
              'if (A ||\n// comment\nB) {\ngo();\n}\nDetails.push(\nnew (Context) Diagnostic{\nFirst,\nSecond});\n}\n')
 profiles.append(('argument-alignment', {}, arguments))
+# An all-caps call at the end of a line ends a statement only when the next
+# line could start one; `<<` and `.` carry the expression on.
+macro_calls = ('void f() {\nEXPECT_EQ(first, second)\n<< "message " << value;\n'
+               'ASSERT_TRUE(ready)\n.With(x);\nLOG_EVENT(x)\nwork();\n}\n')
+profiles.append(('macro-call-continuation', {'BasedOnStyle': 'Google'}, macro_calls))
+# Conditionals: a condition ending in a call, a chain whose colons line up with
+# its first condition, and a link of the chain that is itself wrapped.
+conditionals = ('void f() {\nWidth = VT->isPacked(*this)\n? VT->size()\n: 0;\n'
+                'Kind K = A == B ? First\n: A == C ? Second\n: Third;\n}\n')
+for before in [True, False]:
+    profiles.append((f'conditional-before-{before}', {'BreakBeforeTernaryOperators': before}, conditionals))
+# A #define replacement is laid out as code one level in; the expression of
+# another directive continues from the `#`.
+macros = ('#define PRINT(Name) \\\nif (counts[Idx]) \\\nerrs() << "  " << counts[Idx] \\\n<< #Name << " types"; \\\n++Idx;\n'
+          '#define CASE(Id) \\\ncase Kind::Id: \\\nWidth = 0; \\\nbreak;\n'
+          '#define CHECK_INFO(ci, y) \\\ndo { \\\nEXPECT_EQ(y, ci.year()); \\\n} while (0)\n'
+          '#if defined(FIRST) && \\\ndefined(SECOND)\nint x;\n#elif (THIRD + \\\nFOURTH) > 3\nint y;\n#endif\n')
+for style in ['LLVM', 'Google']:
+    profiles.append((f'macro-body-{style}', {'BasedOnStyle': style}, macros))
+profiles.append(('conditional-wrapped-link', {},
+                 'void f() {\nResult = Context.isHidden()\n? Hidden\n: Context.isProtected()\n? Protected\n: Default;\n}\n'))
 cases = []
 unsupported = []
 for label, options, code in profiles:

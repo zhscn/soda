@@ -119,6 +119,19 @@ impl Computer<'_> {
     ) -> IndentDecision {
         self.offset_decision(role, offset(self.style, slot), base, anchor)
     }
+    /// Where the body of the directive at `hash` goes, one level in from
+    /// the line it starts on.
+    fn slot_of_directive(&self, hash: usize) -> usize {
+        let at = self.tree.tokens[hash].range.start;
+        let base = self.indent(self.line_of(at));
+        self.slot(
+            IndentRole::PreprocessorDirective,
+            S::PreprocessorBody,
+            base,
+            Some(at),
+        )
+        .target_column
+    }
     fn aligned_slot(
         &self,
         role: IndentRole,
@@ -884,11 +897,159 @@ pub fn compute_indent(
     if line >= snapshot.line_count() {
         return Err(EditError::InvalidRange);
     }
-    Ok(Computer {
+    let decision = Computer {
         snapshot,
         tree,
         line,
         style,
     }
-    .run())
+    .run();
+    if !decision.preserve
+        && let Some(body) = macro_body(snapshot, tree, line, style)
+    {
+        return Ok(body);
+    }
+    Ok(decision)
+}
+
+/// A continuation line of a directive, laid out as clang-format lays it out.
+/// The replacement of a `#define` is code one level in: it is taken out
+/// with its columns, inside a block whose contents start where the body does,
+/// and indented as that code, unfinished as it may be while it is typed. The
+/// expression of `#if` and the others is a statement that starts at the `#`.
+fn macro_body(
+    snapshot: &Snapshot,
+    tree: &SyntaxTree,
+    line: usize,
+    style: &CppRules,
+) -> Option<IndentDecision> {
+    let tokens = tree.tokens();
+    let source = tree.source();
+    let start = snapshot.line_start(line)?;
+    // The end of input is an empty token, which a line at the end gets.
+    let first = tokens
+        .partition_point(|t| t.range.end <= start)
+        .min(tokens.len().saturating_sub(1));
+    // A line after a backslash belongs to the directive even while it is
+    // empty, as on Enter after `\`; the directive then ends on it.
+    let continues = line > 0
+        && snapshot
+            .line(line - 1)?
+            .trim_end_matches(['\n', '\r'])
+            .ends_with('\\');
+    if !tokens.get(first)?.preprocessor && !continues {
+        return None;
+    }
+    let hash = tokens[..first]
+        .iter()
+        .rposition(|t| t.kind == K::PreprocessorHash && t.preprocessor)?;
+    let end = super::preprocessor::directive_end(tokens, hash);
+    if end < first || (end == first && !continues) {
+        return None;
+    }
+    let define = super::preprocessor::keyword(source, tokens, hash) == Some("define");
+    let significant = |from: usize| (from..end).find(|&i| !tokens[i].kind.is_trivia());
+    let keyword = significant(hash + 1)?;
+    // Other directives, `#if A && \` above all, continue an expression.
+    let name = if define {
+        significant(keyword + 1)?
+    } else {
+        keyword
+    };
+    let mut body = name + 1;
+    // A function-like macro's parameters touch its name.
+    if define
+        && tokens
+            .get(body)
+            .is_some_and(|t| t.kind == K::LParen && t.range.start == tokens[name].range.end)
+    {
+        let mut depth = 0;
+        while body < end {
+            match tokens[body].kind {
+                K::LParen => depth += 1,
+                K::RParen => depth -= 1,
+                _ => {}
+            }
+            body += 1;
+            if depth == 0 {
+                break;
+            }
+        }
+    }
+    let body_start = tokens
+        .get(body)
+        .map_or(tokens[end - 1].range.end, |t| t.range.start);
+    // Where a body line goes when nothing is known of the code: one level
+    // in from the directive, as the analysis of the whole file has it. The
+    // expression of another directive is a statement where the `#` is.
+    let computer = Computer {
+        snapshot,
+        tree,
+        line,
+        style,
+    };
+    let base = if define {
+        computer.slot_of_directive(hash)
+    } else {
+        computer.indent(snapshot.line_of(tokens[hash].range.start)?)
+    };
+    let first_line = snapshot.line_of(tokens[hash].range.start)?;
+    let last_line = snapshot
+        .line_of(
+            tokens[end - 1]
+                .range
+                .end
+                .saturating_sub(1)
+                .max(tokens[hash].range.start),
+        )?
+        .max(line);
+    let tab = style.whitespace.tab_width;
+    let width = style.whitespace.indent_width;
+    // Contents of the block start at `base`; its brace stands a level out.
+    let mut text = String::new();
+    if define {
+        text.push_str(&" ".repeat(base.saturating_sub(width)));
+        text.push_str("{\n");
+    }
+    for number in first_line..=last_line {
+        let content = snapshot.line(number)?;
+        let content = content.trim_end_matches(['\n', '\r']);
+        let content = content.strip_suffix('\\').unwrap_or(content);
+        let line_start = snapshot.line_start(number)?;
+        if number == first_line {
+            // The header gives way to blanks as wide, so that what follows
+            // it keeps its column. The expression of `#if` starts where the
+            // `#` does, as clang-format lays it out: `0 +` stands for the
+            // header, binding tighter than any operator it could meet.
+            let header = body_start.saturating_sub(line_start).min(content.len());
+            let blank = column_width(&content[..header], 0, tab);
+            if define || blank < 3 {
+                text.push_str(&" ".repeat(blank));
+            } else {
+                text.push_str("0 +");
+                text.push_str(&" ".repeat(blank - 3));
+            }
+            text.push_str(&content[header..]);
+        } else {
+            text.push_str(content);
+        }
+        text.push('\n');
+    }
+    // Macros leave out the final semicolon, `do { ... } while (0)` above
+    // all; one on a line of its own completes the code and moves nothing.
+    text.push_str(";\n");
+    if define {
+        text.push_str(&" ".repeat(base.saturating_sub(width)));
+        text.push_str("}\n");
+    }
+    let inner = super::parse_with_options(&text, &style.parser);
+    let inner_snapshot = Snapshot::new(text, 0);
+    let inner_line = line - first_line + usize::from(define);
+    let mut decision = compute_indent(&inner_snapshot, &inner, inner_line, style).ok()?;
+    if decision.preserve {
+        return None;
+    }
+    decision.anchor = None;
+    decision.directive_spacing = None;
+    Some(decision)
 }

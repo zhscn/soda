@@ -1011,6 +1011,77 @@
         "AllowShortBlocksOnASingleLine": "Never"
       },
       "expected": "void f(unsigned Level,\n       const Map<A *, B<C>>\n           &Active,\n       function_ref<bool(int A,\n                         int B)>\n           Check) {\n  State.push(ParenState(/*Tok=*/nullptr, First,\n                        /*AvoidBinPacking=*/false,\n                        /*NoLineBreak=*/false));\n  for (auto I = List.begin(),\n            E = List.end();\n       I != E; ++I) {\n    work();\n  }\n  if (Ready)\n    return First() &&\n           !Second();\n  Value =\n      // comment\n      compute(x);\n  if (A ||\n      // comment\n      B) {\n    go();\n  }\n  Details.push(\n      new (Context) Diagnostic{\n          First,\n          Second});\n}\n"
+    },
+    {
+      "name": "macro-call-continuation",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "BasedOnStyle": "Google"
+      },
+      "expected": "void f() {\n  EXPECT_EQ(first, second)\n      << \"message \" << value;\n  ASSERT_TRUE(ready)\n      .With(x);\n  LOG_EVENT(x)\n  work();\n}\n"
+    },
+    {
+      "name": "conditional-before-True",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "BreakBeforeTernaryOperators": true
+      },
+      "expected": "void f() {\n  Width = VT->isPacked(*this)\n              ? VT->size()\n              : 0;\n  Kind K = A == B   ? First\n           : A == C ? Second\n                    : Third;\n}\n"
+    },
+    {
+      "name": "conditional-before-False",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "BreakBeforeTernaryOperators": false
+      },
+      "expected": "void f() {\n  Width = VT->isPacked(*this) ? VT->size() : 0;\n  Kind K = A == B ? First : A == C ? Second :\n                                     Third;\n}\n"
+    },
+    {
+      "name": "macro-body-LLVM",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "BasedOnStyle": "LLVM"
+      },
+      "expected": "#define PRINT(Name)               \\\n  if (counts[Idx])                \\\n    errs() << \"  \" << counts[Idx] \\\n           << #Name << \" types\";  \\\n  ++Idx;\n#define CASE(Id) \\\n  case Kind::Id: \\\n    Width = 0;   \\\n    break;\n#define CHECK_INFO(ci, y)    \\\n  do {                       \\\n    EXPECT_EQ(y, ci.year()); \\\n  } while (0)\n#if defined(FIRST) && \\\n    defined(SECOND)\nint x;\n#elif (THIRD + \\\n       FOURTH) > 3\nint y;\n#endif\n"
+    },
+    {
+      "name": "macro-body-Google",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never",
+        "BasedOnStyle": "Google"
+      },
+      "expected": "#define PRINT(Name)               \\\n  if (counts[Idx])                \\\n    errs() << \"  \" << counts[Idx] \\\n           << #Name << \" types\";  \\\n  ++Idx;\n#define CASE(Id) \\\n  case Kind::Id: \\\n    Width = 0;   \\\n    break;\n#define CHECK_INFO(ci, y)    \\\n  do {                       \\\n    EXPECT_EQ(y, ci.year()); \\\n  } while (0)\n#if defined(FIRST) && \\\n    defined(SECOND)\nint x;\n#elif (THIRD + \\\n       FOURTH) > 3\nint y;\n#endif\n"
+    },
+    {
+      "name": "conditional-wrapped-link",
+      "options": {
+        "ColumnLimit": 0,
+        "AllowShortFunctionsOnASingleLine": "None",
+        "AllowShortIfStatementsOnASingleLine": "Never",
+        "AllowShortLoopsOnASingleLine": false,
+        "AllowShortBlocksOnASingleLine": "Never"
+      },
+      "expected": "void f() {\n  Result = Context.isHidden()\n               ? Hidden\n           : Context.isProtected()\n               ? Protected\n               : Default;\n}\n"
     }
   ],
   "unsupported_profiles": []

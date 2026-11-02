@@ -45,6 +45,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err("usage: indent_accuracy [--show N] <file-or-dir>...".into());
     }
     let (mut matched, mut mismatched, mut preserved, mut unavailable) = (0, 0, 0, 0);
+    // Why lines were left as they are, by the role the analysis gave them.
+    let mut kept = std::collections::BTreeMap::<String, usize>::new();
     for path in paths {
         let mut workspace = Workspace::new(FileService::default());
         let Ok(id) = workspace.open(&path) else {
@@ -57,6 +59,12 @@ fn main() -> Result<(), Box<dyn Error>> {
             .document()
             .snapshot()
             .clone();
+        let rules = soda::config::resolve_config(&path, &soda::config::ConfigOptions::default())
+            .ok()
+            .map(|config| config.config.rules);
+        let tree = rules
+            .as_ref()
+            .map(|rules| soda::cpp::parse_snapshot_with_options(&snapshot, rules.parser_options()));
         let mut editor = workspace.editor_mut(id).unwrap();
         for line in 0..snapshot.line_count() {
             let text = snapshot.line(line).unwrap();
@@ -80,7 +88,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                         );
                     }
                 }
-                IndentAdvice::Preserve { .. } => preserved += 1,
+                IndentAdvice::Preserve { .. } => {
+                    preserved += 1;
+                    if let (Some(rules), Some(tree)) = (&rules, &tree)
+                        && let Ok(decision) =
+                            soda::cpp::compute_indent(&snapshot, tree, line, rules)
+                    {
+                        *kept.entry(format!("{:?}", decision.role)).or_default() += 1;
+                    }
+                }
                 IndentAdvice::Unavailable => unavailable += 1,
             }
         }
@@ -92,5 +108,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("mismatch    {mismatched} ({:.2}%)", percent(mismatched));
     println!("preserve    {preserved} ({:.2}%)", percent(preserved));
     println!("unavailable {unavailable} ({:.2}%)", percent(unavailable));
+    for (role, count) in &kept {
+        println!("  preserved as {role}: {count}");
+    }
     Ok(())
 }
