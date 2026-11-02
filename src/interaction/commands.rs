@@ -572,6 +572,20 @@ impl Layers {
                 match super::path::resolve_path(&app.directory(), home.as_deref(), &path) {
                     Ok(path) => {
                         if opening_path {
+                            // Nothing on screen changes, so say why.
+                            if let Some(document) = app
+                                .active_view()
+                                .and_then(|id| app.view(id))
+                                .map(|v| v.document_id)
+                                && let Some(current) =
+                                    app.workspace().file(document).and_then(|f| f.path())
+                                && std::fs::canonicalize(&path).is_ok_and(|p| p == current)
+                            {
+                                response.message = Message::Set(format!(
+                                    "Already at {}",
+                                    super::command_line::buffer_name(app, document)
+                                ));
+                            }
                             response.events.push(Event::Open(path));
                         } else if let Some(view) = app.active_view().and_then(|id| app.view(id)) {
                             response.events.push(Event::Save {

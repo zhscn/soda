@@ -86,6 +86,21 @@ fn choosing_a_command_continues_with_its_arguments() {
 }
 
 #[test]
+fn opening_the_focused_file_says_so() {
+    let root = tree();
+    let path = root.path().join("src/main.cpp");
+    let mut r = runtime(root.path());
+    r.command(Command::OpenPath(path.clone()));
+    wait(&mut r, |r| {
+        r.app().views().any(|v| {
+            r.app().workspace().file(v.document_id).unwrap().path() == Some(path.as_path())
+        })
+    });
+    r.command(Command::OpenPath(path));
+    wait(&mut r, |r| r.message().starts_with("Already at "));
+}
+
+#[test]
 fn path_slots_browse_directories_and_backspace_removes_one() {
     let root = tree();
     let mut r = runtime(root.path());
