@@ -43,17 +43,6 @@ impl Terminal {
             enhanced: false,
             active: true,
         };
-        // The kitty keyboard protocol tells apart keys that legacy encodings
-        // merge, such as Ctrl-Enter from Enter and Ctrl-Backspace from
-        // Backspace. Terminals that do not answer the query keep the legacy
-        // encoding.
-        if terminal::supports_keyboard_enhancement().unwrap_or(false) {
-            execute!(
-                io::stdout(),
-                PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
-            )?;
-            guard.enhanced = true;
-        }
         execute!(
             io::stdout(),
             EnterAlternateScreen,
@@ -62,6 +51,19 @@ impl Terminal {
             EnableMouseCapture,
             Hide
         )?;
+        // The kitty keyboard protocol tells apart keys that legacy encodings
+        // merge, such as Ctrl-Enter from Enter and Ctrl-Backspace from
+        // Backspace. Terminals that do not answer the query keep the legacy
+        // encoding. The main and alternate screens keep separate flag stacks,
+        // so the push comes after entering the alternate screen, and restore
+        // pops before leaving it; otherwise the flags stay on the shell's.
+        if terminal::supports_keyboard_enhancement().unwrap_or(false) {
+            execute!(
+                io::stdout(),
+                PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+            )?;
+            guard.enhanced = true;
+        }
         Ok(guard)
     }
 }
