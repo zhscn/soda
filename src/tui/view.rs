@@ -682,6 +682,10 @@ fn status(
     if runtime.shell_running() {
         right.push(Text::raw("running…  "));
     }
+    for (_, segment, face) in runtime.status_segments() {
+        let style = face.map_or(theme.status, |face| theme.status.patch(theme.face(face)));
+        right.push(Text::styled(format!("{segment}  "), style));
+    }
     if let Some(text) = text.filter(|_| view.is_some()) {
         let (errors, warnings) = text.problems;
         if errors > 0 {

@@ -169,6 +169,8 @@ pub struct Layers {
     recent_files: Vec<std::path::PathBuf>,
     /// The Lua function and the items of the question last offered.
     offer: Option<(u64, Vec<String>)>,
+    /// The Lua function a line of text is asked for.
+    question: Option<u64>,
     /// Command line and search histories.
     history: [history::History; 2],
     /// The results document `]q` and `[q` step through: the latest filled.
@@ -223,6 +225,11 @@ impl Layers {
     /// Whether a command failed since `clear_failed`.
     pub fn failed(&self) -> bool {
         self.failed
+    }
+    /// Removes the hooks that run exactly this command, as a Lua hook is
+    /// removed by its function; whether any went.
+    pub fn remove_hook_command(&mut self, command: &str) -> bool {
+        self.hooks.remove_command(command)
     }
     /// Adds a hook by event name, as the `hook` command does.
     pub fn add_hook(&mut self, event: &str, filter: &str, command: String) -> Result<(), String> {

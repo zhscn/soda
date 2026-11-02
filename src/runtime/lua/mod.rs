@@ -39,10 +39,13 @@ const FUNCTIONS: &[&str] = &[
     "flag",
     "unflag",
     "note",
+    "paint",
     "popup",
     "prompt",
     "choose",
+    "input",
     "hint",
+    "status",
     "tokens",
     "inlays",
     "indicator",
@@ -53,8 +56,10 @@ const FUNCTIONS: &[&str] = &[
     "language",
     "bindings",
     "hook",
+    "unhook",
     "define_command",
     "spawn",
+    "kill",
     "defer",
     "cancel",
     "results",
@@ -168,11 +173,11 @@ const CALLBACKS: &str = "soda.callbacks";
 /// A finished `soda.spawn` process.
 pub(super) struct Job {
     id: u64,
-    /// Where `soda.spawn` was called; the function runs there.
-    view: Option<crate::application::ViewId>,
     code: Option<i32>,
     stdout: String,
     stderr: String,
+    /// The functions that took its lines, done with now.
+    lines: Vec<u64>,
 }
 pub(super) enum Request {
     Chunk {
@@ -184,6 +189,11 @@ pub(super) enum Request {
         argument: String,
     },
     Done(Job),
+    /// A line a process wrote, for the function streaming it.
+    Line {
+        function: u64,
+        text: String,
+    },
     /// A `soda.defer` function whose time came.
     Timer(u64),
     Complete {
@@ -211,7 +221,11 @@ pub(super) struct Host {
     lua: Lua,
     /// The id the next registered function gets.
     next: Cell<u64>,
-    jobs: (Sender<Job>, Receiver<Job>),
+    /// What processes send, with the view each started in.
+    jobs: (Sender<Sent>, Receiver<Sent>),
+    /// `soda.spawn` processes by function: their process group once they
+    /// run, none while they start.
+    children: Children,
     answers: (Sender<Answer>, Receiver<Answer>),
     /// When the request running now has to stop.
     deadline: std::rc::Rc<Cell<Option<std::time::Instant>>>,
@@ -273,6 +287,7 @@ impl Host {
             lua,
             next: Cell::new(1),
             jobs: channel(),
+            children: Default::default(),
             answers: channel(),
             deadline,
             timers: RefCell::default(),
@@ -361,10 +376,17 @@ impl Host {
                     callbacks.set(id, Value::Nil)?;
                     function.call::<()>(())
                 }
+                Request::Line { function, text } => self
+                    .callbacks()?
+                    .get::<Function>(function)?
+                    .call::<()>(text),
                 Request::Done(job) => {
                     let callbacks = self.callbacks()?;
                     let function = callbacks.get::<Function>(job.id)?;
                     callbacks.set(job.id, Value::Nil)?;
+                    for line in &job.lines {
+                        callbacks.set(*line, Value::Nil)?;
+                    }
                     function.call::<()>((job.code, job.stdout, job.stderr))
                 }
                 Request::Complete { source, asked } => self.complete(source, &asked),
@@ -447,41 +469,142 @@ fn expand(runtime: &Runtime, text: &str) -> mlua::Result<String> {
         .map_err(mlua::Error::runtime)
 }
 /// Runs a process to its end, in the project root.
-fn spawn(id: u64, argv: &[String], root: &std::path::Path, input: Option<String>) -> Job {
-    use std::{io::Write, process::Stdio};
-    let child = std::process::Command::new(&argv[0])
-        .args(&argv[1..])
-        .current_dir(root)
-        .stdin(if input.is_some() {
+/// What a process sent, with the view it started in.
+pub(super) type Sent = (Message, Option<crate::application::ViewId>);
+pub(super) type Children = std::sync::Arc<std::sync::Mutex<std::collections::HashMap<u64, Child>>>;
+#[derive(Clone, Copy)]
+pub(super) enum Child {
+    Starting,
+    /// `soda.kill` came before it started.
+    Killed,
+    Running(u32),
+}
+/// How `soda.spawn` runs a program.
+pub(super) struct Spawn {
+    pub argv: Vec<String>,
+    pub cwd: std::path::PathBuf,
+    pub env: Vec<(String, String)>,
+    pub input: Option<String>,
+    /// Functions that take each line of standard output and standard error
+    /// as it comes; without one, the stream goes to the function at the end.
+    pub lines: [Option<u64>; 2],
+}
+/// What a `soda.spawn` process sends, in the order it happens.
+pub(super) enum Message {
+    Line { function: u64, text: String },
+    Done(Job),
+}
+/// Runs a program to its end in its own process group, which `soda.kill`
+/// stops; streamed lines go out as they come, before the end.
+fn spawn(
+    id: u64,
+    spawn: Spawn,
+    sender: &Sender<Sent>,
+    view: Option<crate::application::ViewId>,
+    children: &Children,
+) -> Job {
+    use std::{
+        io::{BufRead, Read, Write},
+        process::Stdio,
+    };
+    let mut command = std::process::Command::new(&spawn.argv[0]);
+    command
+        .args(&spawn.argv[1..])
+        .current_dir(&spawn.cwd)
+        .envs(spawn.env.iter().map(|(k, v)| (k, v)))
+        .stdin(if spawn.input.is_some() {
             Stdio::piped()
         } else {
             Stdio::null()
         })
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn();
-    let output = child.and_then(|mut child| {
-        if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    let failed = |error: std::io::Error| Job {
+        id,
+        code: None,
+        stdout: String::new(),
+        stderr: format!("{}: {error}", spawn.argv[0]),
+        lines: spawn.lines.iter().flatten().copied().collect(),
+    };
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            children.lock().unwrap().remove(&id);
+            return failed(error);
+        }
+    };
+    {
+        let mut children = children.lock().unwrap();
+        if matches!(children.get(&id), Some(Child::Killed)) {
+            crate::runtime::process::terminate(child.id());
+        }
+        children.insert(id, Child::Running(child.id()));
+    }
+    if let (Some(input), Some(mut stdin)) = (spawn.input, child.stdin.take()) {
+        // Written on its own thread, so a process that writes a lot before
+        // it reads cannot hold both sides.
+        std::thread::spawn(move || {
             // A process that exits without reading is not an error here.
             let _ = stdin.write_all(input.as_bytes());
-        }
-        child.wait_with_output()
-    });
-    match output {
-        Ok(output) => Job {
+        });
+    }
+    let readers: Vec<_> = [
+        child
+            .stdout
+            .take()
+            .map(|s| Box::new(s) as Box<dyn Read + Send>),
+        child
+            .stderr
+            .take()
+            .map(|s| Box::new(s) as Box<dyn Read + Send>),
+    ]
+    .into_iter()
+    .zip(spawn.lines)
+    .map(|(stream, function)| {
+        let sender = sender.clone();
+        std::thread::spawn(move || {
+            let mut kept = String::new();
+            let Some(stream) = stream else {
+                return kept;
+            };
+            let mut reader = std::io::BufReader::new(stream);
+            match function {
+                Some(function) => {
+                    let mut line = Vec::new();
+                    while reader.read_until(b'\n', &mut line).is_ok_and(|n| n > 0) {
+                        let text = String::from_utf8_lossy(&line);
+                        let text = text.trim_end_matches(['\n', '\r']).to_owned();
+                        let _ = sender.send((Message::Line { function, text }, view));
+                        line.clear();
+                    }
+                }
+                None => {
+                    let mut bytes = Vec::new();
+                    let _ = reader.read_to_end(&mut bytes);
+                    kept = String::from_utf8_lossy(&bytes).into_owned();
+                }
+            }
+            kept
+        })
+    })
+    .collect();
+    let mut streams = readers
+        .into_iter()
+        .map(|reader| reader.join().unwrap_or_default());
+    let (stdout, stderr) = (streams.next().unwrap(), streams.next().unwrap());
+    let status = child.wait();
+    children.lock().unwrap().remove(&id);
+    match status {
+        Ok(status) => Job {
             id,
-            view: None,
-            code: output.status.code(),
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            code: status.code(),
+            stdout,
+            stderr,
+            lines: spawn.lines.iter().flatten().copied().collect(),
         },
-        Err(error) => Job {
-            id,
-            view: None,
-            code: None,
-            stdout: String::new(),
-            stderr: format!("{}: {error}", argv[0]),
-        },
+        Err(error) => failed(error),
     }
 }
 
@@ -604,9 +727,12 @@ impl Runtime {
             .jobs
             .1
             .try_iter()
-            .map(|job| {
-                let view = job.view;
-                (Request::Done(job), view)
+            .map(|(message, view)| {
+                let request = match message {
+                    Message::Line { function, text } => Request::Line { function, text },
+                    Message::Done(job) => Request::Done(job),
+                };
+                (request, view)
             })
             .collect();
         let now = std::time::Instant::now();

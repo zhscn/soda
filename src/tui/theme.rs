@@ -49,6 +49,8 @@ pub(super) struct Theme {
     pub label: Style,
     pub todo: Style,
     pub marks: [Style; crate::application::MARKS as usize],
+    /// Every face by its place in `faces::names`, for paints.
+    named: Vec<Style>,
 }
 
 struct Palette {
@@ -131,6 +133,9 @@ impl Theme {
                 *style = apply(*style, spec, truecolor);
             }
         }
+        theme.named = crate::application::faces::names()
+            .map(|name| theme.slot(&name).copied().unwrap_or_default())
+            .collect();
         theme
     }
     /// The style a face name stands for.
@@ -253,6 +258,7 @@ impl Theme {
                 p.yellow, p.green, p.blue, p.magenta, p.orange, p.cyan, p.red, p.comment,
             ]
             .map(|bg| Style::new().fg(c(p.bg)).bg(c(bg))),
+            named: vec![],
         }
     }
 }
@@ -264,6 +270,9 @@ impl Theme {
             crate::application::Face::Error => self.error,
             crate::application::Face::Info => self.info,
             crate::application::Face::Mark(n) => self.marks[usize::from(n)],
+            crate::application::Face::Named(n) => {
+                self.named.get(usize::from(n)).copied().unwrap_or_default()
+            }
             crate::application::Face::Note(severity) => {
                 let colour = self.severity(severity).fg.unwrap_or_default();
                 Style::new()

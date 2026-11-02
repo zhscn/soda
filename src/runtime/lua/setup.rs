@@ -118,16 +118,35 @@ pub(super) fn register<'scope, 'r: 'scope>(
             runtime
                 .borrow_mut()
                 .layers
-                .add_hook(&event, &filter, format!("lua-call {id} %val{{hook}}"))
-                .map_err(mlua::Error::runtime)
+                .add_hook(&event, &filter, hook_command(id))
+                .map_err(mlua::Error::runtime)?;
+            Ok(id)
+        })?,
+    )?;
+    soda.set(
+        "unhook",
+        scope.create_function(|_, id: u64| {
+            let removed = runtime
+                .borrow_mut()
+                .layers
+                .remove_hook_command(&hook_command(id));
+            if removed {
+                host.callbacks()?.set(id, Value::Nil)?;
+            }
+            Ok(removed)
         })?,
     )?;
     soda.set(
         "define_command",
         scope.create_function(
-            |_, (name, second, third): (String, Value, Option<Function>)| {
+            |_, (name, second, third, options): (String, Value, Option<Function>, Option<Table>)| {
                 // `(name, doc, fn)` reads like a docstring;
                 // `(name, fn)` has none.
+                let slots = options
+                    .and_then(|options| options.get::<Option<Table>>("args").transpose())
+                    .transpose()?
+                    .map(|args| slots(&args))
+                    .transpose()?;
                 let (doc, function) = match (second, third) {
                     (Value::String(doc), Some(function)) => {
                         (Some(doc.to_str()?.to_owned()), function)
@@ -150,6 +169,7 @@ pub(super) fn register<'scope, 'r: 'scope>(
                         name,
                         body: format!("lua-call {id} %arg{{@}}"),
                         doc: Some(doc),
+                        slots,
                     })
                     .map_err(mlua::Error::runtime)
             },
@@ -170,4 +190,85 @@ pub(super) fn register<'scope, 'r: 'scope>(
 }
 fn context(mode: &str) -> mlua::Result<Context> {
     Context::parse(mode).ok_or_else(|| mlua::Error::runtime(format!("unknown mode: {mode}")))
+}
+/// The command a Lua hook runs: its function, with the event's parameter.
+fn hook_command(id: u64) -> String {
+    format!("lua-call {id} %val{{hook}}")
+}
+/// The argument places of a Lua command, from `args`: each a kind such as
+/// `"file"`, or a table with `name`, `kind` or `choices`, and `optional`.
+/// Commands live as long as the editor, so their slots are leaked once
+/// for each definition.
+fn slots(args: &Table) -> mlua::Result<&'static [crate::interaction::Slot]> {
+    use crate::interaction::{Choice, Slot, SlotKind};
+    let leak = |text: String| -> &'static str { Box::leak(text.into_boxed_str()) };
+    let kind = |name: &str| -> mlua::Result<SlotKind> {
+        Ok(match name {
+            "file" => SlotKind::File,
+            "path" => SlotKind::Path,
+            "buffer" => SlotKind::Buffer,
+            "option" => SlotKind::Option,
+            "face" => SlotKind::Face,
+            "language" => SlotKind::Language,
+            "recent" => SlotKind::Recent,
+            "word" => SlotKind::Word,
+            "rest" => SlotKind::Rest,
+            name => {
+                return Err(mlua::Error::runtime(format!(
+                    "unknown argument kind {name}: use file, path, buffer, option, face, language, recent, word, rest or choices"
+                )));
+            }
+        })
+    };
+    let mut out = vec![];
+    for arg in args.sequence_values::<Value>() {
+        let slot = match arg? {
+            Value::String(name) => {
+                let name = name.to_str()?.to_owned();
+                Slot {
+                    kind: kind(&name)?,
+                    name: leak(name.to_uppercase()),
+                    required: true,
+                }
+            }
+            Value::Table(arg) => {
+                let kind = match arg.get::<Option<Vec<Value>>>("choices")? {
+                    Some(choices) => {
+                        let choices = choices
+                            .into_iter()
+                            .map(|choice| {
+                                // A word, or `{ word, doc }`.
+                                let (word, doc) = match choice {
+                                    Value::Table(pair) => {
+                                        (pair.get(1)?, pair.get::<Option<String>>(2)?)
+                                    }
+                                    Value::String(word) => (word.to_str()?.to_owned(), None),
+                                    _ => {
+                                        return Err(mlua::Error::runtime(
+                                            "a choice is a word or { word, doc }",
+                                        ));
+                                    }
+                                };
+                                Ok(Choice {
+                                    word: leak(word),
+                                    key: None,
+                                    doc: leak(doc.unwrap_or_default()),
+                                })
+                            })
+                            .collect::<mlua::Result<Vec<_>>>()?;
+                        SlotKind::Choice(Box::leak(choices.into_boxed_slice()))
+                    }
+                    None => kind(&arg.get::<Option<String>>("kind")?.unwrap_or("rest".into()))?,
+                };
+                Slot {
+                    name: leak(arg.get::<Option<String>>("name")?.unwrap_or("ARG".into())),
+                    kind,
+                    required: !arg.get::<Option<bool>>("optional")?.unwrap_or(false),
+                }
+            }
+            _ => return Err(mlua::Error::runtime("an argument is a kind or a table")),
+        };
+        out.push(slot);
+    }
+    Ok(Box::leak(out.into_boxed_slice()))
 }

@@ -16,6 +16,8 @@ pub enum Face {
     Mark(u8),
     /// The underline of a note.
     Note(super::Severity),
+    /// Any face by its place in `faces::names`, for paints.
+    Named(u16),
 }
 pub const MARKS: u8 = 8;
 impl Face {

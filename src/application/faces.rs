@@ -96,6 +96,10 @@ pub fn names() -> impl Iterator<Item = String> {
             .map(|c| format!("syntax.{}", c.name())),
     )
 }
+/// A face's place among `names`, which `Face::Named` holds.
+pub fn index(name: &str) -> Option<u16> {
+    names().position(|known| known == name).map(|i| i as u16)
+}
 fn color(text: &str) -> Result<Color, String> {
     if text == "default" {
         return Ok(Color::Default);

@@ -10,6 +10,37 @@ pub(super) fn register<'scope, 'r: 'scope>(
     runtime: &'scope RefCell<&'r mut Runtime>,
 ) -> mlua::Result<()> {
     soda.set(
+        "paint",
+        scope.create_function(|_, (group, items): (String, Option<Vec<Table>>)| {
+            let paints = items
+                .unwrap_or_default()
+                .iter()
+                .map(|item| {
+                    let place = |name: &str| -> mlua::Result<(usize, usize)> {
+                        let [line, column]: [usize; 2] = item.get(name)?;
+                        Ok((line.saturating_sub(1), column.saturating_sub(1)))
+                    };
+                    let face: String = item.get("face")?;
+                    let face = crate::application::faces::index(&face)
+                        .map(crate::application::Face::Named)
+                        .ok_or_else(|| mlua::Error::runtime(format!("unknown face {face}")))?;
+                    Ok(crate::application::PaintSpan {
+                        start: place("from")?,
+                        end: place("to")?,
+                        face,
+                    })
+                })
+                .collect::<mlua::Result<Vec<_>>>()?;
+            let mut runtime = runtime.borrow_mut();
+            let document = runtime.document().map_err(mlua::Error::runtime)?;
+            runtime.edit_event(crate::application::Event::Paint {
+                document,
+                group,
+                paints,
+            })
+        })?,
+    )?;
+    soda.set(
         "flag",
         scope.create_function(
             |_, (group, face, sign, lines): (String, String, String, Vec<usize>)| {

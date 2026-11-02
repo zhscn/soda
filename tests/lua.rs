@@ -934,3 +934,136 @@ fn lua_lists_buffers_and_windows() {
     );
     assert!(!r.message().is_empty());
 }
+#[test]
+fn lua_hooks_come_off_by_their_number() {
+    let mut r = runtime();
+    lua(
+        &mut r,
+        r#"
+        count = 0
+        local mine = soda.hook("mode", ".*", function() count = count + 1 end)
+        soda.hook("mode", ".*", function() count = count + 100 end)
+        assert(soda.unhook(mine))
+        assert(not soda.unhook(mine))
+        "#,
+    );
+    keys(&mut r, "i<esc>");
+    lua(&mut r, "assert(count == 200, count)");
+}
+#[test]
+fn paints_color_ranges_and_move_with_the_text() {
+    let mut r = runtime();
+    lua(
+        &mut r,
+        r#"
+        soda.paint("test", { { from = { 2, 1 }, to = { 2, 4 }, face = "mark2" } })
+        assert(not pcall(soda.paint, "test", { { from = { 1, 1 }, to = { 1, 2 }, face = "nope" } }))
+        "#,
+    );
+    let document = r
+        .app()
+        .view(r.app().active_view().unwrap())
+        .unwrap()
+        .document_id;
+    let paints = r.app().paints(document);
+    assert_eq!(paints.len(), 1);
+    assert_eq!(paints[0].0, 4..7);
+    lua(&mut r, "soda.buffer():set_selection({ 1, 1 })");
+    r.command(Command::SetMode(EditMode::Insert));
+    r.input(UserInput::Paste("xx".into()));
+    assert_eq!(r.app().paints(document)[0].0, 6..9);
+    lua(&mut r, r#"soda.paint("test", {})"#);
+    assert!(r.app().paints(document).is_empty());
+}
+#[test]
+fn lua_commands_complete_their_arguments() {
+    let mut r = runtime();
+    lua(
+        &mut r,
+        r#"
+        soda.define_command("pick-side", "Pick a side", function(side) soda.message("took " .. side) end,
+          { args = { { name = "SIDE", choices = { { "left", "The left one" }, "right" } } } })
+        "#,
+    );
+    keys(&mut r, "<a-x>");
+    r.input(UserInput::Paste("pick-side r".into()));
+    keys(&mut r, "<tab>");
+    let shown = r.layer().map(|l| l.presentation().text);
+    keys(&mut r, "<ret>");
+    assert_eq!(r.message(), "took right", "{shown:?}");
+}
+#[test]
+fn lua_reads_the_clipboard_and_asks_for_text() {
+    let mut r = runtime();
+    lua(
+        &mut r,
+        r#"
+        soda.clipboard("copied")
+        assert(soda.clipboard() == "copied")
+        soda.input("Name?", "old", function(text) soda.message("got " .. text) end)
+        "#,
+    );
+    assert!(r.layer().is_some());
+    keys(&mut r, "<bs><bs><bs>");
+    r.input(UserInput::Paste("new".into()));
+    keys(&mut r, "<ret>");
+    assert_eq!(r.message(), "got new");
+}
+#[test]
+fn processes_stream_lines_take_options_and_can_be_killed() {
+    let mut r = runtime();
+    lua(
+        &mut r,
+        r#"
+        got = {}
+        soda.spawn({ "sh", "-c", "echo one; echo $WHO; pwd; echo bad >&2; cat" }, function(code, out, err)
+          table.insert(got, "done " .. tostring(code) .. " [" .. out .. "] " .. err)
+        end, {
+          input = "fed\n",
+          cwd = "tmp",
+          env = { WHO = "two" },
+          stdout = function(line) table.insert(got, line) end,
+        })
+        sleeper = soda.spawn({ "sleep", "30" }, function(code) slept = tostring(code) end)
+        assert(soda.kill(sleeper))
+        assert(not soda.kill(12345))
+        "#,
+    );
+    for _ in 0..1000 {
+        r.poll();
+        if r.source_lua("done", "assert(#got >= 5 and slept)").is_ok() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    lua(
+        &mut r,
+        r#"
+        local text = table.concat(got, "|")
+        assert(text == "one|two|/tmp|fed|done 0 [] bad\n", text)
+        -- Stopped by a signal, so there is no exit code.
+        assert(slept == "nil", slept)
+        "#,
+    );
+}
+#[test]
+fn lua_sets_status_line_segments() {
+    let mut r = runtime();
+    lua(
+        &mut r,
+        r#"
+        soda.status("git", "main", "info")
+        soda.status("count", "3")
+        soda.status("git", "dev")
+        assert(not pcall(soda.status, "x", "y", "nope"))
+        "#,
+    );
+    let segments: Vec<_> = r
+        .status_segments()
+        .iter()
+        .map(|(name, text, _)| format!("{name}={text}"))
+        .collect();
+    assert_eq!(segments, ["git=dev", "count=3"]);
+    lua(&mut r, r#"soda.status("git", nil)"#);
+    assert_eq!(r.status_segments().len(), 1);
+}

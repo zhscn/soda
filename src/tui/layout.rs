@@ -794,6 +794,7 @@ pub(super) fn frame(
     let patterns: Vec<_> = app.highlights(view.document_id).collect();
     let flags = app.flags(view.document_id);
     let notes = app.notes(view.document_id);
+    let paints = app.paints(view.document_id);
     let mut text = std::borrow::Cow::Borrowed("");
     for ((number, row), segment) in &shown {
         let number = *number;
@@ -810,8 +811,13 @@ pub(super) fn frame(
             })
             .collect();
         faces.sort_by_key(|(range, _)| range.start);
-        // Last, so the worst note's underline wins over everything else.
         let start = snapshot.line_start(number).unwrap();
+        faces.extend(paints.iter().filter_map(|(range, face)| {
+            let from = range.start.max(start) - start;
+            let to = range.end.min(start + text.len()).checked_sub(start)?;
+            (from < to).then_some((from..to, *face))
+        }));
+        // Last, so the worst note's underline wins over everything else.
         faces.extend(notes.iter().filter_map(|note| {
             let from = note.range.start.max(start) - start;
             let to = note.range.end.min(start + text.len()).checked_sub(start)?;

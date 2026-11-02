@@ -996,6 +996,7 @@ pub static BUILTINS: &[Builtin] = &[
                 name: required(name)?,
                 body: required(body)?,
                 doc: None,
+                slots: None,
             })
         }
     ),
@@ -1282,6 +1283,15 @@ pub static BUILTINS: &[Builtin] = &[
         }
     ),
     builtin!(
+        "answer",
+        [Slot {
+            required: false,
+            ..slot("TEXT", SlotKind::Rest)
+        }],
+        "Answer the line of text a Lua extension asked for",
+        |a| Ok(Command::Answer(a.to_owned()))
+    ),
+    builtin!(
         "lua-call",
         [
             slot("ID", SlotKind::Word),
@@ -1354,6 +1364,7 @@ enum Entry {
     User {
         body: String,
         doc: Option<String>,
+        slots: Option<&'static [Slot]>,
     },
 }
 /// A command name with its signature and documentation, for help and the
@@ -1480,11 +1491,12 @@ impl Registry {
         name: String,
         body: String,
         doc: Option<String>,
+        slots: Option<&'static [Slot]>,
     ) -> Result<(), String> {
         if reserved(&name) {
             return Err(format!("{name} is a built-in command"));
         }
-        self.entries.insert(name, Entry::User { body, doc });
+        self.entries.insert(name, Entry::User { body, doc, slots });
         Ok(())
     }
     /// Parses a line naming only built-in commands; used for default tables.
@@ -1573,9 +1585,9 @@ impl Registry {
                 doc: "Registered command".into(),
                 builtin: None,
             },
-            Entry::User { body, doc } => CommandInfo {
+            Entry::User { body, doc, slots } => CommandInfo {
                 name: name.clone(),
-                slots: ARGUMENTS,
+                slots: slots.unwrap_or(ARGUMENTS),
                 doc: doc.clone().unwrap_or_else(|| body.clone()),
                 builtin: None,
             },
@@ -1598,7 +1610,7 @@ impl Registry {
             return (*doc).into();
         }
         match self.entries.get(name) {
-            Some(Entry::User { body, doc }) => doc.clone().unwrap_or_else(|| body.clone()),
+            Some(Entry::User { body, doc, .. }) => doc.clone().unwrap_or_else(|| body.clone()),
             Some(Entry::Native(_)) => "Registered command".into(),
             None => String::new(),
         }

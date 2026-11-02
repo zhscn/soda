@@ -51,6 +51,9 @@ pub enum Command {
         body: String,
         /// What help and key hints show; `None` shows the body.
         doc: Option<String>,
+        /// What the command line completes its arguments as; `None` takes
+        /// them as text.
+        slots: Option<&'static [super::Slot]>,
     },
     Hook {
         event: &'static str,
@@ -124,6 +127,15 @@ pub enum Command {
     },
     /// Answers `Offer` with an item, from one.
     Choose(usize),
+    /// Asks for a line of text; `Answer` gives it to the Lua function
+    /// under `id`.
+    Question {
+        id: u64,
+        title: String,
+        initial: String,
+    },
+    /// Answers `Question`.
+    Answer(String),
     /// Runs Lua code.
     Lua(String),
     /// Calls a Lua function registered under an id, with one argument.
@@ -363,7 +375,12 @@ impl Layers {
                 .keymap
                 .unbind(context, &keys)
                 .map_err(|e| e.to_string()),
-            Command::Define { name, body, doc } => self.registry.define(name, body, doc),
+            Command::Define {
+                name,
+                body,
+                doc,
+                slots,
+            } => self.registry.define(name, body, doc, slots),
             Command::Hook {
                 event,
                 filter,
@@ -895,6 +912,16 @@ impl Layers {
                 let ask = Command::Ask { line, note: title };
                 return self.execute(ask, app, time, file_root);
             }
+            Command::Question { id, title, initial } => {
+                self.question = Some(id);
+                let line = format!("answer {initial}");
+                let ask = Command::Ask { line, note: title };
+                return self.execute(ask, app, time, file_root);
+            }
+            Command::Answer(argument) => match self.question.take() {
+                Some(id) => response.lua.push(super::LuaRequest::Call { id, argument }),
+                None => response.message = Message::Set("Nothing to answer".into()),
+            },
             Command::Choose(index) => match self.offer.take() {
                 Some((id, items)) if (1..=items.len()).contains(&index) => {
                     let argument = index.to_string();

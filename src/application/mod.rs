@@ -23,6 +23,8 @@ mod flags;
 mod highlights;
 mod inlays;
 mod notes;
+mod paints;
+pub use paints::PaintSpan;
 mod tidy;
 mod tokens;
 pub use flags::Flag;
@@ -217,6 +219,12 @@ pub enum Event {
         document: DocumentId,
         hints: Vec<(usize, usize, String)>,
     },
+    /// Replaces a group's paints on a document; none remove the group.
+    Paint {
+        document: DocumentId,
+        group: String,
+        paints: Vec<PaintSpan>,
+    },
     /// Replaces a group's notes on a document.
     Note {
         document: DocumentId,
@@ -405,6 +413,7 @@ pub struct Application {
     grep_pattern: Option<(DocumentId, regex::Regex)>,
     flags: flags::Flags,
     notes: notes::Notes,
+    paints: paints::Paints,
     /// Words at the end of a line, until the next key.
     indicator: Option<(DocumentId, usize, String)>,
     tokens: tokens::Tokens,
@@ -532,6 +541,12 @@ impl Application {
         self.workspace
             .editor(document)
             .map_or_else(Vec::new, |editor| self.inlays.of(editor.model().document()))
+    }
+    /// A document's painted ranges and their faces.
+    pub fn paints(&self, document: DocumentId) -> Vec<(std::ops::Range<usize>, Face)> {
+        self.workspace
+            .editor(document)
+            .map_or_else(Vec::new, |editor| self.paints.of(editor.model().document()))
     }
     /// A document's notes, the least severe first.
     pub fn notes(&self, document: DocumentId) -> Vec<Note<'_>> {
@@ -736,6 +751,7 @@ impl Application {
             }
             self.flags.map(change);
             self.notes.map(change);
+            self.paints.map(change);
             self.tokens.map(change);
             self.inlays.map(change);
             for view in self
@@ -1110,6 +1126,7 @@ impl Application {
                 self.highlights.forget(document);
                 self.flags.forget(document);
                 self.notes.forget(document);
+                self.paints.forget(document);
                 self.tokens.forget(document);
                 self.inlays.forget(document);
                 self.repair_windows();
@@ -1352,6 +1369,18 @@ impl Application {
                     .editor(document)
                     .ok_or(FileError::UnknownDocument)?;
                 self.inlays.set(editor.model().document(), hints);
+                update.options_changed = true;
+            }
+            Event::Paint {
+                document,
+                group,
+                paints,
+            } => {
+                let editor = self
+                    .workspace
+                    .editor(document)
+                    .ok_or(FileError::UnknownDocument)?;
+                self.paints.set(editor.model().document(), &group, paints);
                 update.options_changed = true;
             }
             Event::Note {

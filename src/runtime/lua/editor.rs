@@ -12,6 +12,47 @@ pub(super) fn register<'scope, 'r: 'scope>(
     host: &'scope Host,
 ) -> mlua::Result<()> {
     soda.set(
+        "status",
+        scope.create_function(
+            |_, (name, text, face): (String, Option<String>, Option<String>)| {
+                let face = face
+                    .map(|face| {
+                        crate::application::faces::index(&face)
+                            .map(crate::application::Face::Named)
+                            .ok_or_else(|| mlua::Error::runtime(format!("unknown face {face}")))
+                    })
+                    .transpose()?;
+                let mut runtime = runtime.borrow_mut();
+                let segments = &mut runtime.status;
+                let at = segments.iter().position(|(known, ..)| *known == name);
+                match (at, text.filter(|text| !text.is_empty())) {
+                    (Some(at), Some(text)) => segments[at] = (name, text, face),
+                    (None, Some(text)) => segments.push((name, text, face)),
+                    (Some(at), None) => {
+                        segments.remove(at);
+                    }
+                    (None, None) => {}
+                }
+                runtime.dirty = true;
+                Ok(())
+            },
+        )?,
+    )?;
+    soda.set(
+        "input",
+        scope.create_function(
+            |_, (title, initial, function): (String, Option<String>, Function)| {
+                let id = host.keep(function)?;
+                runtime.borrow_mut().command(Command::Question {
+                    id,
+                    title,
+                    initial: initial.unwrap_or_default(),
+                });
+                Ok(())
+            },
+        )?,
+    )?;
+    soda.set(
         "defer",
         scope.create_function(|_, (ms, function): (u64, Function)| {
             let id = host.keep(function)?;
@@ -218,10 +259,18 @@ pub(super) fn register<'scope, 'r: 'scope>(
     )?;
     soda.set(
         "clipboard",
-        scope.create_function(|_, text: String| {
-            runtime
-                .borrow_mut()
-                .edit_event(crate::application::Event::SetClipboard(text))
+        scope.create_function(|_, text: Option<String>| {
+            let mut runtime = runtime.borrow_mut();
+            match text {
+                Some(text) => runtime
+                    .edit_event(crate::application::Event::SetClipboard(text))
+                    .map(|()| None),
+                // Without text, what a paste would put in.
+                None => {
+                    runtime.load_clipboard();
+                    Ok(Some(runtime.app.clipboard().to_owned()))
+                }
+            }
         })?,
     )?;
     soda.set(
@@ -240,24 +289,73 @@ pub(super) fn register<'scope, 'r: 'scope>(
     soda.set(
         "spawn",
         scope.create_function(
-            |_, (argv, function, input): (Vec<String>, Function, Option<String>)| {
+            |_, (argv, function, options): (Vec<String>, Function, Value)| {
                 if argv.is_empty() {
                     return Err(mlua::Error::runtime("soda.spawn needs a program"));
                 }
-                let id = host.keep(function)?;
                 let (root, view) = {
                     let runtime = runtime.borrow();
                     (runtime.app.root(), runtime.app.active_view())
                 };
+                let mut spawn = super::Spawn {
+                    argv,
+                    cwd: root.clone(),
+                    env: vec![],
+                    input: None,
+                    lines: [None, None],
+                };
+                match options {
+                    Value::Nil => {}
+                    // The input alone, as before options.
+                    Value::String(input) => spawn.input = Some(input.to_str()?.to_owned()),
+                    Value::Table(options) => {
+                        spawn.input = options.get("input")?;
+                        if let Some(cwd) = options.get::<Option<String>>("cwd")? {
+                            spawn.cwd = root.join(cwd);
+                        }
+                        if let Some(env) = options.get::<Option<Table>>("env")? {
+                            for pair in env.pairs::<String, String>() {
+                                spawn.env.push(pair?);
+                            }
+                        }
+                        for (slot, stream) in spawn.lines.iter_mut().zip(["stdout", "stderr"]) {
+                            if let Some(function) = options.get::<Option<Function>>(stream)? {
+                                *slot = Some(host.keep(function)?);
+                            }
+                        }
+                    }
+                    _ => {
+                        return Err(mlua::Error::runtime(
+                            "soda.spawn takes input text or a table of options",
+                        ));
+                    }
+                }
+                let id = host.keep(function)?;
                 let sender = host.jobs.0.clone();
+                let children = host.children.clone();
+                children.lock().unwrap().insert(id, super::Child::Starting);
                 std::thread::spawn(move || {
-                    let mut job = super::spawn(id, &argv, &root, input);
-                    job.view = view;
-                    let _ = sender.send(job);
+                    let job = super::spawn(id, spawn, &sender, view, &children);
+                    let _ = sender.send((super::Message::Done(job), view));
                 });
-                Ok(())
+                Ok(id)
             },
         )?,
+    )?;
+    soda.set(
+        "kill",
+        scope.create_function(|_, id: u64| {
+            let mut children = host.children.lock().unwrap();
+            let Some(child) = children.get_mut(&id) else {
+                return Ok(false);
+            };
+            match *child {
+                super::Child::Running(pid) => crate::runtime::process::terminate(pid),
+                super::Child::Starting => *child = super::Child::Killed,
+                super::Child::Killed => {}
+            }
+            Ok(true)
+        })?,
     )?;
     Ok(())
 }

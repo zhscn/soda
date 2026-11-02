@@ -100,6 +100,8 @@ pub struct Runtime {
     /// Text in a box by the caret, until the next input.
     /// Words for the message row while it has no message, until replaced.
     hint: Option<String>,
+    /// Status line segments extensions set: name, text and face.
+    status: Vec<(String, String, Option<crate::application::Face>)>,
     popup: Option<String>,
     /// How many lines of the popup are scrolled past; drawing keeps it in
     /// range, since only drawing knows how the text wraps.
@@ -163,6 +165,7 @@ impl Runtime {
             dirty: true,
             hints_until: None,
             hint: None,
+            status: vec![],
             popup: None,
             popup_scroll: Default::default(),
             popup_page: Default::default(),
@@ -356,6 +359,10 @@ impl Runtime {
         self.lsp.enable();
     }
     /// The list of candidates to show under the caret.
+    /// Status line segments in the order they were first set.
+    pub fn status_segments(&self) -> &[(String, String, Option<crate::application::Face>)] {
+        &self.status
+    }
     pub fn hint(&self) -> Option<&str> {
         self.hint.as_deref()
     }

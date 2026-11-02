@@ -35,6 +35,12 @@ impl Hooks {
             .retain(|hook| hook.event != event || filter.is_some_and(|f| f != hook.filter));
         before - self.0.len()
     }
+    /// Removes the hooks that run exactly this command; whether any went.
+    pub(super) fn remove_command(&mut self, command: &str) -> bool {
+        let before = self.0.len();
+        self.0.retain(|hook| hook.command != command);
+        self.0.len() != before
+    }
     pub fn matching(&self, event: &str, parameter: &str) -> Vec<String> {
         self.0
             .iter()

@@ -120,21 +120,40 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `soda.message(text)` | 设置状态消息 |
 | `soda.flag(group, face, sign, lines)` / `soda.unflag([group])` | 行标记，`lines` 是从 1 开始的行号数组；`unflag` 没有标记可去时不报错 |
 | `soda.hint(text)` | 消息行没有消息时显示的文字，一直保留到下一次调用；`nil` 清除 |
+| `soda.status(name, text, [face])` | 状态栏右侧的一段文字，按名字替换，按第一次设置的顺序排列；`text` 为 nil 或空时去掉。`face` 是任一 face 名 |
 | `soda.indicator(line, text)` | 在当前文档第 `line` 行的行尾显示文字，下一个按键清除 |
 | `soda.keys(notation)` | 按键记法输入按键，如 `soda.keys("foo<ret>")`，走和键盘一样的路径 |
 | `soda.prompt(text)` | 打开命令行并预填 `text` |
+| `soda.input(title, [initial], fn)` | 在命令行里要一行文字，预填 `initial`，回车后以这行文字调用 `fn`；取消时不调用 |
 | `soda.choose(title, items, fn)` | 在命令行里从 `items` 中选一项，输入过滤，选中后以从 1 起的序号调用 `fn`；取消时不调用 |
-| `soda.hook(event, filter, fn)` | 事件发生时以事件参数调用 `fn` |
-| `soda.define_command(name, [doc], fn)` | 定义命令，调用时把参数文本整体传给 `fn`；`doc` 是一句说明，按键提示、帮助和命令补全显示它，省略时显示命令名 |
+| `soda.hook(event, filter, fn)` | 事件发生时以事件参数调用 `fn`，返回编号 |
+| `soda.unhook(id)` | 去掉 `soda.hook` 加的这一个钩子，返回是否去掉了；同一事件的其他钩子不受影响 |
+| `soda.define_command(name, [doc], fn, [options])` | 定义命令，调用时把参数文本整体传给 `fn`；`doc` 是一句说明，按键提示、帮助和命令补全显示它，省略时显示命令名。`options.args` 声明参数位，命令行按它补全，见下文 |
 | `soda.results(kind, lines)` | 把结果行写入 `*kind*` 并设为最近的结果，回车和 `M-g n`/`M-g p` 与 `grep`、`run` 的结果相同；`lines` 可以是 `路径:行:列:` 行，或文件名行加缩进的 `行:列  文本` 分组行；其他行留作标题，一个位置都没有时只显示消息 |
 | `soda.open(path, [line], [column])` | 打开文件并放置光标，行列从 1 开始，列按字节；打开是异步的，文件内容要在之后的请求里读 |
-| `soda.clipboard(text)` | 替换剪贴板内容，与编辑器自己的复制一样同步到系统剪贴板 |
-| `soda.spawn(argv, fn, [input])` | 在项目根目录后台运行程序（不经过 shell），结束后调用 `fn(code, stdout, stderr)`；`input` 写入标准输入 |
+| `soda.clipboard([text])` | 带文字时替换剪贴板内容，与编辑器自己的复制一样同步到系统剪贴板；不带时返回粘贴会用的内容，先读系统剪贴板 |
+| `soda.spawn(argv, fn, [options])` | 后台运行程序（不经过 shell），结束后调用 `fn(code, stdout, stderr)`，返回编号；见下文 |
+| `soda.kill(id)` | 停止 `soda.spawn` 启动的进程及其子进程，返回它是否还在运行 |
 | `soda.popup(text)` | 在光标旁的浮窗里显示文字，下一个按键关闭 |
+| `soda.paint(group, items)` | 给当前文档的一组范围上色：`{from, to, face}`，位置同文档句柄，`face` 是任一 face 名；同组再调用时替换，空表去掉这一组。范围随编辑移动 |
 | `soda.note(group, items)` | 给当前文档的一组范围加注（诊断）：`{from, to, severity, text}`，位置同文档句柄 |
 | `soda.tokens(data, names)` / `soda.inlays(items)` | 语义高亮和 inlay hint，供 LSP 模块使用，见[语言服务器](lsp.md) |
 | `soda.completion.register(source)` | 注册补全来源，见[补全](completion.md) |
 | `soda.lsp.*` | 语言服务器接口，见[语言服务器](lsp.md) |
+
+`soda.define_command` 的 `options.args` 是参数位的数组，每一项是一种类型，或者一个表：
+- 类型：`file`（项目文件）、`path`、`buffer`、`option`、`face`、`language`、`recent`、`word`、`rest`；写成字符串时参数位必填，名字是类型的大写。
+- 表：`{ name = "SIDE", choices = { { "left", "说明" }, "right" }, optional = true }`，或者 `{ name = "FILE", kind = "file" }`。`choices` 的每一项是词，或者词加说明；补全时只能从中选。
+
+最后一个参数位取到行尾，前面的取一个词；参数文本仍然整体交给函数。
+
+`soda.spawn` 的第三个参数可以是写入标准输入的文字，也可以是选项表：
+- `input`：写入标准输入的文字。
+- `cwd`：工作目录，相对路径从项目根目录算起；默认是项目根目录。
+- `env`：加上的环境变量，`{ NAME = "value" }`。
+- `stdout`、`stderr`：每一行输出到来时以这一行（不含换行）调用的函数，在结束函数之前按顺序调用；给了的流不再交给结束函数，结束函数里它是空字符串。
+
+进程在自己的进程组里运行，`soda.kill` 停掉整个组；被信号停止的进程，结束函数收到的 `code` 是 nil。
 
 模块的选项用 `soda.declare_option(name, spec)` 声明，之后与内置选项一样可以 `set`、`set-local`、`%opt{}` 和补全。类型由 `spec.default` 决定：布尔；整数，可以给 `min`、`max`；字符串时必须给 `choices`，取值只能是其中之一。`spec.doc` 是说明。同样的声明重复执行没有影响，换一种声明报错；不能声明内置选项的名字。选项名只能用小写字母、数字和 `-`。
 
