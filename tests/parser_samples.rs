@@ -132,3 +132,22 @@ fn roles_recover_macros_lambdas_templates_and_struct_initializers() {
         );
     }
 }
+#[test]
+fn using_directives_open_no_namespace() {
+    for source in [
+        "using namespace clang;\nint x;\n",
+        "using namespace llvm::omp;\n",
+        "void f() {\n  using namespace std;\n  g();\n}\n",
+    ] {
+        let tree = parse(source);
+        assert!(
+            tree.nodes().iter().all(|n| !n.incomplete && n.kind != NodeKind::NamespaceDecl),
+            "{source:?}: {:?}",
+            tree.nodes()
+        );
+    }
+    // A namespace still opens after a using declaration ends.
+    let tree = parse("using std::string;\nnamespace a {\nint x;\n}\n");
+    assert!(tree.nodes().iter().any(|n| n.kind == NodeKind::NamespaceBody));
+    assert!(tree.nodes().iter().all(|n| !n.incomplete));
+}

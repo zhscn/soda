@@ -132,12 +132,42 @@ pub(crate) fn reparse(old: &SyntaxTree, source: Arc<str>) -> (SyntaxTree, Analys
             }
         }
     }
-    let safe_root = !old.nodes.iter().any(|n| n.incomplete)
-        && !old
-            .tokens
+    // Items at file scope resume like those of a container. The parser keeps
+    // no directive state but conditional frames, so a file without them is
+    // safe, as long as the edit leaves every directive as it was. Unfinished
+    // items elsewhere do not matter: resumption happens only after an item
+    // that ends in `;` or `}`, and new items that are unfinished fail it.
+    let conditional = |source: &str, tokens: &[Token]| {
+        tokens.iter().enumerate().any(|(index, token)| {
+            token.kind == K::PreprocessorHash
+                && matches!(
+                    super::super::preprocessor::keyword(source, tokens, index),
+                    Some(
+                        "if" | "ifdef"
+                            | "ifndef"
+                            | "else"
+                            | "elif"
+                            | "elifdef"
+                            | "elifndef"
+                            | "endif"
+                    )
+                )
+        })
+    };
+    let touched = |tokens: &[Token], changed: std::ops::Range<usize>| {
+        tokens
             .iter()
-            .chain(&parser.tree.tokens)
-            .any(|t| t.preprocessor);
+            .skip_while(|t| t.range.end < changed.start)
+            .take_while(|t| t.range.start <= changed.end)
+            .any(|t| t.preprocessor)
+    };
+    let scanned = relexed.scanned.clone();
+    let growth = source.len() as isize - old.source.len() as isize;
+    let old_scanned = scanned.start..scanned.end.saturating_add_signed(-growth);
+    let safe_root = !touched(&old.tokens, old_scanned)
+        && !touched(&parser.tree.tokens, scanned)
+        && !conditional(&old.source, &old.tokens)
+        && !conditional(&source, &parser.tree.tokens);
     if safe_root {
         match super::container::repair(old, &mut parser, 0, damage, relexed.unchanged_suffix) {
             Ok((count, reused)) => {
@@ -557,5 +587,29 @@ mod tests {
             assert_eq!(work.strategy, ParseStrategy::Full, "{work:?}");
             assert!(work.fallback.is_some());
         }
+    }
+
+    #[test]
+    fn file_scope_edits_resume_items_unless_directives_could_change() {
+        let source = "#include <a>\n#define TWICE(x) ((x) * 2)\n\nint f();\nint g() { return 1; }\nstruct S { int a; };\n";
+        let edit = |source: &str, needle: &str, replacement: &str| {
+            let (tree, work) = reparse(
+                &parse(source),
+                source.replacen(needle, replacement, 1).into(),
+            );
+            assert_full(&tree);
+            work
+        };
+        // Items around includes and macros resume where they were.
+        let work = edit(source, "int f();", "int f(int);\nlong h();");
+        assert_eq!(work.strategy, ParseStrategy::Declarations, "{work:?}");
+        // An edit to a directive analyses the whole file again.
+        let work = edit(source, "* 2)", "* 3)");
+        assert_eq!(work.strategy, ParseStrategy::Full, "{work:?}");
+        assert_eq!(work.fallback, Some(AnalysisFallback::PreprocessorContext));
+        // So does any edit at file scope while conditionals choose branches.
+        let guarded = format!("#ifndef A\n#define A\n{source}#endif\n");
+        let work = edit(&guarded, "int f();", "int f(int);\nlong h();");
+        assert_eq!(work.strategy, ParseStrategy::Full, "{work:?}");
     }
 }

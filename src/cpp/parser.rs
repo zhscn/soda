@@ -986,7 +986,13 @@ impl Parser {
                 break;
             }
             if k.sync() {
-                if k == K::DefaultKw && prev == K::Equals {
+                // `using namespace std;` names a namespace, opening none.
+                let using = k == K::NamespaceKw
+                    && self.tree.tokens[..self.pos]
+                        .iter()
+                        .rposition(|t| !t.kind.is_trivia())
+                        .is_some_and(|before| self.text(before) == "using");
+                if (k == K::DefaultKw && prev == K::Equals) || using {
                     self.advance();
                     prev = k;
                     continue;
