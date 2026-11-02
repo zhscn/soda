@@ -764,3 +764,21 @@ mod bundled {
         );
     }
 }
+#[test]
+fn lua_that_runs_too_long_is_stopped_and_lua_goes_on() {
+    let mut r = runtime();
+    for code in [
+        "while true do end",
+        // Catching the stop does not keep the loop going.
+        "while true do pcall(function() while true do end end) end",
+        "while true do coroutine.resume(coroutine.create(function() while true do end end)) end",
+    ] {
+        let started = std::time::Instant::now();
+        let error = r.source_lua("test", code).unwrap_err();
+        assert!(error.contains("stopped after"), "{code}: {error}");
+        assert!(started.elapsed() < Duration::from_secs(10), "{code}");
+    }
+    // The next request has its own time.
+    lua(&mut r, "local ok = pcall(error, 'x'); soda.message(tostring(ok))");
+    assert_eq!(r.message(), "false");
+}

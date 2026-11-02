@@ -103,6 +103,8 @@ impl Terminal {
 /// How often the watch on the terminal looks.
 #[cfg(unix)]
 const HANGUP_CHECK: Duration = Duration::from_millis(100);
+/// The longest input goes on being read before a frame shows its effect.
+const INPUT_BURST: Duration = Duration::from_millis(30);
 /// Ends the event loop when the terminal goes away, as a hangup signal
 /// would. It has to come from outside the loop: reading a hung-up terminal
 /// returns nothing instead of failing, and crossterm reads again forever,
@@ -381,16 +383,31 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
             }
             // While highlighting catches up, check for input without waiting.
             let wait = Duration::from_millis(if catching_up { 0 } else { 30 });
+            let mut suspend = false;
             if !runtime.quit_requested() && event::poll(wait)? {
-                match event::read()? {
-                    event::Event::Mouse(event) => {
-                        let areas = view::Areas::new(&runtime, width, height);
-                        mouse.handle(event, &mut runtime, &areas);
+                // Everything that has arrived goes in before the next frame,
+                // so keys typed or repeated faster than frames draw do not
+                // queue up behind them; a long burst still shows progress.
+                let started = std::time::Instant::now();
+                loop {
+                    match event::read()? {
+                        event::Event::Mouse(event) => {
+                            let areas = view::Areas::new(&runtime, width, height);
+                            mouse.handle(event, &mut runtime, &areas);
+                        }
+                        event => runtime.input(input::normalize(event)),
                     }
-                    event => runtime.input(input::normalize(event)),
+                    suspend = runtime.take_suspend();
+                    if suspend
+                        || runtime.quit_requested()
+                        || started.elapsed() >= INPUT_BURST
+                        || !event::poll(Duration::ZERO)?
+                    {
+                        break;
+                    }
                 }
             }
-            if runtime.take_suspend() {
+            if suspend || runtime.take_suspend() {
                 screen.suspend()?;
                 // The shell drew over the screen; paint all of it again.
                 terminal.clear()?;

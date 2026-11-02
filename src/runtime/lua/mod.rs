@@ -169,10 +169,51 @@ pub(super) struct Host {
     next: Cell<u64>,
     jobs: (Sender<Job>, Receiver<Job>),
     answers: (Sender<Answer>, Receiver<Answer>),
+    /// When the request running now has to stop.
+    deadline: std::rc::Rc<Cell<Option<std::time::Instant>>>,
 }
+/// How long one request may run. Lua runs on the editor's thread, so a
+/// loop that does not end would hold the editor for good; past this every
+/// instruction count check fails, so a `pcall` cannot keep it going.
+const LUA_LIMIT: std::time::Duration = std::time::Duration::from_secs(3);
 impl Host {
     fn new() -> mlua::Result<Self> {
         let lua = Lua::new();
+        let deadline = std::rc::Rc::new(Cell::new(None::<std::time::Instant>));
+        let due = deadline.clone();
+        lua.set_global_hook(
+            mlua::HookTriggers::new().every_nth_instruction(10_000),
+            move |_, _| match due.get() {
+                Some(at) if std::time::Instant::now() > at => Err(mlua::Error::runtime(format!(
+                    "stopped after {} s; does a loop never end?",
+                    LUA_LIMIT.as_secs()
+                ))),
+                _ => Ok(mlua::VmState::Continue),
+            },
+        )?;
+        // Errors a request's time ran out with go on through `pcall` and its
+        // kind, so that catching them does not keep a loop going.
+        let due = deadline.clone();
+        let over = lua.create_function(move |_, ()| {
+            Ok(due.get().is_some_and(|at| std::time::Instant::now() > at))
+        })?;
+        lua.load(
+            r#"
+            local over = ...
+            local function pass(ok, ...)
+              if not ok and over() then
+                error((...), 0)
+              end
+              return ok, ...
+            end
+            local pcall, xpcall, resume = pcall, xpcall, coroutine.resume
+            _G.pcall = function(...) return pass(pcall(...)) end
+            _G.xpcall = function(...) return pass(xpcall(...)) end
+            coroutine.resume = function(...) return pass(resume(...)) end
+            "#,
+        )
+        .set_name("soda limit")
+        .call::<()>(over)?;
         lua.set_named_registry_value(CALLBACKS, lua.create_table()?)?;
         let current =
             lua.create_function(|lua, ()| lua.named_registry_value::<Value>(IMPLEMENTATION))?;
@@ -187,6 +228,7 @@ impl Host {
             next: Cell::new(1),
             jobs: channel(),
             answers: channel(),
+            deadline,
         })
     }
     /// Calls a source with what it is asked and a sink for its answer. The
@@ -243,6 +285,13 @@ impl Host {
     }
     /// Runs one request with the `soda` functions lent the runtime.
     fn run(&self, runtime: &mut Runtime, request: Request) -> mlua::Result<()> {
+        self.deadline
+            .set(Some(std::time::Instant::now() + LUA_LIMIT));
+        let result = self.request(runtime, request);
+        self.deadline.set(None);
+        result
+    }
+    fn request(&self, runtime: &mut Runtime, request: Request) -> mlua::Result<()> {
         let lua = &self.lua;
         let runtime = RefCell::new(runtime);
         let edited = buffer::Edited::default();
