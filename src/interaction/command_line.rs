@@ -87,6 +87,10 @@ pub struct CommandLine {
     recent: Vec<PathBuf>,
     /// The items of an `Item` slot.
     items: Vec<String>,
+    /// The rows are those of the last input, kept in view while the worker
+    /// answers this one, so the list does not blink at each key. They can
+    /// be looked at and not chosen.
+    stale: bool,
 }
 fn row(
     key: u64,
@@ -146,6 +150,28 @@ fn split_path(text: &str) -> (&str, &str) {
 pub(super) fn buffer_name(app: &Application, document: crate::editor::DocumentId) -> String {
     app.document_name(document)
 }
+/// How a file name answers typed text, after orderless: each word separated
+/// by spaces appears somewhere, in any order, and case counts only if the
+/// text has capitals. Gives whether the name begins with the text, and the
+/// ranges that matched.
+fn name_match(name: &str, text: &str) -> Option<(bool, Vec<Range<usize>>)> {
+    let exact = text.chars().any(char::is_uppercase);
+    let fold = |text: &str| {
+        if exact {
+            text.to_owned()
+        } else {
+            text.to_ascii_lowercase()
+        }
+    };
+    let (folded, wanted) = (fold(name), fold(text));
+    let mut ranges = vec![];
+    for word in wanted.split_whitespace() {
+        let at = folded.find(word)?;
+        ranges.push(at..at + word.len());
+    }
+    let leading = folded.starts_with(wanted.trim_start());
+    Some((leading, ranges))
+}
 fn printable(text: &str) -> String {
     text.chars()
         .map(|c| if c.is_control() { '�' } else { c })
@@ -179,6 +205,7 @@ impl CommandLine {
             matcher: Matcher::new(Config::DEFAULT),
             recent: vec![],
             items: vec![],
+            stale: false,
         }
     }
     /// Recently used files for a `recent` slot, newest first.
@@ -340,6 +367,19 @@ impl CommandLine {
                 Target::Slot(SlotKind::Word | SlotKind::Rest) => vec![],
             },
         };
+        let same_list = self.query.as_ref().map(|q| q.target) == query.as_ref().map(|q| q.target);
+        if rows.is_empty() && !self.rows.is_empty() && same_list && self.waiting(&query) {
+            // New input forgets the choice, as it does with fresh rows.
+            if restart {
+                self.list.reset();
+                self.list.update(&[], &self.rows);
+            }
+            self.stale = true;
+            self.query = query;
+            response.redraw = true;
+            return response;
+        }
+        self.stale = false;
         let changed = self.rows.len() != rows.len()
             || self.rows.iter().zip(&rows).any(|(old, new)| {
                 old.candidate.key != new.candidate.key || old.candidate.label != new.candidate.label
@@ -439,11 +479,10 @@ impl CommandLine {
         let Some(entries) = self.directory.as_ref().and_then(|d| d.entries.as_ref()) else {
             return vec![];
         };
-        entries
+        let mut matched: Vec<_> = entries
             .iter()
             .enumerate()
-            .filter(|(_, entry)| entry.name.to_string_lossy().starts_with(prefix))
-            .map(|(index, entry)| {
+            .filter_map(|(index, entry)| {
                 let slash = if entry.directory { "/" } else { "" };
                 let replacement = entry
                     .name
@@ -451,13 +490,14 @@ impl CommandLine {
                     .filter(|name| !name.chars().any(char::is_control))
                     .map(|name| format!("{parent}{name}{slash}"));
                 let label = format!("{}{slash}", printable(&entry.name.to_string_lossy()));
-                // Names filter by prefix, so the prefix is what matched.
-                let typed =
-                    (!prefix.is_empty() && label.starts_with(prefix)).then_some(0..prefix.len());
+                let (leading, typed) = name_match(&label, prefix)?;
                 let row = row(index as u64, label, replacement, entry.directory);
-                mark(row, typed.into_iter().collect(), None)
+                Some((leading, mark(row, typed, None)))
             })
-            .collect()
+            .collect();
+        // Stable: names that begin with the text first, in directory order.
+        matched.sort_by_key(|(leading, _)| !*leading);
+        matched.into_iter().map(|(_, row)| row).collect()
     }
     fn project_files(
         &mut self,
@@ -552,6 +592,7 @@ impl CommandLine {
             let rows = self.file_rows();
             self.list.update(&self.rows, &rows);
             self.rows = rows;
+            self.stale = false;
         }
         true
     }
@@ -571,7 +612,11 @@ impl CommandLine {
             .is_some_and(|q| !matches!(q.target, Target::Slot(SlotKind::Word | SlotKind::Rest)))
     }
     pub fn loading(&self) -> bool {
-        let target = self.query.as_ref().map(|q| q.target);
+        !self.stale && self.waiting(&self.query)
+    }
+    /// Whether a worker has yet to answer this query.
+    fn waiting(&self, query: &Option<Query>) -> bool {
+        let target = query.as_ref().map(|q| q.target);
         (target == Some(Target::Slot(SlotKind::Path))
             && self.directory.as_ref().is_some_and(|d| d.pending.is_some()))
             || (target == Some(Target::Slot(SlotKind::File))
@@ -643,6 +688,10 @@ impl CommandLine {
         let slot_text = &self.input.text()[location.range.clone()];
         // A row chosen by hand wins over whatever the text already names.
         let chosen = self.list.user_selected();
+        // Only a typed path needs no row; the rest wait for the answer.
+        if self.stale && (chosen || location.target != Some(Target::Slot(SlotKind::Path))) {
+            return Transition::Blocked;
+        }
         let accept = match location.target {
             Some(Target::Name) => chosen || self.info(slot_text).is_none(),
             Some(Target::Slot(SlotKind::Path)) => chosen,
@@ -750,6 +799,7 @@ impl CommandLine {
                 self.list.navigate(&self.rows, ListMotion::Previous, true);
                 Transition::redraw()
             }
+            Input::Complete { backward: false } if self.stale => Transition::Blocked,
             Input::Complete { backward: false } => {
                 let location = self.locate();
                 match self.fill(&location) {

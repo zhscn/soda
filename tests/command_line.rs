@@ -169,6 +169,78 @@ fn a_typed_parent_lists_and_opens_though_it_is_no_candidate() {
 }
 
 #[test]
+fn rows_stay_in_view_until_the_worker_answers_and_cannot_be_chosen() {
+    let root = tree();
+    let mut r = runtime(root.path());
+    let shown = |r: &Runtime| matches!(r.layer(), Some(Layer::CommandLine(l)) if l.loading());
+
+    // A project file: the query goes to a worker.
+    r.command(Command::Ex("project ".into()));
+    wait(&mut r, |r| rows(r).len() >= 2);
+    let before = rows(&r);
+    r.input(UserInput::Paste("a.h".into()));
+    assert_eq!(rows(&r), before, "the list stays while the worker runs");
+    assert!(!shown(&r), "and it does not say loading");
+    keys(&mut r, "<ret>");
+    keys(&mut r, "<tab>");
+    assert_eq!(
+        text(&r),
+        "project a.h",
+        "neither key takes a row of the last query"
+    );
+    wait(&mut r, |r| rows(r) == ["src/sub/a.h"]);
+    keys(&mut r, "<esc>");
+
+    // A new directory: the rows of the last one stay, and a typed name goes.
+    r.command(Command::Ex("open ".into()));
+    r.input(UserInput::Paste("src/".into()));
+    wait(&mut r, |r| rows(r) == ["sub/", "main.cpp"]);
+    r.input(UserInput::Paste("sub/".into()));
+    assert_eq!(rows(&r), ["sub/", "main.cpp"]);
+    keys(&mut r, "<down><ret>");
+    assert_eq!(
+        text(&r),
+        "open src/sub/",
+        "a chosen row of the last directory is not taken"
+    );
+    wait(&mut r, |r| rows(r) == ["a.h"]);
+}
+
+#[test]
+fn a_path_matches_anywhere_in_the_name_and_beginnings_come_first() {
+    let root = tree();
+    for name in ["ccache.txt", "main.cc", "version.cc.in", "Notes.cc"] {
+        std::fs::write(root.path().join(name), "").unwrap();
+    }
+    let mut r = runtime(root.path());
+    r.command(Command::Ex("open ".into()));
+    r.input(UserInput::Paste("cc".into()));
+    wait(&mut r, |r| {
+        rows(r) == ["ccache.txt", "Notes.cc", "main.cc", "version.cc.in"]
+    });
+    // Words in any order; capitals make case count.
+    keys(&mut r, "<esc>");
+    r.command(Command::Ex("open ".into()));
+    r.input(UserInput::Paste("in cc".into()));
+    wait(&mut r, |r| rows(r) == ["main.cc", "version.cc.in"]);
+    keys(&mut r, "<esc>");
+    r.command(Command::Ex("open ".into()));
+    r.input(UserInput::Paste("N".into()));
+    wait(&mut r, |r| rows(r) == ["Notes.cc"]);
+    // The typed text still names a new file.
+    keys(&mut r, "<esc>");
+    r.command(Command::Ex("open ".into()));
+    r.input(UserInput::Paste("cc".into()));
+    keys(&mut r, "<ret>");
+    wait(&mut r, |r| {
+        r.app().views().any(|v| {
+            r.app().workspace().file(v.document_id).unwrap().path()
+                == Some(root.path().join("cc").as_path())
+        })
+    });
+}
+
+#[test]
 fn opening_the_focused_file_says_so() {
     let root = tree();
     let path = root.path().join("src/main.cpp");
