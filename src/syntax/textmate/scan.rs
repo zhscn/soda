@@ -1,8 +1,10 @@
 //! Line scanning with a rule stack, following vscode-textmate: at each
 //! position the earliest match among the frame's patterns and its end pattern
 //! wins, ties going to the earlier pattern with the end pattern first unless
-//! `applyEndPatternLast` is set.
-use super::{Captures, GrammarId, Registry, Rule, RuleId};
+//! `applyEndPatternLast` is set. Injections whose selectors match the
+//! stack's scope names compete with the frame's patterns; they win an earlier
+//! match, and a tie when their priority is `L:`.
+use super::{Captures, GrammarId, Injection, Registry, Rule, RuleId, selector::Priority};
 use crate::syntax::Category;
 use onig::{Region, SearchOptions};
 use std::{collections::HashMap, sync::Arc};
@@ -21,6 +23,22 @@ struct Frame {
     scope: Option<Category>,
     /// Category inside the rule, from `contentName` or `scope`.
     content: Option<Category>,
+    /// Scope names of `name` and `contentName`, which injections select by;
+    /// the root frame's name is the grammar's scope.
+    names: Option<Arc<str>>,
+    content_names: Option<Arc<str>>,
+    /// Whether the begin match reached the end of its line, which anchors
+    /// `\G` at the start of the next line.
+    eol: bool,
+}
+/// The scope names of a stack, outermost first.
+fn scope_names(frames: &[Frame]) -> Vec<&str> {
+    frames
+        .iter()
+        .flat_map(|frame| [&frame.names, &frame.content_names])
+        .flatten()
+        .flat_map(|names| names.split_whitespace())
+        .collect()
 }
 /// The rule stack at a line start. Equal states scan following lines
 /// identically, which is what incremental updates rely on.
@@ -36,6 +54,9 @@ impl State {
                 end: None,
                 scope: None,
                 content: None,
+                names: Some(registry.scope(grammar).clone()),
+                content_names: None,
+                eol: false,
             }],
         }
     }
@@ -56,6 +77,21 @@ impl Paint {
             self.0[start..end].fill(category);
         }
     }
+}
+
+/// How a frame was entered within the line being scanned.
+#[derive(Clone, Copy, Default)]
+struct Entry {
+    entered: Option<usize>,
+    anchor: Option<usize>,
+}
+/// The stack a match is in and the category around it, for its captures.
+struct Within<'a>(&'a [Frame], Option<Category>);
+/// The injections selected for a stack of this depth with this top frame.
+struct Selected {
+    depth: usize,
+    top: Frame,
+    rules: Vec<(RuleId, Priority)>,
 }
 
 enum Winner {
@@ -128,8 +164,8 @@ impl Registry {
         }
         let text = format!("{line}\n");
         let mut paint = Paint(vec![None; text.len()]);
-        let position = self.check_while(base, &text, state, &mut paint);
-        self.scan(base, &text, position, state, &mut paint);
+        let (position, anchor) = self.check_while(base, &text, state, &mut paint);
+        self.scan(base, &text, position, anchor, state, &mut paint);
         let mut runs: Vec<(std::ops::Range<usize>, Category)> = vec![];
         for (index, category) in paint.0[..line.len()].iter().enumerate() {
             let Some(category) = *category else {
@@ -144,14 +180,16 @@ impl Registry {
     }
     /// `while` rules continue only while their pattern matches at the start
     /// of each line; the first that fails pops itself and everything above.
+    /// Returns where scanning continues and the anchor there.
     fn check_while(
         &mut self,
         base: GrammarId,
         text: &str,
         state: &mut State,
         paint: &mut Paint,
-    ) -> usize {
+    ) -> (usize, Option<usize>) {
         let mut position = 0;
+        let mut anchor = state.frames.last().unwrap().eol.then_some(0);
         let mut index = 1;
         while index < state.frames.len() {
             let frame = state.frames[index].clone();
@@ -160,6 +198,7 @@ impl Registry {
                 continue;
             };
             let id = self.regex_id(frame.end.as_deref().unwrap_or(""));
+            let id = self.at(id, position, anchor);
             let mut region = Region::new();
             let matched = self.regex(id).and_then(|regex| {
                 regex.search_with_options(
@@ -180,11 +219,20 @@ impl Registry {
                 Rule::Begin { end_captures, .. } => end_captures.clone(),
                 _ => unreachable!(),
             };
-            self.paint_captures(base, text, &region, &captures, frame.scope, paint);
+            let stack = &state.frames[..=index];
+            self.paint_captures(
+                base,
+                text,
+                &region,
+                &captures,
+                Within(stack, frame.scope),
+                paint,
+            );
             position = end;
+            anchor = Some(end);
             index += 1;
         }
-        position
+        (position, anchor)
     }
     fn search(
         &mut self,
@@ -193,7 +241,7 @@ impl Registry {
         position: usize,
         memo: &mut Memo,
     ) -> Option<usize> {
-        if !self.anchored(regex)
+        if !self.regexes[regex].anchored
             && let Some((from, found)) = memo.get(&regex)
             && *from <= position
             && found.is_none_or(|start| start >= position)
@@ -228,17 +276,34 @@ impl Registry {
         base: GrammarId,
         text: &str,
         mut position: usize,
+        mut anchor: Option<usize>,
         state: &mut State,
         paint: &mut Paint,
     ) {
         let mut memo = Memo::new();
-        // Pushes at one position; repeating an empty begin is a loop.
-        let mut stalls = 0;
+        // Per frame: where it was entered and the anchor to restore when it
+        // pops. Frames from earlier lines have neither.
+        let mut entries: Vec<Entry> = vec![Entry::default(); state.frames.len()];
+        let injections = self.injections(base);
+        // The injections whose selectors match the stack. Each step pushes
+        // or pops at most one frame, so the depth and the top frame tell
+        // whether the stack changed since the last step.
+        let mut active: Option<Selected> = None;
+        // Scanning goes on at the end of the line, where empty matches can
+        // still enter rules, as in vscode-textmate.
         for _ in 0..STEP_LIMIT {
-            if position >= text.len() {
-                return;
-            }
             let frame = state.frames.last().unwrap().clone();
+            if !injections.is_empty()
+                && active
+                    .as_ref()
+                    .is_none_or(|a| a.depth != state.frames.len() || a.top != frame)
+            {
+                active = Some(Selected {
+                    depth: state.frames.len(),
+                    top: frame.clone(),
+                    rules: select(&injections, &state.frames),
+                });
+            }
             let candidates = self.candidates(frame.rule, base);
             let (closes, end_last) = match self.rule(frame.rule) {
                 Rule::Begin {
@@ -249,7 +314,10 @@ impl Registry {
                 _ => (false, false),
             };
             let end = match (&frame.end, closes) {
-                (Some(source), true) => Some(self.regex_id(source)),
+                (Some(source), true) => {
+                    let id = self.regex_id(source);
+                    Some(self.at(id, position, anchor))
+                }
                 _ => None,
             };
             let mut best: Option<(usize, Winner, usize)> = None;
@@ -273,6 +341,7 @@ impl Registry {
                     Rule::Begin { begin, .. } => *begin,
                     Rule::Patterns(_) => continue,
                 };
+                let regex = self.at(regex, position, anchor);
                 consider(
                     self.search(regex, text, position, &mut memo),
                     Winner::Rule(rule),
@@ -286,6 +355,15 @@ impl Registry {
                     end,
                 );
             }
+            if let Some(active) = &active
+                && let Some(injected) =
+                    self.injected(&active.rules, base, text, (position, anchor), &mut memo)
+                && best.as_ref().is_none_or(|(start, _, _)| {
+                    injected.0 < *start || (injected.0 == *start && injected.3 == Priority::Left)
+                })
+            {
+                best = Some((injected.0, Winner::Rule(injected.1), injected.2));
+            }
             let Some((start, winner, regex)) = best else {
                 paint.fill(position, text.len(), frame.content);
                 return;
@@ -297,6 +375,7 @@ impl Registry {
             let (_, end) = region.pos(0).unwrap();
             paint.fill(position, start, frame.content);
             let depth = state.frames.len();
+            let mut popped_here = false;
             match winner {
                 Winner::End => {
                     paint.fill(start, end, frame.scope);
@@ -304,9 +383,20 @@ impl Registry {
                         Rule::Begin { end_captures, .. } => end_captures.clone(),
                         _ => unreachable!(),
                     };
-                    self.paint_captures(base, text, &region, &captures, frame.scope, paint);
+                    let stack = &state.frames;
+                    self.paint_captures(
+                        base,
+                        text,
+                        &region,
+                        &captures,
+                        Within(stack, frame.scope),
+                        paint,
+                    );
                     if state.frames.len() > 1 {
                         state.frames.pop();
+                        let entry = entries.pop().unwrap();
+                        anchor = entry.anchor;
+                        popped_here = entry.entered == Some(position);
                     }
                 }
                 Winner::Rule(rule) => {
@@ -321,7 +411,15 @@ impl Registry {
                             }
                             .or(frame.content);
                             paint.fill(start, end, category);
-                            self.paint_captures(base, text, &region, &captures, category, paint);
+                            let stack = &state.frames;
+                            self.paint_captures(
+                                base,
+                                text,
+                                &region,
+                                &captures,
+                                Within(stack, category),
+                                paint,
+                            );
                         }
                         Rule::Begin {
                             end: pattern,
@@ -333,24 +431,41 @@ impl Registry {
                             let (pattern, name, content_name) =
                                 (pattern.clone(), name.clone(), content_name.clone());
                             let captures = begin_captures.clone();
-                            let scope = match &name {
-                                Some(name) => self.name_category(name, text, &groups),
-                                None => None,
-                            }
-                            .or(frame.content);
-                            let content = match &content_name {
-                                Some(name) => self.name_category(name, text, &groups),
-                                None => None,
-                            }
-                            .or(scope);
+                            let (scope, names) = self.name_scope(name.as_ref(), text, &groups);
+                            let scope = scope.or(frame.content);
+                            let (content, content_names) =
+                                self.name_scope(content_name.as_ref(), text, &groups);
+                            let content = content.or(scope);
                             paint.fill(start, end, scope);
-                            self.paint_captures(base, text, &region, &captures, scope, paint);
-                            state.frames.push(Frame {
+                            let entered = Frame {
                                 rule,
                                 end: Some(resolve_end(&pattern, text, &groups).into()),
                                 scope,
-                                content,
+                                content: scope,
+                                names,
+                                content_names: None,
+                                eol: end == text.len(),
+                            };
+                            entries.push(Entry {
+                                entered: Some(position),
+                                anchor,
                             });
+                            anchor = Some(end);
+                            // Begin captures are inside the rule's name but
+                            // not its content name.
+                            state.frames.push(entered);
+                            let stack = &state.frames;
+                            self.paint_captures(
+                                base,
+                                text,
+                                &region,
+                                &captures,
+                                Within(stack, scope),
+                                paint,
+                            );
+                            let entered = state.frames.last_mut().unwrap();
+                            entered.content = content;
+                            entered.content_names = content_names;
                         }
                         Rule::Patterns(_) => unreachable!(),
                     }
@@ -358,31 +473,66 @@ impl Registry {
             }
             if end > position {
                 position = end;
-                stalls = 0;
-            } else if state.frames.len() > depth && stalls < 2 {
-                // An empty begin may legitimately enter a rule, but not
-                // over and over at the same place.
-                stalls += 1;
-            } else if state.frames.len() < depth {
-                stalls += 1;
-                if stalls > 4 {
-                    let next = next_char(text, position);
-                    paint.fill(position, next, frame.content);
-                    position = next;
-                    stalls = 0;
-                }
-            } else {
-                if state.frames.len() > depth {
-                    state.frames.pop();
-                }
-                let next = next_char(text, position);
-                paint.fill(position, next, frame.content);
-                position = next;
-                stalls = 0;
+                continue;
             }
+            // Without advancing, following vscode-textmate: entering a rule is
+            // fine unless a frame entered here already has the same rule, and
+            // leaving one is fine unless it was entered here. Anything else
+            // would loop, so the rule is undone and a character skipped.
+            if state.frames.len() > depth {
+                let rule = state.frames.last().unwrap().rule;
+                let looped = (0..depth)
+                    .rev()
+                    .take_while(|&index| entries[index].entered == Some(position))
+                    .any(|index| state.frames[index].rule == rule);
+                if !looped {
+                    continue;
+                }
+                state.frames.pop();
+                anchor = entries.pop().unwrap().anchor;
+            } else if state.frames.len() < depth && !popped_here {
+                continue;
+            }
+            if position == text.len() {
+                return;
+            }
+            let next = next_char(text, position);
+            paint.fill(position, next, frame.content);
+            position = next;
         }
         let content = state.frames.last().unwrap().content;
         paint.fill(position, text.len(), content);
+    }
+    /// The earliest match among the selected injections, the first one on
+    /// a tie: its start, rule, regex and priority.
+    fn injected(
+        &mut self,
+        selected: &[(RuleId, Priority)],
+        base: GrammarId,
+        text: &str,
+        (position, anchor): (usize, Option<usize>),
+        memo: &mut Memo,
+    ) -> Option<(usize, RuleId, usize, Priority)> {
+        let mut best: Option<(usize, RuleId, usize, Priority)> = None;
+        for &(injection, priority) in selected {
+            for &rule in self.candidates(injection, base).iter() {
+                let regex = match self.rule(rule) {
+                    Rule::Match { regex, .. } => *regex,
+                    Rule::Begin { begin, .. } => *begin,
+                    Rule::Patterns(_) => continue,
+                };
+                let regex = self.at(regex, position, anchor);
+                if let Some(start) = self.search(regex, text, position, memo)
+                    && best.as_ref().is_none_or(|(s, ..)| start < *s)
+                {
+                    best = Some((start, rule, regex, priority));
+                    if start == position {
+                        return best;
+                    }
+                }
+            }
+        }
+        best
     }
     fn paint_captures(
         &mut self,
@@ -390,7 +540,7 @@ impl Registry {
         text: &str,
         region: &Region,
         captures: &Captures,
-        outer: Option<Category>,
+        Within(stack, outer): Within,
         paint: &mut Paint,
     ) {
         if captures.is_empty() {
@@ -405,27 +555,47 @@ impl Registry {
             if start >= end {
                 continue;
             }
-            let category = match &capture.name {
-                Some(name) => self.name_category(name, text, &groups),
-                None => None,
-            };
-            paint.overlay(start, end, category);
-            if let Some(patterns) = capture.patterns {
-                // Scan the captured text alone, as its own small document.
-                let mut nested = State {
-                    frames: vec![Frame {
-                        rule: patterns,
-                        end: None,
-                        scope: category.or(outer),
-                        content: category.or(outer),
-                    }],
+            let Some(patterns) = capture.patterns else {
+                let category = match &capture.name {
+                    Some(name) => self.name_category(name, text, &groups),
+                    None => None,
                 };
+                paint.overlay(start, end, category);
+                continue;
+            };
+            let (category, names) = self.name_scope(capture.name.as_ref(), text, &groups);
+            paint.overlay(start, end, category);
+            {
+                // Scan the captured text alone, as its own small document,
+                // on top of the stack so injections see where it is.
+                let mut frames = stack.to_vec();
+                frames.push(Frame {
+                    rule: patterns,
+                    end: None,
+                    scope: category.or(outer),
+                    content: category.or(outer),
+                    names,
+                    content_names: None,
+                    eol: false,
+                });
+                let mut nested = State { frames };
                 let mut inner = Paint(paint.0[..end].to_vec());
-                self.scan(base, &text[..end], start, &mut nested, &mut inner);
+                // As in vscode-textmate, `\G` has no anchor in captures.
+                self.scan(base, &text[..end], start, None, &mut nested, &mut inner);
                 paint.0[start..end].copy_from_slice(&inner.0[start..end]);
             }
         }
     }
+}
+
+/// The injections whose selectors match the stack.
+fn select(injections: &[Injection], frames: &[Frame]) -> Vec<(RuleId, Priority)> {
+    let scopes = scope_names(frames);
+    injections
+        .iter()
+        .filter(|injection| injection.matches(&scopes))
+        .map(|injection| (injection.rule, injection.priority))
+        .collect()
 }
 
 #[cfg(test)]

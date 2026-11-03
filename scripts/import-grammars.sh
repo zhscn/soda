@@ -14,6 +14,7 @@ EXTENSIONS=(
   "lua lua"
   "make makefile"
   "markdown-basics markdown"
+  "markdown-math markdown-math"
   "python python"
   "rust rust"
   "shellscript shellscript"
@@ -59,7 +60,7 @@ manifest = {
         for l in languages
     ],
     "grammars": [
-        {k: g[k] for k in ("language", "scopeName", "path", "embeddedLanguages") if g.get(k)}
+        {k: g[k] for k in ("language", "scopeName", "path", "embeddedLanguages", "injectTo") if g.get(k)}
         for g in grammars
     ],
 }

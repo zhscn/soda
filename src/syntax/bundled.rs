@@ -114,6 +114,30 @@ pub(crate) static PACKAGES: &[Package] = &[
         ],
     },
     Package {
+        name: "markdown-math",
+        manifest: include_str!("../../grammars/markdown-math/package.json"),
+        files: &[
+            (
+                "syntaxes/md-math-block.tmLanguage.json",
+                include_str!("../../grammars/markdown-math/syntaxes/md-math-block.tmLanguage.json"),
+            ),
+            (
+                "syntaxes/md-math-fence.tmLanguage.json",
+                include_str!("../../grammars/markdown-math/syntaxes/md-math-fence.tmLanguage.json"),
+            ),
+            (
+                "syntaxes/md-math-inline.tmLanguage.json",
+                include_str!(
+                    "../../grammars/markdown-math/syntaxes/md-math-inline.tmLanguage.json"
+                ),
+            ),
+            (
+                "syntaxes/md-math.tmLanguage.json",
+                include_str!("../../grammars/markdown-math/syntaxes/md-math.tmLanguage.json"),
+            ),
+        ],
+    },
+    Package {
         name: "python",
         manifest: include_str!("../../grammars/python/package.json"),
         files: &[

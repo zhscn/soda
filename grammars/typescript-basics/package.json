@@ -17,10 +17,18 @@
    "scopeName": "source.tsx"
   },
   {
+   "injectTo": [
+    "source.ts",
+    "source.tsx"
+   ],
    "path": "./syntaxes/jsdoc.ts.injection.tmLanguage.json",
    "scopeName": "documentation.injection.ts"
   },
   {
+   "injectTo": [
+    "source.js",
+    "source.js.jsx"
+   ],
    "path": "./syntaxes/jsdoc.js.injection.tmLanguage.json",
    "scopeName": "documentation.injection.js.jsx"
   }

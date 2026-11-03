@@ -9,7 +9,9 @@ fn snapshot(text: &str) -> Snapshot {
 }
 /// Highlighted fragments of each line, as (text, category).
 fn fragments(scope: &str, text: &str) -> Vec<Vec<(String, Category)>> {
-    let mut registry = Registry::bundled();
+    fragments_in(Registry::bundled(), scope, text)
+}
+fn fragments_in(mut registry: Registry, scope: &str, text: &str) -> Vec<Vec<(String, Category)>> {
     let grammar = registry.grammar(scope).expect("bundled grammar");
     let snapshot = snapshot(text);
     let mut lines = Lines::new(&registry, grammar);
@@ -294,4 +296,92 @@ fn a_grammar_that_does_not_exist_has_no_tokens() {
     let text = snapshot("x\n");
     assert_eq!(tokens.lines(&text, 0..1, None), (vec![], true));
     assert!(!tokens.in_literal(&text, 0));
+}
+
+/// Strings and a `TODO` keyword; its own injections mark `TODO` inside
+/// strings (`L:`, so before the string's patterns) and `FIXME` outside them.
+/// A `TODO` injected without priority loses the tie to the grammar's own.
+const INJECTING: &str = r#"{
+    "scopeName": "source.a",
+    "patterns": [
+        { "begin": "\"", "end": "\"", "name": "string.quoted.a",
+          "patterns": [{ "match": "\\bTODO\\b", "name": "string.todo" }] },
+        { "match": "\\bTODO\\b", "name": "keyword.todo" }
+    ],
+    "injections": {
+        "L:string.quoted.a": { "patterns": [{ "match": "\\bTODO\\b", "name": "invalid.todo" }] },
+        "source.a - string": { "patterns": [
+            { "match": "\\bFIXME\\b", "name": "entity.name.function" },
+            { "match": "\\bTODO\\b", "name": "constant.numeric" }
+        ] }
+    }
+}"#;
+/// Injected into `source.a` from outside, after its own patterns.
+const INJECTED: &str = r#"{
+    "scopeName": "source.b",
+    "injectionSelector": "R:source.a - (string | comment)",
+    "patterns": [{ "match": "\\bXXX\\b", "name": "constant.numeric" }]
+}"#;
+
+#[test]
+fn injections_apply_where_their_selectors_match_the_stack() {
+    let mut registry = Registry::bundled();
+    registry.add("source.a", INJECTING, []);
+    registry.add("source.b", INJECTED, ["source.a"]);
+    let lines = fragments_in(registry, "source.a", "TODO FIXME XXX \"TODO FIXME XXX\"\n");
+    assert_eq!(
+        lines[0],
+        [
+            ("TODO", Category::Keyword),
+            ("FIXME", Category::Function),
+            ("XXX", Category::Number),
+            ("\"", Category::String),
+            ("TODO", Category::Invalid),
+            (" FIXME XXX\"", Category::String),
+        ]
+        .map(|(text, category)| (text.to_owned(), category))
+    );
+}
+#[test]
+fn injections_come_only_from_the_grammar_being_scanned() {
+    let mut registry = Registry::bundled();
+    registry.add("source.a", INJECTING, []);
+    registry.add("source.b", INJECTED, ["source.a"]);
+    registry.add(
+        "source.c",
+        r#"{ "scopeName": "source.c", "patterns": [{ "include": "source.a" }] }"#,
+        [],
+    );
+    let lines = fragments_in(registry, "source.c", "TODO FIXME XXX\n");
+    assert_eq!(lines[0], [("TODO".to_owned(), Category::Keyword)]);
+}
+#[test]
+fn markdown_math_is_injected_outside_code() {
+    let lines = fragments(
+        "text.html.markdown",
+        "a $\\frac{1}{2}$ b\n\n$$\nx^2 \\frac{1}{2}\n$$\n\n`$\\frac{1}{2}$`\n\n```txt\n$$\n\\frac{1}{2}\n$$\n```\n",
+    );
+    assert!(has(&lines[0..1], "frac", Category::Function));
+    assert!(has(&lines[3..4], "frac", Category::Function));
+    assert!(has(&lines[3..4], "2", Category::Number));
+    assert!(!has(&lines[6..], "frac", Category::Function));
+    // The fence's begin takes the line's end, so the block's first line is
+    // entered at the end of the fence line.
+    let lines = fragments("text.html.markdown", "```math\n\\frac{1}{2}\n```\n");
+    assert!(has(&lines[1..2], "frac", Category::Function));
+}
+#[test]
+fn rules_entered_without_advancing_nest_until_one_repeats() {
+    // A shell command enters three rules at its first character; the last
+    // begins with `\G`, which holds only where the previous one ended.
+    let shell = "cargo run --release\n";
+    let expected = [
+        ("cargo", Category::Function),
+        ("run", Category::String),
+        ("--release", Category::Constant),
+    ]
+    .map(|(text, category)| (text.to_owned(), category));
+    assert_eq!(fragments("source.shell", shell)[0], expected);
+    let markdown = fragments("text.html.markdown", &format!("```sh\n{shell}```\n"));
+    assert_eq!(markdown[1], expected);
 }

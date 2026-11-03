@@ -1,0 +1,46 @@
+{
+ "grammars": [
+  {
+   "language": "markdown-math",
+   "path": "./syntaxes/md-math.tmLanguage.json",
+   "scopeName": "text.html.markdown.math"
+  },
+  {
+   "embeddedLanguages": {
+    "meta.embedded.math.markdown": "latex"
+   },
+   "injectTo": [
+    "text.html.markdown"
+   ],
+   "path": "./syntaxes/md-math-block.tmLanguage.json",
+   "scopeName": "markdown.math.block"
+  },
+  {
+   "embeddedLanguages": {
+    "meta.embedded.math.markdown": "latex",
+    "punctuation.definition.math.end.markdown": "latex"
+   },
+   "injectTo": [
+    "text.html.markdown"
+   ],
+   "path": "./syntaxes/md-math-inline.tmLanguage.json",
+   "scopeName": "markdown.math.inline"
+  },
+  {
+   "embeddedLanguages": {
+    "meta.embedded.math.markdown": "latex"
+   },
+   "injectTo": [
+    "text.html.markdown"
+   ],
+   "path": "./syntaxes/md-math-fence.tmLanguage.json",
+   "scopeName": "markdown.math.codeblock"
+  }
+ ],
+ "languages": [
+  {
+   "id": "markdown-math"
+  }
+ ],
+ "name": "markdown-math"
+}

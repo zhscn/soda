@@ -2,8 +2,13 @@
 //! first use into one rule arena; `include`s that reach other grammars
 //! resolve when a scan first needs them. Regular expressions use Oniguruma,
 //! whose dialect the grammars are written in.
+//!
+//! Injections follow vscode-textmate: only the grammar being scanned brings
+//! them, from its own `injections` and from grammars that name it in
+//! `injectTo`. Their selectors look at the scope names of the rule stack.
 mod lines;
 mod scan;
+mod selector;
 mod tokens;
 pub(super) use lines::Lines;
 pub(super) use scan::State;
@@ -21,8 +26,11 @@ pub(super) type GrammarId = usize;
 /// A `name` or `contentName`. Names with `$n` take capture text when used.
 #[derive(Clone)]
 pub(super) struct Name {
+    /// None for templates, which are categorized once substituted.
     category: Option<Category>,
-    template: Option<Box<str>>,
+    /// Space-separated scope names, or the template.
+    text: Arc<str>,
+    templated: bool,
 }
 pub(super) struct Capture {
     name: Option<Name>,
@@ -67,17 +75,40 @@ pub(super) enum Rule {
 struct RegexEntry {
     source: Arc<str>,
     compiled: Option<Option<Regex>>,
-    /// `\G` depends on where a search starts, so its results are not reused.
+    /// Whether the expression uses `\G`, which matches only at the anchor.
     anchored: bool,
+    /// The expression with `\G` made unmatchable, for searches elsewhere.
+    unanchored: Option<RegexId>,
 }
 struct Grammar {
+    scope: Arc<str>,
     root: RuleId,
     repository: HashMap<String, RuleId>,
+    /// The grammar's own `injections`, by selector.
+    own_injections: Vec<(String, RuleId)>,
+    /// `injectionSelector`, for grammars injected into others.
+    selector: Option<String>,
+    /// Everything injected while this grammar is scanned, built on first use.
+    injections: Option<Arc<[Injection]>>,
+}
+/// Patterns tried wherever the selector matches the rule stack's scopes.
+pub(super) struct Injection {
+    matcher: selector::Matcher,
+    priority: selector::Priority,
+    /// A `Rule::Patterns` holding the injected patterns.
+    rule: RuleId,
+}
+impl Injection {
+    pub fn matches(&self, scopes: &[&str]) -> bool {
+        self.matcher.matches(scopes)
+    }
 }
 #[derive(Default)]
 pub(super) struct Registry {
     /// Grammar sources by scope name.
     sources: HashMap<String, &'static str>,
+    /// Grammars to inject, by the scope name they are injected into.
+    injectors: HashMap<String, Vec<String>>,
     grammars: Vec<Grammar>,
     by_scope: HashMap<String, Option<GrammarId>>,
     rules: Vec<Rule>,
@@ -98,6 +129,33 @@ fn number(value: Option<&Value>) -> bool {
         Some(Value::Number(n)) => n.as_i64() == Some(1),
         _ => false,
     }
+}
+
+/// Substitutes `$n` and `${n:/downcase}` in a name template with captures.
+fn substitute(template: &str, text: &str, groups: &[Option<(usize, usize)>]) -> String {
+    let mut out = String::new();
+    let mut rest = template;
+    while let Some(index) = rest.find('$') {
+        out.push_str(&rest[..index]);
+        rest = &rest[index + 1..];
+        let (group, consumed) = if let Some(inner) = rest.strip_prefix('{') {
+            let end = inner.find('}').unwrap_or(inner.len());
+            let digits: String = inner[..end]
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect();
+            (digits.parse::<usize>().ok(), end + 2)
+        } else {
+            let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+            (digits.parse::<usize>().ok(), digits.len())
+        };
+        if let Some(Some((start, end))) = group.and_then(|g| groups.get(g)) {
+            out.push_str(&text[*start..*end].to_ascii_lowercase());
+        }
+        rest = &rest[consumed.min(rest.len())..];
+    }
+    out.push_str(rest);
+    out
 }
 
 impl Registry {
@@ -125,11 +183,26 @@ impl Registry {
                     text(grammar, "scopeName"),
                     text(grammar, "path").and_then(file),
                 ) {
-                    registry.sources.insert(scope.to_owned(), source);
+                    let targets = grammar.get("injectTo").and_then(Value::as_array);
+                    let targets = targets.into_iter().flatten().filter_map(Value::as_str);
+                    registry.add(scope, source, targets);
                 }
             }
         }
         registry
+    }
+    /// Makes a grammar available, injected into the `targets` scopes.
+    pub(super) fn add<'a>(
+        &mut self,
+        scope: &str,
+        source: &'static str,
+        targets: impl IntoIterator<Item = &'a str>,
+    ) {
+        self.sources.insert(scope.to_owned(), source);
+        for target in targets {
+            let injectors = self.injectors.entry(target.to_owned()).or_default();
+            injectors.push(scope.to_owned());
+        }
     }
     /// Compiles a grammar on first use.
     pub fn grammar(&mut self, scope: &str) -> Option<GrammarId> {
@@ -147,8 +220,12 @@ impl Registry {
         };
         let id = self.grammars.len();
         self.grammars.push(Grammar {
+            scope: scope.into(),
             root: 0,
             repository: HashMap::new(),
+            own_injections: vec![],
+            selector: None,
+            injections: None,
         });
         self.by_scope.insert(scope.to_owned(), Some(id));
         let mut compiler = Compiler {
@@ -166,11 +243,56 @@ impl Registry {
         for (key, rule) in repository {
             named.insert(key.clone(), compiler.rule(rule, &[repository]));
         }
-        self.grammars[id] = Grammar {
-            root,
-            repository: named,
-        };
+        let mut own_injections = vec![];
+        let injections = value.get("injections").and_then(Value::as_object);
+        for (selector, rule) in injections.into_iter().flatten() {
+            let rule = compiler.rule(rule, &[repository]);
+            let rule = compiler
+                .registry
+                .push(Rule::Patterns(vec![Pattern::Rule(rule)]));
+            own_injections.push((selector.clone(), rule));
+        }
+        let grammar = &mut self.grammars[id];
+        grammar.root = root;
+        grammar.repository = named;
+        grammar.own_injections = own_injections;
+        grammar.selector = text(&value, "injectionSelector").map(str::to_owned);
         Some(id)
+    }
+    /// What is injected while `base` is scanned: its own injections and the
+    /// grammars injected into it, `L:` ones first.
+    pub(super) fn injections(&mut self, base: GrammarId) -> Arc<[Injection]> {
+        if let Some(injections) = &self.grammars[base].injections {
+            return injections.clone();
+        }
+        let mut sources = self.grammars[base].own_injections.clone();
+        let scope = self.grammars[base].scope.to_string();
+        for injector in self.injectors.get(&scope).cloned().unwrap_or_default() {
+            let Some(grammar) = self.grammar(&injector) else {
+                continue;
+            };
+            let grammar = &self.grammars[grammar];
+            if let Some(selector) = &grammar.selector {
+                sources.push((selector.clone(), grammar.root));
+            }
+        }
+        let mut out = vec![];
+        for (selector, rule) in sources {
+            for (matcher, priority) in selector::parse(&selector) {
+                out.push(Injection {
+                    matcher,
+                    priority,
+                    rule,
+                });
+            }
+        }
+        out.sort_by_key(|injection| injection.priority);
+        let out: Arc<[Injection]> = out.into();
+        self.grammars[base].injections = Some(out.clone());
+        out
+    }
+    pub(super) fn scope(&self, grammar: GrammarId) -> &Arc<str> {
+        &self.grammars[grammar].scope
     }
     /// Compiles every grammar and pattern; end patterns with back
     /// references compile once resolved, so they are skipped.
@@ -217,6 +339,7 @@ impl Registry {
             anchored: source.contains("\\G"),
             source: source.clone(),
             compiled: None,
+            unanchored: None,
         });
         let id = self.regexes.len() - 1;
         self.regex_ids.insert(source, id);
@@ -239,20 +362,47 @@ impl Registry {
         }
         self.regexes[id].compiled.as_ref().unwrap().as_ref()
     }
-    pub(super) fn anchored(&self, id: RegexId) -> bool {
-        self.regexes[id].anchored
+    /// The expression to search with from `position`: as vscode-textmate
+    /// does, `\G` matches only at the anchor, where the last `begin` or
+    /// `while` match ended, and is replaced by a noncharacter elsewhere.
+    pub(super) fn at(&mut self, id: RegexId, position: usize, anchor: Option<usize>) -> RegexId {
+        if !self.regexes[id].anchored || anchor == Some(position) {
+            return id;
+        }
+        if let Some(unanchored) = self.regexes[id].unanchored {
+            return unanchored;
+        }
+        let mut source = String::new();
+        let mut chars = self.regexes[id].source.chars();
+        while let Some(ch) = chars.next() {
+            if ch != '\\' {
+                source.push(ch);
+                continue;
+            }
+            match chars.next() {
+                Some('G') => source.push('\u{FFFF}'),
+                Some(next) => {
+                    source.push('\\');
+                    source.push(next);
+                }
+                None => source.push('\\'),
+            }
+        }
+        let unanchored = self.regex_id(&source);
+        self.regexes[id].unanchored = Some(unanchored);
+        unanchored
     }
     fn name(&mut self, value: Option<&Value>) -> Option<Name> {
         let text = value?.as_str()?;
-        if text.contains('$') {
-            return Some(Name {
-                category: None,
-                template: Some(text.into()),
-            });
-        }
+        let templated = text.contains('$');
         Some(Name {
-            category: self.categorize(text),
-            template: None,
+            category: if templated {
+                None
+            } else {
+                self.categorize(text)
+            },
+            text: text.into(),
+            templated,
         })
     }
     fn categorize(&mut self, names: &str) -> Option<Category> {
@@ -271,32 +421,27 @@ impl Registry {
         text: &str,
         groups: &[Option<(usize, usize)>],
     ) -> Option<Category> {
-        let Some(template) = &name.template else {
+        if !name.templated {
             return name.category;
-        };
-        let mut out = String::new();
-        let mut rest = &template[..];
-        while let Some(index) = rest.find('$') {
-            out.push_str(&rest[..index]);
-            rest = &rest[index + 1..];
-            let (group, consumed) = if let Some(inner) = rest.strip_prefix('{') {
-                let end = inner.find('}').unwrap_or(inner.len());
-                let digits: String = inner[..end]
-                    .chars()
-                    .take_while(char::is_ascii_digit)
-                    .collect();
-                (digits.parse::<usize>().ok(), end + 2)
-            } else {
-                let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
-                (digits.parse::<usize>().ok(), digits.len())
-            };
-            if let Some(Some((start, end))) = group.and_then(|g| groups.get(g)) {
-                out.push_str(&text[*start..*end].to_ascii_lowercase());
-            }
-            rest = &rest[consumed.min(rest.len())..];
         }
-        out.push_str(rest);
-        self.categorize(&out)
+        let names = substitute(&name.text, text, groups);
+        self.categorize(&names)
+    }
+    /// The category and scope names of a name, substituted as above.
+    pub(super) fn name_scope(
+        &mut self,
+        name: Option<&Name>,
+        text: &str,
+        groups: &[Option<(usize, usize)>],
+    ) -> (Option<Category>, Option<Arc<str>>) {
+        let Some(name) = name else {
+            return (None, None);
+        };
+        if !name.templated {
+            return (name.category, Some(name.text.clone()));
+        }
+        let names = substitute(&name.text, text, groups);
+        (self.categorize(&names), Some(names.into()))
     }
     /// The rules a frame tries, with includes expanded. `$base` refers to
     /// the grammar being scanned, so expansions are cached per base.
