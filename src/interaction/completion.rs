@@ -166,6 +166,9 @@ struct Session {
     view: ViewId,
     start: DocumentPosition,
     query: String,
+    /// What items that start `back` bytes before the anchor have typed,
+    /// matched against by `back`.
+    typed: Vec<(usize, String)>,
     items: Vec<Item>,
     /// Indices into `items`, best first.
     matches: Vec<usize>,
@@ -345,6 +348,7 @@ impl State {
             view: offer.view,
             start,
             query: String::new(),
+            typed: vec![],
             items: offer
                 .choices
                 .into_iter()
@@ -516,6 +520,7 @@ impl State {
             view: view.id,
             start: anchor,
             query: text[start..caret].to_owned(),
+            typed: vec![],
             items: vec![],
             matches: vec![],
             selected: None,
@@ -672,6 +677,7 @@ impl State {
             )
         };
         let mut atoms: Vec<(usize, Atom)> = vec![];
+        session.typed.clear();
         let mut chars = vec![];
         let mut ranked: Vec<(bool, bool, u16, usize)> = vec![];
         for index in pool {
@@ -682,6 +688,7 @@ impl State {
             let typed = text.get(from..caret).unwrap_or(&query);
             if !atoms.iter().any(|(back, _)| *back == item.back) {
                 atoms.push((item.back, atom(typed)));
+                session.typed.push((item.back, typed.to_owned()));
             }
             let (_, pattern) = atoms.iter().find(|(back, _)| *back == item.back).unwrap();
             let score = if typed.is_empty() {
@@ -778,7 +785,14 @@ impl State {
             .take(PAGE)
             .map(|(at, index)| {
                 let item = &session.items[*index];
-                let matched = fuzzy_match(&mut matcher, &session.query, &item.label)
+                // What the item was scored on, which reaches further back
+                // than the query for an item that starts earlier.
+                let typed = session
+                    .typed
+                    .iter()
+                    .find(|(back, _)| *back == item.back)
+                    .map_or(&session.query, |(_, typed)| typed);
+                let matched = fuzzy_match(&mut matcher, typed, &item.label)
                     .map_or(vec![], |(_, ranges)| ranges);
                 let selected = session.selected == Some(at);
                 Row {
