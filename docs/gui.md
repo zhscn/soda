@@ -53,7 +53,7 @@ soda-gui [--no-config] [FILE | DIRECTORY]
 
 ## 输入
 
-- **键盘**：winit 的按键转换成与终端相同的 `KeyStroke`：带 Shift 的字符是上档字符，Shift-Tab 是 BackTab；有 Ctrl 或 Alt 时取不带修饰键的那个键，所以 macOS 上 Option 打出的特殊字符不影响绑定。Super（Command）键标记为不支持的修饰键。
+- **键盘**：winit 的按键转换成与终端相同的 `KeyStroke`：带 Shift 的字符是上档字符，Shift-Tab 是 BackTab；有 Ctrl 或 Alt 时取不带修饰键的那个键，所以 macOS 上 Option 打出的特殊字符不影响绑定。Super 键标记为不支持的修饰键。macOS 上 Command 组合键按系统习惯处理，不经过键位表：Cmd-C / X / V 为 `copy`、`cut`、`paste`（命令行和输入框里 Cmd-V 把系统剪贴板的内容作为输入粘贴进去），Cmd-Z / Shift-Cmd-Z 为 `undo`、`redo`，Cmd-A、Cmd-S、Cmd-Q 为 `select-all`、`write`、`quit`。为此不用 winit 自带的应用菜单（它的 Cmd-Q 不询问未保存的文档就退出），所以也没有 Cmd-H 隐藏窗口。
 - **输入法**：只在 Insert 和输入框里开启，Normal 下按键直接是命令。组字中的文字画在光标处并加下划线，候选窗口跟着光标。提交的文字逐字作为按键输入。
 - **鼠标**：点击标签切换文档，点击窗口聚焦并放置光标，拖动选择，滚轮和触控板滚动指针下的窗口或弹出文字（见上文），拖动显示中的滚动条。拖动窗口边界还没有实现，用 `resize-window`。
 - **窗口**：关闭窗口相当于 `quit`，逐个询问未保存的文档。`suspend`（Ctrl-Z）把窗口最小化。

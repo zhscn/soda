@@ -2,10 +2,7 @@
 //! connection, elsewhere (X11, macOS) through arboard. Without either the
 //! clipboard tools still serve, as in the terminal.
 use crate::runtime::SystemClipboard;
-use winit::{
-    raw_window_handle::{HasDisplayHandle, RawDisplayHandle},
-    window::Window,
-};
+use winit::{raw_window_handle::HasDisplayHandle, window::Window};
 
 enum Native {
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -19,7 +16,7 @@ enum Native {
 pub fn native(window: &Window) -> Option<Box<dyn SystemClipboard>> {
     let display = window.display_handle().ok()?.as_raw();
     #[cfg(all(unix, not(target_os = "macos")))]
-    if let RawDisplayHandle::Wayland(handle) = display {
+    if let winit::raw_window_handle::RawDisplayHandle::Wayland(handle) = display {
         // SAFETY: the display is winit's connection, which outlives the
         // runtime that keeps this clipboard (see `gui::run`).
         let clipboard = unsafe { smithay_clipboard::Clipboard::new(handle.display.as_ptr()) };

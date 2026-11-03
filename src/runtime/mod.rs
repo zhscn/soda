@@ -961,6 +961,11 @@ impl Runtime {
     fn system_clipboard(&self) -> bool {
         self.app.options().choice(None, "clipboard") == "system"
     }
+    /// What a paste would put in, the system clipboard read first.
+    pub fn clipboard_text(&mut self) -> String {
+        self.load_clipboard();
+        self.app.clipboard().to_owned()
+    }
     fn load_clipboard(&mut self) {
         if !self.system_clipboard() {
             return;

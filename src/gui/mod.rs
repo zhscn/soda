@@ -186,7 +186,12 @@ impl Scrolling {
 
 /// Run the graphical frontend using the shared owner-thread runtime.
 pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
-    let event_loop = EventLoop::new().map_err(io::Error::other)?;
+    let mut builder = EventLoop::builder();
+    // Without winit's menu, whose Command-Q ends the program at once,
+    // Command keys come to the editor: Command-Q asks about unsaved work.
+    #[cfg(target_os = "macos")]
+    winit::platform::macos::EventLoopBuilderExtMacOS::with_default_menu(&mut builder, false);
+    let event_loop = builder.build().map_err(io::Error::other)?;
     let runtime = host::start(path, config, Box::new(crate::clipboard::Clipboard::local()))?;
     // Declared after the event loop, so dropped before it: the runtime's
     // Wayland clipboard uses the loop's connection.
@@ -759,7 +764,21 @@ impl ApplicationHandler for App {
             }
             WindowEvent::ModifiersChanged(modifiers) => gui.modifiers = modifiers.state(),
             WindowEvent::KeyboardInput { event, .. } => {
-                if let Some(stroke) = input::stroke(&event, gui.modifiers) {
+                if let Some(menu) = input::menu(&event, gui.modifiers) {
+                    match menu {
+                        // Into the command line or a prompt as typed text.
+                        input::Menu::Paste if runtime.layer().is_some() => {
+                            let text = runtime.clipboard_text();
+                            runtime.input(UserInput::Paste(text));
+                        }
+                        input::Menu::Paste => {
+                            runtime.command(crate::interaction::Command::Named("paste".into()))
+                        }
+                        input::Menu::Command(name) => {
+                            runtime.command(crate::interaction::Command::Named(name.into()))
+                        }
+                    }
+                } else if let Some(stroke) = input::stroke(&event, gui.modifiers) {
                     runtime.input(UserInput::Key(stroke));
                 }
             }

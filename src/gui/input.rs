@@ -74,3 +74,37 @@ fn function(key: NamedKey) -> Option<u8> {
         .position(|f| *f == key)
         .map(|index| index as u8 + 1)
 }
+
+/// What a Command key chord stands for on macOS, where it is the Edit
+/// menu's, not the editor's: a command, or pasting.
+pub enum Menu {
+    Command(&'static str),
+    Paste,
+}
+/// The macOS shortcut a key press is; none elsewhere, where Super belongs
+/// to the desktop.
+pub fn menu(event: &KeyEvent, modifiers: ModifiersState) -> Option<Menu> {
+    if !cfg!(target_os = "macos")
+        || event.state == ElementState::Released
+        || !modifiers.super_key()
+        || modifiers.control_key()
+        || modifiers.alt_key()
+    {
+        return None;
+    }
+    let Logical::Character(text) = event.key_without_modifiers() else {
+        return None;
+    };
+    let shift = modifiers.shift_key();
+    Some(match (text.to_lowercase().as_str(), shift) {
+        ("c", false) => Menu::Command("copy"),
+        ("x", false) => Menu::Command("cut"),
+        ("v", false) => Menu::Paste,
+        ("z", false) => Menu::Command("undo"),
+        ("z", true) => Menu::Command("redo"),
+        ("a", false) => Menu::Command("select-all"),
+        ("s", false) => Menu::Command("write"),
+        ("q", false) => Menu::Command("quit"),
+        _ => return None,
+    })
+}
