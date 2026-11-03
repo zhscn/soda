@@ -433,35 +433,24 @@ impl CommandLine {
             symbols(editor.model().document().snapshot().text(), caret)
         });
         self.matcher.config = Config::DEFAULT;
-        let mut ranked: Vec<_> = symbols
-            .iter()
-            .enumerate()
-            .filter_map(|(index, symbol)| {
-                let (score, highlights) = matched(&mut self.matcher, query, symbol)?;
-                let row = row(index as u64, symbol.clone(), Some(symbol.clone()), false);
-                Some((score, mark(row, highlights, None)))
-            })
-            .collect();
         // Equal scores keep the nearest first.
-        ranked.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
-        ranked.into_iter().map(|(_, row)| row).collect()
+        let shown = symbols.iter().cloned().enumerate();
+        ranked(&mut self.matcher, query, shown, |_| false)
+            .map(|(index, symbol, highlights)| {
+                let row = row(index as u64, symbol.clone(), Some(symbol), false);
+                mark(row, highlights, None)
+            })
+            .collect()
     }
     fn item_rows(&mut self, query: &str) -> Vec<MatchedCandidate<Completion>> {
         self.matcher.config = Config::DEFAULT;
-        let mut ranked: Vec<_> = self
-            .items
-            .iter()
-            .enumerate()
-            .filter_map(|(index, item)| {
-                let shown = printable(item);
-                let (score, highlights) = matched(&mut self.matcher, query, &shown)?;
+        let shown = self.items.iter().map(|item| printable(item)).enumerate();
+        ranked(&mut self.matcher, query, shown, |_| false)
+            .map(|(index, shown, highlights)| {
                 let number = (index + 1).to_string();
-                let row = row(index as u64, shown, Some(number), false);
-                Some((score, mark(row, highlights, None)))
+                mark(row(index as u64, shown, Some(number), false), highlights, None)
             })
-            .collect();
-        ranked.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
-        ranked.into_iter().map(|(_, row)| row).collect()
+            .collect()
     }
     /// Command names match fuzzily; an exact name or alias comes first.
     /// Descriptions match as substrings, after every name match.
@@ -899,7 +888,6 @@ impl CommandLine {
     }
 }
 
-/// Everything matches an empty query; otherwise a fuzzy match with its score.
 /// The symbols of a text, each once, nearest `caret` first: runs of word
 /// characters that do not start with a digit.
 pub(super) fn symbols(text: &str, caret: usize) -> Vec<String> {
@@ -934,12 +922,31 @@ pub(super) fn symbols(text: &str, caret: usize) -> Vec<String> {
         .map(|(symbol, _)| symbol.to_owned())
         .collect()
 }
-fn matched(matcher: &mut Matcher, query: &str, shown: &str) -> Option<(u32, Vec<Range<usize>>)> {
-    if query.is_empty() {
-        Some((0, vec![]))
-    } else {
-        fuzzy_match(matcher, query, shown).map(|(score, ranges)| (u32::from(score), ranges))
-    }
+/// Candidates that match `query` fuzzily, best first, each with what it
+/// shows and the ranges that matched; everything matches an empty query.
+/// Equal scores keep the given order, except that those `last` picks go
+/// after the rest.
+fn ranked<T>(
+    matcher: &mut Matcher,
+    query: &str,
+    candidates: impl IntoIterator<Item = (T, String)>,
+    last: impl Fn(&T) -> bool,
+) -> impl Iterator<Item = (T, String, Vec<Range<usize>>)> {
+    let mut found: Vec<_> = candidates
+        .into_iter()
+        .filter_map(|(item, shown)| {
+            let (score, highlights) = if query.is_empty() {
+                (0, vec![])
+            } else {
+                fuzzy_match(matcher, query, &shown)?
+            };
+            Some((score, item, shown, highlights))
+        })
+        .collect();
+    found.sort_by_key(|(score, item, ..)| (std::cmp::Reverse(*score), last(item)));
+    found
+        .into_iter()
+        .map(|(_, item, shown, highlights)| (item, shown, highlights))
 }
 /// Recent files, newest first, shown relative to the project root.
 fn recent(
@@ -949,18 +956,12 @@ fn recent(
     matcher: &mut Matcher,
 ) -> Vec<MatchedCandidate<Completion>> {
     matcher.config = Config::DEFAULT.match_paths();
-    let mut rows: Vec<_> = paths
-        .iter()
-        .enumerate()
-        .filter_map(|(age, path)| {
-            let shown = printable(&path.strip_prefix(root).unwrap_or(path).to_string_lossy());
-            let (score, highlights) = matched(matcher, query, &shown)?;
-            Some((age, path, shown, score, highlights))
-        })
-        .collect();
-    rows.sort_by_key(|(age, _, _, score, _)| (std::cmp::Reverse(*score), *age));
-    rows.into_iter()
-        .map(|(age, path, shown, _, highlights)| {
+    let shown = paths.iter().enumerate().map(|(age, path)| {
+        let shown = printable(&path.strip_prefix(root).unwrap_or(path).to_string_lossy());
+        ((age, path), shown)
+    });
+    ranked(matcher, query, shown, |_| false)
+        .map(|((age, path), shown, highlights)| {
             let replacement = path.to_str().filter(|p| !p.chars().any(char::is_control));
             mark(
                 row(age as u64, shown, replacement.map(str::to_owned), false),
@@ -982,19 +983,13 @@ fn buffers(
         .active_view()
         .and_then(|view| app.view(view))
         .map(|v| v.document_id);
-    let mut rows: Vec<_> = app
-        .workspace()
-        .documents()
-        .filter_map(|id| {
-            let name = app.document_name(id);
-            let shown = printable(&name);
-            let (score, highlights) = matched(matcher, query, &shown)?;
-            Some((id, name, shown, score, highlights))
-        })
-        .collect();
-    rows.sort_by_key(|(id, _, _, score, _)| (std::cmp::Reverse(*score), active == Some(*id)));
-    rows.into_iter()
-        .map(|(id, name, shown, _, highlights)| {
+    let shown = app.workspace().documents().map(|id| {
+        let name = app.document_name(id);
+        let shown = printable(&name);
+        ((id, name), shown)
+    });
+    ranked(matcher, query, shown, |(id, _)| active == Some(*id))
+        .map(|((id, name), shown, highlights)| {
             let marker = if active == Some(id) { "* " } else { "  " };
             let dirty = if app.workspace().is_dirty(id) {
                 " [+]"

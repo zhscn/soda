@@ -33,6 +33,16 @@ impl Ord for Ranked {
             .then_with(|| self.candidate.key.cmp(&other.candidate.key))
     }
 }
+/// A query as the fuzzy, smart-case pattern every candidate list uses.
+pub(crate) fn atom(query: &str) -> Atom {
+    Atom::new(
+        query,
+        CaseMatching::Smart,
+        Normalization::Smart,
+        AtomKind::Fuzzy,
+        false,
+    )
+}
 /// Fuzzy-matches one short text, returning the score and the UTF-8 ranges
 /// of the matched graphemes. Used for in-memory candidate lists.
 pub(crate) fn fuzzy_match(
@@ -40,13 +50,15 @@ pub(crate) fn fuzzy_match(
     query: &str,
     text: &str,
 ) -> Option<(u16, Vec<std::ops::Range<usize>>)> {
-    let atom = Atom::new(
-        query,
-        CaseMatching::Smart,
-        Normalization::Smart,
-        AtomKind::Fuzzy,
-        false,
-    );
+    matched_ranges(&atom(query), matcher, text)
+}
+/// The score of `text` under a pattern and the ranges of the graphemes
+/// that matched.
+fn matched_ranges(
+    atom: &Atom,
+    matcher: &mut Matcher,
+    text: &str,
+) -> Option<(u16, Vec<std::ops::Range<usize>>)> {
     let ranges: Vec<_> = text
         .grapheme_indices(true)
         .map(|(start, g)| start..start + g.len())
@@ -72,13 +84,7 @@ pub(super) fn filter(
     task: &PickerTask,
     matcher: &mut Matcher,
 ) -> Option<PickerResults<PathBuf>> {
-    let atom = Atom::new(
-        &task.query,
-        CaseMatching::Smart,
-        Normalization::Smart,
-        AtomKind::Fuzzy,
-        false,
-    );
+    let atom = atom(&task.query);
     let mut symbols = Vec::new();
     let mut heap = BinaryHeap::new();
     let mut matched = 0;
@@ -109,32 +115,12 @@ pub(super) fn filter(
     let mut ranked = heap.into_vec();
     ranked.sort();
     let mut rows = Vec::with_capacity(ranked.len());
-    let mut indices = Vec::new();
     for item in ranked {
         if task.obsolete() {
             return None;
         }
         let candidate = item.candidate;
-        let ranges: Vec<_> = candidate
-            .label
-            .grapheme_indices(true)
-            .map(|(start, g)| start..start + g.len())
-            .collect();
-        symbols.clear();
-        symbols.extend(
-            candidate
-                .label
-                .graphemes(true)
-                .map(|g| g.chars().next().unwrap()),
-        );
-        indices.clear();
-        atom.indices(Utf32Str::Unicode(&symbols), matcher, &mut indices)?;
-        indices.sort_unstable();
-        indices.dedup();
-        let highlights = indices
-            .iter()
-            .filter_map(|index| ranges.get(*index as usize).cloned())
-            .collect();
+        let (_, highlights) = matched_ranges(&atom, matcher, &candidate.label)?;
         rows.push(MatchedCandidate {
             candidate,
             score: item.score,

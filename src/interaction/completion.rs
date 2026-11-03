@@ -7,11 +7,14 @@ use crate::{
     application::{Application, ViewId},
     core::{Association, ByteOffset, Snapshot},
     editor::DocumentPosition,
-    interaction::{EditMode, picker::fuzzy_match},
+    interaction::{
+        EditMode,
+        picker::{atom, fuzzy_match},
+    },
 };
 use nucleo_matcher::{
     Config, Matcher, Utf32Str,
-    pattern::{Atom, AtomKind, CaseMatching, Normalization},
+    pattern::Atom,
 };
 use std::path::{Path, PathBuf};
 
@@ -667,15 +670,6 @@ impl State {
             (0..session.items.len()).collect()
         };
         let offset = session.start.offset.0;
-        let atom = |typed: &str| {
-            Atom::new(
-                typed,
-                CaseMatching::Smart,
-                Normalization::Smart,
-                AtomKind::Fuzzy,
-                false,
-            )
-        };
         let mut atoms: Vec<(usize, Atom)> = vec![];
         session.typed.clear();
         let mut chars = vec![];

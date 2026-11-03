@@ -2,7 +2,7 @@
 //! editors; completions are accepted only by their live request identity.
 mod list;
 mod matching;
-pub(crate) use matching::fuzzy_match;
+pub(crate) use matching::{atom, fuzzy_match};
 mod source;
 mod worker;
 pub use list::{Candidate, CandidateKey, CandidateListState, ListMotion, MatchedCandidate};
