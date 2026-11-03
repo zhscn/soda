@@ -37,6 +37,7 @@ const FUNCTIONS: &[&str] = &[
     "set",
     "declare_option",
     "message",
+    "log",
     "flag",
     "unflag",
     "note",

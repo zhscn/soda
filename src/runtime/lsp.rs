@@ -269,6 +269,11 @@ fn initialize(root: &Path, init: &Value) -> Value {
                         },
                     },
                 },
+                "window": {
+                    "workDoneProgress": true,
+                    "showMessage": {},
+                    "showDocument": { "support": true },
+                },
                 "workspace": {
                     "applyEdit": true,
                     "configuration": true,

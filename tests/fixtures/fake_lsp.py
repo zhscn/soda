@@ -169,6 +169,17 @@ while True:
                           "label": [{"value": "int"}, {"value": "&"}]}])
     elif method == "textDocument/didSave":
         log.write("didSave\n")
+    elif method == "$fake/progress":
+        if True:
+            def progress(value):
+                write({"jsonrpc": "2.0", "method": "$/progress", "params": {"token": "t", "value": value}})
+            progress({"kind": "begin", "title": "indexing", "percentage": 0})
+            progress({"kind": "report", "message": "3/10", "percentage": 30})
+            write({"jsonrpc": "2.0", "method": "window/logMessage", "params": {"type": 4, "message": "quiet words"}})
+            write({"jsonrpc": "2.0", "method": "window/showMessage", "params": {"type": 3, "message": "loud words"}})
+    elif method == "workspace/symbol" and params["query"] == "end":
+        write({"jsonrpc": "2.0", "method": "$/progress", "params": {"token": "t", "value": {"kind": "end"}}})
+        answer(message, [])
     elif method == "textDocument/signatureHelp":
         answer(message, {"activeSignature": 0, "activeParameter": 1, "signatures": [
             {"label": "add(int a, int b)", "parameters": [{"label": "int a"}, {"label": "int b"}]},

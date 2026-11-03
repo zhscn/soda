@@ -180,6 +180,13 @@ pub(super) fn register<'scope, 'r: 'scope>(
         })?,
     )?;
     soda.set(
+        "log",
+        scope.create_function(|_, text: String| {
+            runtime.borrow_mut().log(text);
+            Ok(())
+        })?,
+    )?;
+    soda.set(
         "hint",
         scope.create_function(|_, text: Option<String>| {
             let mut runtime = runtime.borrow_mut();

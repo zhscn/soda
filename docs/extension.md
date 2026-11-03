@@ -118,6 +118,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `soda.defer(ms, fn)` | `ms` 毫秒后在当前视图上调用 `fn` 一次，返回编号 |
 | `soda.cancel(id)` | 取消还没到时间的 `defer`，返回是否取消了 |
 | `soda.message(text)` | 设置状态消息 |
+| `soda.log(text)` | 只写进消息日志（`*messages*`），不显示在消息行 |
 | `soda.flag(group, face, sign, lines)` / `soda.unflag([group])` | 行标记，`lines` 是从 1 开始的行号数组；`unflag` 没有标记可去时不报错 |
 | `soda.hint(text)` | 消息行没有消息时显示的文字，一直保留到下一次调用；`nil` 清除 |
 | `soda.status(name, text, [face])` | 状态栏右侧的一段文字，按名字替换，按第一次设置的顺序排列；`text` 为 nil 或空时去掉。`face` 是任一 face 名 |

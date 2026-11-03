@@ -54,6 +54,8 @@ rust-analyzer 默认不开，因为它会运行项目的构建脚本，打开一
 
 inlay hint（参数名、`auto` 的类型）用斜体灰色显示在文字之间，不是文档内容：不能选中，不影响保存；光标、横向滚动和鼠标都按文字算，点在 hint 上等于点它后面的字符。开了 `wrap` 时 hint 集中显示在行尾，否则会把文字挤出屏幕。选项 `inlay-hints` 关闭显示。
 
+服务器报告的工作进度（`$/progress`，如 clangd 和 ccls 建索引）显示在状态栏：标题、消息和百分比，同时有几项时显示最近开始的一项，结束后消失。`window/showMessage` 显示在消息行，`window/logMessage` 只进消息日志（`messages` 命令打开）。`window/showMessageRequest` 只显示消息，回答为没有选择：服务器等着回答，而选择要等人。`window/showDocument` 在编辑器里打开文档并跳到所给的行，`external` 的不打开。
+
 保存时发 `didSave`，clangd 因此重新检查依赖这个头文件的已打开文档。
 
 ## 编辑

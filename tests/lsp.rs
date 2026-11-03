@@ -896,3 +896,22 @@ fn the_symbol_at_the_caret_is_highlighted_where_it_is_read_and_written() {
     keys(&mut f.r, "l");
     wait(&mut f.r, |r| r.app().paints(document).is_empty());
 }
+#[test]
+fn progress_shows_on_the_status_line_and_messages_reach_the_user() {
+    let Some(mut f) = open("x\n") else { return };
+    let status = |r: &Runtime| {
+        r.status_segments()
+            .iter()
+            .find(|(name, ..)| name == "lsp-progress")
+            .map(|(_, text, _)| text.clone())
+    };
+    f.r.source_lua("t", r#"soda.lsp.notify("$fake/progress", {})"#)
+        .unwrap();
+    wait(&mut f.r, |r| {
+        status(r).as_deref() == Some("indexing 3/10 30%")
+    });
+    wait(&mut f.r, |r| r.message() == "loud words");
+    assert!(f.r.messages().any(|m| m == "quiet words"));
+    f.r.command(Command::Named("lsp-workspace-symbols end".into()));
+    wait(&mut f.r, |r| status(r).is_none());
+}

@@ -1244,6 +1244,71 @@ soda.hook("idle", ".*", function()
   end)
 end)
 
+-- Work a server reports, such as indexing, on the status line: the latest
+-- of each piece of work, until it ends.
+local progress, order = {}, {}
+local function show_progress()
+  local shown = nil
+  for _, token in ipairs(order) do
+    local work = progress[token]
+    if work then
+      local words = { work.title }
+      if work.message and work.message ~= "" then
+        table.insert(words, work.message)
+      end
+      if work.percentage then
+        table.insert(words, math.floor(work.percentage) .. "%")
+      end
+      shown = table.concat(words, " ")
+    end
+  end
+  soda.status("lsp-progress", shown)
+end
+soda.lsp.on("$/progress", function(params)
+  local token, value = tostring(params.token), params.value or {}
+  if value.kind == "begin" then
+    if not progress[token] then
+      table.insert(order, token)
+    end
+    progress[token] = { title = value.title or "", message = value.message, percentage = value.percentage }
+  elseif value.kind == "report" and progress[token] then
+    local work = progress[token]
+    work.message = value.message or work.message
+    work.percentage = value.percentage or work.percentage
+  elseif value.kind == "end" then
+    progress[token] = nil
+    for at, each in ipairs(order) do
+      if each == token then
+        table.remove(order, at)
+        break
+      end
+    end
+  end
+  show_progress()
+end)
+-- What a server says for the user goes to the message line; what it logs,
+-- to the message log only.
+soda.lsp.on("window/showMessage", function(params)
+  soda.message(params.message)
+end)
+soda.lsp.on("window/logMessage", function(params)
+  soda.log(params.message)
+end)
+-- A question with choices cannot wait for an answer here: the server waits
+-- for this function. It is shown, and answered as dismissed.
+soda.lsp.on("window/showMessageRequest", function(params)
+  soda.message(params.message)
+end)
+soda.lsp.on("window/showDocument", function(params)
+  if params.external then
+    return { success = false }
+  end
+  local path = path_of(params.uri)
+  local range = params.selection
+  soda.open(path, range and range.start.line + 1 or 1, 1)
+  return { success = true }
+end)
+
 soda.hook("save", ".*", function()
   local uri = soda.lsp.uri()
   if uri then
