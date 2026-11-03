@@ -37,7 +37,7 @@ mod jumps;
 mod keymap;
 pub use keymap::{BindingError, Context, Keymap, KeypadStart, LineEdit};
 mod registry;
-pub use registry::{BUILTINS, Choice, CommandHandler, CommandInfo, Registry, Slot, SlotKind};
+pub use registry::{BUILTINS, Choice, CommandInfo, Registry, Slot, SlotKind};
 mod resize;
 mod session;
 
@@ -188,41 +188,6 @@ pub struct Layers {
     hook: Option<String>,
 }
 impl Layers {
-    pub fn bind(
-        &mut self,
-        mode: EditMode,
-        keys: &[KeyStroke],
-        command: Command,
-    ) -> Result<(), BindingError> {
-        let label = match &command {
-            Command::Named(line) => line.clone(),
-            command => format!("{command:?}"),
-        };
-        self.keymap.bind(mode.into(), keys, command, label)?;
-        self.sequence.clear();
-        self.modal.clear();
-        Ok(())
-    }
-    pub fn unbind_input(&mut self, key: KeyStroke) -> Result<(), BindingError> {
-        self.keymap.unbind(Context::Prompt, &[key])
-    }
-    pub fn bind_input(&mut self, key: KeyStroke, input: Input) -> Result<(), BindingError> {
-        let label = format!("{input:?}");
-        self.keymap.bind_input(key, input, label)
-    }
-    pub fn unbind(&mut self, mode: EditMode, keys: &[KeyStroke]) -> Result<(), BindingError> {
-        self.sequence.clear();
-        self.modal.clear();
-        self.keymap.unbind(mode.into(), keys)
-    }
-    /// Registers a Rust command under a name that is not built in.
-    pub fn register_command(
-        &mut self,
-        name: impl Into<String>,
-        handler: CommandHandler,
-    ) -> Result<(), String> {
-        self.registry.register(name, handler)
-    }
     /// Whether a command failed since `clear_failed`.
     pub fn failed(&self) -> bool {
         self.failed

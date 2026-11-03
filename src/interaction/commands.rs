@@ -554,25 +554,14 @@ impl Layers {
                         }
                     }
                 };
-                if let Some(handler) = self.registry.handler(line.trim()) {
-                    let command = handler(app)?;
-                    if matches!(command, Command::Named(_)) {
-                        response.message = Message::Set(
-                            "Registered commands cannot recursively dispatch named commands".into(),
-                        );
-                    } else {
-                        return self.execute(command, app, time, file_root);
+                match self.registry.expand(&line) {
+                    Ok(mut commands) if commands.len() == 1 => {
+                        return self.execute(commands.pop().unwrap(), app, time, file_root);
                     }
-                } else {
-                    match self.registry.expand(&line) {
-                        Ok(mut commands) if commands.len() == 1 => {
-                            return self.execute(commands.pop().unwrap(), app, time, file_root);
-                        }
-                        Ok(commands) => response.commands = commands,
-                        Err(error) => {
-                            response.message = Message::Set(error);
-                            response.failed = true;
-                        }
+                    Ok(commands) => response.commands = commands,
+                    Err(error) => {
+                        response.message = Message::Set(error);
+                        response.failed = true;
                     }
                 }
             }

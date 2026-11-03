@@ -7,13 +7,11 @@ use super::{
     modal::{Action, Entry as InsertAt, Query, Step},
 };
 use crate::{
-    application::{Application, Axis, ClipboardAction, Direction},
-    core::EditError,
+    application::{Axis, ClipboardAction, Direction},
     editor::{Command as Edit, Motion},
 };
 use std::collections::BTreeMap;
 
-pub type CommandHandler = fn(&Application) -> Result<Command, EditError>;
 const MAX_DEPTH: usize = 16;
 
 /// How the command line completes an argument and whether Enter requires
@@ -1383,15 +1381,12 @@ pub static BUILTINS: &[Builtin] = &[
     builtin!("nop", "Do nothing; hides a default binding", Command::Nop),
 ];
 
-enum Entry {
-    Native(CommandHandler),
-    /// A body of command lines and what help shows for it; without a
-    /// description help shows the body.
-    User {
-        body: String,
-        doc: Option<String>,
-        slots: Option<&'static [Slot]>,
-    },
+/// A user command: a body of command lines and what help shows for it;
+/// without a description help shows the body.
+struct Entry {
+    body: String,
+    doc: Option<String>,
+    slots: Option<&'static [Slot]>,
 }
 /// A command name with its signature and documentation, for help and the
 /// command line.
@@ -1500,18 +1495,6 @@ fn statements(body: &str) -> Vec<String> {
         .collect()
 }
 impl Registry {
-    pub fn register(
-        &mut self,
-        name: impl Into<String>,
-        handler: CommandHandler,
-    ) -> Result<(), String> {
-        let name = name.into();
-        if reserved(&name) || name.is_empty() || name.contains(char::is_whitespace) {
-            return Err(format!("cannot define command {name:?}"));
-        }
-        self.entries.insert(name, Entry::Native(handler));
-        Ok(())
-    }
     pub fn define(
         &mut self,
         name: String,
@@ -1522,7 +1505,7 @@ impl Registry {
         if reserved(&name) {
             return Err(format!("{name} is a built-in command"));
         }
-        self.entries.insert(name, Entry::User { body, doc, slots });
+        self.entries.insert(name, Entry { body, doc, slots });
         Ok(())
     }
     /// Parses a line naming only built-in commands; used for default tables.
@@ -1541,7 +1524,7 @@ impl Registry {
     /// Expands a command line into commands executed in order. User
     /// definitions expand eagerly so that unknown commands and bad arguments
     /// stop the line before any part runs; statements reading `%opt` or
-    /// `%val`, and registered handlers, stay named and run when reached.
+    /// `%val`, stay named and run when reached.
     pub(super) fn expand(&self, line: &str) -> Result<Vec<Command>, String> {
         let mut out = vec![];
         self.expand_into(line, 0, &mut out)?;
@@ -1558,7 +1541,7 @@ impl Registry {
         }
         let (name, args) = split(line);
         match self.entries.get(name) {
-            Some(Entry::User { body, .. }) => {
+            Some(Entry { body, .. }) => {
                 if depth == MAX_DEPTH {
                     return Err(format!(
                         "{name} recursively expands more than {MAX_DEPTH} levels"
@@ -1568,8 +1551,6 @@ impl Registry {
                     self.expand_into(&statement, depth + 1, out)?;
                 }
             }
-            Some(Entry::Native(_)) if args.is_empty() => out.push(Command::Named(name.into())),
-            Some(Entry::Native(_)) => return Err(format!("{name} takes no argument")),
             // A statement reading state is expanded when its turn comes.
             None if depth > 0 && super::expand::has_expansions(line) && !holds_commands(line) => {
                 if !self.knows(name) {
@@ -1584,13 +1565,7 @@ impl Registry {
         }
         Ok(())
     }
-    pub(super) fn handler(&self, name: &str) -> Option<CommandHandler> {
-        match self.entries.get(name) {
-            Some(Entry::Native(handler)) => Some(*handler),
-            _ => None,
-        }
-    }
-    /// Every command, built-ins first, then registered and user commands.
+    /// Every command, built-ins first, then user commands.
     pub fn commands(&self) -> Vec<CommandInfo> {
         let builtins = BUILTINS.iter().map(|b| CommandInfo {
             name: b.name.into(),
@@ -1604,19 +1579,11 @@ impl Registry {
             doc: (*doc).into(),
             builtin: None,
         });
-        let custom = self.entries.iter().map(|(name, entry)| match entry {
-            Entry::Native(_) => CommandInfo {
-                name: name.clone(),
-                slots: &[],
-                doc: "Registered command".into(),
-                builtin: None,
-            },
-            Entry::User { body, doc, slots } => CommandInfo {
-                name: name.clone(),
-                slots: slots.unwrap_or(ARGUMENTS),
-                doc: doc.clone().unwrap_or_else(|| body.clone()),
-                builtin: None,
-            },
+        let custom = self.entries.iter().map(|(name, entry)| CommandInfo {
+            name: name.clone(),
+            slots: entry.slots.unwrap_or(ARGUMENTS),
+            doc: entry.doc.clone().unwrap_or_else(|| entry.body.clone()),
+            builtin: None,
         });
         builtins.chain(edits).chain(custom).collect()
     }
@@ -1635,10 +1602,8 @@ impl Registry {
         if let Some((_, _, doc)) = PROMPT_ACTIONS.iter().find(|(n, ..)| *n == name) {
             return (*doc).into();
         }
-        match self.entries.get(name) {
-            Some(Entry::User { body, doc, .. }) => doc.clone().unwrap_or_else(|| body.clone()),
-            Some(Entry::Native(_)) => "Registered command".into(),
-            None => String::new(),
-        }
+        self.entries.get(name).map_or_else(String::new, |entry| {
+            entry.doc.clone().unwrap_or_else(|| entry.body.clone())
+        })
     }
 }

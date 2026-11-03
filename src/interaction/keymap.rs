@@ -1,7 +1,7 @@
 //! Context-scoped key tables. Defaults are command lines resolved through the
 //! registry; user bindings shadow them and unbinding restores the default.
 use super::{
-    Command, EditMode, Input, InputKey, InputMotion, Key, KeyStroke, picker::ListMotion,
+    Command, Input, InputKey, InputMotion, Key, KeyStroke, picker::ListMotion,
     registry::{Choice, Registry, word},
 };
 use crate::{
@@ -65,16 +65,6 @@ fn every_context_has_its_choice_in_order() {
         assert_eq!(context as usize, index);
     }
 }
-impl From<EditMode> for Context {
-    fn from(mode: EditMode) -> Self {
-        match mode {
-            EditMode::Normal => Self::Normal,
-            EditMode::Beacon => Self::Beacon,
-            EditMode::Insert => Self::Insert,
-        }
-    }
-}
-
 /// Readline-style edits shared by Insert and every text field.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LineEdit {

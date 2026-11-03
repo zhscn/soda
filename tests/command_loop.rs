@@ -144,7 +144,7 @@ fn modal_confirm_and_cancel_are_consumed_once() {
             .unwrap()
             .presentation()
             .text
-            .contains("needs PATH")
+            .contains("needs LINE")
     );
     assert!(text(&app).is_empty());
     let response = handled(route(
@@ -312,38 +312,21 @@ fn configured_layers() -> Layers {
             Path::new("/"),
         )
         .unwrap();
-    let prefix = KeyStroke {
-        control: true,
-        ..KeyStroke::plain(Key::Char('x'))
-    };
-    for (ch, control, command) in [
-        ('f', true, Command::Ex("open ".into())),
-        ('s', true, Command::Save { choose_path: false }),
-        ('n', false, Command::New),
+    for (keys, target) in [
+        // A prompt that opens empty, so Enter has an argument missing.
+        ("<c-x><c-f>", "goto"),
+        ("<c-x><c-s>", "write"),
+        ("<c-x>n", "new"),
+        ("<c-_>", "undo"),
     ] {
         layers
-            .bind(
-                soda::interaction::EditMode::Insert,
-                &[
-                    prefix,
-                    KeyStroke {
-                        control,
-                        ..KeyStroke::plain(Key::Char(ch))
-                    },
-                ],
-                command,
-            )
+            .configure(Command::Map {
+                context: soda::interaction::Context::Insert,
+                keys: KeyStroke::parse_sequence(keys).unwrap(),
+                target: target.into(),
+                label: None,
+            })
             .unwrap();
     }
-    layers
-        .bind(
-            soda::interaction::EditMode::Insert,
-            &[KeyStroke {
-                control: true,
-                ..KeyStroke::plain(Key::Char('_'))
-            }],
-            Command::Edit(EditCommand::Undo),
-        )
-        .unwrap();
     layers
 }
