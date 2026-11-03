@@ -853,7 +853,9 @@ fn command_line(painter: &mut Painter, area: Rect, line: &CommandLine) -> Option
     let rows = line.rows();
     let list = line.list();
     // The input sits in the middle of the message row.
-    let input_top = area.bottom() - (row_h + (row_h * 0.3).round()) / 2.0 - row_h / 2.0;
+    // The message row is a line and its rounded room, as `Areas` makes it.
+    let message = row_h + (row_h * 0.3).round();
+    let input_top = area.bottom() - message / 2.0 - row_h / 2.0;
     painter.fill(area, painter.bg, 0.0);
     // What the line is for, at the right: an error, else the command's
     // slots and any question, then progress and the count.
@@ -904,7 +906,9 @@ fn command_line(painter: &mut Painter, area: Rect, line: &CommandLine) -> Option
         );
     }
     // Candidates fill the rows above the status line's old place.
-    let count = ((area.h - row_h * 1.3) / row_h).floor().max(0.0) as usize;
+    // Whole rows above the message row; rounding, not flooring, so that
+    // a fraction of a pixel lost in the sums does not lose a row.
+    let count = ((area.h - message) / row_h).round().max(0.0) as usize;
     if count > 0 {
         let list_area = Rect::new(0.0, area.y, area.w, count as f32 * row_h);
         let (_, bg) = painter.colors(theme.float);
