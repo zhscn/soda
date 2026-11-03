@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.svg" width="128" alt="Soda logo"></p>
+
 # Soda
 
 Soda 是用 Rust 实现的编辑器，有终端和图形两个前端，核心体验是 CLion 式的 C++ 即时缩进：回车时根据增量维护的语法结构和项目的 `.clang-format` 计算新行缩进，并正确处理 tab 与 space 混排。编辑采用 meow 式的选择优先模型，Insert 和输入框支持 readline 键。
