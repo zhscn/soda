@@ -226,6 +226,10 @@ fn selected(runtime: &Runtime) -> bool {
         .unwrap_or(false)
 }
 
+/// The application's identifier: the desktop entry's name on Linux and the
+/// bundle identifier on macOS.
+pub const APP_ID: &str = "io.github.zhscn.soda";
+
 /// Run the graphical frontend using the shared owner-thread runtime.
 pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
     let mut builder = EventLoop::builder();
@@ -826,6 +830,19 @@ impl ApplicationHandler for App {
         let attributes = Window::default_attributes()
             .with_title("soda")
             .with_inner_size(LogicalSize::new(1100.0, 720.0));
+        // The desktop entry's name, by which Wayland compositors and X11
+        // window managers find the window's icon and launcher.
+        #[cfg(all(
+            unix,
+            not(any(target_os = "macos", target_os = "ios", target_os = "android"))
+        ))]
+        let attributes = {
+            use winit::platform::{
+                wayland::WindowAttributesExtWayland, x11::WindowAttributesExtX11,
+            };
+            let attributes = WindowAttributesExtWayland::with_name(attributes, APP_ID, "soda");
+            WindowAttributesExtX11::with_name(attributes, APP_ID, "soda")
+        };
         let window = match event_loop.create_window(attributes) {
             Ok(window) => Arc::new(window),
             Err(error) => return self.fail(event_loop, error.to_string()),

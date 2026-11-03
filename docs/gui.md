@@ -79,3 +79,12 @@ macOS 的 Command 键按系统习惯处理，不经过键位表：
 cargo run --features gui --example gui_snapshot -- \
     --size 1400x900 --scale 1.5 --keys 'C-x 3 M-x o' --out shot.ppm src/main.rs
 ```
+
+## 打包
+
+应用标识是 `io.github.zhscn.soda`（`gui::APP_ID`）：Linux 上它是 Wayland 的 app_id、X11 的 `WM_CLASS` 和桌面入口的文件名，桌面环境据此把窗口对应到入口和图标；macOS 上它是包标识。
+
+- **Linux**：`scripts/install-linux.sh` 把 `soda`、`soda-gui`、`packaging/linux/io.github.zhscn.soda.desktop` 和 `assets/icon.svg`（装成 hicolor 的 scalable 图标）放到 `PREFIX`，默认 `~/.local`。
+- **macOS**：`scripts/bundle-macos.sh` 构建 `soda-gui`，用 `packaging/macos/Info.plist` 和已提交的 `soda.icns` 组装 `Soda.app` 并做临时签名。`scripts/make-icons.sh` 从 `assets/icon.svg` 渲染 `.icns`，只在图标改动后运行。
+
+从启动器或 Finder 打开时，工作目录若是根目录就换成主目录，项目从主目录找起。macOS 上从 Finder 启动的程序拿不到 shell 的 `PATH`，语言服务器的命令要写绝对路径；Finder 里“用 Soda 打开”文件还不支持。

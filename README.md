@@ -2,7 +2,7 @@
 
 # Soda
 
-Soda 是用 Rust 实现的编辑器，有终端和图形两个前端，核心体验是 CLion 式的 C++ 即时缩进：回车时根据增量维护的语法结构和项目的 `.clang-format` 计算新行缩进，并正确处理 tab 与 space 混排。编辑采用 meow 式的选择优先模型，Insert 和输入框支持 readline 键。
+Soda 是用 Rust 实现的编辑器，有终端和图形两个前端，核心体验是 CLion 式的 C++ 即时缩进：回车时根据增量维护的语法结构和项目的 `.clang-format` 计算新行缩进，并正确处理 tab 与 space 混排。不加配置时按键与裸 Emacs 相近；meow 式的模态编辑、puni 式的结构化编辑等以 Lua 插件自带，在配置里打开。
 
 ```sh
 cargo run --release -- [--no-config] [FILE]
@@ -11,14 +11,23 @@ cargo run -- --help        # 默认键位与命令
 cargo run --release --features gui --bin soda-gui -- [--no-config] [FILE]
 ```
 
-编辑区按 `F1` 查看当前键位与命令，`SPC :` 打开命令面板，`:` 打开命令行。启动时运行 `~/.config/soda/init.lua`（或 `$XDG_CONFIG_HOME/soda/init.lua`）：
+编辑区按 `F1` 查看当前键位与命令，`M-x` 打开命令面板。启动时运行 `~/.config/soda/init.lua`（或 `$XDG_CONFIG_HOME/soda/init.lua`）：
 
 ```lua
-soda.map("normal", "SPC w", "write")
+require("meow").setup()          -- 模态编辑，默认 meow README 的 QWERTY 布局
 soda.command([[define-command fmt pipe clang-format --assume-filename="$SODA_FILE"]])
-soda.map("normal", "SPC =", "fmt")
+soda.map("global", "C-c =", "fmt")
 soda.set("line-numbers", "relative")
 ```
+
+## 安装为桌面应用
+
+```sh
+scripts/install-linux.sh     # Linux：soda、soda-gui、桌面入口和图标装到 ~/.local（PREFIX 可改）
+scripts/bundle-macos.sh      # macOS：生成 target/release/Soda.app，拷到 /Applications 即可
+```
+
+图标是 `assets/icon.svg`（`assets/logo.svg` 加底板）；改了以后运行 `scripts/make-icons.sh` 重新生成 macOS 的 `packaging/macos/soda.icns`。
 
 ## 文档
 

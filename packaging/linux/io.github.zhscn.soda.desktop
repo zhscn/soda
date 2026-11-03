@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Soda
+GenericName=Text Editor
+Comment=Edit text and code, with C++ indentation as you type
+Exec=soda-gui %F
+Icon=io.github.zhscn.soda
+Terminal=false
+Categories=Utility;TextEditor;
+MimeType=text/plain;text/x-c++src;text/x-c++hdr;text/x-csrc;text/x-chdr;text/x-rust;text/markdown;
+Keywords=editor;text;code;
+StartupNotify=true
+StartupWMClass=io.github.zhscn.soda
