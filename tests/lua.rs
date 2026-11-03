@@ -1136,3 +1136,66 @@ fn files_are_created_renamed_and_deleted_and_documents_follow() {
     let failed = r.source_lua("t", r#"soda.delete_file("nothing")"#);
     assert!(failed.unwrap_err().contains("nothing"));
 }
+#[test]
+fn trees_open_and_close_load_children_when_asked_and_hand_back_nodes() {
+    let mut r = runtime();
+    let text = |r: &Runtime| {
+        let view = r.app().view(r.app().active_view().unwrap()).unwrap();
+        let editor = r.app().workspace().editor(view.document_id).unwrap();
+        editor.model().document().snapshot().text().to_owned()
+    };
+    let caret_line = |r: &Runtime| {
+        let view = r.app().view(r.app().active_view().unwrap()).unwrap();
+        let editor = r.app().workspace().editor(view.document_id).unwrap();
+        let head = editor
+            .model()
+            .session(view.session_id)
+            .unwrap()
+            .selection()
+            .head;
+        editor.model().document().snapshot().line_of(head).unwrap()
+    };
+    lua(
+        &mut r,
+        r#"
+        local later
+        soda.tree({
+          name = "calls",
+          roots = {
+            { label = "main", detail = "a.cpp:1", where = 1,
+              children = { { label = "helper", where = 2 } } },
+            { label = "done", leaf = true },
+          },
+          expand = function(node, add)
+            -- Children may come later, as an answer would.
+            later = function() add({ { label = node.label .. " child", leaf = true, where = 3 } }) end
+          end,
+          open = function(node) soda.message("open " .. node.where) end,
+        })
+        soda.define_command("deliver", function() later() end)
+        "#,
+    );
+    assert_eq!(text(&r), "▸ main  a.cpp:1\n  done\n");
+    keys(&mut r, "<tab>");
+    assert_eq!(text(&r), "▾ main  a.cpp:1\n  ▸ helper\n  done\n");
+    keys(&mut r, "j<tab>");
+    assert_eq!(text(&r), "▾ main  a.cpp:1\n  ▾ helper …\n  done\n");
+    r.command(Command::Named("deliver".into()));
+    assert_eq!(
+        text(&r),
+        "▾ main  a.cpp:1\n  ▾ helper\n      helper child\n  done\n"
+    );
+    assert_eq!(caret_line(&r), 1, "the caret stays on its node");
+    keys(&mut r, "j<ret>");
+    assert_eq!(r.message(), "open 3");
+    // Backspace goes to the parent, then closes it.
+    keys(&mut r, "<bs>");
+    assert_eq!(caret_line(&r), 1);
+    keys(&mut r, "<bs>");
+    assert_eq!(text(&r), "▾ main  a.cpp:1\n  ▸ helper\n  done\n");
+    assert_eq!(caret_line(&r), 1);
+    // The bindings are a context of their own.
+    lua(&mut r, r#"soda.map("tree", "o", "tree-open")"#);
+    keys(&mut r, "o");
+    assert_eq!(r.message(), "open 2");
+}

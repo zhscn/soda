@@ -24,6 +24,7 @@ mod process;
 mod run;
 mod shell;
 mod state;
+pub(crate) mod tree;
 
 /// Messages the log keeps.
 const MESSAGE_LIMIT: usize = 1000;
@@ -69,6 +70,8 @@ pub struct Runtime {
     /// Input macros still have to replay, next first, as a
     /// typeahead: a replay started while replaying goes to the front.
     replay: std::collections::VecDeque<UserInput>,
+    /// Trees Lua shows, by the name of their document.
+    trees: std::collections::HashMap<String, tree::Tree>,
     replaying: bool,
     /// Hook events waiting to run: the event, its parameter and the view
     /// its commands act on.
@@ -147,6 +150,7 @@ impl Runtime {
             message: String::new(),
             epoch: Instant::now(),
             replay: Default::default(),
+            trees: Default::default(),
             replaying: false,
             notices: vec![],
             hooking: false,
@@ -914,6 +918,10 @@ impl Runtime {
             }
             Effect::Indicator(line, text) => {
                 self.app.set_indicator(document, line, text);
+                None
+            }
+            Effect::Tree(action) => {
+                self.tree_action(action);
                 None
             }
         }

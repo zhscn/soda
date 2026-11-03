@@ -9,7 +9,17 @@ C++ 文档打开时启动 clangd，带 `--function-arg-placeholders=1`，工作�
 ```lua
 soda.lsp.server("rust", { "rust-analyzer" })
 soda.lsp.server("cpp", nil)  -- 不用 clangd
+soda.lsp.server("cpp", { "ccls" }, {
+  init = { cache = { directory = "/tmp/ccls" }, compilationDatabaseDirectory = "build" },
+  settings = { ... },
+  roots = { ".ccls", "compile_commands.json" },
+})
 ```
+
+第三个参数可选：
+- `init`：`initialize` 的 `initializationOptions`。
+- `settings`：服务器用 `workspace/configuration` 要设置时，按 `section` 的点分路径从这里取，没有的部分回答 null，不带 `section` 时给整张表；服务器启动后也用 `workspace/didChangeConfiguration` 发一次。
+- `roots`：根目录标记。文档所在目录往上，最近的含有其中任一文件或目录的目录就是服务器的根目录，没有找到时用项目根目录。只影响服务器，`grep` 等仍按项目；通过跳转打开的文档仍跟随来源的服务器。
 
 rust-analyzer 默认不开，因为它会运行项目的构建脚本，打开一个文件不应该做这件事。clangd 打开项目时可能在项目里写 `.cache/clangd`。
 
@@ -57,7 +67,7 @@ inlay hint（参数名、`auto` 的类型）用斜体灰色显示在文字之间
 
 应用之前先按顺序推演一遍：等服务器回答期间当前文档变了、有文件读不出来、要改的文件不存在、要创建的已经存在而没有允许覆盖，整个编辑都不应用，消息行说明原因。动手之后失败（比如写磁盘失败）则显示 `Partly applied`，这时前面的步骤已经做了。
 
-clangd 的重构类动作是命令：执行后由服务器发来 `workspace/applyEdit`，走同一段代码。Rust 先回答 `applied: true`，再交给 Lua，所以失败时服务器不知道，但消息行会显示。
+clangd 的重构类动作是命令：执行后由服务器发来 `workspace/applyEdit`，走同一段代码，回答里的 `applied` 是编辑是否真的应用了。
 
 ## 同步
 
@@ -65,7 +75,7 @@ clangd 的重构类动作是命令：执行后由服务器发来 `workspace/appl
 
 同一用途的新请求发出时，取消还在等的旧请求：同一个命令再执行一次、补全会话换了、文档又改了以后的语义高亮和 inlay hint。取消发 `$/cancelRequest`，旧请求的回答到了也丢弃。
 
-服务器发来的请求一律回答空值（`workspace/configuration` 回答等长的空数组）。启动失败或者进程退出时报告一次，不自动重启。编辑器退出时结束服务器；被 SIGKILL 时服务器读到 stdin 结束，自己退出。
+服务器发来的请求见下面的 Lua 接口。启动失败或者进程退出时报告一次，不自动重启。编辑器退出时结束服务器；被 SIGKILL 时服务器读到 stdin 结束，自己退出。
 
 列位置优先协商 UTF-8，服务器不支持时用 UTF-16，转换在 `lua/lsp.lua` 里。
 
@@ -76,7 +86,7 @@ soda.lsp.server(language, command)            -- nil 表示去掉
 soda.lsp.request(method, params, function(result, error) end)  -- 返回请求编号；没有服务器时返回 false
 soda.lsp.cancel(id)                           -- 发 $/cancelRequest，之后到的回答丢弃；回答已经到了时返回 false
 soda.lsp.notify(method, params)
-soda.lsp.on(method, function(params) end)     -- 服务器的通知
+soda.lsp.on(method, function(params) end)     -- 服务器的通知和请求；对请求返回的值就是回答
 soda.lsp.uri()                                -- 当前文档的 URI
 soda.lsp.info()                               -- encoding、capabilities；没有服务器时为 nil
 soda.lsp.restart()
@@ -97,7 +107,11 @@ soda.choose(title, items, function(index) end)  -- 从 items 里选一项，取�
 soda.popup(text)    -- 光标旁的浮窗，放不下时滚轮或翻页键滚动，边框上显示位置，其他按键关闭
 ```
 
-作用对象是当前文档的语言的服务器。JSON 的 `null` 在 Lua 里是 `nil`。Lua 的空表发出去是对象 `{}`，协议要空数组的地方用 `soda.lsp.array({})`；从服务器收到的数组不需要标记。
+作用对象是当前文档的语言的服务器。
+
+服务器发来的请求，有 `soda.lsp.on` 函数时交给它们，依次调用，第一个返回非 nil 的值作为回答；都返回 nil 或出错时回答默认值：`workspace/applyEdit` 为 `{ applied = true }`，`workspace/configuration` 按 `settings` 回答，其余为 null。服务器在拿到回答前等着，所以函数要立刻返回。没有函数的请求直接回答默认值。`workspace/applyEdit` 由 `lua/lsp.lua` 处理，回答编辑是否真的应用了。
+
+服务器没有声明某项能力（如 `callHierarchyProvider`、`workspaceSymbolProvider`）时，对应的命令直接说明，不发请求；服务器回答方法不存在（clangd 的扩展 `switchSourceHeader` 在别的服务器上就是这样）时也一样。补全和签名提示这类自动的请求则静默跳过。JSON 的 `null` 在 Lua 里是 `nil`。Lua 的空表发出去是对象 `{}`，协议要空数组的地方用 `soda.lsp.array({})`；从服务器收到的数组不需要标记。
 
 ## 项目与服务器
 
@@ -110,7 +124,7 @@ soda.popup(text)    -- 光标旁的浮窗，放不下时滚轮或翻页键滚动
 
 ## 限制
 
-- 项目根目录由版本库标记决定，不按 `compile_commands.json` 找；clangd 自己会按文件找。服务器的根目录标记还不能按语言配置。
-- 调用层级只有一层，不是 ccls 那样可以展开的树。
+- 没有 `roots` 时，服务器的根目录就是项目根目录，由版本库标记决定，不按 `compile_commands.json` 找；clangd 自己会按文件找。
+- 内置的调用层级只有一层；可以展开的树要用 `soda.tree` 自己写。
 - 不发 `willCreateFiles`、`willRenameFiles`、`willDeleteFiles`：这几个请求要等服务器回答一个编辑再动手，而文件操作本身就来自服务器的编辑。目录改名只报告目录本身，不展开成其中每个文件。
 - `completionItem/resolve` 只取说明和 detail；候选的其他修改要在列表里就给出。

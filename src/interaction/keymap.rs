@@ -23,10 +23,12 @@ pub enum Context {
     Snippet,
     /// Normal with the caret on a marked symbol; other keys go to Normal.
     Mark,
+    /// Normal in a document that shows a tree; other keys go to Normal.
+    Tree,
     Prompt,
 }
 impl Context {
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Global,
         Self::Normal,
         Self::Beacon,
@@ -34,6 +36,7 @@ impl Context {
         Self::Completion,
         Self::Snippet,
         Self::Mark,
+        Self::Tree,
         Self::Prompt,
     ];
     pub fn name(self) -> &'static str {
@@ -45,6 +48,7 @@ impl Context {
             Self::Completion => "completion",
             Self::Snippet => "snippet",
             Self::Mark => "mark",
+            Self::Tree => "tree",
             Self::Prompt => "prompt",
         }
     }
@@ -500,6 +504,11 @@ const SNIPPET: &[(&str, &str)] = &[
     ("<s-backtab>", "snippet-previous"),
     ("<s-tab>", "snippet-previous"),
 ];
+const TREE: &[(&str, &str)] = &[
+    ("<tab>", "tree-toggle"),
+    ("<ret>", "tree-open"),
+    ("<bs>", "tree-collapse"),
+];
 const INSERT: &[(&str, &str)] = &[
     ("<a-/>", "completion-trigger"),
     ("<up>", "move-up"),
@@ -695,7 +704,7 @@ fn sequence(keys: &[KeyStroke]) -> Result<Vec<KeyStroke>, BindingError> {
 }
 
 pub struct Keymap {
-    edit: [Layer<Command>; 7],
+    edit: [Layer<Command>; 8],
     prompt: Layer<Input>,
 }
 impl Default for Keymap {
@@ -714,6 +723,7 @@ impl Default for Keymap {
             (Context::Completion, COMPLETION),
             (Context::Snippet, SNIPPET),
             (Context::Mark, &[]),
+            (Context::Tree, TREE),
         ] {
             for (keys, line) in table {
                 let target = registry.parse_builtin(line).unwrap();

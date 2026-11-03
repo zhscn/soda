@@ -143,6 +143,17 @@ pub enum Effect {
     Structure(Query, Selection),
     /// Words for the end of a line, until the next key.
     Indicator(usize, String),
+    /// A key on the row of a tree.
+    Tree(TreeAction),
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TreeAction {
+    /// Opens or closes the node.
+    Toggle,
+    /// Hands the node to the tree's owner, as a jump to it.
+    Open,
+    /// Closes the node, or goes to its parent.
+    Collapse,
 }
 /// One key to read for the command that asked.
 #[derive(Clone, Copy, Debug)]

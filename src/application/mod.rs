@@ -116,6 +116,21 @@ pub enum Event {
         document: DocumentId,
         discard: bool,
     },
+    /// Makes the nearest directory holding one of `markers` the root of a
+    /// language's servers; none goes back to the document's project.
+    ServerRoots {
+        language: String,
+        markers: Vec<String>,
+    },
+    /// A document shows a tree; its keys are those of the `tree` context.
+    MarkTree(DocumentId),
+    /// Replaces a document's text where it is shown, without moving focus
+    /// or scrolling; the caret of its views goes to `caret`.
+    ReplaceText {
+        document: DocumentId,
+        text: String,
+        caret: usize,
+    },
     /// A document's file was renamed on disk: it stands for `path` now.
     Relocate {
         document: DocumentId,
@@ -423,6 +438,12 @@ pub struct Application {
     indicator: Option<(DocumentId, usize, String)>,
     tokens: tokens::Tokens,
     inlays: inlays::Inlays,
+    /// Files whose presence makes a directory the root of a language's
+    /// server, and the roots found so far by directory and language.
+    server_roots: std::collections::HashMap<String, Vec<String>>,
+    found_roots: std::cell::RefCell<std::collections::HashMap<(PathBuf, String), Option<PathBuf>>>,
+    /// Documents that show a tree, whose keys are those of `tree`.
+    trees: std::collections::BTreeSet<DocumentId>,
 }
 impl Application {
     pub fn new(service: FileService) -> Self {
@@ -493,6 +514,10 @@ impl Application {
         &self.options
     }
     /// Whether the caret stands on a marked symbol.
+    /// Whether a document shows a tree.
+    pub fn is_tree(&self, document: DocumentId) -> bool {
+        self.trees.contains(&document)
+    }
     pub fn on_mark(&self) -> bool {
         let Some(view) = self.active_view().and_then(|id| self.view(id)) else {
             return false;
@@ -1134,10 +1159,55 @@ impl Application {
                 self.paints.forget(document);
                 self.tokens.forget(document);
                 self.inlays.forget(document);
+                self.trees.remove(&document);
                 self.repair_windows();
                 update.closed_views = ids;
                 update.closed_documents.push(document);
                 update.notices.push(Notice::Closed(name));
+            }
+            Event::ServerRoots { language, markers } => {
+                if markers.is_empty() {
+                    self.server_roots.remove(&language);
+                } else {
+                    self.server_roots.insert(language, markers);
+                }
+                self.found_roots.borrow_mut().clear();
+            }
+            Event::MarkTree(document) => {
+                self.trees.insert(document);
+            }
+            Event::ReplaceText {
+                document,
+                text,
+                caret,
+            } => {
+                let views: Vec<ViewId> = self
+                    .views
+                    .values()
+                    .filter(|v| v.document_id == document)
+                    .map(|v| v.id)
+                    .collect();
+                let first = *views.first().ok_or(Error::UnknownView)?;
+                let snapshot = self
+                    .workspace
+                    .editor(document)
+                    .ok_or(FileError::UnknownDocument)?
+                    .model()
+                    .document()
+                    .snapshot();
+                let tx = crate::core::Transaction::new(
+                    snapshot.version(),
+                    vec![crate::core::Change::new(0..snapshot.len_bytes(), text)],
+                );
+                self.edit(first, Command::Apply(tx), Duration::ZERO, &mut update)?;
+                for view in views {
+                    self.edit(
+                        view,
+                        Command::SetSelection(Selection::caret(caret)),
+                        Duration::ZERO,
+                        &mut update,
+                    )?;
+                }
             }
             Event::Relocate { document, path } => {
                 let file = self.workspace.relocate(document, path)?;

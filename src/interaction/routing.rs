@@ -270,6 +270,15 @@ impl Layers {
                 }
             }
             EditMode::Normal if !self.modal.active() && app.on_mark() => stack.push(Context::Mark),
+            EditMode::Normal
+                if !self.modal.active()
+                    && app
+                        .active_view()
+                        .and_then(|view| app.view(view))
+                        .is_some_and(|view| app.is_tree(view.document_id)) =>
+            {
+                stack.push(Context::Tree)
+            }
             EditMode::Beacon => stack.push(Context::Beacon),
             EditMode::Normal => {}
         }

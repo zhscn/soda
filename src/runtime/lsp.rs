@@ -83,6 +83,24 @@ pub(super) enum Delivery {
     },
     /// A notification, for a function given to `soda.lsp.on`.
     Notification { function: u64, params: Value },
+    /// A request from a server, for the functions given to `soda.lsp.on`:
+    /// the first that returns something answers, otherwise `fallback`.
+    Request {
+        functions: Vec<u64>,
+        params: Value,
+        key: Key,
+        id: Value,
+        fallback: Value,
+    },
+}
+/// How to run a language's server.
+pub(super) struct Server {
+    pub command: Vec<String>,
+    /// `initializationOptions` of `initialize`.
+    pub init: Value,
+    /// What `workspace/configuration` answers from, by dotted section, and
+    /// `workspace/didChangeConfiguration` sends once the server is up.
+    pub settings: Value,
 }
 
 /// A language and the root a server for it runs in.
@@ -125,7 +143,7 @@ impl Client {
 
 pub(super) struct Lsp {
     enabled: bool,
-    servers: HashMap<String, Vec<String>>,
+    servers: HashMap<String, Server>,
     clients: HashMap<Key, Client>,
     /// Servers that failed; `lsp-restart` lets them try again.
     failed: Vec<Key>,
@@ -186,8 +204,18 @@ pub(super) fn uri(path: &Path) -> String {
     }
     uri
 }
-fn initialize(root: &Path) -> Value {
-    json!({
+/// What `workspace/configuration` answers for a section of the settings.
+fn section(settings: &Value, name: Option<&str>) -> Value {
+    let Some(name) = name.filter(|name| !name.is_empty()) else {
+        return settings.clone();
+    };
+    name.split('.')
+        .try_fold(settings, |value, key| value.get(key))
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+fn initialize(root: &Path, init: &Value) -> Value {
+    let mut message = json!({
         "jsonrpc": "2.0",
         "id": 0,
         "method": "initialize",
@@ -241,6 +269,8 @@ fn initialize(root: &Path) -> Value {
                 },
                 "workspace": {
                     "applyEdit": true,
+                    "configuration": true,
+                    "didChangeConfiguration": {},
                     "didChangeWatchedFiles": {
                         "dynamicRegistration": true,
                         "relativePatternSupport": true,
@@ -258,7 +288,11 @@ fn initialize(root: &Path) -> Value {
                 },
             },
         },
-    })
+    });
+    if !init.is_null() {
+        message["params"]["initializationOptions"] = init.clone();
+    }
+    message
 }
 impl Lsp {
     /// Lets documents start servers; frontends turn this on, so that
@@ -266,10 +300,10 @@ impl Lsp {
     pub fn enable(&mut self) {
         self.enabled = true;
     }
-    pub fn set_server(&mut self, language: String, command: Option<Vec<String>>) {
-        match command {
-            Some(command) => {
-                self.servers.insert(language, command);
+    pub fn set_server(&mut self, language: String, server: Option<Server>) {
+        match server {
+            Some(server) => {
+                self.servers.insert(language, server);
             }
             None => {
                 self.servers.remove(&language);
@@ -292,7 +326,8 @@ impl Lsp {
     }
     fn start(&mut self, key: &Key) -> Result<(), String> {
         let (language, root) = key;
-        let command = &self.servers[language];
+        let server = &self.servers[language];
+        let command = &server.command;
         let mut process = Command::new(&command[0])
             .args(&command[1..])
             .current_dir(root)
@@ -330,7 +365,7 @@ impl Lsp {
             }
             let _ = incoming.send(Incoming::Closed(name));
         });
-        let _ = writer.send(Outgoing::Message(initialize(root)));
+        let _ = writer.send(Outgoing::Message(initialize(root, &server.init)));
         self.clients.insert(
             key.clone(),
             Client {
@@ -477,6 +512,14 @@ impl Lsp {
         }
         false
     }
+    /// Answers a request a server made.
+    pub fn reply(&mut self, key: &Key, id: Value, result: Value) {
+        if let Some(client) = self.clients.get_mut(key) {
+            client.send(Outgoing::Message(
+                json!({ "jsonrpc": "2.0", "id": id, "result": result }),
+            ));
+        }
+    }
     pub fn notify(&mut self, key: &Key, method: &str, params: Value) -> bool {
         let Some(client) = self.clients.get_mut(key) else {
             return false;
@@ -518,12 +561,6 @@ impl Lsp {
             // notification, which cannot answer back, so an edit is reported
             // as applied before it is.
             (Some(id), Some(method)) => {
-                for function in self.handlers.get(method).into_iter().flatten() {
-                    out.push(Delivery::Notification {
-                        function: *function,
-                        params: message["params"].clone(),
-                    });
-                }
                 let params = &message["params"];
                 match method {
                     "client/registerCapability" => {
@@ -547,17 +584,35 @@ impl Lsp {
                     }
                     _ => {}
                 }
-                let result = match method {
+                let settings = self
+                    .servers
+                    .get(&key.0)
+                    .map_or(&Value::Null, |server| &server.settings);
+                let fallback = match method {
                     "workspace/applyEdit" => json!({ "applied": true }),
-                    "workspace/configuration" => {
-                        let items = message["params"]["items"].as_array().map_or(0, Vec::len);
-                        Value::Array(vec![Value::Null; items])
-                    }
+                    "workspace/configuration" => Value::Array(
+                        params["items"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .map(|item| section(settings, item["section"].as_str()))
+                            .collect(),
+                    ),
                     _ => Value::Null,
                 };
-                client.send(Outgoing::Message(
-                    json!({ "jsonrpc": "2.0", "id": id, "result": result }),
-                ));
+                // Lua answers when it has something to say; the server waits.
+                match self.handlers.get(method) {
+                    Some(functions) if !functions.is_empty() => out.push(Delivery::Request {
+                        functions: functions.clone(),
+                        params: params.clone(),
+                        key: key.clone(),
+                        id,
+                        fallback,
+                    }),
+                    _ => client.send(Outgoing::Message(
+                        json!({ "jsonrpc": "2.0", "id": id, "result": fallback }),
+                    )),
+                }
             }
             (None, Some(method)) => {
                 for function in self.handlers.get(method).into_iter().flatten() {
@@ -580,6 +635,15 @@ impl Lsp {
                 client.send(Outgoing::Message(
                     json!({ "jsonrpc": "2.0", "method": "initialized", "params": {} }),
                 ));
+                if let Some(server) = self.servers.get(&key.0)
+                    && !server.settings.is_null()
+                {
+                    client.send(Outgoing::Message(json!({
+                        "jsonrpc": "2.0",
+                        "method": "workspace/didChangeConfiguration",
+                        "params": { "settings": server.settings },
+                    })));
+                }
                 for message in held {
                     client.send(message);
                 }

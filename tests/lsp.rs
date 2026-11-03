@@ -46,6 +46,10 @@ impl Fixture {
 /// A C++ file open with the fake server in clangd's place, or `None`
 /// without Python to run it.
 fn open(source: &str) -> Option<Fixture> {
+    open_with(source, "", "")
+}
+/// The same with options for `soda.lsp.server`, and Lua to run first.
+fn open_with(source: &str, options: &str, first: &str) -> Option<Fixture> {
     if Process::new("python3").arg("--version").output().is_err() {
         return None;
     }
@@ -57,10 +61,12 @@ fn open(source: &str) -> Option<Fixture> {
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
     r.load_startup_lua();
     r.enable_lsp();
+    r.source_lua("first", first).unwrap();
+    let options = if options.is_empty() { "nil" } else { options };
     r.source_lua(
         "test",
         &format!(
-            r#"soda.lsp.server("cpp", {{ "env", "FAKE_LSP_LOG={}", "python3", "{}" }})"#,
+            r#"soda.lsp.server("cpp", {{ "env", "FAKE_LSP_LOG={}", "python3", "{}" }}, {options})"#,
             log.display(),
             script.display()
         ),
@@ -675,4 +681,100 @@ fn file_operations_that_cannot_all_be_done_do_nothing() {
         f.r.message()
     );
     assert!(base.join("a.cpp").exists() && !base.join("c.cpp").exists());
+}
+#[test]
+fn a_server_gets_its_options_and_settings_and_lua_answers_its_requests() {
+    let Some(mut f) = open_with(
+        "x\n",
+        r#"{ init = { cache = { directory = "/tmp/c" } },
+             settings = { fake = { index = { threads = 2 } } } }"#,
+        r#"soda.lsp.on("$fake/ask", function(params) return { twice = params.n * 2 } end)"#,
+    ) else {
+        return;
+    };
+    let log = f.log.clone();
+    wait(&mut f.r, move |_| {
+        std::fs::read_to_string(&log)
+            .is_ok_and(|log| log.contains("answer config") && log.contains("answer private"))
+    });
+    let log = f.log();
+    assert!(
+        log.contains(r#"init {"cache": {"directory": "/tmp/c"}}"#),
+        "{log}"
+    );
+    assert!(
+        log.contains(r#"settings {"fake": {"index": {"threads": 2}}}"#),
+        "{log}"
+    );
+    // By section, nothing for an unknown one, and all of it without one.
+    assert!(
+        log.contains(
+            r#"answer config [{"threads": 2}, null, {"fake": {"index": {"threads": 2}}}]"#
+        ),
+        "{log}"
+    );
+    assert!(log.contains(r#"answer private {"twice": 4}"#), "{log}");
+    drop(f.dir);
+}
+#[test]
+fn root_markers_choose_the_server_root() {
+    if Process::new("python3").arg("--version").output().is_err() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().canonicalize().unwrap();
+    std::fs::create_dir_all(base.join("repo/.git")).unwrap();
+    std::fs::create_dir_all(base.join("repo/sub/deep")).unwrap();
+    std::fs::write(base.join("repo/sub/.ccls"), "").unwrap();
+    std::fs::write(base.join("repo/sub/deep/a.cpp"), "x\n").unwrap();
+    let log = base.join("log");
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_lsp.py");
+    let mut r = Runtime::started_in(base.clone()).unwrap();
+    r.load_startup_lua();
+    r.enable_lsp();
+    r.source_lua(
+        "test",
+        &format!(
+            r#"soda.lsp.server("cpp", {{ "env", "FAKE_LSP_LOG={}", "python3", "{}" }},
+               {{ roots = {{ ".ccls", "compile_commands.json" }} }})"#,
+            log.display(),
+            script.display()
+        ),
+    )
+    .unwrap();
+    r.start(Some(base.join("repo/sub/deep/a.cpp")));
+    let read = log.clone();
+    wait(&mut r, move |_| {
+        std::fs::read_to_string(&read).is_ok_and(|log| log.contains("initialize "))
+    });
+    let text = std::fs::read_to_string(&log).unwrap();
+    assert!(
+        text.contains(&format!(
+            "initialize file://{}\n",
+            base.join("repo/sub").display()
+        )),
+        "{text}"
+    );
+    // The project is still the repository.
+    assert_eq!(r.app().project(), Some(base.join("repo")));
+}
+#[test]
+fn what_the_server_does_not_offer_is_said_and_not_asked() {
+    let Some(mut f) = open("x\n") else { return };
+    f.r.source_lua(
+        "t",
+        r#"-- Pretend the server took its hover back.
+           local info = soda.lsp.info
+           soda.lsp.info = function()
+             local i = info()
+             if i then i.capabilities.hoverProvider = nil end
+             return i
+           end"#,
+    )
+    .unwrap();
+    keys(&mut f.r, "<c-c>k");
+    assert_eq!(
+        f.r.message(),
+        "The language server does not offer textDocument/hover"
+    );
 }

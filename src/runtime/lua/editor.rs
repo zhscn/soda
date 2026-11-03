@@ -287,6 +287,28 @@ pub(super) fn register<'scope, 'r: 'scope>(
         })?,
     )?;
     soda.set(
+        "tree_show",
+        scope.create_function(|_, (name, roots, function): (String, Table, Function)| {
+            if name.is_empty() || name == "file" || name.contains(['*', ' ']) {
+                return Err(mlua::Error::runtime(format!("{name:?} cannot name a tree")));
+            }
+            let roots = nodes(&roots)?;
+            let function = host.keep(function)?;
+            runtime
+                .borrow_mut()
+                .show_tree(name, crate::runtime::tree::Tree::new(function, roots));
+            Ok(())
+        })?,
+    )?;
+    soda.set(
+        "tree_children",
+        scope.create_function(|_, (name, id, children): (String, u64, Table)| {
+            let children = nodes(&children)?;
+            runtime.borrow_mut().tree_children(&name, id, children);
+            Ok(())
+        })?,
+    )?;
+    soda.set(
         "spawn",
         scope.create_function(
             |_, (argv, function, options): (Vec<String>, Function, Value)| {
@@ -358,4 +380,25 @@ pub(super) fn register<'scope, 'r: 'scope>(
         })?,
     )?;
     Ok(())
+}
+
+/// Tree nodes as the prelude hands them over: `{ id, label, detail,
+/// children, more, expanded }`.
+fn nodes(list: &Table) -> mlua::Result<Vec<crate::runtime::tree::NodeSpec>> {
+    list.sequence_values::<Table>()
+        .map(|node| {
+            let node = node?;
+            Ok(crate::runtime::tree::NodeSpec {
+                id: node.get("id")?,
+                label: node.get::<Option<String>>("label")?.unwrap_or_default(),
+                detail: node.get::<Option<String>>("detail")?.unwrap_or_default(),
+                children: node
+                    .get::<Option<Table>>("children")?
+                    .map(|children| nodes(&children))
+                    .transpose()?,
+                more: node.get::<Option<bool>>("more")?.unwrap_or(false),
+                expanded: node.get::<Option<bool>>("expanded")?.unwrap_or(false),
+            })
+        })
+        .collect()
 }

@@ -64,6 +64,8 @@ const FUNCTIONS: &[&str] = &[
     "defer",
     "cancel",
     "results",
+    "tree_show",
+    "tree_children",
     "open",
     "clipboard",
     "file_kind",
@@ -155,6 +157,50 @@ local choose = soda.choose
 function soda.choose(title, items, answer)
   choose(title, items, function(index)
     answer(tonumber(index))
+  end)
+end
+local tree_show, tree_children = soda.tree_show, soda.tree_children
+soda.tree_show, soda.tree_children = nil, nil
+local tree_ids = 0
+-- A tree in the document `*name*`. Nodes are tables with `label`, and
+-- `detail`, `children`, `expanded` or `leaf`; without children, `expand`
+-- is asked for them when the node first opens, unless it is a leaf.
+-- `open(node)` takes Enter on a node. The functions get the tables given.
+function soda.tree(spec)
+  if type(spec) ~= "table" or type(spec.name) ~= "string" then
+    error("soda.tree takes { name, roots, expand, open }", 2)
+  end
+  local nodes = {}
+  local function convert(list)
+    local out = {}
+    for _, node in ipairs(list or {}) do
+      tree_ids = tree_ids + 1
+      nodes[tree_ids] = node
+      table.insert(out, {
+        id = tree_ids,
+        label = tostring(node.label or ""),
+        detail = node.detail ~= nil and tostring(node.detail) or nil,
+        children = node.children ~= nil and convert(node.children) or nil,
+        more = node.children == nil and spec.expand ~= nil and not node.leaf,
+        expanded = node.expanded == true,
+      })
+    end
+    return out
+  end
+  tree_show(spec.name, convert(spec.roots), function(argument)
+    local event, id = argument:match("^(%a+) (%d+)$")
+    id = tonumber(id)
+    local node = nodes[id]
+    if not node then
+      return
+    end
+    if event == "open" and spec.open then
+      spec.open(node)
+    elseif event == "expand" then
+      spec.expand(node, function(children)
+        tree_children(spec.name, id, convert(children))
+      end)
+    end
   end)
 end
 local completion_source = soda.completion_source
@@ -450,6 +496,37 @@ impl Host {
                     let call = callbacks.get::<Function>(function)?;
                     callbacks.set(function, Value::Nil)?;
                     call.call::<()>((to_lua(lua, &result)?, to_lua(lua, &error)?))
+                }
+                Request::Lsp(super::lsp::Delivery::Request {
+                    functions,
+                    params,
+                    key,
+                    id,
+                    fallback,
+                }) => {
+                    // The server waits for an answer, so it gets one even
+                    // when a function fails.
+                    let mut answer = Ok(None);
+                    let callbacks = self.callbacks()?;
+                    for function in functions {
+                        let call = callbacks
+                            .get::<Function>(function)
+                            .and_then(|f| f.call::<Value>(to_lua(lua, &params)?));
+                        match call {
+                            Ok(Value::Nil) => continue,
+                            Ok(value) => {
+                                answer = lua.from_value::<serde_json::Value>(value).map(Some);
+                                break;
+                            }
+                            Err(error) => {
+                                answer = Err(error);
+                                break;
+                            }
+                        }
+                    }
+                    let result = answer.as_ref().ok().cloned().flatten().unwrap_or(fallback);
+                    runtime.borrow_mut().lsp.reply(&key, id, result);
+                    answer.map(|_| ())
                 }
                 Request::Lsp(super::lsp::Delivery::Notification { function, params }) => self
                     .callbacks()?

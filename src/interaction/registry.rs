@@ -590,6 +590,27 @@ pub static BUILTINS: &[Builtin] = &[
         Command::Completion(super::completion::Action::Move { backward: true })
     ),
     builtin!(
+        "tree-toggle",
+        "Open or close the node of a tree on the caret's line",
+        Command::Effect(Box::new(super::modal::Effect::Tree(
+            super::modal::TreeAction::Toggle
+        )))
+    ),
+    builtin!(
+        "tree-open",
+        "Go to what the node of a tree on the caret's line stands for",
+        Command::Effect(Box::new(super::modal::Effect::Tree(
+            super::modal::TreeAction::Open
+        )))
+    ),
+    builtin!(
+        "tree-collapse",
+        "Close the node of a tree on the caret's line, or go to its parent",
+        Command::Effect(Box::new(super::modal::Effect::Tree(
+            super::modal::TreeAction::Collapse
+        )))
+    ),
+    builtin!(
         "completion-accept",
         "Take the selected candidate, keeping the text after the caret",
         Command::Completion(super::completion::Action::Accept)

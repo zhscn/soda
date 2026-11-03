@@ -47,6 +47,7 @@ while True:
     params = message.get("params", {})
     if method == "initialize":
         log.write("initialize %s\n" % params["rootUri"])
+        log.write("init %s\n" % json.dumps(params.get("initializationOptions")))
         # A question first, as real servers ask, to see that it is answered.
         write({"jsonrpc": "2.0", "id": "q", "method": "window/workDoneProgress/create"})
         answer(message, {"capabilities": {
@@ -58,6 +59,12 @@ while True:
                 "full": {"delta": True},
             },
             "completionProvider": {"resolveProvider": True},
+            "definitionProvider": True, "declarationProvider": True,
+            "typeDefinitionProvider": True, "referencesProvider": True,
+            "hoverProvider": True, "renameProvider": True, "codeActionProvider": True,
+            "documentFormattingProvider": True, "documentSymbolProvider": True,
+            "callHierarchyProvider": True, "signatureHelpProvider": {},
+            "workspaceSymbolProvider": True,
             "workspace": {"fileOperations": {
                 "didCreate": {"filters": [{"pattern": {"glob": "**/*.cpp"}}]},
                 "didRename": {"filters": [{"pattern": {"glob": "**/*.cpp", "matches": "file"}},
@@ -66,6 +73,9 @@ while True:
             }},
         }})
     elif method == "initialized":
+        write({"jsonrpc": "2.0", "id": "config", "method": "workspace/configuration",
+               "params": {"items": [{"section": "fake.index"}, {"section": "fake.none"}, {}]}})
+        write({"jsonrpc": "2.0", "id": "private", "method": "$fake/ask", "params": {"n": 2}})
         write({"jsonrpc": "2.0", "id": "reg", "method": "client/registerCapability", "params": {
             "registrations": [{"id": "w", "method": "workspace/didChangeWatchedFiles",
                                "registerOptions": {"watchers": [
@@ -224,6 +234,10 @@ while True:
                "params": {"edit": {"changes": {uri: [replacement(0, 0, 3, "tweaked")]}}}})
     elif message.get("id") == "edit":
         log.write("applied %s\n" % json.dumps(message.get("result")))
+    elif method == "workspace/didChangeConfiguration":
+        log.write("settings %s\n" % json.dumps(params["settings"], sort_keys=True))
+    elif "method" not in message and message.get("id") in ("config", "private"):
+        log.write("answer %s %s\n" % (message["id"], json.dumps(message.get("result"), sort_keys=True)))
     elif method == "textDocument/hover":
         answer(message, {"contents": {"kind": "plaintext", "value": "first\n  second"}})
     elif method == "textDocument/prepareCallHierarchy":

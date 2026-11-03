@@ -129,6 +129,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `soda.hook(event, filter, fn)` | 事件发生时以事件参数调用 `fn`，返回编号 |
 | `soda.unhook(id)` | 去掉 `soda.hook` 加的这一个钩子，返回是否去掉了；同一事件的其他钩子不受影响 |
 | `soda.define_command(name, [doc], fn, [options])` | 定义命令，调用时把参数文本整体传给 `fn`；`doc` 是一句说明，按键提示、帮助和命令补全显示它，省略时显示命令名。`options.args` 声明参数位，命令行按它补全，见下文 |
+| `soda.tree(spec)` | 在 `*name*` 文档里显示一棵树，见下文 |
 | `soda.results(kind, lines)` | 把结果行写入 `*kind*` 并设为最近的结果，回车和 `M-g n`/`M-g p` 与 `grep`、`run` 的结果相同；`lines` 可以是 `路径:行:列:` 行，或文件名行加缩进的 `行:列  文本` 分组行；其他行留作标题，一个位置都没有时只显示消息 |
 | `soda.open(path, [line], [column])` | 打开文件并放置光标，行列从 1 开始，列按字节；打开是异步的，文件内容要在之后的请求里读 |
 | `soda.clipboard([text])` | 带文字时替换剪贴板内容，与编辑器自己的复制一样同步到系统剪贴板；不带时返回粘贴会用的内容，先读系统剪贴板 |
@@ -215,6 +216,30 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 - **作用视图**：选区属于视图。请求所在的视图显示该文档时用它，否则用屏幕上的视图，再否则用任一视图。
 - **结构**：条目是词、字面量、注释、预处理指令或整个括号分组，标点不属于任何条目；位置落在条目中间时，返回的是位置一侧的部分。C++ 的答案来自语法树，能区分模板的 `<` 和比较，未闭合的分组和被 `#if` 分支拆开的分组都不算分组。其他语言按 `(`、`[`、`{` 配对，字面量和注释来自 TextMate，跨行的字符串和注释按行算；纯文本没有字面量。
 - **选区与模式**：选区是半开区间，读到的范围就是选中的文本。`anchor` 和 `head` 相同时没有选区。
+
+
+### 树
+
+`soda.tree` 把一棵树显示在文档 `*name*` 里，位置规则与结果文档相同（`display` 可以改）。节点是普通的 Lua 表：
+
+```lua
+soda.tree({
+  name = "callers",
+  roots = {
+    { label = "main", detail = "a.cpp:12", children = { ... } },  -- 子节点已知
+    { label = "helper", detail = "b.cpp:3" },                      -- 展开时再问 expand
+    { label = "done", leaf = true },                               -- 没有子节点
+  },
+  expand = function(node, add) add({ ... }) end,  -- 可以晚些调用，比如在服务器回答之后
+  open = function(node) soda.open(node.path, node.line) end,
+})
+```
+
+- 每行是缩进、`▸`/`▾` 标记、`label` 和灰色的 `detail`。`expanded = true` 的节点一开始就展开。
+- 有 `expand` 时，没有 `children` 也不是 `leaf` 的节点可以展开：第一次展开时调用 `expand`，等待期间节点后面显示 `…`，`add` 给出的子节点之后一直保留；给空表则这个节点成为叶子。
+- `open` 和 `expand` 收到的是传进去的那张表，所以节点上可以放任何字段（位置、服务器给的原始对象）。
+- 键在 `tree` 上下文里：`Tab`（`tree-toggle`）展开或收起，`Enter`（`tree-open`）调用 `open`，`Backspace`（`tree-collapse`）收起节点、已收起时回到父节点。其他键照常是 Normal 的，所以移动、搜索都能用。可以用 `soda.map("tree", ...)` 改。
+- 重绘时光标留在原来的节点上；同名的树再显示一次就整个替换。
 
 ## 实施顺序
 

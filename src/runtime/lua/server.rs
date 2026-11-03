@@ -12,13 +12,40 @@ pub(super) fn register<'scope, 'r: 'scope>(
 ) -> mlua::Result<()> {
     soda.set(
         "lsp_server",
-        scope.create_function(|_, (language, command): (String, Option<Vec<String>>)| {
-            if command.as_ref().is_some_and(Vec::is_empty) {
-                return Err(mlua::Error::runtime("a language server needs a program"));
-            }
-            runtime.borrow_mut().lsp.set_server(language, command);
-            Ok(())
-        })?,
+        scope.create_function(
+            |lua, (language, command, options): (String, Option<Vec<String>>, Option<Table>)| {
+                if command.as_ref().is_some_and(Vec::is_empty) {
+                    return Err(mlua::Error::runtime("a language server needs a program"));
+                }
+                let json = |name: &str| -> mlua::Result<serde_json::Value> {
+                    match options.as_ref().map(|o| o.get::<Value>(name)).transpose()? {
+                        None | Some(Value::Nil) => Ok(serde_json::Value::Null),
+                        Some(value) => lua.from_value(value),
+                    }
+                };
+                let server = command
+                    .map(|command| -> mlua::Result<_> {
+                        Ok(crate::runtime::lsp::Server {
+                            command,
+                            init: json("init")?,
+                            settings: json("settings")?,
+                        })
+                    })
+                    .transpose()?;
+                let roots: Vec<String> = match &options {
+                    Some(options) => options
+                        .get::<Option<Vec<String>>>("roots")?
+                        .unwrap_or_default(),
+                    None => vec![],
+                };
+                let mut runtime = runtime.borrow_mut();
+                runtime.lsp.set_server(language.clone(), server);
+                runtime.edit_event(crate::application::Event::ServerRoots {
+                    language,
+                    markers: roots,
+                })
+            },
+        )?,
     )?;
     soda.set(
         "lsp_array",

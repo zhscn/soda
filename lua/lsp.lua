@@ -91,6 +91,49 @@ local function send(slot, method, params, answer)
   return id
 end
 
+-- The capability a server declares for each standard request; a server
+-- that does not declare one is not asked.
+local providers = {
+  ["textDocument/definition"] = "definitionProvider",
+  ["textDocument/declaration"] = "declarationProvider",
+  ["textDocument/typeDefinition"] = "typeDefinitionProvider",
+  ["textDocument/references"] = "referencesProvider",
+  ["textDocument/hover"] = "hoverProvider",
+  ["textDocument/rename"] = "renameProvider",
+  ["textDocument/codeAction"] = "codeActionProvider",
+  ["textDocument/formatting"] = "documentFormattingProvider",
+  ["textDocument/documentSymbol"] = "documentSymbolProvider",
+  ["textDocument/prepareCallHierarchy"] = "callHierarchyProvider",
+  ["textDocument/signatureHelp"] = "signatureHelpProvider",
+  ["textDocument/completion"] = "completionProvider",
+  ["workspace/symbol"] = "workspaceSymbolProvider",
+}
+-- Whether the current server can answer `method`; says so when it cannot.
+local function supports(method, quiet)
+  local info = soda.lsp.info()
+  if not info then
+    if not quiet then
+      soda.message("No language server for this document")
+    end
+    return false
+  end
+  local provider = providers[method]
+  if provider and not info.capabilities[provider] then
+    if not quiet then
+      soda.message("The language server does not offer " .. method)
+    end
+    return false
+  end
+  return true
+end
+-- Why a request failed, in words.
+local function failed(method, failure)
+  if failure.code == -32601 then
+    return "The language server does not offer " .. method
+  end
+  return method .. ": " .. tostring(failure.message)
+end
+
 -- Asks about the caret; says so if there is nobody to ask.
 local function ask(method, extend, answer)
   local params = here()
@@ -98,12 +141,15 @@ local function ask(method, extend, answer)
     soda.message("No language server for this document")
     return
   end
+  if not supports(method) then
+    return
+  end
   for key, value in pairs(extend or {}) do
     params[key] = value
   end
   local function respond(result, failure)
     if failure then
-      soda.message(method .. ": " .. tostring(failure.message))
+      soda.message(failed(method, failure))
     else
       answer(result)
     end
@@ -923,8 +969,9 @@ local function apply_edit(edit, origin)
   return true
 end
 
+-- The server learns whether its edit went in.
 soda.lsp.on("workspace/applyEdit", function(params)
-  apply_edit(params.edit)
+  return { applied = apply_edit(params.edit) }
 end)
 
 soda.define_command("lsp-rename", "Rename the symbol across the project", function(name)
@@ -1027,7 +1074,7 @@ soda.define_command("lsp-switch", "Switch between a header and its source", func
   local asked = uri
     and soda.lsp.request("textDocument/switchSourceHeader", { uri = uri }, function(result, failure)
       if failure then
-        soda.message(tostring(failure.message))
+        soda.message(failed("textDocument/switchSourceHeader", failure))
       elseif result then
         soda.open(path_of(result))
       else
@@ -1085,9 +1132,12 @@ soda.define_command("lsp-workspace-symbols", "Search the symbols of the project"
     soda.prompt("lsp-workspace-symbols ")
     return
   end
+  if not supports("workspace/symbol") then
+    return
+  end
   local asked = soda.lsp.request("workspace/symbol", { query = query }, function(result, failure)
     if failure then
-      soda.message(tostring(failure.message))
+      soda.message(failed("workspace/symbol", failure))
       return
     end
     local entries = {}
@@ -1133,7 +1183,7 @@ soda.completion.register({
       soda.hint(nil)
     elseif context.trigger then
       local params = here()
-      if params then
+      if params and supports("textDocument/signatureHelp", true) then
         send("signature", "textDocument/signatureHelp", params, function(result)
           soda.hint(signature_of(result))
         end)
@@ -1204,7 +1254,7 @@ soda.completion.register({
     end
     local params = here()
     local info = soda.lsp.info()
-    if not params or not info then
+    if not params or not info or not supports("textDocument/completion", true) then
       sink:done()
       return
     end

@@ -150,11 +150,14 @@ impl Application {
     /// What a jump from the active document carries.
     pub(super) fn reached(&self) -> Reached {
         let context = self.active_context();
-        let server = context
-            .server
-            .clone()
-            .or_else(|| context.project.clone())
-            .unwrap_or(context.directory);
+        let server = match self.active_document() {
+            Some(document) => self.server_root_of(document),
+            None => context
+                .server
+                .clone()
+                .or_else(|| context.project.clone())
+                .unwrap_or(context.directory.clone()),
+        };
         Reached {
             project: context.project,
             server,
@@ -184,15 +187,38 @@ impl Application {
         let context = self.active_context();
         context.project.unwrap_or(context.directory)
     }
-    /// The root of the language server for a document.
+    /// The root of the language server for a document: the one it was
+    /// reached through, the nearest directory with a root marker of its
+    /// language, or its project.
     pub fn server_root_of(&self, document: DocumentId) -> PathBuf {
         match self.contexts.get(&document) {
             Some(Context {
                 server: Some(server),
                 ..
             }) => server.clone(),
-            _ => self.root_of(document),
+            _ => self
+                .marked_root(document)
+                .unwrap_or_else(|| self.root_of(document)),
         }
+    }
+    /// The nearest directory around a document holding one of its
+    /// language's root markers; found once for each directory.
+    fn marked_root(&self, document: DocumentId) -> Option<PathBuf> {
+        let editor = self.workspace.editor(document)?;
+        let language = editor.model().document().language().profile().id.clone();
+        let markers = self.server_roots.get(&language)?;
+        let directory = self.workspace.file(document)?.path()?.parent()?.to_owned();
+        let key = (directory, language);
+        if let Some(found) = self.found_roots.borrow().get(&key) {
+            return found.clone();
+        }
+        let found = key
+            .0
+            .ancestors()
+            .find(|dir| markers.iter().any(|marker| dir.join(marker).exists()))
+            .map(Path::to_owned);
+        self.found_roots.borrow_mut().insert(key, found.clone());
+        found
     }
     /// A document's directory.
     pub fn directory_of(&self, document: DocumentId) -> PathBuf {

@@ -158,12 +158,12 @@
 
 ### 键位上下文
 
-键位表有 `global`、`normal`、`beacon`、`insert`、`completion`、`snippet`、`mark` 和 `prompt`（所有输入框、picker 与确认对话框）。按键从一组栈里查找，先查到的算数，和 Emacs 读 active maps 一样（`Layers::stack`）：
+键位表有 `global`、`normal`、`beacon`、`insert`、`completion`、`snippet`、`mark`、`tree` 和 `prompt`（所有输入框、picker 与确认对话框）。按键从一组栈里查找，先查到的算数，和 Emacs 读 active maps 一样（`Layers::stack`）：
 
 | 模式 | 栈 |
 | --- | --- |
 | Insert | `completion`（列表显示时）、`snippet`（还有位置时）、`insert`、`global` |
-| Normal | `mark`（光标在标记上时）、`normal`、`global` |
+| Normal | `mark`（光标在标记上时）、`tree`（在扩展的树文档里时）、`normal`、`global` |
 | Beacon | `beacon`、`normal`、`global` |
 
 `global` 是所有模式共有的键，`C-x`、`C-c` 下的键都在这里，keypad 也只读这张表。模块把键绑到 `<c-c>` 下，就同时得到 `SPC` 入口。
