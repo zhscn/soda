@@ -1,14 +1,14 @@
-//! Terminal input adapter and renderer. Runtime owns command execution,
-//! interaction state and task scheduling; layout reads immutable application state.
+//! Terminal frontend: owns the terminal, turns its events into input, and
+//! copies the frames `screen` draws to it. Runtime owns command execution,
+//! interaction state and task scheduling.
 mod clipboard;
-mod highlight;
+mod color;
 mod input;
-mod layout;
-mod mouse;
-mod results;
-mod theme;
-mod view;
-use crate::{interaction::EditMode, runtime::Runtime};
+use crate::{
+    host,
+    runtime::Runtime,
+    screen::{CursorShape, MouseEvent, MouseKind, Presenter},
+};
 use crossterm::{
     cursor::{Hide, SetCursorStyle, Show},
     event::{
@@ -23,7 +23,6 @@ use crossterm::{
         LeaveAlternateScreen,
     },
 };
-use highlight::Highlighter;
 use std::{
     io::{self, IsTerminal},
     path::PathBuf,
@@ -165,107 +164,53 @@ fn release_input(fd: std::os::fd::RawFd) {
 fn draw(
     terminal: &mut ratatui::DefaultTerminal,
     runtime: &Runtime,
-    highlighter: &mut Highlighter,
-    theme: &theme::Theme,
-    areas: &view::Areas,
+    presenter: &mut Presenter,
+    truecolor: bool,
 ) -> io::Result<()> {
-    let texts = frames(runtime, highlighter, areas).map_err(io::Error::other)?;
-    let shape = if runtime.layer().is_none() && runtime.edit_mode() != EditMode::Insert {
-        SetCursorStyle::SteadyBlock
-    } else {
-        SetCursorStyle::SteadyBar
-    };
-    execute!(io::stdout(), BeginSynchronizedUpdate, shape)?;
+    let mut rendered = Ok(None);
+    execute!(io::stdout(), BeginSynchronizedUpdate)?;
     terminal.hide_cursor()?;
-    let drawn = terminal.draw(|f| view::render(f, runtime, theme, areas, &texts));
-    execute!(io::stdout(), EndSynchronizedUpdate)?;
-    drawn?;
-    Ok(())
-}
-/// The text of every window; only the active one shows beacons.
-fn frames(
-    runtime: &Runtime,
-    highlighter: &mut Highlighter,
-    areas: &view::Areas,
-) -> Result<Vec<Option<layout::Frame>>, crate::application::Error> {
-    let active = runtime.app().active_view();
-    areas
-        .windows
-        .iter()
-        .map(|window| {
-            let overlay = if Some(window.view) == active {
-                layout::Overlay {
-                    beacons: runtime.beacons(),
-                    digits: runtime.expand_hints(),
-                    preview: runtime
-                        .completion_popup()
-                        .and_then(|popup| popup.preview)
-                        .filter(|_| {
-                            let document = runtime.app().view(window.view).map(|v| v.document_id);
-                            runtime.app().options().bool(document, "completion-preview")
-                        }),
-                }
-            } else {
-                layout::Overlay::default()
-            };
-            layout::frame(
-                runtime.app(),
-                window.view,
-                highlighter,
-                window.text.width,
-                window.text.height,
-                &overlay,
-            )
-        })
-        .collect()
-}
-/// Scrolls the active window to its caret.
-fn follow(runtime: &mut Runtime, areas: &view::Areas) -> io::Result<()> {
-    let Some(window) = areas.active(runtime) else {
-        return Ok(());
+    let drawn = terminal.draw(|frame| {
+        let buffer = frame.buffer_mut();
+        rendered = presenter.render(runtime, buffer).map(Some);
+        if !truecolor {
+            color::downgrade(buffer);
+        }
+        if let Ok(Some(cursor)) = &rendered
+            && let Some((x, y)) = cursor.position
+        {
+            frame.set_cursor_position((x, y));
+        }
+    });
+    let shape = match rendered {
+        Ok(Some(cursor)) if cursor.shape == CursorShape::Block => SetCursorStyle::SteadyBlock,
+        _ => SetCursorStyle::SteadyBar,
     };
-    if let Some(viewport) = layout::follow_caret(
-        runtime.app(),
-        window.view,
-        window.text.width,
-        window.text.height,
-    )
-    .map_err(io::Error::other)?
-    {
-        runtime.update_viewport(viewport.view, viewport.anchor, viewport.horizontal_column);
-    }
+    execute!(io::stdout(), shape, EndSynchronizedUpdate)?;
+    drawn?;
+    rendered.map_err(io::Error::other)?;
     Ok(())
+}
+/// The pointer events the screen acts on; presses and drags of other
+/// buttons are left out.
+fn mouse_event(event: event::MouseEvent) -> Option<MouseEvent> {
+    use event::{MouseButton, MouseEventKind};
+    let kind = match event.kind {
+        MouseEventKind::Down(MouseButton::Left) => MouseKind::Press,
+        MouseEventKind::Drag(MouseButton::Left) => MouseKind::Drag,
+        MouseEventKind::Up(_) => MouseKind::Release,
+        MouseEventKind::ScrollUp => MouseKind::ScrollUp,
+        MouseEventKind::ScrollDown => MouseKind::ScrollDown,
+        _ => return None,
+    };
+    Some(MouseEvent {
+        kind,
+        column: event.column,
+        row: event.row,
+    })
 }
 
-/// `$XDG_CONFIG_HOME/soda/init.lua`, falling back to
-/// `~/.config/soda/init.lua`.
-pub fn config_path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .filter(|dir| !dir.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
-    Some(base.join("soda").join("init.lua"))
-}
-/// Histories and caret positions kept between sessions.
-pub fn state_path() -> Option<PathBuf> {
-    let base = std::env::var_os("XDG_STATE_HOME")
-        .filter(|dir| !dir.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local").join("state"))
-        })?;
-    Some(base.join("soda").join("state"))
-}
-/// Writes the state through a temporary file, so a failed write leaves the
-/// previous state whole.
-fn save_state(path: &std::path::Path, text: &str) -> io::Result<()> {
-    let directory = path.parent().unwrap();
-    std::fs::create_dir_all(directory)?;
-    let file = tempfile::NamedTempFile::new_in(directory)?;
-    std::fs::write(file.path(), text)?;
-    file.persist(path).map_err(|error| error.error)?;
-    Ok(())
-}
+/// Run the terminal frontend using the shared owner-thread runtime.
 /// Run the terminal frontend using the shared owner-thread runtime.
 pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
@@ -285,72 +230,12 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
     let mut screen = Terminal::enter()?;
     let mut terminal =
         ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(io::stdout()))?;
-    let mut theme = theme::Theme::build("auto", &Default::default());
-    let mut theme_key = None;
-    let mut highlighter = Highlighter::with_budget(Duration::from_millis(12));
-    let mut catching_up = false;
-    // A directory argument is a project; otherwise the working directory
-    // only places documents that have nothing else to go by.
-    let project = path.as_deref().filter(|path| path.is_dir());
-    let mut runtime = match project.map(std::fs::canonicalize).transpose()? {
-        Some(project) => Runtime::new(project)?,
-        None => Runtime::started_in(std::env::current_dir()?)?,
-    };
-    let path = path.filter(|path| !path.is_dir());
-    runtime.set_system_clipboard(Box::new(clipboard::Clipboard::detect()));
-    // Built-in modules come first so that configuration can replace their
-    // commands and keys; modules in the lua directory beside the command
-    // file replace them outright.
-    let config = config.then(config_path).flatten();
-    if let Some(config) = &config {
-        runtime.add_lua_modules(&config.with_file_name("lua"));
-    }
-    runtime.load_startup_lua();
-    runtime.enable_lsp();
-    // Configuration comes before the first document so that its hooks see
-    // it.
-    if let Some(config) = config {
-        let old = config.with_file_name("init");
-        if old.is_file() {
-            runtime.report(format!(
-                "{} is no longer read; write its lines in {} as soda.command(\"…\")",
-                old.display(),
-                config.display()
-            ));
-        }
-        match std::fs::read_to_string(&config) {
-            Ok(code) => {
-                let _ = runtime.source_lua(&config.display().to_string(), &code);
-            }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => runtime.report(format!("{}: {error}", config.display())),
-        }
-    }
-    let state = state_path();
-    if let Some(text) = state
-        .as_ref()
-        .and_then(|path| std::fs::read_to_string(path).ok())
-    {
-        runtime.restore(&text);
-    }
-    let message = runtime.message().to_owned();
-    runtime.start(path);
-    if !message.is_empty() {
-        runtime.report(message);
-    }
-    let mut geometry = None;
-    let mut mouse = mouse::Mouse::default();
-    let mut capturing = true;
-    // A panic's report waits until the terminal is restored, or it would be
-    // lost on the alternate screen.
-    let report = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
-    let previous = std::panic::take_hook();
-    let slot = report.clone();
-    std::panic::set_hook(Box::new(move |info| {
-        let backtrace = std::backtrace::Backtrace::capture();
-        *slot.lock().unwrap() = Some(format!("{info}\n{backtrace}"));
-    }));
-    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| -> io::Result<()> {
+    let mut runtime = host::start(path, config, Box::new(clipboard::Clipboard::detect()))?;
+    let mut presenter = Presenter::new(color::light_background());
+    let truecolor = color::truecolor();
+    let outcome = host::guard(|| {
+        let mut capturing = true;
+        let mut catching_up = false;
         let mut resumed = false;
         while !runtime.quit_requested() && !ended.load(std::sync::atomic::Ordering::Relaxed) {
             runtime.poll();
@@ -365,38 +250,14 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
                 }
             }
             let (width, height) = terminal::size()?;
-            let areas = view::Areas::new(&runtime, width, height);
-            runtime.set_editing_area(areas.editor.width, areas.editor.height);
-            let rows = (
-                areas.editor.height,
-                areas.list_rows(),
-                areas.text(&runtime).height,
-                areas
-                    .windows
-                    .iter()
-                    .map(|window| (window.view, usize::from(window.text.height)))
-                    .collect::<Vec<_>>(),
-            );
-            if geometry.as_ref() != Some(&rows) {
-                runtime.resize(rows.0.into(), rows.1);
-                runtime.set_page_rows(rows.2.into());
-                runtime.set_window_rows(rows.3.clone());
-                geometry = Some(rows);
-            }
+            presenter.measure(&mut runtime, width, height);
             if runtime.take_redraw() || catching_up || std::mem::take(&mut resumed) {
-                follow(&mut runtime, &areas)?;
-                // The gutter widens with the line count, so measure again.
-                let areas = view::Areas::new(&runtime, width, height);
-                highlighter.retain(runtime.app());
-                let app = runtime.app();
-                let key = (app.options().choice(None, "theme"), app.faces().revision());
-                if theme_key != Some(key) {
-                    theme = theme::Theme::build(key.0, app.faces());
-                    theme_key = Some(key);
-                }
-                draw(&mut terminal, &runtime, &mut highlighter, &theme, &areas)?;
+                presenter
+                    .prepare(&mut runtime, width, height)
+                    .map_err(io::Error::other)?;
+                draw(&mut terminal, &runtime, &mut presenter, truecolor)?;
                 runtime.take_redraw();
-                catching_up = highlighter.take_pending();
+                catching_up = presenter.take_pending();
             }
             // While highlighting catches up, check for input without waiting.
             let wait = Duration::from_millis(if catching_up { 0 } else { 30 });
@@ -409,8 +270,9 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
                 loop {
                     match event::read()? {
                         event::Event::Mouse(event) => {
-                            let areas = view::Areas::new(&runtime, width, height);
-                            mouse.handle(event, &mut runtime, &areas);
+                            if let Some(event) = mouse_event(event) {
+                                presenter.mouse(&mut runtime, event, width, height);
+                            }
                         }
                         event => runtime.input(input::normalize(event)),
                     }
@@ -432,103 +294,9 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
             }
         }
         Ok(())
-    }));
-    std::panic::set_hook(previous);
-    // Quitting asks about every unsaved document, so any left mean the loop
-    // ended early: a panic, a terminal error, a hangup or termination.
-    let unsaved = runtime.unsaved();
-    let recovered = (!unsaved.is_empty()).then(|| {
-        let directory = state_path()
-            .and_then(|path| Some(path.parent()?.join("recovery")))
-            .unwrap_or_else(std::env::temp_dir);
-        recover(&unsaved, &directory).map(|()| directory)
     });
     drop(screen);
-    // After a hangup nobody reads stderr, and writing may fail.
-    use io::Write;
-    let mut stderr = io::stderr();
-    match recovered {
-        Some(Ok(directory)) => {
-            let _ = writeln!(
-                stderr,
-                "soda: unsaved changes were written to {}",
-                directory.display()
-            );
-        }
-        Some(Err(error)) => {
-            let _ = writeln!(stderr, "soda: unsaved changes were lost: {error}");
-        }
-        None => {}
-    }
-    // State after a panic may be inconsistent; the previous file stays.
-    if let (Some(path), Ok(_)) = (state, &outcome) {
-        let text = runtime.persist();
-        if let Err(error) = save_state(&path, &text) {
-            let _ = writeln!(stderr, "soda: cannot save {}: {error}", path.display());
-        }
-    }
-    match outcome {
-        Ok(result) => result,
-        Err(panic) => {
-            if let Some(report) = report.lock().unwrap().take() {
-                eprintln!("soda panicked: {report}");
-            }
-            std::panic::resume_unwind(panic)
-        }
-    }
-}
-/// Writes the text of unsaved documents into a directory, one file each,
-/// named by the time and the buffer name.
-fn recover(unsaved: &[(String, String)], directory: &std::path::Path) -> io::Result<()> {
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |time| time.as_secs());
-    std::fs::create_dir_all(directory)?;
-    for (name, text) in unsaved {
-        let name: String = name
-            .chars()
-            .map(|c| {
-                if c == '/' || c.is_whitespace() {
-                    '%'
-                } else {
-                    c
-                }
-            })
-            .collect();
-        std::fs::write(directory.join(format!("{stamp}-{name}")), text)?;
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn unsaved_documents_are_recovered_into_files() {
-        let mut runtime = crate::runtime::Runtime::new(std::path::PathBuf::from("/")).unwrap();
-        runtime.start(None);
-        assert!(runtime.unsaved().is_empty());
-        runtime.command(crate::interaction::Command::SetMode(
-            crate::interaction::EditMode::Insert,
-        ));
-        runtime.input(crate::interaction::UserInput::Paste("draft".into()));
-        let unsaved = runtime.unsaved();
-        assert_eq!(unsaved.len(), 1);
-        assert!(unsaved[0].0.starts_with("[untitled "));
-        assert_eq!(unsaved[0].1, "draft");
-        let directory = tempfile::tempdir().unwrap();
-        let target = directory.path().join("recovery");
-        super::recover(&[("/a b/c.txt".into(), "x".into())], &target).unwrap();
-        let names: Vec<_> = std::fs::read_dir(&target)
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
-            .collect();
-        assert_eq!(names.len(), 1);
-        assert!(names[0].ends_with("-%a%b%c.txt"), "{names:?}");
-        assert_eq!(
-            std::fs::read_to_string(target.join(&names[0])).unwrap(),
-            "x"
-        );
-    }
+    host::finish(&mut runtime, outcome)
 }
 
 #[cfg(all(test, unix))]

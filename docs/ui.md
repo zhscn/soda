@@ -1,6 +1,6 @@
 # 终端界面
 
-`tui` 模块把 Runtime 的只读状态画成一屏。它不持有交互状态：每帧从 Application、交互层和 Runtime 读取需要的内容，先应用视口跟随，再绘制。渲染使用 ratatui（crossterm 后端），由它比较前后两帧，只输出变化的单元格；编辑区的文本裁剪仍由 `layout` 按逻辑列和 grapheme 计算，与核心的列宽规则一致。
+画面分两层。`screen` 与平台无关，把 Runtime 的只读状态画成一个单元格网格（ratatui 的 `Buffer`）：每帧从 Application、交互层和 Runtime 读取需要的内容，先应用视口跟随，再绘制；编辑区的文本裁剪由 `screen::layout` 按逻辑列和 grapheme 计算，与核心的列宽规则一致。`tui` 是终端前端，只负责终端资源和输入，把这个网格交给 ratatui（crossterm 后端），由它比较前后两帧，只输出变化的单元格。图形前端可以复用 `screen`，用字体画出同一个网格。
 
 ## 布局
 
@@ -110,10 +110,10 @@
 
 可以设置的名字有界面部分（`text`、`selection`、`cursor-line`、`gutter`、`status`、`mode-normal`、`mode-insert`、`mode-beacon`、`mode-prompt`、`title`、`border`、`float`、`label`、`todo`、`note-error`、`note-warning`、`note-info`、`reference`、`reference-write`、`snippet`、`unnecessary`、`deprecated`、`mark1`…`mark8` 等，命令行里可以补全，说明见 `src/application/faces.rs`），以及每个语法分类 `syntax.comment`、`syntax.keyword`、`syntax.string` 等。`face` 可以写在 `init.lua` 里，也可以随时执行，下一帧生效。
 
-`COLORTERM` 为 `truecolor` 或 `24bit` 时输出 24 位颜色，否则换算为最接近的 xterm 256 色。主题设置整屏背景，不依赖终端自身的配色。
+主题和网格中的颜色都是 24 位的；终端前端在 `COLORTERM` 为 `truecolor` 或 `24bit` 时原样输出，否则在输出前换算为最接近的 xterm 256 色。`auto` 依据的浅色背景由前端判断，终端前端读 `COLORFGBG`。主题设置整屏背景，不依赖终端自身的配色。
 
 光标形状跟随模式：Normal 和 Beacon 为方块，Insert 和所有输入为竖线。
 
 ## 测试
 
-`layout` 的单元测试覆盖裁剪、宽字符、选区、视口跟随、软换行的断行与定位和输入行滚动。`view` 的测试用 ratatui 的 TestBackend 渲染整屏，检查标签栏、行号、状态栏、按键提示、命令行和帮助的组成。
+`layout` 的单元测试覆盖裁剪、宽字符、选区、视口跟随、软换行的断行与定位和输入行滚动。`view` 的测试经 `Presenter` 把整屏画进单元格缓冲区，检查标签栏、行号、状态栏、按键提示、命令行和帮助的组成。

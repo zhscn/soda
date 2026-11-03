@@ -1,8 +1,7 @@
-//! The built-in color theme. Colors are 24-bit; terminals that do not
-//! announce truecolor get the nearest xterm 256-color index instead. The
-//! `theme` option picks the dark or light variant; `auto` takes the light
-//! one when `COLORFGBG` reports a light background. Faces set with `face`
-//! go over it.
+//! The built-in color theme. Colors are 24-bit; a frontend that cannot show
+//! them converts them as it draws. The `theme` option picks the dark or
+//! light variant; `auto` takes the one the frontend reports for its
+//! background. Faces set with `face` go over it.
 use crate::syntax::Category;
 use ratatui::style::{Color, Modifier, Style};
 
@@ -124,22 +123,18 @@ const LIGHT: Palette = Palette {
 };
 
 impl Theme {
-    /// The theme a `theme` option value names, with the faces over it.
-    pub fn build(choice: &str, faces: &crate::application::faces::Faces) -> Self {
+    /// The theme a `theme` option value names, with the faces over it;
+    /// `auto` is light when the frontend's background is.
+    pub fn build(choice: &str, faces: &crate::application::faces::Faces, light: bool) -> Self {
         let light = match choice {
             "light" => true,
             "dark" => false,
-            _ => std::env::var("COLORFGBG")
-                .ok()
-                .and_then(|value| value.rsplit(';').next()?.parse::<u8>().ok())
-                .is_some_and(|bg| bg == 7 || bg >= 9),
+            _ => light,
         };
-        let truecolor = std::env::var("COLORTERM")
-            .is_ok_and(|value| matches!(value.as_str(), "truecolor" | "24bit"));
-        let mut theme = Self::new(if light { &LIGHT } else { &DARK }, truecolor);
+        let mut theme = Self::new(if light { &LIGHT } else { &DARK });
         for (name, spec) in faces.iter() {
             if let Some(style) = theme.slot(name) {
-                *style = apply(*style, spec, truecolor);
+                *style = apply(*style, spec);
             }
         }
         theme.named = crate::application::faces::names()
@@ -203,8 +198,8 @@ impl Theme {
             _ => return None,
         })
     }
-    fn new(p: &Palette, truecolor: bool) -> Self {
-        let c = |rgb: u32| color(rgb, truecolor);
+    fn new(p: &Palette) -> Self {
+        let c = color;
         let on = |fg: u32, bg: u32| Style::new().fg(c(fg)).bg(c(bg));
         let badge = |bg: u32| on(p.on_accent, bg).add_modifier(Modifier::BOLD);
         Self {
@@ -337,10 +332,10 @@ const CATEGORIES: usize = Category::ALL.len();
 const CATEGORY_ORDER: [Category; CATEGORIES] = Category::ALL;
 
 /// A face's colors and attributes over a theme style.
-fn apply(mut style: Style, spec: &crate::application::faces::FaceSpec, truecolor: bool) -> Style {
+fn apply(mut style: Style, spec: &crate::application::faces::FaceSpec) -> Style {
     use crate::application::faces::Color as Face;
     let pick = |c: Face| match c {
-        Face::Rgb(rgb) => color(rgb, truecolor),
+        Face::Rgb(rgb) => color(rgb),
         Face::Default => Color::Reset,
     };
     if let Some(fg) = spec.fg {
@@ -368,44 +363,6 @@ fn apply(mut style: Style, spec: &crate::application::faces::FaceSpec, truecolor
     }
     style
 }
-fn color(rgb: u32, truecolor: bool) -> Color {
-    let (r, g, b) = ((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8);
-    if truecolor {
-        Color::Rgb(r, g, b)
-    } else {
-        Color::Indexed(xterm256(r, g, b))
-    }
-}
-/// The nearest entry of the 6×6×6 cube or the gray ramp.
-fn xterm256(r: u8, g: u8, b: u8) -> u8 {
-    const LEVELS: [u8; 6] = [0, 95, 135, 175, 215, 255];
-    let level = |v: u8| {
-        (0..6)
-            .min_by_key(|&i| (i32::from(LEVELS[i]) - i32::from(v)).abs())
-            .unwrap()
-    };
-    let (ri, gi, bi) = (level(r), level(g), level(b));
-    let cube = 16 + 36 * ri + 6 * gi + bi;
-    let distance = |x: (u8, u8, u8)| {
-        let d = |a: u8, b: u8| (i32::from(a) - i32::from(b)).pow(2);
-        d(x.0, r) + d(x.1, g) + d(x.2, b)
-    };
-    let gray_index = ((i32::from(r) + i32::from(g) + i32::from(b)) / 3 - 8).clamp(0, 230) / 10;
-    let gray = (8 + gray_index * 10) as u8;
-    if distance((gray, gray, gray)) < distance((LEVELS[ri], LEVELS[gi], LEVELS[bi])) {
-        232 + gray_index as u8
-    } else {
-        cube as u8
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn xterm256_picks_cube_and_gray_entries() {
-        assert_eq!(super::xterm256(0, 0, 0), 16);
-        assert_eq!(super::xterm256(255, 255, 255), 231);
-        assert_eq!(super::xterm256(0x80, 0x80, 0x80), 244);
-        assert_eq!(super::xterm256(0xff, 0, 0), 196);
-    }
+fn color(rgb: u32) -> Color {
+    Color::Rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)
 }

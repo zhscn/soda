@@ -3,6 +3,7 @@
 //! key hints and help drawn over the editing area. Everything here reads
 //! state; viewport changes happen before drawing.
 use super::{
+    highlight::Highlighter,
     layout::{self, Span},
     theme::Theme,
 };
@@ -12,7 +13,6 @@ use crate::{
     runtime::Runtime,
 };
 use ratatui::{
-    Frame,
     buffer::Buffer,
     layout::{Position, Rect},
     style::Style,
@@ -135,15 +135,53 @@ impl Areas {
     }
 }
 
+/// The text of every window; only the active one shows beacons.
+pub(super) fn frames(
+    runtime: &Runtime,
+    highlighter: &mut Highlighter,
+    areas: &Areas,
+) -> Result<Vec<Option<layout::Frame>>, crate::application::Error> {
+    let active = runtime.app().active_view();
+    areas
+        .windows
+        .iter()
+        .map(|window| {
+            let overlay = if Some(window.view) == active {
+                layout::Overlay {
+                    beacons: runtime.beacons(),
+                    digits: runtime.expand_hints(),
+                    preview: runtime
+                        .completion_popup()
+                        .and_then(|popup| popup.preview)
+                        .filter(|_| {
+                            let document = runtime.app().view(window.view).map(|v| v.document_id);
+                            runtime.app().options().bool(document, "completion-preview")
+                        }),
+                }
+            } else {
+                layout::Overlay::default()
+            };
+            layout::frame(
+                runtime.app(),
+                window.view,
+                highlighter,
+                window.text.width,
+                window.text.height,
+                &overlay,
+            )
+        })
+        .collect()
+}
+
+/// Draws the screen into `buf`; returns where the caret shows, if it does.
 pub(super) fn render(
-    frame: &mut Frame,
+    buf: &mut Buffer,
     runtime: &Runtime,
     theme: &Theme,
     areas: &Areas,
     texts: &[Option<layout::Frame>],
-) {
-    let screen = frame.area();
-    let buf = frame.buffer_mut();
+) -> Option<(u16, u16)> {
+    let screen = buf.area;
     buf.set_style(screen, theme.text);
     if let Some(area) = areas.tabs {
         tabs(buf, area, runtime, theme);
@@ -233,9 +271,7 @@ pub(super) fn render(
     if let (None, Some(words)) = (runtime.layer(), runtime.popup()) {
         floating(buf, areas.editor, cursor, words, runtime, theme);
     }
-    if let Some(position) = cursor {
-        frame.set_cursor_position(position);
-    }
+    cursor.map(|position| (position.x, position.y))
 }
 
 /// Text in a box by the caret, on whichever side has more room. Text that
@@ -1020,26 +1056,18 @@ fn key_hints(buf: &mut Buffer, areas: &Areas, runtime: &Runtime, theme: &Theme) 
 mod tests {
     use super::*;
     use crate::interaction::{Command, KeyStroke, UserInput};
-    use ratatui::{Terminal, backend::TestBackend};
 
+    /// A frame as a frontend draws it: measured, prepared, then rendered.
+    fn draw(runtime: &mut Runtime, width: u16, height: u16) -> Buffer {
+        let mut presenter = super::super::Presenter::new(false);
+        presenter.measure(runtime, width, height);
+        presenter.prepare(runtime, width, height).unwrap();
+        let mut buffer = Buffer::empty(Rect::new(0, 0, width, height));
+        presenter.render(runtime, &mut buffer).unwrap();
+        buffer
+    }
     fn screen(runtime: &mut Runtime, width: u16, height: u16) -> String {
-        let theme = Theme::build("auto", &Default::default());
-        let areas = Areas::new(runtime, width, height);
-        runtime.resize(areas.editor.height.into(), areas.list_rows());
-        runtime.set_page_rows(areas.text(runtime).height.into());
-        super::super::follow(runtime, &areas).unwrap();
-        let areas = Areas::new(runtime, width, height);
-        let texts = super::super::frames(
-            runtime,
-            &mut crate::tui::highlight::Highlighter::default(),
-            &areas,
-        )
-        .unwrap();
-        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-        terminal
-            .draw(|f| render(f, runtime, &theme, &areas, &texts))
-            .unwrap();
-        let buffer = terminal.backend().buffer();
+        let buffer = draw(runtime, width, height);
         let mut out = String::new();
         for y in 0..height {
             for x in 0..width {
@@ -1147,7 +1175,7 @@ mod tests {
     #[test]
     fn notes_underline_their_range_and_speak_at_the_caret() {
         use crate::application::{Event, NoteSpan, Severity};
-        use ratatui::{backend::TestBackend, style::Modifier};
+        use ratatui::style::Modifier;
         let root = tempfile::tempdir().unwrap();
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
         r.start(None);
@@ -1191,19 +1219,8 @@ mod tests {
         let plain = screen(&mut r, 60, 10);
         assert!(!plain.lines().nth(2).unwrap().contains("broken"), "{plain}");
         r.command(Command::Named("set inline-notes true".into()));
-        let theme = Theme::build("auto", &Default::default());
-        let areas = Areas::new(&r, 60, 10);
-        let texts = super::super::frames(
-            &r,
-            &mut crate::tui::highlight::Highlighter::default(),
-            &areas,
-        )
-        .unwrap();
-        let mut terminal = ratatui::Terminal::new(TestBackend::new(60, 10)).unwrap();
-        terminal
-            .draw(|frame| render(frame, &r, &theme, &areas, &texts))
-            .unwrap();
-        let cells = terminal.backend().buffer();
+        let theme = Theme::build("auto", &Default::default(), false);
+        let cells = &draw(&mut r, 60, 10);
         let first = rows[1].split("one").next().unwrap().chars().count() as u16;
         let underlined = |x| cells[(x, 1)].modifier.contains(Modifier::UNDERLINED);
         assert!(!underlined(first + 3) && underlined(first + 4) && underlined(first + 6));
@@ -1307,19 +1324,7 @@ mod tests {
         let text = screen(&mut r, 40, 10);
         let row = text.lines().nth(1).unwrap();
         let start = row.split("aa").next().unwrap().chars().count() as u16;
-        let theme = Theme::build("auto", &Default::default());
-        let areas = Areas::new(&r, 40, 10);
-        let texts = super::super::frames(
-            &r,
-            &mut crate::tui::highlight::Highlighter::default(),
-            &areas,
-        )
-        .unwrap();
-        let mut terminal = ratatui::Terminal::new(TestBackend::new(40, 10)).unwrap();
-        terminal
-            .draw(|frame| render(frame, &r, &theme, &areas, &texts))
-            .unwrap();
-        let cells = terminal.backend().buffer();
+        let cells = &draw(&mut r, 40, 10);
         let underlined = |x| {
             cells[(x, 1)]
                 .modifier
@@ -1401,12 +1406,7 @@ mod tests {
         assert!(text.contains("call(a: 1, b: 2)"), "{text}");
         // Past both hints: the caret stands on the 2 on screen.
         let areas = Areas::new(&r, 40, 8);
-        let texts = super::super::frames(
-            &r,
-            &mut crate::tui::highlight::Highlighter::default(),
-            &areas,
-        )
-        .unwrap();
+        let texts = frames(&r, &mut Highlighter::default(), &areas).unwrap();
         let (x, _) = texts[0].as_ref().unwrap().cursor.unwrap();
         assert_eq!(x, 14, "8 cells of text and 6 of hints");
 
