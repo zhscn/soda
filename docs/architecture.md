@@ -1,18 +1,18 @@
 # Soda 架构概览
 
-Soda 是以 TUI 交付、以 C++ 交互缩进为核心体验的 Rust 编辑器。首要目标是 CLion 式的即时缩进：namespace、类成员初始化列表、访问标签、参数与 lambda 续行，在一次回车中由增量维护的语法结构直接计算，不随文件变大而退化。其余编辑功能服务于这个目标，开箱即用但不追求大而全。
+Soda 是用 Rust 写的编辑器，有终端和图形两个前端，核心体验是 CLion 式的 C++ 即时缩进：namespace、构造函数初始化列表、访问标签、参数与 lambda 续行，回车时由增量维护的语法结构直接算出，不随文件变大而退化。Rust 按 rustfmt 的块风格缩进。其余功能服务于这个目标，开箱即用，不求大而全。
 
-新增服务、扩展点和后台任务都要有具体使用场景、明确的状态所有者和生命周期，模块难以独立测试时先调整边界再扩大功能。
+新增服务、扩展点和后台任务要有具体场景、明确的状态所有者和生命周期；模块难以独立测试时，先调整边界再扩功能。
 
 ## 1 优先级
 
 | 优先级 | 目标 |
 | --- | --- |
-| P0 | C++ 即时缩进与 tab/space 混排可靠、自然；行为与 clang-format 布局一致 |
-| P1 | 代码规模与复杂度可控，模块职责清晰、可独立验证 |
+| P0 | C++ 即时缩进与 tab/space 混排可靠、自然，布局与 clang-format 一致 |
+| P1 | 复杂度可控，模块职责清晰、可独立验证 |
 | P2 | 默认工作流开箱即用：模态编辑、readline 输入键、文件与缓冲区、搜索替换、命令面板 |
-| P3 | 基础扩展能力：键位、命令组合与外部进程 |
-| P4 | 保留语言服务、GUI 和远程会话的演进空间 |
+| P3 | 扩展能力：键位、命令组合、外部进程、Lua |
+| P4 | 语言服务与图形前端；远程会话暂缓 |
 
 ## 2 模块
 
@@ -21,70 +21,65 @@ Soda 是以 TUI 交付、以 C++ 交互缩进为核心体验的 Rust 编辑器�
 | `core` | rope 快照、事务、位置映射、历史、坐标与逻辑列 | [编辑内核](core.md)、[坐标](coordinates.md) |
 | `editor` | 文档模型、编辑会话、命令控制器、输入与缩进建议的原子组合 | [编辑命令](commands.md) |
 | `cpp` | 无损词法、容错结构分析、增量重分析、缩进与续行求解 | [交互缩进](indentation.md) |
+| `rust` | Rust 词法、括号/泛型/闭包参数配对、块风格缩进 | [交互缩进](indentation.md) |
 | `config` | clang-format 配置解析、预设、目录继承，编译为缩进规则 | [clang-format 配置](clang-format.md) |
-| `language` | 语言档案与目录（文件归属的唯一判断）、跨语言共享的空白策略与生成 | [语法高亮与导航](syntax.md)、[交互缩进](indentation.md) |
-| `files` | 文件 I/O、工作区、打开与保存请求、后台 worker | [文件服务](files.md) |
-| `application` | owner-thread 状态归约：视图、窗口树、文档、剪贴板与寄存器、文件完成 | [边界契约](contracts.md) |
-| `interaction` | 键位、命令表、模态编辑、输入框、picker、搜索替换、补全等会话 | [交互层](interaction.md)、[模态编辑的设计](modal.md)、[补全](completion.md)、[扩展模型](extension.md) |
+| `language` | 语言档案与目录（文件归属的唯一判断）、缩进建议类型、空白策略、注释续写 | [语法高亮与导航](syntax.md) |
+| `files` | 文件 I/O、工作区、打开与保存、后台 worker | [文件服务](files.md) |
+| `application` | owner-thread 状态归约：视图、窗口树、文档、剪贴板与寄存器 | [边界契约](contracts.md) |
+| `interaction` | 键位、命令表、模态编辑、输入框、picker、搜索替换、补全与 snippet | [交互层](interaction.md)、[模态编辑的设计](modal.md)、[补全](completion.md) |
 | `options` | 带类型的选项表，全局值与文档覆盖 | [扩展模型](extension.md) |
-| `runtime` | 命令循环：执行响应、观察更新、调度后台任务与外部命令、语言服务器的进程与同步 | [交互层](interaction.md)、[语言服务器](lsp.md) |
-| `syntax` | 分类、C++ 词法着色、TextMate 引擎与增量行缓存、内置语法；只依赖 `core` 和 `cpp` | [语法高亮与导航](syntax.md) |
-| `screen` | 与绘制方式无关的显示：文本区布局（折行、tab、inlay、水平滚动、光标、点击换算）对前端的 `Measure` 泛型，高亮缓存、主题，以及标签、标题、状态栏、消息行的内容 | [终端界面](ui.md) |
-| `host` | 前端共用的会话首尾：启动 Runtime、加载 `init.lua` 与状态、捕获 panic、恢复未保存文档、保存状态 | [交互层](interaction.md) |
-| `tui` | 终端资源、crossterm 输入规范化、按单元格划分区域并绘制、鼠标解析、颜色降级 | [终端界面](ui.md) |
-| `gui` | 图形前端（`gui` 特性，程序 `soda-gui`）：winit 窗口与输入法、wgpu 渲染、cosmic-text 字体、按像素排布与绘制、光标滑动 | [图形界面](gui.md) |
+| `runtime` | 命令循环：执行响应、观察更新、调度后台任务与外部命令、Lua、语言服务器进程 | [扩展模型](extension.md)、[语言服务器](lsp.md) |
+| `syntax` | 分类、C++ 词法着色、TextMate 引擎与增量行缓存、内置语法 | [语法高亮与导航](syntax.md) |
+| `screen` | 与绘制方式无关的显示：文本区布局（折行、tab、inlay、水平滚动、点击换算）对前端的 `Measure` 泛型，高亮缓存、主题，标签、标题、状态栏与消息行 | [终端界面](ui.md) |
+| `host` | 前端共用的会话首尾：启动 Runtime、加载 `init.lua` 与状态、捕获 panic、恢复未保存文档 | [交互层](interaction.md) |
+| `tui` | 终端资源、crossterm 输入规范化、按单元格绘制、鼠标、颜色降级 | [终端界面](ui.md) |
+| `gui` | 图形前端（`gui` 特性，程序 `soda-gui`）：winit 窗口与输入法、wgpu 渲染、cosmic-text 字体 | [图形界面](gui.md) |
 
-数据单向流动：前端把平台输入交给 Runtime；交互层把按键解析为命令并输出 Application 事件；Application 通过 editor 提交事务；语言服务只读快照并返回建议，修改始终由事务入口统一提交。后台任务读取快照，结果带版本与请求身份回到 owner thread，过期结果被拒绝。
+数据单向流动：前端把平台输入交给 Runtime；交互层把按键解析为命令并产生 Application 事件；Application 通过 editor 提交事务。语言分析只读快照、返回建议，修改都经事务入口提交。后台任务读快照，结果带版本与请求身份回到 owner thread，过期的丢弃。
 
 ## 3 关键决策
 
-**文本与事务。** 文本存于 ropey，公开坐标是 UTF-8 字节偏移；逻辑列、终端单元和协议位置分别建模。换行、缩进修正和光标放置组成一个事务，一次撤销。
+**文本与事务。** 文本存于 ropey，公开坐标是 UTF-8 字节偏移；逻辑列、终端单元和协议位置分别建模。换行、缩进修正和光标放置是一个事务，一次撤销。
 
-**C++ 分析。** 使用自有的无损词法和扁平节点树，不依赖 tree-sitter 或 clangd。编辑后重新词法分析受影响区域并修复容器节点，与完整分析做差分测试。续行与对齐移植 clang-format 的 ContinuationIndenter 规则（fake parentheses、嵌套块缩进、参数对齐），以 clang-format 格式化过的 LLVM 源码为准测量一致率。节点使用绝对位置，每次编辑有 O(n) 的偏移更新；实测约 3 ms/MB，不改为相对位置。
+**C++ 分析。** 自有的无损词法和扁平节点树，不依赖 tree-sitter 或 clangd。编辑后重新分词受影响区域并修复容器节点，与完整分析做差分测试。续行与对齐移植 clang-format 的 ContinuationIndenter（fake parentheses、嵌套块缩进、参数对齐）。节点用绝对位置，每次编辑有 O(n) 的偏移更新，约 3 ms/MB，不改为相对位置。
 
-**交互模型。** 选择优先，语义和键位取自 meow：Normal、Insert、Beacon 三个固定模式，每个键是一条命令，分发是 Emacs 式的键位表栈，`x s` 和 `C-x C-s` 走同一棵绑定树。多选区只存在于 Beacon，Normal 永远只有一个选区。Vim 语法已经移除：它是固定的底层，Emacs 键只能翻译成 Vim 键，产出范围的功能（结构化选择、符号标记）接不进 operator 语法。Insert 和所有输入框共享 readline 风格的行编辑键。理由与取舍见[模态编辑的设计](modal.md)。
+**Rust 分析。** 规则比 C++ 简单得多：rustfmt 默认不做视觉对齐，缩进只由分组所在行和语句、参数、分支的起点决定。每次修改整文件重新分词和配对，约 15 ms/MB，不做增量。高亮仍用 TextMate。
 
-**扩展模型。** 按 kakoune 的方式组织：所有操作是命名命令，键位、`:` 命令行、配置文件和帮助都引用命令名；扩展通过 `define-command` 组合命令，用 `pipe` / `shell` 调用外部进程。选项、展开和钩子让命令语言能读写状态并响应事件；命令语言不加条件和循环，配置（`init.lua`）和逻辑都写在 Lua 5.4（mlua）里，绑定到同一组命令、展开和通知上，见[扩展模型](extension.md)。
+**其他语言。** TextMate 语法提供高亮、字面量范围和语言配置；缩进只看括号；结构操作按 `(`、`[`、`{` 配对。语义层交给 LSP。
+
+**交互模型。** 选择优先，语义和键位取自 meow：Normal、Insert、Beacon 三个固定模式，每个键是一条命令，分发是 Emacs 式的键位表栈，`x s` 和 `C-x C-s` 走同一棵绑定树。多选区只在 Beacon。Insert 和所有输入框共享 readline 风格的行编辑键。理由见[模态编辑的设计](modal.md)。
+
+**扩展模型。** 按 kakoune 的方式组织：所有操作是命名命令，键位、`:` 命令行、配置和帮助都引用命令名；`define-command` 组合命令，`pipe` / `shell` 调用外部进程。命令语言没有条件和循环，配置（`init.lua`）和逻辑写在 Lua 5.4（mlua）里，绑定到同一组命令、展开和钩子。LSP 客户端也在 Lua 侧。
 
 ## 4 质量与性能
 
-缩进质量以真实编辑轨迹验证，同时检查文本、空白字节、选区和撤销：
+缩进质量以真实语料和编辑轨迹验证，同时检查文本、空白字节、选区和撤销：
 
-- `examples/indent_accuracy.rs` 对 clang-format 格式化过的语料逐行重算缩进，报告一致率。
-- `tests/clang_format_options.rs` 用 clang-format 生成的布局做两种回放：重新缩进，以及从空文档逐字输入。
-- `src/cpp/incremental.rs` 的语料测试逐字输入真实文件，对照增量与完整分析。
+| 验证 | 内容 |
+| --- | --- |
+| `examples/indent_accuracy.rs` | clang-format 格式化过的 C++ 语料逐行重算缩进，报告一致率 |
+| `tests/clang_format_options.rs` | 用 clang-format 生成的布局回放：重新缩进，以及从空文档逐字输入 |
+| `src/cpp/incremental.rs` 的 `typing_corpus` | 逐字输入真实文件，对照增量与完整分析 |
+| `src/rust/indent.rs` 的 `corpus` | rustfmt 格式化过的 Rust 语料逐行重算，以及模拟回车 |
+| `examples/cpp_input_trace.rs` | 真实文件上 Enter 与普通输入的延迟 |
 
-性能以输入到可见更新的延迟为准：缓存就绪的缩进查询 P95 不超过 5 ms，普通输入到可见更新 P95 不超过 16 ms；报告同时记录 P99、最大值和文件规模。`examples/cpp_input_trace.rs` 测量真实文件上的 Enter 与普通输入延迟。
+延迟目标：缓存就绪的缩进查询 P95 不超过 5 ms，普通输入到可见更新 P95 不超过 16 ms。
 
-## 5 当前范围与后续工作
+## 5 进展
 
 已完成：
 
-- **编辑基础**：编辑内核与历史、文件生命周期，以及终端界面、鼠标、分屏与窗口大小调整、显示规则、系统剪贴板。
-- **C++ 缩进**：增量分析、交互缩进与 clang-format 配置。缩进选项除 `Macros` 中展开不是循环或条件头的定义外全部接入；clang-format 格式化过的语料逐行一致率在 99.8% 以上，各预设语料的不一致行在 0.15% 以下。
-- **交互**：meow 式模态编辑（选区、keypad、宏、Beacon 多选区）、搜索替换、项目搜索、文件与缓冲区 picker、命令表与命令面板、键位配置、外部命令。
-- **扩展**：选项、展开、钩子与 Lua 扩展。
-- **语言服务**：语法高亮、补全与 snippet（候选的 insert/replace 范围、commit 字符、延迟解析的说明、灰字预览），以及经 Lua 接入的 LSP（诊断与行尾显示、跳转、引用、重命名与文件操作及其通知、代码动作、签名、增量语义高亮、inlay hint、请求取消）。
+- **编辑基础**：编辑内核与历史、文件生命周期、分屏与窗口调整、鼠标、系统剪贴板。
+- **C++ 缩进**：增量分析、交互缩进与 clang-format 配置。缩进选项除 `Macros` 中展开不是循环或条件头的定义外全部接入；clang-format 语料逐行一致率在 99.8% 以上，各预设语料的不一致行在 0.15% 以下。剩下的是个例：被 `#if/#else` 拆开的初始化列表、宏实参内带花括号的语句、按原始列判定的行尾注释续行。
+- **Rust 缩进与结构**：rustfmt 块风格；soda 与 rustfmt 源码上重算一致率 99.8% 以上，模拟回车几乎全部一致。泛型 `<>` 和闭包参数 `|…|` 是结构分组。
+- **交互**：meow 式模态编辑（选区、keypad、宏、Beacon 多选区）、搜索替换、项目搜索、各类 picker、命令表与命令面板、键位配置、外部命令。
+- **扩展**：选项、展开、钩子与 Lua。
+- **语言服务**：TextMate 高亮（12 个内置语法包）、补全与 snippet；经 Lua 接入的 LSP：诊断、跳转、引用、重命名与文件操作、代码动作、签名、语义高亮、inlay hint、请求取消。
+- **前端**：终端界面完整；图形界面第一版，含输入法、平滑光标、macOS 的 Command 键。
 
-已决定不做：CST 改为相对位置。增量分析停在文件级续接，大文件上每次编辑约 3 ms/MB 的偏移更新可以接受。
+已决定不做：CST 改为相对位置；远程会话（Lua 同步操作 Runtime，拆分代价大；传画面则每个按键等一次往返，不满足回车缩进的延迟要求）。
 
-C++ 缩进剩下的不一致都是个例：被 `#if/#else` 拆开的构造函数初始化列表；宏实参内带花括号的语句；按原始列判定、在重算测试中丢失的行尾注释续行。
+待做，开始前确认方向：
 
-待做，开始前需要确认方向：
-
-- **规模**：代码约 4.1 万行，是参照规模的两倍；`interaction` 一个模块约 1.2 万行，需要审查。
-- **前端**：文本区的布局与绘制方式无关（`screen`），水平方向按前端的 `Measure` 计量，竖直方向是统一行高。图形前端（`gui`，见[图形界面](gui.md)）已有第一版；待做：macOS 上更完整的验证。缩进线、git 状态这类新的显示功能先在共享层表达成语义，再由各前端尽力表现。远程会话暂缓：理想是 VSCode Remote 式的两端同步，但 Lua 同步操作 Runtime，拆分代价大；传画面的方案每个按键要等一次往返，不满足回车缩进的延迟要求。
-
-## 6 设计参考
-
-参考项目的本地目录如下，`~` 表示用户主目录。
-
-| 项目 | 本地目录 | 主要参考 |
-| --- | --- | --- |
-| llvm-project | `~/project/llvm-project` | `clang/lib/Format/` 的结构识别、token 角色、ContinuationIndenter 与空白生成 |
-| intellij-community | `~/project/intellij-community` | 缩进查询服务边界、Search Everywhere 的来源与结果管理 |
-| kakoune | `~/project/kakoune` | 命令、键位与扩展模型；选区与多选区 |
-| meow | `~/.emacs.d/elpaca/sources/meow` | 模态编辑的语义与键位、keypad、beacon |
-| helix | `~/package/helix` | Rust 编辑内核与终端前端组织、keymap 与命令表 |
-| codemirror | `~/package/codemirror` | 状态、事务、历史分组与搜索 cursor |
-| neovim | `~/package/neovim` | 命令行补全状态、位置结果集 |
+- **复杂度**：源码约 5.3 万行，`interaction` 约 1.4 万行，占四分之一以上，需要审查重复的状态和逻辑。
+- **前端**：macOS 上更完整的验证；缩进线、git 状态这类显示功能先在 `screen` 表达成语义，再由各前端绘制。

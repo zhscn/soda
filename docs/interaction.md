@@ -1,64 +1,44 @@
 # 交互层与搜索会话
 
-交互层管理输入组件和功能会话，并输出 Application 事件。编辑核心拥有文档、编辑选区、位置映射和历史；Runtime 执行事件、观察更新并调度后台任务；终端前端转换平台输入并绘制交互状态。
+交互层（`src/interaction/`）管理模态编辑、键位、命令和输入组件，输出 Application 事件。编辑核心拥有文档、选区、位置映射和历史；Runtime 执行事件、观察更新并调度后台任务；前端转换平台输入并绘制交互状态。
 
 ## 输入路由与命令循环
 
-前端将平台事件转换为 `UserInput`：规范化按键、完整粘贴文本或未识别输入。`KeyStroke` 保存按键、Control/Shift、未支持修饰键标记和释放标记；重复按键与按下使用相同绑定。终端尺寸变化由前端处理，不进入命令解析。
+前端把平台事件转换为 `UserInput`：按键（`KeyStroke`，含修饰键、未支持修饰键和释放标记）、粘贴、鼠标（`Pointer`）、焦点变化或未识别输入。重复按键与按下使用相同绑定；释放和未配置的组合不会提交、取消或修改输入。
 
-`Layers::route_input` 是用户输入入口。存在模态层时，只解析该层的操作；模态层消费或阻止输入后，不再解析文档快捷键。确认或取消关闭模态层也不会把同一个按键再次交给文档。没有模态层时，内置绑定解析为 `interaction::Command`，粘贴解析为一次文本插入，再通过 `Layers::execute` 执行。
+`Layers::route_input` 是入口。`Layers` 在编辑视图上方最多持有一个模态层（`Layer`）：命令行、保存等待、帮助、搜索、替换、屏幕标签、窗口调整。有模态层时只由它处理输入，它不识别的键也被阻止；关闭模态层的那个键不再交给文档。没有模态层时，按键经键位栈解析为 `interaction::Command`，粘贴解析为一次插入，再由 `Layers::execute` 执行。Lua 和钩子也走 `Layers::execute`，共用目标解析和安全检查。
 
-`interaction::Command` 表达编辑、打开、保存、搜索、文件 picker、关闭、切换视图和退出等操作；`editor::Command` 表达文档与编辑会话操作。其他调用入口可直接使用 `Layers::execute`，与键位入口共用目标解析和安全检查。活动模态层阻止直接调用应用命令；会话确认通过自身的事件输出完成。命令在调用时解析活动视图；另存为会话建立后保持目标文档。前端显式提供文件 picker 的根目录，交互层不读取进程工作目录。
+结果是 `InputResult`：`Pass`（没有绑定，Runtime 忽略）、`Blocked`（被模态层阻止）或 `Handled(Response)`。`Response` 包含有序的 Application 事件、picker 任务、重绘、退出和消息操作（保留、清除、替换）。Runtime 每执行一个事件，先把更新交给 `Layers::observe` 并处理后续响应，再执行下一个事件或读下一次输入；文件和 picker 的完成事件同样如此。模态层内部转换为 `Blocked`、`Active(Response)`、`Closed(Response)`，`enter`、`close` 和确认都统一处理前一会话的恢复事件与任务取消。
 
-执行返回 `Response`，包含有序 Application 事件、picker 任务、重绘、退出和状态消息操作。消息操作分为保留、清除、替换；组件输入和文档粘贴保留已有消息，显式应用命令清除或替换消息。Runtime 执行每个事件后，必须先将对应更新交给 `Layers::observe` 并处理后续响应，再执行下一个事件或接收下一次输入。文件和 picker 完成事件也遵守同一 owner thread 更新规则。
+命令在执行时解析活动视图；活动视图变化时命令行和保存等待结束，所以另存为、跳转不会落到另一个视图上。没有活动视图时，需要视图的命令不产生事件。前端显式提供项目根目录，交互层不读取进程工作目录。
 
-没有绑定且没有模态层的输入返回 `Pass`；Runtime 忽略这类输入。没有活动视图时，需要视图的命令安全地不产生事件；创建文档、打开路径和文件 picker 仍可使用。
-
-## 输入与组件
-
-`TextInput` 保存单行文本和有方向的 UTF-8 字节选区，通过公开操作维持 grapheme 边界。插入、粘贴和删除作用于整个选区；普通左右移动先收起已有选区，扩展移动保留锚点。按词操作使用 Unicode word 边界，空白和标点作为分隔。
-
-每次输入返回 `InputUpdate`，分别报告文字和选区变化。文字变化触发业务查询，单独的选区变化只请求重绘，无变化操作不触发查询或重绘。同长度替换仍是文字变化；替换成完全相同的文字只可能改变选区。插入与粘贴过滤控制字符，过滤后为空的输入保留原选区。确认、取消和业务操作由会话处理。
-
-`Layers` 管理编辑视图上方的一个模态交互层：命令行、帮助、离开文档时的保存等待、搜索和替换。活动层通过 `active()` 只读访问；进入或替换使用 `enter`，取消关闭使用 `close`，确认由输入处理入口完成。这些操作统一处理此前会话的恢复事件与任务取消，直接调用交互层时，调用者必须执行返回的效果和事件；前端通过 Runtime 自动完成这些步骤。模态键位转换为平台无关的 `Input`。`Layers::handle` 在一次调用内完成路由与会话处理，返回 `InputResult`：
-
-- `Pass`：没有模态层，交由编辑视图处理。
-- `Blocked`：模态层阻止输入继续传播，当前状态没有变化。
-- `Handled`：返回 `Response`，分别描述 Application 事件、重绘和退出请求。
-
-模态层不识别的按键也会被阻止，避免输入落入文档。离开文档只有显式选择 `discard` 才丢弃；空输入回车选择保存，取消保留文档。修饰键由前端规范化，交互层的绑定解析统一校验组合，未配置的组合及按键释放不会提交、取消或修改输入。组件展示返回文字、字节光标及选区范围，终端布局负责转换为屏幕单元、裁剪和选区高亮。宽 grapheme 的光标位置与选区显示使用同一套布局计算。
-
-命令行在活动视图变化时关闭，执行时作用于当时的活动视图，因此另存为、跳转等命令不会落到另一个视图上。模态层结束后输入重新归编辑视图所有。
-
-## 会话转换协议
-
-每个内置功能在自己的模块中处理输入、观察更新和生成展示状态。内部转换统一为 `Blocked`、`Active(Response)`、`Closed(Response)`；Layers 通过静态 Layer 分发，只管理会话安装、移除、取消和尺寸。输入无活动层时返回 Pass；活动层的事件消费后不再次传给文档。
-
-取消、确认和应用更新引起的结束都使用同一生命周期协议。Layers 移除已结束会话后，Runtime 执行其返回的事件与效果；输入事件不能保留为可跨会话重放的内部 intent。尺寸在 Layers 中保存，新进入的帮助和 picker 会话在第一次绘制前继承对应尺寸。
+输入组件 `TextInput` 持有单行文字和有方向的 UTF-8 字节选区，操作维持 grapheme 边界，按词操作使用 Unicode word 边界，插入和粘贴过滤控制字符。文字变化触发查询，只有选区变化时只重绘。
 
 ## 模态编辑模型
 
-模型取自 meow：先选中，再对选区操作。为什么这样设计、与 meow 和 kakoune 的差别见[模态编辑的设计](modal.md)。`interaction/modal/` 是这一层：
+模型取自 meow：先选中，再对选区操作。设计理由、与 meow 和 kakoune 的差别见[模态编辑的设计](modal.md)。`interaction/modal/` 的划分：
 
-- `mod.rs`：`Action`（键能触发的动作）和模态状态。
-- `text.rs`：文本里的位置，纯函数，不碰状态。
-- `execute.rs`：每个动作如何改变选区，或如何使用选区。
-- `beacon.rs`：Beacon 的多选区。
-- `replay.rs`：键盘宏。
+| 文件 | 内容 |
+| --- | --- |
+| `mod.rs` | `Action`（键触发的动作）和模态状态 |
+| `text.rs` | 文本中的位置，纯函数 |
+| `execute.rs` | 每个动作如何改变或使用选区 |
+| `beacon.rs` | Beacon 的多选区 |
+| `replay.rs` | 键盘宏 |
 
-模式固定三个，不能由用户定义：
+模式固定三个：
 
 | 模式 | 单键的含义 |
 | --- | --- |
-| Normal | 移动、选择、对选区操作。没有绑定的键什么也不做 |
+| Normal | 移动、选择、对选区操作；没有绑定的键什么也不做 |
 | Insert | 输入字符 |
 | Beacon | Normal 的键，加上派生选区：选区在 grab 范围内成组出现 |
 
-选区是核心里的半开范围，可以为空，空选区就是光标。光标可以停在行尾，离开 Insert 时不回退。提示输入不是模式，而是覆盖在模式之上的层；keypad 也不是模式，而是读键状态。
+选区是核心中的半开范围，空选区就是光标。光标可以停在行尾，离开 Insert 时不回退。提示输入是覆盖在模式上的层；keypad 是读键状态，都不是模式。
 
 ### 选区的种类
 
-选区带一个种类（`Kind`）：字符、词、符号、行、块、查找、搜索、join。种类随选区一起记住，选区一旦变化（编辑、鼠标、Lua）种类自动失效，所以不会过期。
+选区带一个种类（`Kind`）：字符、词、符号、行、块、查找（`f`/`t`）、visit（搜索匹配）、join、thing。种类随选区记住；选区被其他方式改变（编辑、鼠标、Lua）后种类失效。字符选区是 mark：锚点不变时，头部怎么移动都保持字符种类。
 
 命令按种类决定扩展还是替换：
 
@@ -66,58 +46,70 @@
 | --- | --- | --- |
 | `h j k l` | 字符选区：移动头部 | 取消选区后移动 |
 | `H J K L` | 移动头部 | 从光标开始字符选区 |
-| `w b W B` | 由 `[`、`]` 标记的：扩展；由 `w` 产生的：替换为下一个 | 从光标开始 |
+| `w b W B` | 由 `[`、`]` 产生的：扩展；由 `w` 产生的：替换为下一个 | 从光标开始 |
 | `e` | 向选区方向扩展 | 选中当前行，不含换行 |
 | `o` | 取父分组 | 取周围的分组，光标紧贴开括号时取这一组 |
-| 数字 | 按种类再走 N 步，保持远端，也保持种类 | 没有选区时是计数 |
+| 数字 | 按种类再走 N 步，保持远端和种类 | 没有选区时是计数 |
 
-`w` 取到下一个词的结尾，选区包含词前的空白，遇到标点停止：`foo bar, baz` 连按 `w` 依次选中 `foo`、` bar`、` baz`。词只含字母数字，符号另含下划线。
+`w` 取到下一个词的结尾，包含词前的空白，遇到标点停止：`foo bar, baz` 连按 `w` 依次选中 `foo`、` bar`、` baz`。词只含字母数字，符号另含下划线。选中后行尾附近显示 1 到 0 的数字，表示按该数字能扩展到哪里，1.5 秒后或下一个键时消失。
 
-选中后行尾附近显示 1 到 0 的数字，表示按这个数字能扩展到哪里，1.5 秒后或下一个键时消失。
+`o`、`O`、`,`、`.` 的括号走语言结构，字符串和注释里的括号不算分组；C++ 模板和 Rust 的泛型 `<>`、闭包 `|…|` 也是分组。结构查询需要可变访问，所以经 `Effect::Structure` 交给 Runtime，答案以 `Action::Found` 回到交互层。
 
-`o`、`O` 和 `,` `.` 的括号走语言结构，字符串和注释里的括号不算分组。文字查询由 `Response.structure` 交给 runtime，因为结构分析需要可变访问；answer 再以 `Action::Found` 回到这一层。
+### Normal 键
+
+默认键位在 `interaction::keymap` 的 `NORMAL` 表：
+
+| 类别 | 键 |
+| --- | --- |
+| 移动 | `h j k l`、方向键、`C-b C-n C-p C-f`；`H J K L`、Shift+方向键扩展；`Home`/`End`、`C-a`/`C-e` 行首行尾；`M-<`/`M->` 文档首尾；`M-b`/`M-f` 按词；PageUp/PageDown 翻页 |
+| 选择 | `w b`/`W B` 词/符号；`[`/`]` 选中此处的词/符号并设为搜索；`e` 行；`o` 周围分组，`O` 到下一个分组结尾；`f`/`t` 加字符：选到/选到之前；`,`/`.` 加 thing：内部/包括边界；`'` 本行与上一行之间的空白（join）；`;` 交换两端；`C-Space` 开始字符选区 |
+| thing | `r s c a` 圆、方、花、尖括号，`g` 字符串，`w` 词，`e` 符号，`p` 段落，`l` 行，`b` 整个文档 |
+| 选区历史 | `z` 退一步，`Z` 退到最早，`Esc`/`C-g`/`C-[` 清除选区和历史 |
+| 计数 | `0`–`9` 扩展（无选区时为计数），`-` 反向下一条命令 |
+| 进入 Insert | `i`/`a` 选区开头/结尾，`I`/`A` 在上方/下方开新行 |
+| 操作 | `r` 剪切，`s` 修改，`d` 删除，`y` 复制，`p` 粘贴；Emacs 键 `C-w`、`M-w`、`C-y`、`M-y`、`C-d`、`C-k`、`M-d`、`M-Backspace` |
+| 搜索 | `n`/`N`、`v`、`C-s`/`C-r` |
+| 其他 | `u`/`U` 撤销/重做，`` ` `` 重复上一条命令，`q` 屏幕标签跳转，`Q` 跳到行，`R` 替换，`/` 打开文件，Enter `jump`，`C-o`/`C-i`（Tab）跳转历史，`F1` 帮助 |
+| Beacon 与宏 | `G` grab，`S` 与 grab 交换，`E`/`V` 在每行/每处匹配播放宏 |
+| keypad | `x`、`c`、`m`、`g`、Space |
 
 ### 操作
 
-| 键 | 无选区 | 有选区 |
-| --- | --- | --- |
-| `r` `kill` | 剪切到行尾 | 剪切；正向的行选区带上换行；join 选区合并 |
-| `s` `change` | 删一个字符，进入 Insert | 删除，进入 Insert，不写剪贴板 |
-| `d` `delete` | 删一个字符 | 删除，不写剪贴板；join 选区合并 |
-| `y` `save` | 报错 | 复制，然后取消选区，光标留在原处（同 Emacs 的 `kill-ring-save`） |
-| `p` `yank` | 粘贴 | 收起选区后粘贴，不替换 |
+| 键 | 命令 | 无选区 | 有选区 |
+| --- | --- | --- | --- |
+| `r` | `kill` | 剪切到行尾 | 剪切；正向的行选区带上换行；join 选区合并两行 |
+| `s` | `change` | 删一个字符，进入 Insert | 删除，进入 Insert，不写剪贴板 |
+| `d` | `delete` | 删一个字符 | 删除，不写剪贴板；join 选区合并两行 |
+| `y` | `save` | 报告 No selection | 复制，然后取消选区，光标留在原处（同 Emacs 的 `kill-ring-save`） |
+| `p` | `put` | 粘贴 | 收起选区后粘贴，不替换 |
 
-`replace-selection` 用剪贴板替换选区，没有默认键。查找失败时选区不变并报告，不会丢失。`u` 撤销后恢复修改前的选区。
+`replace-selection` 用剪贴板替换选区，没有默认键。查找失败时选区不变并报告。`u` 撤销后恢复修改前的选区。每次选择都把旧选区记入历史，供 `z`、`Z` 退回。`;` 交换两端后，`e`、数字、`n` 都跟随新方向。
 
-每次选择都把旧选区记入历史，`z` 退回一步，`Z` 退到最早，`Esc` 清除选区和历史。`;` 交换两端，之后的 `e`、数字、`n` 都跟随新方向。
+`n` 取下一个匹配：选区不是当前搜索的匹配时，先把选中文本设为新的搜索。选区反向时反向走，到头绕回。`N` 丢弃当前搜索，退回上一个。`v`（`visit SYMBOL`）在命令行中补全当前文档的符号，按模糊匹配排序，同分时离光标近的在前；确认后从光标往后选中下一处并设为当前搜索。选的是文档中的符号时按整个符号找（`add` 不匹配 `add_x`），否则按字面文字找。`C-s`、`C-r` 打开带实时预览的搜索（见[搜索与替换](#搜索与替换)）。跳转后行尾显示 `[i/N]`，下一个键清除。
 
-`n` 取下一个匹配：选区不是当前搜索的匹配时，先把选中文本作为新的搜索。选区反向时反向走，到头绕回。`N` 丢弃当前搜索，退回上一个。`[`、`]` 同时设置搜索。`v`（`visit SYMBOL`）在命令行里补全当前文档的符号，按模糊匹配排序，同分时离光标近的在前；确认后从光标往后选中下一处并设为当前搜索，之后 `n` 接着走。选的是文档里的符号时按整个符号找（`add` 不匹配 `add_x`），否则按字面文字找。`C-s`、`C-r` 打开带实时预览的搜索提示。行尾显示 `[i/N]`，下一个键清除。
-
-计数来自 leader：`SPC 3`，之后的数字继续累加，也可以在无选区时直接按数字。`-` 让下一条命令反向。`` ` `` 重复上一条命令，不包括插入的文字。
+计数来自 leader（`SPC 3`，之后的数字继续累加），也可以在无选区时直接按数字。`` ` `` 重复上一条命令，不包括插入的文字。
 
 ### Keypad
 
-`x`、`c` 是绑定到 `keypad <c-x>`、`keypad <c-c>` 的普通 Normal 键，Space 绑定到 `keypad leader`，`m`、`g` 绑定到 `keypad meta`、`keypad ctrl-meta`，都可以改。
-
-绑定只有一份，在 `global` 表里，比如 `<c-x><c-s>`。keypad 读键时只查这一张表，每个键先试 Ctrl 再试原样：
+`x`、`c` 绑定到 `keypad <c-x>`、`keypad <c-c>`，Space 绑定到 `keypad leader`，`m`、`g` 绑定到 `keypad meta`、`keypad ctrl-meta`，都可以改绑。绑定只有一份：`<c-x><c-s>` 写在 `global` 表里，keypad 读键时每个键先试加 Ctrl，再试原样，只查 `global` 表；`m`、`g` 给下一个键加 Meta / Ctrl-Meta，按当前键位栈查找。
 
 | 键 | 序列 | 说明 |
 | --- | --- | --- |
 | `x s` | `<c-x><c-s>` | Ctrl 优先 |
 | `x k` | `<c-x>k` | 没有 Ctrl 绑定，退回原样 |
-| `x <space> o` | `<c-x>o` | Space 强制下一个键不加修饰，和 `<c-x><c-o>` 区分 |
+| `x <space> o` | `<c-x>o` | Space 强制下一个键不加修饰，与 `<c-x><c-o>` 区分 |
 | `<space> f` | `<c-c>f` | leader 的第一个键不加修饰 |
-| `m x` | `<a-x>` | 只作用于下一个键，之后按 keypad 规则 |
+| `m x` | `<a-x>` | 只作用于下一个键 |
 
-和 meow 的差别：`m`、`g` 只在开头起作用，所以 `x p g` 能到 `<c-x>pg`；`SPC` 后面没有保留键。Backspace 退掉上一个键，Esc 取消，计数跨过 keypad 保留。
+Backspace 退掉上一个键，Esc 取消，计数跨过 keypad 保留。与 meow 的差别见[模态编辑的设计](modal.md)。
 
 ### 宏
 
-`F3`、`C-x (`、`SPC [` 开始录制，`F4`、`C-x )`、`SPC ]` 结束；没在录制时后两者播放，`C-x e` 同样。录的是按键，回放走同一条路由，补全列表里的选择录成结果文字。`E` 在选中的每一行行首播放，`V` 在搜索的每处匹配播放，都合成一次撤销；任一命令失败时停止。
+`F3`、`C-x (`、`SPC [` 开始录制；`F4`、`C-x )`、`C-x e`、`SPC ]` 结束录制，没在录制时播放上一个宏。录的是按键，回放走同一条路由，补全列表中的选择录成结果文字。`E` 在选中的每一行行首播放，`V` 在搜索的每处匹配播放，都合成一次撤销；任一命令失败时停止。
 
 ### Beacon
 
-`G` 把选区设为 grab 并进入 Beacon；没有选区时 `G` 留下标记，配合 `S` 把选区移过去。主选区在 session 里，其余选区是跟随编辑的位置（`DocumentPosition`），不进入核心。Normal 和单选区 Insert 永远只有一个选区，所以只有下面的操作需要知道多选区，移动命令不用改。
+`G` 把选区设为 grab 并进入 Beacon；没有选区时 `G` 留下标记，之后用 `S` 把选区与它交换。主选区在会话中，其余选区是跟随编辑的 `DocumentPosition`，不进入核心。Normal 和单选区 Insert 永远只有一个选区，所以只有下面的操作需要知道多选区。
 
 主选区每次变化，其余选区按它的种类重新派生：
 
@@ -125,177 +117,154 @@
 | --- | --- |
 | 无 | 其他行的同一显示列，较短的行跳过 |
 | 字符 | 其他行相同列范围的选区 |
-| 词、符号（`w`） | 每个词，和主选区一样是选区 |
+| 词、符号（`w`） | 每个词，选法同主选区 |
 | 词、符号（`[`、`]`） | 同一个词的每处匹配 |
-| 搜索 | 搜索的每处匹配 |
+| visit | 搜索的每处匹配 |
 | 行 | 同样高度的每组行 |
-| 查找 | 每处字符 |
+| 查找 | 每处该字符 |
 | join | 每行的缩进处 |
 
-`d`、`r` 删除所有选区，`r` 把它们的文字逐行放进剪贴板。`i`、`a`、`s` 在所有选区上进入 Insert，输入、Enter、Backspace 和 Delete 是同一个事务里的多处修改。这时自动配对、缩进和补全都不参与，Enter 只插入换行。Esc 回到 Beacon。
-
-录制开始时回到主选区单独编辑；结束时对其余选区逐个回放，连同录制的修改合成一次撤销，然后离开 Beacon。
+`d`、`r` 删除所有选区，`r` 把它们的文字逐行放进剪贴板。`i`、`a`、`s` 在所有选区上进入 Insert，输入、Enter、Backspace 和 Delete 是同一事务中的多处修改；这时自动配对、缩进和补全不参与，Enter 只插入换行。Esc 回到 Beacon。录制宏时先回到主选区单独编辑；结束录制时对其余选区逐个回放，连同录制的修改合成一次撤销，然后离开 Beacon。
 
 ## 命令、键位与配置
 
-交互能力按 kakoune 的方式组织：所有用户可调用的操作都是有名字的命令，键位、`:` 命令行、配置文件和帮助只引用命令名。扩展通过组合命令、调用外部进程和 Lua 实现。命令表是唯一的接入面：Lua 向同一张表注册命令，不直接访问 Runtime 的命令循环，见[扩展模型](extension.md#lua)。
+按 kakoune 的方式组织：所有用户可调用的操作都是有名字的命令，键位、`:` 命令行、配置、钩子和帮助只引用命令名。Lua 向同一张命令表注册命令，见[扩展模型](extension.md#lua)。
 
 ### 命令表
 
-`interaction::registry` 保存命令。每个条目包含名字、参数形式和一行说明；条目有三种来源：
+`interaction::registry` 保存命令，每个条目有名字、参数位和一行说明：
 
 | 来源 | 定义方式 | 名字规则 |
 | --- | --- | --- |
-| 内置 | 静态表，参数解析为类型化 `Command` | 固定，不可替换 |
+| 内置 | `BUILTINS` 静态表，参数解析为类型化 `Command` | 固定，不可替换 |
 | Rust 注册 | `register_command(name, handler)`，处理函数读取只读 Application 并返回 `Command` | 不可与内置名冲突；重复注册替换 |
-| 用户定义 | `define-command NAME BODY` | 同上；与 Rust 注册共享名字空间；帮助显示命令体，Lua 定义的显示其说明 |
+| 用户定义 | `define-command NAME BODY`、`soda.define_command` | 与 Rust 注册共享名字空间；帮助显示命令体或 Lua 给的说明 |
 
-命令行的第一个空白分隔词是命令名，其余部分去掉首尾空白后整体作为参数，由命令自己解释：路径参数保留内部空格，`map` 再拆分模式、按键和目标。`Command::Named(line)` 携带一条命令行，在执行时解析，因此绑定可以引用之后才定义的命令。`:` 命令行、`soda.command`、键位目标和 `define-command` 的命令体使用同一个解析器；`:42` 这种纯数字输入仍表示跳转到行。
+命令行的第一个空白分隔词是命令名，其余部分去掉首尾空白后整体作为参数，由命令自己解释（路径保留内部空格，`map` 再拆分模式、按键和目标）。`Command::Named(line)` 在执行时才解析，所以绑定可以引用之后才定义的命令。`:` 命令行、`soda.command`、键位目标和命令体使用同一个解析器；`:42` 这种纯数字表示跳转到行。
 
-用户定义命令的命令体用 `;` 分隔多条命令行，`\;` 表示字面分号。`%arg{1}` 到 `%arg{9}` 替换为按空白拆分的调用参数，`%arg{@}` 替换为完整参数。展开在执行时进行，嵌套用户命令最多展开 16 层，超过时整条命令失败且不执行任何部分；未知命令名和参数错误同样在执行前报告。展开得到的命令依次执行，与 `Response.commands` 一样在第一次失败时停止；某条命令打开交互组件后，后续命令被阻止。Rust 处理函数在轮到它时才读取 Application，返回 `Named` 会被拒绝，避免处理函数之间的递归分发。
-
-`%opt{NAME}` 替换为选项在当前文档的值，`%val{NAME}` 替换为编辑器状态：`file`、`name`、`kind`、`line`、`column`（一起始，制表符按制表位计）、`selection`、`word`、`root`、`mode`、`column-limit`（clang-format 的 `ColumnLimit`，没有时为 0），以及钩子中的 `hook`（事件参数，如保存的路径）。它们在语句执行时才展开：`:` 中的一行在执行前展开；用户命令的每条语句在轮到它时展开，所以 `goto 10; shell echo %val{line}` 读到跳转后的行号。读取状态的语句在执行前只检查命令名，参数在展开后检查；展开失败或参数不合法时，这条语句和其后的语句都不执行。命令名本身不能来自展开。`map` 和 `define-command` 的参数是以后才执行的命令行，其中的展开保留原样。展开结果按原文替换，不再拆分。
+命令体用 `;` 分隔多条命令，`\;` 是字面分号；`%arg{1}` 到 `%arg{9}` 替换为按空白拆分的调用参数，`%arg{@}` 为完整参数。嵌套用户命令最多展开 16 层，超过时整条命令不执行；未知命令名和参数错误也在执行前报告。展开得到的命令依次执行，第一次失败时停止；某条命令打开交互组件后，后续命令被阻止。Rust 处理函数返回 `Named` 会被拒绝，避免递归分发。`%opt{}`、`%val{}` 的展开见[扩展模型](extension.md)。
 
 ### 键位上下文
 
-键位表有 `global`、`normal`、`beacon`、`insert`、`completion`、`snippet`、`mark`、`tree` 和 `prompt`（所有输入框、picker 与确认对话框）。按键从一组栈里查找，先查到的算数，和 Emacs 读 active maps 一样（`Layers::stack`）：
+键位表有 `global`、`normal`、`beacon`、`insert`、`completion`、`snippet`、`mark`、`tree` 和 `prompt`（所有输入框、picker 与确认）。按键在一个栈中查找，先查到的算数，与 Emacs 读 active maps 一样（`Layers::stack`）：
 
 | 模式 | 栈 |
 | --- | --- |
-| Insert | `completion`（列表显示时）、`snippet`（还有位置时）、`insert`、`global` |
-| Normal | `mark`（光标在标记上时）、`tree`（在扩展的树文档里时）、`normal`、`global` |
+| Insert | `completion`（列表显示时）、`snippet`（还有位置时；位置在提供选项时排到 `completion` 之前）、`insert`、`global` |
+| Normal | `mark`（光标在标记的符号上时）或 `tree`（在树文档中时）、`normal`、`global` |
 | Beacon | `beacon`、`normal`、`global` |
 
-`global` 是所有模式共有的键，`C-x`、`C-c` 下的键都在这里，keypad 也只读这张表。模块把键绑到 `<c-c>` 下，就同时得到 `SPC` 入口。
+`global` 是所有模式共有的键，`C-x`、`C-c` 下的键都在这里。模块把键绑到 `<c-c>` 下，就同时得到 `SPC` 入口。
 
 每张表依次查找：
 
-1. 用户层：`map` 和 Rust `bind`（prompt 为 `bind_input`）写入；`unmap`、`unbind` 和 `unbind_input` 删除用户条目，默认解释随之恢复。
+1. 用户层：`map` 和 Rust `bind`（prompt 为 `bind_input`）写入；`unmap`、`unbind`、`unbind_input` 删除用户条目，默认解释随之恢复。
 2. 默认层：`interaction::keymap` 中的静态表，引用命令名并在启动时解析，测试保证每个默认条目都能解析。
 3. 都没有时：Normal 和 Beacon 忽略这个键；insert 和 prompt 的可打印字符直接输入。
 
-用户层的完整绑定不能同时是另一个用户绑定的前缀；用户层前缀会遮住默认层中相同开头的单键。序列最多四个按键。Esc、Ctrl-[、Ctrl-G 和 Ctrl-C 取消待完成序列；前三个不能作为序列的第二个及以后的按键，Ctrl-C 可以（`<c-x><c-c>`）。要关闭某个默认键，把它绑定到 `nop`。
+用户层的完整绑定不能同时是另一个用户绑定的前缀；用户层前缀会遮住默认层中相同开头的单键。序列最多四个按键。Esc、`C-[`、`C-g`、`C-c` 取消待完成序列；前三个不能作为序列的第二个及以后的按键，`C-c` 可以（`<c-x><c-c>`）。要关闭某个默认键，绑定到 `nop`。
 
-`prompt` 上下文的目标是输入动作，不是应用命令：`confirm`、`cancel`、`complete`、`complete-backward`、`candidate-next`、`candidate-previous`、`candidate-first`、`candidate-last`、`page-next`、`page-previous`、`match-next`、`match-previous`、`replace-all`、`help`、`select-all`、`nop`，以及下面的行编辑名。prompt 绑定只接受单个按键。输入组件因此不会执行文档命令或切换编辑模式。
-
-Normal 的默认绑定按 meow，见[模态编辑模型](#模态编辑模型)，另有 PageDown / PageUp 翻页、`<f1>` 帮助。Insert 中方向键、Enter、Tab 和 Shift-Tab 分别绑定 `move-up`/`move-down`、`newline`、`insert-tab` 和 `outdent`。
+`prompt` 的目标是输入动作而不是应用命令：`confirm`、`cancel`、`complete`、`complete-backward`、`candidate-next`、`candidate-previous`、`candidate-first`、`candidate-last`、`page-next`、`page-previous`、`history-next`、`history-previous`、`match-next`、`match-previous`、`replace-all`、`help`、`select-all`、`nop`，以及[行编辑键](#行编辑键)。prompt 绑定只接受单个按键，所以输入组件不会执行文档命令或切换模式。
 
 ### 括号配对
 
-Insert 中按选项 `auto-pairs`（默认开）成对输入括号，与 Emacs 的 electric-pair-mode 相同，计算在编辑器的同一个输入事务中完成，一次撤销：
-- 输入 `(`、`[`、`{` 时，若光标后是行尾、空白、右括号、`;` 或 `,`，同时插入右括号，光标留在中间；在 `{|}` 中回车展开成三行，C++ 以外的语言对 `(|)`、`[|]` 也一样。
-- 输入的右括号与光标后的字符相同时，越过它而不插入。
-- 退格时光标在空的一对之间，两边一起删除。
-- 有选区时输入左括号，用这一对包住选区，选区保持在内部。
-- 引号按语言配对：C++ 配对 `"` 和 `'`，其他语言取语言配置的 `autoClosingPairs`（Rust 没有 `'`，因为它也是生命周期），纯文本不配对。前一个字符是字母、数字、`_` 或引号时不配对（`don't`、`x'`）；字符串内输入同一个引号会越过结尾的引号。注释和字符串内不配对任何字符；这由 C++ 词法或 TextMate 结果判断，纯文本没有这一层。
+Insert 中按选项 `auto-pairs`（默认开）成对输入括号，与 Emacs 的 electric-pair-mode 相同，在同一个输入事务中完成，一次撤销：
+
+- 输入 `(`、`[`、`{` 时，若光标后是行尾、空白、右括号、`;` 或 `,`，同时插入右括号，光标留在中间。在 `{|}` 中回车展开成三行；C++ 以外的语言对 `(|)`、`[|]` 也一样。
+- 输入的右括号与光标后的字符相同时，越过它。
+- 光标在空的一对之间退格，两边一起删除。
+- 有选区时输入左括号，用这一对包住选区。
+- 引号按语言配对：C++ 配对 `"` 和 `'`，其他语言取语言配置的 `autoClosingPairs`（Rust 没有 `'`），纯文本不配对。前一个字符是字母、数字、`_` 或引号时不配对；字符串内输入同一个引号会越过结尾的引号。
+- 注释和字符串内不配对。C++ 和 Rust 由自己的词法判断，其他语言用 TextMate 结果，纯文本没有这一层。
 - 粘贴不配对。
 
 ### 结构化编辑
 
-内置模块 `pairs` 提供与 Emacs 的 puni 相同的操作和键位，用的是 `buf:enclosing`、`buf:next_item` 和 `buf:prev_item`，所以所有语言都能用；结构不明确时（未闭合的分组、被 `#if` 拆开的分组）退回普通命令的行为。这些移动不进入跳转历史。
+内置模块 `pairs`（`lua/pairs.lua`）提供与 Emacs 的 puni 相同的操作和键位。它基于 `buf:enclosing`、`buf:next_item`、`buf:prev_item`，所以所有语言都能用；C++ 和 Rust 的分组来自自己的结构分析（含模板、泛型 `<>` 和闭包 `|…|`），其他语言按 `(`、`[`、`{` 配对。结构不明确时（未闭合的分组、被 `#if` 拆开的分组）退回普通命令的行为。这些移动不进入跳转历史。
 
 | 键 | 命令 | 作用 |
 | --- | --- | --- |
 | `<c-a-f>` / `<c-a-b>` | `sexp-forward` / `sexp-backward` | 越过一个表达式，停在分组边界 |
-| `<c-a-u>` | `sexp-up` | 到包围它的括号 |
+| `<c-a-u>` | `sexp-up` | 到包围它的分组开头 |
 | `<c-a-a>` / `<c-a-e>` | `sexp-beginning` / `sexp-end` | 到所在分组内部的开头 / 结尾 |
 | Normal `<a-o>`、`<c-a-space>` | `sexp-expand` | 选中光标处或包围它的分组，再按扩大一层 |
-| Normal、Insert `<c-a-k>` / `<c-a-bs>` | `sexp-kill-forward` / `sexp-kill-backward` | 剪切下一个 / 上一个表达式 |
-| Normal、Insert `<c-k>` | `sexp-kill` | 剪切到行尾；有表达式越过行尾时剪切到它结束，遇到所在分组的闭括号时停在它之前 |
-| Normal、Insert `<c-s-right>` / `<c-s-left>` | `sexp-slurp` / `sexp-barf` | 把闭括号移到下一个表达式之后 / 最后一个表达式之前 |
+| `<c-a-k>` / `<c-a-bs>` | `sexp-kill-forward` / `sexp-kill-backward` | 剪切下一个 / 上一个表达式 |
+| `<c-k>` | `sexp-kill` | 剪切到行尾；有表达式越过行尾时剪到它结束，遇到所在分组的闭括号时停在它之前 |
+| `<c-s-right>` / `<c-s-left>` | `sexp-slurp` / `sexp-barf` | 把闭括号移到下一个表达式之后 / 最后一个表达式之前 |
 | Insert `<bs>`、`<c-h>` | `soft-backspace` | 删除会破坏配对时只移动光标；空的一对整个删除 |
-| Insert `<c-bs>`、`<a-bs>` | `soft-kill-word` | 向前剪一个词，进 kill ring；标点剪到最近的括号为止，紧邻括号时同 `soft-backspace`；不管选区 |
-| Insert `<c-w>` | `kill-region-or-word` | 有选区时剪切选区（puni 的 `puni-kill-region`），否则同 `soft-kill-word` |
+| Insert `<c-bs>`、`<a-bs>` | `soft-kill-word` | 向前剪一个词进 kill ring；标点剪到最近的括号为止，紧邻括号时同 `soft-backspace` |
+| Insert `<c-w>` | `kill-region-or-word` | 有选区时剪切选区，否则同 `soft-kill-word` |
 
-`foo(a,⏎ b);` 行首的 `<c-k>` 留下 `;`，`if (x) {⏎} else {⏎}` 行首的留下 `else {⏎}`，这与 puni 的 `beyond` 相同。没有写模式的键在 Normal 和 Insert 中都有效。用 `unmap insert <bs>` 这样的命令恢复内置行为。
+没有写模式的键在 Normal 和 Insert 中都有效。`foo(a,⏎ b);` 行首的 `<c-k>` 留下 `;`，`if (x) {⏎} else {⏎}` 行首的留下 `else {⏎}`，与 puni 相同。用 `unmap insert <bs>` 这样的命令恢复内置行为。
 
 ### Emacs 键位
 
-Emacs 的键和模态键并存。键位取自 Emacs 默认值，再加上这几处本地习惯：`C-v` / `M-v` 翻半页（view-mode），`C-x C-o` 选窗口（ace-window）。
+Emacs 的键与模态键并存，取自 Emacs 默认值，另有 `C-v` / `M-v` 翻半页（view-mode）、`C-x C-o` 选窗口（ace-window）。Normal 中的 Emacs 移动和剪切键见 [Normal 键](#normal-键)。
 
-所有模式都有效（`global` 表）：
+所有模式（`global` 表）：
 
 | 键 | 命令 |
 | --- | --- |
 | `C-x C-s`、`C-x C-w`、`C-x C-f`、`C-x C-r` | `write`、`saveas`、`open`、`recent` |
-| `C-x b`、`C-x C-b`、`C-x k`、`C-x C-c` | `buffer`、`close`、`quit` |
+| `C-x b`、`C-x C-b`、`C-x k`、`C-x C-c` | `buffer`、`buffer`、`close`、`quit` |
 | `C-x 0`、`1`、`2`、`3`、`o`、`C-x C-o` | `close-window`、`only`、`split`、`vsplit`、`window-next`、`window-pick` |
 | `C-x ^` | `resize-window` |
 | `C-x p f`、`C-x p b`、`C-x p g` | `project`、`buffer`、`grep` |
 | `M-x`、`M-!`、`M-\|`、`M-%` | `commands`、`shell`、`pipe`、`replace` |
 | `M-g g`、`M-g M-g` | `goto` |
-| `M-g n`、`M-g p`、``C-x ` `` | `next-result`、`previous-result` |
+| `M-g n`、`M-g p`、``C-x ` `` | `next-result`、`previous-result`、`next-result` |
 | `M-,`、`C-M-,` | `jump-back`、`jump-forward` |
 | `C-v`、`M-v`、`C-l` | `half-page-down`、`half-page-up`、`recenter`（居中，不循环） |
-| `C-/`、`C-_`、`C-x u`，`C-M-/`、`C-M-_` | `undo`，`redo` |
-| `M-;` | `comment`（只切换行注释） |
+| `C-/`、`C-_`、`C-x u`；`C-M-/`、`C-M-_` | `undo`；`redo` |
 | `C-z` | `suspend` |
 | `C-c C-c` | `stop` |
 
-`C-c` 是前缀，不再离开 Insert；用 Esc、`C-[` 或 `C-g`。
+`C-c` 是前缀，不离开 Insert；离开 Insert 用 Esc、`C-[` 或 `C-g`。
 
-`C-c` 下的键也是 leader 键，`SPC` 加同样的键：`f` 项目文件、`b` 缓冲区、`:` 命令面板、`r` 最近文件、`j` 跳转、`w`、`o` 选窗口，`H J K L` 切窗口，`1`–`0` 计数，`[`、`]` 宏；模块另加 `k` 悬停、`c`、`C` 调用方、被调用方、`R` 重命名、`a` 代码动作、`s`、`S` 符号、`h` 头文件切换、`g` git 改动、`i`、`I` 符号高亮、`(` 等 surround。
+`C-c` 下的键也是 leader 键（`SPC` 加同样的键）：`f` 项目文件、`b` 缓冲区、`r` 最近文件、`:` 命令面板、`j` 屏幕标签跳转、`w`/`o` 选窗口、`H J K L` 切换窗口、`W` 调整窗口、`1`–`0` 计数、`[`/`]` 宏。模块另加 `k . R a s S h c C t T`（LSP，见[语言服务器](lsp.md)）、`g` git 改动、`i`/`I` 符号高亮、`(` 等 surround。
 
-Normal 中：
+Normal、Insert 都有效（`lua/emacs.lua`、`lua/comment.lua`）：
 
-| 键 | 作用 |
+| 键 | 命令 |
 | --- | --- |
-| `C-f`、`C-b`、`C-n`、`C-p` | 同 `l`、`h`、`j`、`k` |
-| `C-a`、`C-e`、`M-<`、`M->`、`M-f`、`M-b` | 行首、行尾、文档首尾、按词移动 |
-| `C-Space` | 开始字符选区，之后的移动扩展它 |
-| `C-g` | 取消选区 |
-| `C-w`、`M-w`、`C-y`、`M-y` | `kill`、`save`、`yank`、`yank-pop` |
-| `C-d` | `delete` |
-| `C-k` | `kill-line-end`（`pairs` 模块换成 `sexp-kill`） |
-| `C-s`、`C-r` | `search`、`search-backward` |
-| `M-d`、`M-Backspace` | `kill-word-forward`、`kill-word-backward` |
-
-Normal、Insert 都有效：
-
-| 键 | 作用 |
-| --- | --- |
-| `M-u`、`M-l`、`M-c` | `upcase-word`、`downcase-word`、`capitalize-word`，只看当前行，大小写转换只处理 ASCII |
-| `C-t`、`M-t` | `transpose-chars`、`transpose-words`，只看当前行 |
+| `M-u`、`M-l`、`M-c` | `upcase-word`、`downcase-word`、`capitalize-word`；只看当前行，只转换 ASCII |
+| `C-t`、`M-t` | `transpose-chars`、`transpose-words`；只看当前行 |
 | `M-\`、`M-Space`、`M-^` | `delete-horizontal-space`、`just-one-space`、`join-line` |
+| `M-;` | `comment`，切换行注释 |
 
-Insert 另有 `C-n`、`C-p`、`M-<`、`M->` 移动，`C-s`、`C-r` 搜索（结束后回到 Insert，光标在匹配结尾），`C-o`、`C-j`、`M-m` 为 `open-line`、`newline`、`back-to-indentation`。
-
-输入框另有 `C-g` 取消、`C-j` 确认、`M-<` / `M->` 到第一个 / 最后一个候选、`C-v` / `M-v` 翻页、`C-s` / `C-r` 下一个 / 上一个匹配。
+Insert 另有 `C-n`、`C-p`、`M-<`、`M->` 移动，`C-s`、`C-r` 搜索（结束后回到 Insert，光标在匹配结尾），`C-o`、`C-j`、`M-m` 为 `open-line`、`newline`、`back-to-indentation`，`M-/` 触发补全，`M-y` 为 `yank-pop`。输入框另有 `C-g` 取消、`C-j` 确认、`M-<` / `M->` 到第一个 / 最后一个候选、`C-v` / `M-v` 翻页、`C-s` / `C-r` 下一个 / 上一个匹配、`M-p` / `M-n` 翻历史。
 
 Alt 加 Shift 的符号键在 kitty 协议下按美式键盘换算。
 
 ### 按键记法
 
-单个字符直接书写；带修饰键或特殊键写在尖括号中，大小写不敏感：`<c-x>`、`<a-f>`（`<m-f>` 同义）、`<s-tab>`、`<c-s-left>`。特殊键名为 `esc`、`ret`（`cr`、`enter`）、`tab`、`backtab`、`bs`（`backspace`）、`del`、`space`、`lt`、`gt`、`left`、`right`、`up`、`down`、`home`、`end`、`pageup`、`pagedown` 和 `f1` 到 `f12`。序列直接拼接，例如 `<space>f`、`<c-x><c-s>`。帮助使用同一记法输出；状态栏、按键提示和消息则用 Emacs 记法（`C-x C-s`），见[界面](ui.md)。
+单个字符直接书写；带修饰键或特殊键写在尖括号中，大小写不敏感：`<c-x>`、`<a-f>`（`<m-f>` 同义）、`<s-tab>`、`<c-s-left>`。特殊键名为 `esc`、`ret`（`cr`、`enter`）、`tab`、`backtab`、`bs`（`backspace`）、`del`、`space`、`lt`、`gt`、`left`、`right`、`up`、`down`、`home`、`end`、`pageup`、`pagedown` 和 `f1` 到 `f12`。序列直接拼接，如 `<space>f`、`<c-x><c-s>`。帮助使用这种记法；状态栏、按键提示和消息用 Emacs 记法（`C-x C-s`），见[界面](ui.md)。
 
 ### 行编辑键
 
-Insert 和 prompt 共享一组 readline 风格的行编辑命令。名字只定义一次，在 Insert 中转换为编辑命令，在输入框中转换为 `InputKey`：
+Insert 和输入框共享一组 readline 风格的命令。名字只定义一次，在 Insert 中转换为编辑命令，在输入框中转换为 `InputKey`：
 
 | 默认键 | 命令 | 说明 |
 | --- | --- | --- |
-| Left / Right、Ctrl-B / Ctrl-F | `char-left` / `char-right` | 按字符簇移动 |
-| Ctrl-Left / Ctrl-Right、Alt-B / Alt-F | `word-left` / `word-right` | 按词移动 |
-| Home / End、Ctrl-A / Ctrl-E | `line-start` / `line-end` | 到行首 / 行尾 |
-| Backspace / Ctrl-H、Delete / Ctrl-D | `delete-backward` / `delete-forward` | 删除字符簇；Insert 的退格保留按缩进单位回退 |
-| Ctrl-W、Ctrl-Backspace、Alt-Backspace | `kill-word-backward` | 剪切到前一个词边界 |
-| Ctrl-Delete、Alt-D | `kill-word-forward` | 剪切到后一个词边界 |
-| Ctrl-U | `kill-line-start` | 剪切到行首 |
-| Ctrl-K | `kill-line-end` | 剪切到行尾；位于行尾时剪切换行 |
-| Ctrl-Y | `yank` | 粘贴剪切内容 |
-| Alt-Y | `yank-pop` | 紧跟在粘贴后，换成 kill ring 里更早的一条；Insert 和 Normal 有，输入框没有 |
+| Left / Right、`C-b` / `C-f` | `char-left` / `char-right` | 按字符簇移动 |
+| `C-Left` / `C-Right`、`M-b` / `M-f` | `word-left` / `word-right` | 按 Unicode 词移动 |
+| Home / End、`C-a` / `C-e` | `line-start` / `line-end` | 到行首 / 行尾 |
+| Backspace / `C-h`、Delete / `C-d` | `delete-backward` / `delete-forward` | 删除字符簇；Insert 的退格在行首空白中按缩进单位回退 |
+| `C-w`、`C-Backspace`、`M-Backspace` | `kill-word-backward` | 剪切到前一个词边界 |
+| `C-Delete`、`M-d` | `kill-word-forward` | 剪切到后一个词边界 |
+| `C-u` | `kill-line-start` | 剪切到行首 |
+| `C-k` | `kill-line-end` | 剪切到行尾；位于行尾时剪切换行 |
+| `C-y` | `yank` | 粘贴 |
 
-Shift 加方向键、Home 和 End 扩展选区，对应 `extend-` 前缀的同名命令。Insert 中 `kill-*` 写入 kill ring，连续的剪切合并成一条（见[剪贴板](#剪贴板)）；它们和 Emacs 的 `kill-line`、`kill-word` 一样从光标算起，不管选区。`yank` 等同于粘贴剪贴板；输入框使用组件自己的剪切缓冲。Normal 不使用这组键；它的 Emacs 键见[Emacs 键位](#emacs-键位)。
+Shift 加方向键、Home、End 扩展选区，对应 `extend-` 前缀的同名命令。Insert 中 `kill-*` 写入 kill ring，连续剪切合并成一条（见[剪贴板](#剪贴板)），与 Emacs 的 `kill-line`、`kill-word` 一样从光标算起，不管选区。输入框使用组件自己的剪切缓冲。`pairs` 模块在 Insert 中替换了其中几个键，见[结构化编辑](#结构化编辑)。
 
-Ctrl-N/Ctrl-P 上下移动；补全列表打开期间由补全使用。
+Insert 中 Tab 是 `insert-tab`：有选区时缩进所选行（选区终点恰在下一行开头时不含该行），否则按文档的 tab/space 策略插入缩进；Shift-Tab 是 `outdent`；Enter 是语言感知的 `newline`。
 
 ### 配置文件
 
-配置只有一个文件：`$XDG_CONFIG_HOME/soda/init.lua`，未设置时为 `~/.config/soda/init.lua`，不存在时不报错。它是一段 Lua，启动时在内置模块之后、第一个文档创建之前运行，所以能改写内置模块的命令和键位，其中的钩子也作用于启动时的文档。同一目录下的 `lua/` 放自己的模块，用 `require` 加载。`--no-config` 跳过配置。
+配置只有一个文件：`$XDG_CONFIG_HOME/soda/init.lua`（未设置时为 `~/.config/soda/init.lua`），不存在时不报错。它在内置模块之后、第一个文档创建之前运行，所以能改写内置模块的命令和键位，其中的钩子也作用于启动时的文档。同一目录下的 `lua/` 放自己的模块，用 `require` 加载。`--no-config` 跳过配置。同目录下还有旧格式的 `init` 文件时，启动会提示把其中的行改写为 `soda.command("…")`。
 
-键位、选项、配色和语言映射有对应的 Lua 函数，其余的命令行用 `soda.command("…")` 执行，见[扩展模型](extension.md)中的 Lua 一节。出错时第一个错误以 `lua: ` 开头显示在消息行并写入 `*messages*`，文件在出错处停下。
-
-旧的命令行格式配置文件 `init` 不再读取；它还在时启动会提示把其中的行改写进 `init.lua`，每行写成 `soda.command("…")` 就能原样生效。
+键位、选项、配色和语言映射有对应的 Lua 函数，其余用 `soda.command("…")` 执行，见[扩展模型](extension.md#lua)。出错时第一个错误以 `lua: ` 开头显示在消息行并写入 `*messages*`，文件在出错处停下。
 
 ```lua
 -- ~/.config/soda/init.lua
@@ -316,233 +285,159 @@ soda.hook("open", [[.*\.py]], function()
 end)
 ```
 
-`map MODE KEYS COMMAND`、`unmap MODE KEYS`、`define-command NAME BODY`、`hook` 和 `unhook` 也可以在 `:` 中执行，对当前会话立即生效，不写回配置文件。
-
-Lua 里用 `soda.map(mode, keys, target, [doc])` 绑定，`target` 可以是命令行，也可以直接是一个函数，按键提示和帮助显示 `doc`；`soda.unmap` 去掉绑定，`soda.bindings(mode)` 列出生效的绑定。默认键位写在 `keymap.rs` 的表里，作为用户绑定之下的一层。
+`soda.map(mode, keys, target, [doc])` 的 `target` 可以是命令行或函数，按键提示和帮助显示 `doc`；`soda.unmap` 去掉绑定，`soda.bindings(mode)` 列出生效的绑定。`map`、`unmap`、`define-command`、`hook`、`unhook` 也可以在 `:` 中执行，对当前会话立即生效，不写回配置文件。
 
 ### 外部进程
 
-`pipe CMD` 把当前选区交给 `sh -c CMD` 的标准输入；没有选区时使用整个文档。命令成功退出后，标准输出作为一次可撤销编辑替换原范围。`shell CMD` 只运行命令，标准输入为空，退出状态和输出的第一行显示在消息行。两者都以当前文档的目录为工作目录，并提供环境变量 `SODA_FILE`（未命名文档时不设置）、`SODA_LINE` 和 `SODA_COLUMN`（从 1 开始）。
+| 命令 | 行为 |
+| --- | --- |
+| `pipe CMD` | 把选区（没有时为整个文档）交给 `sh -c CMD` 的标准输入；成功退出后标准输出作为一次可撤销编辑替换原范围 |
+| `shell CMD` | 只运行命令，标准输入为空，退出状态和输出的第一行显示在消息行 |
+| `run CMD` | 构建、测试这类长时间命令，输出流式写入 `*run*` |
 
-`pipe`/`shell` 在后台线程运行，同一时间只有一个；运行期间编辑照常进行。完成后若文档已经变化，`pipe` 的结果被丢弃并提示。非零退出不修改文档，消息行显示标准错误的第一行。输出限制为 16 MiB，超出时丢弃结果；非 UTF-8 输出同样拒绝。
+`pipe`、`shell` 以当前文档的目录为工作目录，提供环境变量 `SODA_FILE`（未命名文档不设置）、`SODA_LINE`、`SODA_COLUMN`（从 1 开始）。它们在后台运行，同一时间只有一个，运行期间可以继续编辑；完成时文档已经变化，`pipe` 的结果被丢弃并提示。非零退出不修改文档，消息行显示标准错误的第一行。输出超过 16 MiB 或不是 UTF-8 时丢弃。
 
-`run CMD`用于构建、测试这类长时间运行的命令：
-- 标准输出和标准错误合并，按行流式写入 scratch 文档 `*run*`。第一行是 `$ CMD`，结束时追加退出状态，消息行显示 `CMD: exited N`。
-- 光标在最后一行的视图跟随新输出；把光标移开后停止跟随。
-- `*run*` 默认显示在底部 12 行的侧边窗口，可用 `display run …` 改变。
-- 同一时间只有一个 `run`，新的 `run` 会先停止上一个。它可以和 `shell`、`grep` 同时运行。
-- 超过 100,000 行的输出被丢弃并注明；非 UTF-8 字节按替换字符显示。
+`run` 在项目根目录运行，标准输出和标准错误合并，按行写入 scratch 文档 `*run*`：第一行是 `$ CMD`，结束时追加退出状态，消息行显示 `CMD: exited N`。光标在最后一行的视图跟随新输出，移开后停止跟随。`*run*` 默认显示在底部 12 行的侧边窗口（`display run …` 可改）。同一时间只有一个 `run`，新的先停止旧的；它可以和 `shell`、`grep` 同时运行。超过 100,000 行的输出被丢弃并注明；非 UTF-8 字节显示为替换字符。
 
-`stop`（Normal 模式 `<c-c>`）停止正在运行的 `run`、`shell`/`pipe` 和项目搜索。每个外部命令在自己的进程组中运行，停止时整个进程组收到 SIGTERM，命令派生的子进程一起结束。被停止的 `shell` 报告 `was stopped`；被停止的 `run` 不再写入输出。没有任务在运行时 `stop` 不显示消息，因为 `<c-c>` 也用来取消待定的按键。退出编辑器不会等待或终止仍在运行的命令。
+`stop`（`C-c C-c`）停止正在运行的 `run`、`shell`/`pipe` 和项目搜索。每个外部命令在自己的进程组中运行，停止时整个进程组收到 SIGTERM。被停止的 `shell` 报告 `was stopped`，被停止的 `run` 不再写入输出；没有任务时不显示消息。退出编辑器不等待也不终止仍在运行的命令。
 
 ### 消息
 
-消息行一次只显示一条消息。Runtime 在每次输入、命令或后台完成之后，把新出现的消息记入日志，连续重复的消息只记一次，最多保留 1,000 条。`messages` 把日志显示在 scratch 文档 `*messages*` 中（默认底部 12 行），光标放在最新一条；文档打开期间，新消息追加到末尾。
+消息行一次显示一条消息。Runtime 在每次输入、命令或后台完成之后把新消息记入日志，连续重复的只记一次，最多 1,000 条。`messages` 在 scratch 文档 `*messages*`（默认底部 12 行）中显示日志，光标放在最新一条；打开期间新消息追加到末尾。
 
 ### 内置命令
 
+完整列表在 `registry.rs` 的 `BUILTINS`，帮助和 `M-x` 候选附带每条命令的说明。本文其他章节描述的命令（离开文档、外部进程、搜索、结果、高亮、行标记、跳转等）不再重复：
+
 | 命令 | 行为 |
 | --- | --- |
-| `edit [PATH]` | 打开指定文件；无参数时重新加载当前文件 |
-| `open PATH` | 打开指定文件；新文件在保存时创建 |
-| `write [PATH]` | 保存；指定路径时保存到该路径 |
-| `saveas PATH` | 保存到指定路径；交互入口预填当前路径 |
-| `quit [DECISION] [PATH]` | 退出；逐个决定未保存的文档 |
-| `write-quit` | 当前文档未保存时等同 `quit save` |
-| `close [DECISION] [PATH]` | 关闭当前文档 |
-| `reload [DECISION] [PATH]` | 从磁盘重新加载当前文件 |
-| `buffer NAME` | 切换到已打开的文档 |
-| `next-view` | 在当前窗口显示下一个视图；其他窗口中的视图跳过 |
-| `split [PATH]` / `vsplit [PATH]` | 上下或左右分屏，新窗口复制当前视图；给出路径时在新窗口打开 |
-| `close-window` | 关闭当前窗口，视图保留为隐藏 |
-| `only` | 只保留当前窗口 |
-| `window-left` / `-right` / `-up` / `-down`、`window-next` / `window-previous` | 切换窗口 |
-| `resize-window [wider\|narrower\|taller\|shorter\|reset [CELLS]]` | 调整当前窗口的大小，默认 1 格；不带参数时进入逐步调整模式（`C-x ^`、`SPC W`） |
-| `half-page-down` / `half-page-up` | 移动半页并滚动 |
-| `grep PATTERN` | 在项目文件中按正则表达式搜索，结果写入 `*grep*` |
-| `jump` | 打开当前行写明的位置；不是位置行时移到下一行首个非空白字符 |
-| `jump-back` / `jump-forward` | 沿跳转历史后退或前进（`<c-o>` / `<c-i>`） |
-| `next-result` / `previous-result` | 在最近的结果文档（`*grep*` 或 `*run*`）中打开下一个或上一个位置 |
-| `run CMD` | 后台运行命令，输出流式写入 `*run*` |
-| `stop` | 停止 `run`、`shell`/`pipe` 和项目搜索 |
-| `suspend` | 挂起编辑器回到 shell，用 `fg` 继续 |
-| `lua CODE` | 执行一段 Lua，见[扩展模型](extension.md) |
-| `lua-call ID [ARGUMENT]` | 调用 Lua 注册的钩子或命令函数（由 `soda.hook`/`soda.define_command` 生成） |
-| `messages` | 在 `*messages*` 中显示最近的消息 |
-| `highlight FACE PATTERN` / `highlight-local FACE PATTERN` | 在所有文档 / 当前文档中高亮正则表达式 |
-| `flag-lines GROUP FACE SIGN LINES` / `unflag-lines [GROUP]` | 在当前文档的行号栏给行打上标记 / 去掉一组或全部标记 |
-| `unhighlight [PATTERN]` | 去掉某个模式的高亮，或者全部 |
-| `each-line KEYS` | 在每个选中行的行首以 Normal 模式输入 KEYS |
-| `each-match PATTERN KEYS` | 在每处匹配以 Normal 模式输入 KEYS；有选区时只在选中的行中 |
-| `recent FILE` | 打开最近用过的文件（`SPC r`） |
-| `jump-to` | 输入两个字符，再按屏幕上的标签跳到那里（`SPC j`） |
-| `window-pick` | 按标签选择窗口；只有两个窗口时直接切换（`SPC w`） |
-| `echo [TEXT]` | 在消息行显示文字，常与 `%val{}` 一起用 |
-| `check-files` | 重新加载磁盘上变化了的干净文件，报告其余的 |
-| `display KIND PLACEMENT` | 设置某种文档的显示位置，见[终端界面](ui.md#窗口) |
-| `set OPTION VALUE` | 设置全局选项，见[扩展模型](extension.md#选项) |
-| `set-local OPTION VALUE` / `unset-local OPTION` | 设置或去掉当前文档自己的选项值 |
-| `new` | 新文档 |
-| `project FILE` | 打开项目中的文件 |
-| `goto LINE[:COLUMN]` | 跳转到行列，从 1 开始，列为逻辑列 |
-| `search` / `search-backward` / `replace` | 搜索与替换会话 |
-| `visit [SYMBOL]` | 从文档的符号里选一个（或输入任意文字），选中下一处并设为搜索 |
-| `recenter` | 把光标所在行滚动到窗口中间 |
-| `snippet BODY` | 在光标处展开 snippet，见[补全](completion.md#snippet) |
-| `help` | 帮助 |
-| `commands` | 打开空的命令行，即命令面板 |
-| `undo` / `redo`、`copy` / `cut` / `paste` | 历史与剪贴板 |
-| `move-up` / `move-down`、`document-start` / `document-end` | 移动；`extend-move-up` / `extend-move-down` 扩展选区 |
-| `page-up` / `page-down`、`select-all` | 翻页与全选 |
-| `normal-mode` / `insert-mode` | 切换编辑模式 |
-| `indent` / `outdent`、`insert-tab` / `insert-literal-tab`、`newline` | 缩进、Tab 和语言感知换行 |
-| 行编辑命令 | 见上表 |
-| `map` / `unmap` / `define-command` | 键位与命令定义 |
-| `hook EVENT FILTER COMMAND` / `unhook EVENT [FILTER]` | 添加或去掉钩子，见[扩展模型](extension.md#钩子) |
-| `pipe` / `shell` | 外部进程 |
-| `nop` | 不执行任何操作，用于屏蔽默认键 |
+| `edit [PATH]`、`open PATH`、`new` | 打开文件（`edit` 无参数时重新加载）；新文件在保存时创建；新建无标题文档 |
+| `write [PATH]`、`saveas PATH`、`write-quit` | 保存、另存为、保存后退出 |
+| `buffer NAME`、`recent FILE`、`project FILE`、`project-root [DIR]` | 切换文档、打开最近或项目中的文件、查看或指定项目 |
+| `next-view` | 在当前窗口显示下一个视图，跳过其他窗口中的视图 |
+| `split [PATH]` / `vsplit [PATH]` | 上下 / 左右分屏，新窗口复制当前视图或打开 PATH |
+| `close-window` / `only` | 关闭当前窗口（视图保留为隐藏）/ 只留当前窗口 |
+| `window-left`、`-right`、`-up`、`-down`、`window-next`、`window-previous` | 切换窗口 |
+| `resize-window [wider\|narrower\|taller\|shorter\|reset [CELLS]]` | 调整当前窗口，默认 1 格；无参数时进入逐步调整模式 |
+| `display KIND PLACEMENT` | 某种文档的显示位置，见[终端界面](ui.md#窗口) |
+| `goto LINE[:COLUMN]` | 跳到行列，从 1 开始，列为逻辑列，越界时限制到文档或行尾 |
+| `page-down` / `page-up`、`half-page-down` / `half-page-up`、`recenter` | 翻页（一个视口减一行，保留逻辑列）、翻半页、居中 |
+| `set` / `set-local` / `unset-local`、`face`、`language-map`、`hook` / `unhook` | 见[扩展模型](extension.md#选项)与[钩子](extension.md#钩子) |
+| `lua CODE`、`lua-call ID [ARG]`、`choose`、`answer` | 执行 Lua、调用 Lua 注册的函数、回答 Lua 扩展的提问 |
+| `snippet BODY` | 展开 snippet，见[补全](completion.md#snippet) |
+| `echo [TEXT]` | 在消息行显示文字，常与 `%val{}` 合用 |
+| `commands`、`help`、`suspend`、`nop` | 命令面板、帮助、挂起、什么也不做（屏蔽默认键） |
+| `undo` / `redo`、`copy` / `cut` / `paste` / `yank-pop` | 历史与剪贴板 |
+| `move-up` / `move-down`、`document-start` / `document-end`、`select-all`、`normal-mode` / `insert-mode` | 移动、全选、切换模式；`extend-` 前缀扩展选区 |
+| `indent` / `outdent`、`insert-tab` / `insert-literal-tab`、`newline` | 缩进、Tab、语言感知换行 |
 
-打开、保存和离开文档沿用 Soda 的异步任务、冲突检测与保存/丢弃/取消流程。窗口键见 [Emacs 键位](#emacs-键位)。`write-quit` 只自动保存当前文档，其他未保存文档仍需明确处理。相对路径以当前文档的目录解析，支持 `~/`。
+Normal 的模态命令（`left`、`next-word`、`block`、`kill`、`put`、`grab`、`expand N`、`keypad START` 等）对应 [Normal 键](#normal-键)。相对路径以当前文档的目录解析，支持 `~/`。
 
 ### 帮助
 
-编辑区的 `F1` 打开只读帮助页，方向键、PageUp/PageDown 与 Home/End 浏览内容，F1、Enter 或 Esc 返回编辑区。帮助页由当前键位表生成：分上下文列出键、命令名和说明，包括用户绑定；模态键的说明是固定文字。`--help` 输出默认键位生成的同一份内容。帮助不修改文档、选区和编辑视口，并阻止编辑命令传播。
+`F1` 打开只读帮助页，可滚动浏览，F1、Enter 或 Esc 返回。帮助页由当前键位表生成：模态键的固定说明，然后按上下文列出键、命令名和说明，包括用户绑定。`soda --help` 输出默认键位生成的同一份内容。
 
 ## 命令行
 
-命令行是通用交互入口：一个单行输入加一个候选列表。它承担 M-x 式命令面板、打开文件、另存为、跳转、缓冲区切换和项目文件选择。这些入口只是预填不同的文字：`M-x` 和 `SPC :` 预填空串，`open` 预填 `open `，`<space>f` 预填 `project `，`<space>b` 预填 `buffer `。
+命令行是一个单行输入加一个候选列表，承担 M-x 式命令面板、打开文件、另存为、跳转和缓冲区切换。入口只是预填不同的文字：`M-x`、`SPC :` 预填空串，`open` 预填 `open `，`SPC f` 预填 `project `，`SPC b` 预填 `buffer `。
 
-这是对 emacs minibuffer（vertico）体验的取舍：保留“输入命令、按参数补全、Backspace 退一层目录、候选跟随输入”的感受，放弃嵌套 minibuffer 和输入区与候选区之间的焦点转移。命令行的模型接近 REPL：一行文字就是一条命令，补全只帮助写出这行文字。
+体验取自 Emacs 的 vertico，但不嵌套、不转移焦点：一行文字就是一条命令，补全只帮助写出这行文字。
 
-### 状态与焦点
+### 状态与参数位
 
-会话状态只有输入文字、光标和候选选择。命令名、参数位以及光标所在的参数位每次按键后从文字重新解析，不单独保存。焦点始终在输入框；候选列表只有一个选中项，上下键移动选中项，不转移焦点。命令行不嵌套，同一时间只有一个。
+会话状态只有输入文字、光标和候选选择；命令名、参数位以及光标所在的参数位每次按键后从文字重新解析。焦点始终在输入框，上下键只移动选中项。命令行不嵌套。
 
-### 参数位
+命令声明参数位序列，每个参数位有名字、类型和是否必需。中间的参数位各是一个空白分隔的词，最后一个取剩余的整行（可含空格）。命令行不解释引号。
 
-命令在命令表中声明参数位序列，每个参数位有名字、类型以及是否必需。第一个词是命令名；中间的参数位各是一个空白分隔的词；最后一个参数位取剩余的整行，可以包含空格，用于路径、shell 命令和命令体。命令行不解释引号。
-
-| 类型 | 候选 | 需要匹配 | 使用者 |
+| 类型 | 候选 | 需要匹配 | 例 |
 | --- | --- | --- | --- |
 | 命令名 | 命令表中的名字与说明 | 是 | 第一个词 |
 | `Path` | 目录项 | 否，可输入新文件名 | `edit`、`open`、`write`、`saveas` |
-| `File` | 项目文件，模糊匹配 | 是 | `project` |
+| `File` | 项目文件 | 是 | `project` |
+| `Recent` | 最近用过的文件 | 是 | `recent` |
 | `Buffer` | 已打开的文档 | 是 | `buffer` |
-| `Choice` | 命令声明的固定词及说明，可带单键 | 是 | `map`、`unmap` 的 MODE；`close`、`reload`、`quit` 的 DECISION |
+| `Symbol` | 当前文档的符号 | 否 | `visit` |
+| `Choice` | 命令声明的固定词及说明，可带单键 | 是 | `map` 的 MODE，`close`、`reload`、`quit` 的 DECISION |
+| `Option`、`Face`、`Language` | 选项名、face 名、语言 id | 是 | `set`、`face`、`language-map` |
+| `Item` | Lua 扩展提问的选项 | 是 | `choose` |
 | `Word`、`Rest` | 无 | 否 | 其余参数 |
 
-`Choice` 的词可以声明一个键，构成该参数位的键位表：参数位为空时按下这个键，直接选中对应的词并按回车处理；不在表里的键照常输入文字。键位表只在参数位为空、且命令行是编辑器发出的提问（带 `[unsaved …]` 这类提示）时生效。自己输入的 `:quit s` 中 `s` 只是文字，所以可以继续写成 `quit save PATH`；已经开始输入的词也不受影响。MODE 不声明键，DECISION 声明 `s`（save）和 `d`（discard）。
+`Choice` 的词可以声明一个键：参数位为空、且命令行是编辑器发出的提问（带 `[unsaved …]` 这类说明）时，按这个键直接选中该词并按回车处理。自己输入的 `:quit s` 中 `s` 只是文字。DECISION 声明 `s`（save）和 `d`（discard）。
 
-每种类型由一个补全器提供候选。候选包含展示文字、替换文字、匹配到的字符范围，以及说明文字的起点；面板高亮匹配字符，说明文字用暗色。
+候选包含展示文字、替换文字、匹配到的字符范围和说明文字的起点；面板高亮匹配字符，说明用暗色。
 
 | 候选 | 匹配方式 | 排序 |
 | --- | --- | --- |
-| 命令名 | 名字模糊匹配；名字都不匹配时再按说明的子串匹配 | 名字完全相同的最前，然后按模糊匹配得分，同分保持命令表顺序，说明匹配排在最后 |
+| 命令名 | 名字模糊匹配；都不匹配时按说明的子串匹配 | 名字完全相同的最前，然后按得分，同分保持命令表顺序，说明匹配最后 |
 | 缓冲区 | 显示名模糊匹配 | 按得分，同分时当前文档在后 |
-| 项目文件 | 相对路径模糊匹配 | 按得分 |
-| 目录项、`Choice` | 前缀匹配，高亮前缀 | 目录优先 / 声明顺序 |
+| 项目文件、最近文件 | 相对路径模糊匹配 | 按得分 |
+| 目录项 | orderless：空格分开的每个词都出现在文件名中，位置和顺序不限 | 以输入开头的在前，目录优先 |
+| `Choice`、选项、face、语言 | 前缀匹配 | 声明顺序 |
 
-模糊匹配使用 nucleo，smart case：查询全为小写时不区分大小写，含大写字母时区分。
-
-补全器只读取参数位文字、前面已填写的参数和只读 Application。便宜的补全同步计算（命令名、缓冲区、枚举）；目录读取和项目文件匹配在后台执行，结果携带请求身份，过期结果丢弃。光标所在的参数位决定候选来源；光标移到别的参数位时候选随之切换。
+模糊匹配使用 nucleo；所有匹配都是 smart case：全小写时不区分大小写，含大写时区分。命令名、缓冲区、枚举的补全同步计算；目录读取和项目文件匹配在后台执行，结果携带请求身份，过期结果丢弃。光标移到别的参数位时候选随之切换。
 
 ### 按键
 
 | 输入 | 行为 |
 | --- | --- |
 | 输入文字、粘贴、删除 | 编辑输入并刷新当前参数位的候选 |
-| 上下键、Ctrl-P / Ctrl-N、PageUp / PageDown、Ctrl-Up / Ctrl-Down | 移动选中项，不改写输入 |
-| Alt-P / Alt-N | `history-previous` / `history-next`：翻历史。搜索没有候选，上下键在搜索里也翻历史 |
-| Tab | 用选中项替换当前参数位；目录候选留在该参数位并列出下一层，其他候选在后面还有参数位时追加空格 |
-| Shift-Tab | 向前选择 |
+| 上下键、`C-p` / `C-n`、PageUp / PageDown、`C-Up` / `C-Down` | 移动选中项，不改写输入 |
+| `M-p` / `M-n` | 翻历史；搜索输入框没有候选，上下键也翻历史 |
+| Tab / Shift-Tab | 用选中项替换当前参数位；目录候选留在该参数位并列出下一层，其他候选在后面还有参数位时追加空格 |
 | Enter | 见下文 |
-| Backspace | `Path` 参数位以 `/` 结尾且光标在末尾时删除最后一层目录；其他情况删除一个字符 |
-| Esc / Ctrl-C | 关闭，不执行 |
+| Backspace | `Path` 参数位以 `/` 结尾且光标在末尾时删除最后一层目录 |
+| Esc、`C-c`、`C-g` | 关闭，不执行 |
 
 Enter 依次处理：
 
-1. 用户主动移动过选中项时，总是采用选中项，即使文字已经等于另一个候选。没有移动过时，命令名和需要匹配的参数位在文字不等于任何候选时采用第一行；`Path` 参数位使用输入，从而可以直接输入新文件名，这时第一行只画淡色标记，表示 Tab 会用它而回车不会。采用的候选是目录时进入该目录，不执行。
-2. 采用候选后若还有必需的参数位未填写，追加空格继续输入，不执行。命令面板因此是“选中命令，接着写参数”的连续流程。
-3. 解析整行。缺少参数或参数错误时，错误显示在命令行中并保持打开；解析成功则关闭命令行并执行。
+1. 主动移动过选中项时采用选中项。没有移动过时，命令名和需要匹配的参数位在文字不等于任何候选时采用第一行；`Path` 参数位使用输入的文字，所以 `cc` 回车打开名为 `cc` 的文件，这时第一行只画淡色标记，表示 Tab 会用它。采用的候选是目录时进入该目录，不执行。
+2. 还有必需的参数位未填写时追加空格继续输入，不执行。命令面板因此是“选中命令，接着写参数”的连续流程。
+3. 解析整行。参数错误时错误显示在命令行中并保持打开；成功则关闭并执行。
 
-`Path` 参数位按 orderless 的方式匹配文件名：空格分开的每个词都要出现在文件名里，位置和顺序不限，比如 `cc` 能找到 `main.cc`；全小写时不分大小写。以输入开头的文件名排在前面。回车的规则不变，没有移动过选中项时用输入的文字，所以 `cc` 回车打开名为 `cc` 的文件。
+### 历史与持久状态
 
-`:42` 这样的纯数字仍表示跳转到行。
+命令行和搜索各有一份历史，记录成功执行的行，最多 100 条，重复的行移到最新。往回翻时先保存正在输入的文字，翻过最新一条后恢复；编辑了历史行之后再翻，编辑后的文字成为新的草稿。回答保存决定这类提问的命令行不进入历史。
 
-### 历史
+退出时，前端把命令行历史、搜索历史和最近 200 个文件的光标位置写入 `$XDG_STATE_HOME/soda/state`（未设置时为 `~/.local/state/soda/state`），下次启动时在 `init.lua` 之后、第一个文档之前读回。每行一条制表符分隔的记录，先写临时文件再替换，损坏的行被忽略。之后打开同一路径且没有指定位置（不是 `jump`、`goto` 打开的）时回到记下的行列。寄存器、标记和窗口布局不保留。无头 Runtime 不读写这个文件，由 `host` 在启动和退出时调用 `restore` 和 `persist`。
 
-命令行和 `/`、`?` 搜索各有一份历史，记录成功执行的行，最多 100 条；重复的行移到最新位置。往回翻时先保存正在输入的文字，翻过最新一条后恢复它；编辑了历史行之后再翻，编辑后的文字成为新的草稿。搜索输入框没有候选，上下键总是翻历史。回答保存决定等问题的命令行不进入历史。
+### 异常退出与挂起
 
-### 会话之间保留的状态
+主循环提前结束（panic、终端读写出错、SIGHUP、SIGTERM）时，前端先恢复终端，再由 `host` 把每个未保存文档写入状态目录下的 `recovery/`（不可用时用系统临时目录），文件名是 `时间戳-缓冲区名`（`/` 和空白换成 `%`），并在标准错误中给出目录。panic 的报告在终端恢复后输出，之后不写状态文件。
 
-退出时，终端前端把命令行历史、搜索历史和最近 200 个文件的光标位置写入 `$XDG_STATE_HOME/soda/state`（未设置时为 `~/.local/state/soda/state`），下次启动时在 `init.lua` 之后、第一个文档之前读回。文件每行一条制表符分隔的记录，写入先到临时文件再替换，损坏的行被忽略。
+`suspend`（`C-z`）先把终端恢复成 shell 的状态，再向自己发送 SIGTSTP；`fg` 继续后重新接管终端并重画。
 
-文件关闭或退出时记下光标所在的行和逻辑列；以后打开同一路径、且打开时没有指定位置（不是 `jump` 或 `goto` 打开的）时回到那里。寄存器、标记和窗口布局不保留。无头 Runtime 不读写这个文件，由 `host` 在启动和退出时调用 `restore` 和 `persist`。
+### 缺参数的命令与多步交互
 
-### 异常退出
+执行时缺少必需参数的命令不报错，而是打开预填 `命令名 ` 的命令行，相当于 Emacs 的 `interactive`。所以绑定 `open`、`project`、`buffer`、`goto` 直接得到对应的交互入口；`saveas` 预填当前文件路径，`open` 预填当前文档的目录。
 
-正常退出会逐个询问未保存的文档，所以退出时还有未保存的文档，说明主循环提前结束了：发生了 panic、终端读写出错，或者收到了 SIGHUP（关闭终端窗口）或 SIGTERM。这时前端先恢复终端，再由 `host` 把每个未保存文档的文本写入状态目录下的 `recovery/`（无法确定状态目录时用系统临时目录），文件名是 `时间戳-缓冲区名`，`/` 和空白换成 `%`，并在标准错误中给出目录。panic 的报告和回溯也在终端恢复之后输出，不会丢在备用屏幕上。panic 之后不写状态文件，保留上一次的。SIGHUP 之后终端已经不在，错误输出可能无人读取，写入失败也不影响恢复。SIGKILL 无法捕获，没有机会做这些。
+多步交互由命令行串联：一条命令打开下一条预填好的命令行，步骤之间的状态写在命令文字里；命令行可以带一条不参与解析的说明（如 `[unsaved src/a.cpp] :close `）。关闭命令行会取消它的后台补全任务。
 
-`suspend`（Normal 模式 `<c-z>`）像 shell 作业那样挂起编辑器：先把终端恢复成 shell 的状态，再向自己发送 SIGTSTP；用 `fg` 继续后重新接管终端并重画整个屏幕。
+### 路径、文件与缓冲区补全
 
-### 缺参数的命令
-
-执行时缺少必需参数的命令不报错，而是打开预填 `命令名 ` 的命令行，相当于 emacs 的 `interactive` 声明。键位绑定 `open`、`project`、`buffer` 或 `goto` 因此直接得到对应的交互入口。`saveas` 预填当前文件路径。
-
-### 多步交互
-
-多步交互由命令行串联：一条命令执行后可以打开下一条预填好的命令行，步骤之间的状态写在命令文字（参数）里，不保存在会话对象中。不存在嵌套，也就没有多层之间的焦点转移。
-
-离开文档就是这样的链，见下文“关闭、退出与重新加载”。等待异步结果的一步（保存）是独立的等待层而不是命令行，它结束后要么执行下一条命令，要么打开预填的命令行重试，同样不嵌套。搜索与替换有实时预览和撤销恢复，保留专用会话。
-
-命令行可以带一条说明，显示在输入前，例如 `[unsaved src/a.cpp] :close `，说明这一步针对什么；说明不参与解析。
-
-### 生命周期
-
-活动视图变化时命令行关闭；命令执行时解析当时的活动视图。关闭命令行会取消它的后台补全任务。
-
-### 目录补全
-
-相对路径以当前文档的目录为基准，`~/` 使用 HOME。每个目录只读取一次并缓存；参数位文字变化时在本地按文件名前缀筛选（区分大小写），目录部分变化时才重新读取。列表包含隐藏项，目录优先，空前缀时提供 `..`。读取时解析实际目录位置，支持目录符号链接和包含 `..` 的路径。目录读取由 `files::paths` 的 PathRunner 执行，单个目录最多 10,000 项、8 MiB 估算预算；非 UTF-8 或含控制字符的文件名只展示，不能填入输入。输入、候选导航和补全均不写磁盘；打开不存在的文件建立命名缓冲区，保存时才创建文件。
-
-### 项目文件补全
-
-`File` 参数位使用下面“Picker 接入架构”描述的候选集、模糊匹配、后台任务与身份规则，查询就是参数位文字。候选集在命令行进入该参数位时建立，同一命令行内复用。
-
-### 最近文件补全
-
-`recent` 的 FILE 参数位列出最近用过的文件，最新的在前，路径相对项目根目录显示，模糊匹配与项目文件补全相同。文件在打开和关闭时成为最新的一个；列表就是持久状态中记录光标位置的那 200 个文件，所以跨会话保留（与 Emacs 的 recentf 相同）。
-
-### 缓冲区补全
-
-每个已加载文档一项，包括没有视图的文档。命名文档使用完整路径，未命名文档使用 `[untitled N]`（N 为文档编号）；展示时 `*` 标记当前文档，`[+]` 标记未保存。按显示名模糊匹配（见上表），同分时其他文档排在当前文档之前。`buffer NAME` 切换到该文档：复用已有视图，没有视图时创建。
-
+- **目录**：相对路径以当前文档的目录为基准，`~/` 使用 HOME。每个目录读取一次并缓存，目录部分变化时才重新读取。列表包含隐藏项，空前缀时提供 `..`；支持目录符号链接和含 `..` 的路径。读取由 `files::paths` 在后台执行，单个目录最多 10,000 项；含控制字符的文件名只展示，不能填入。补全不写磁盘，打开不存在的文件建立命名缓冲区，保存时才创建。
+- **项目文件**：使用下文 [Picker 后台引擎](#picker-后台引擎)，查询就是参数位文字；候选集在进入该参数位时建立，同一命令行内复用。
+- **最近文件**：最新的在前，路径相对项目根目录显示。文件在打开和关闭时成为最新；列表就是持久状态中那 200 个文件，跨会话保留（同 Emacs 的 recentf）。
+- **缓冲区**：每个已加载文档一项，包括没有视图的。命名文档显示完整路径，未命名文档为 `[untitled N]`；`*` 标记当前文档，`[+]` 标记未保存。`buffer NAME` 复用已有视图，没有时创建。
 
 ## 文档的位置
 
 每个文档有两个位置，不依赖启动编辑器时的工作目录（`application/context.rs`）：
 
-- **目录**：手工输入的相对路径以它为基准，用于 `open`、`saveas`、路径补全、`shell` 和 `pipe`。文件文档是所在目录；无标题文档和 scratch 文档继承创建时的当前文档。结果文档的目录是生成它的根目录，所以切换焦点后位置仍然解析正确。
-- **项目**：覆盖整个项目的工具的范围，用于文件 picker、`grep`、`run`、`recent`、状态栏路径、`%val{root}` 和 `soda.spawn`；没有项目时用目录。
+- **目录**：手工输入的相对路径以它为基准，用于 `open`、`saveas`、路径补全、`shell` 和 `pipe`。文件文档是所在目录；无标题文档和 scratch 文档继承创建时的当前文档；结果文档是生成它的根目录。
+- **项目**：覆盖整个项目的工具的范围，用于项目文件、`grep`、`run`、`recent`、状态栏路径、`%val{root}` 和 `soda.spawn`；没有项目时用目录。
 
-项目在文档得到路径时确定，参照 Emacs 的 `project.el`：从文件所在目录向上找 `.git`、`.jj`、`.hg`、`.svn`，或用 `project-root` 和 `soda DIR` 指定过的目录，取最近的一个。
+项目在文档得到路径时确定，参照 Emacs 的 `project.el`：从文件所在目录向上找 `.git`、`.jj`、`.hg`、`.svn`，或用 `project-root`、`soda DIR` 指定过的目录，取最近的一个。
 
-- `$HOME` 和 `/` 不因为标记成为项目，否则放 dotfiles 的 home 会占有其下所有文件。
+- `$HOME` 和 `/` 不因为标记成为项目。
 - git submodule（`.git` 文件指向 `modules/`）属于外层仓库；linked worktree 自成项目。
-- 标记之后才创建的（比如文件打开后才 `git init`），要重新打开文档或用 `project-root` 才生效。
+- 文件打开后才创建的标记（比如之后才 `git init`），要重新打开文档或用 `project-root` 才生效。
+- 没有项目的文件若是通过跳转打开的（结果列表、`soda.open`），继承来源文档的项目，所以从项目跳进系统头文件后，`grep` 和项目文件仍在原项目。直接打开的文件没有项目。
 
-没有项目的文件若是通过跳转打开的（结果列表、`soda.open`），继承来源文档的项目，所以从项目跳进系统头文件后，`grep` 和 picker 仍在原项目。直接打开的文件没有项目。
-
-启动目录只在两处出现：解析命令行上的路径，以及作为 `soda` 不带文件启动时第一个文档的目录。`soda DIR` 把 `DIR` 当作项目，不论里面有没有标记。
-
-| 命令 | 行为 |
-| --- | --- |
-| `open` | 不带参数时打开命令行，预填当前文档的目录（`C-x C-f`） |
-| `project-root [DIR]` | 显示项目；给出目录时把它设为当前文档及其下文件的项目 |
+启动目录只用于解析命令行上的路径，以及作为不带文件启动时第一个文档的目录。`soda DIR` 把 `DIR` 当作项目，不论有没有标记。
 
 ## 关闭、退出与重新加载
 
-`:bd`（`close`）关闭当前文档，`:q`（`quit`）退出应用，`:e` 或 `reload` 从磁盘重新加载。三者都带可选参数 `DECISION [PATH]`，`DECISION` 为 `save` 或 `discard`，`PATH` 只跟在 `save` 后面：未命名文档保存到这里，有路径的文档改存到这里。干净文档直接执行，`DECISION` 被忽略；未保存文档按决定执行，没有决定时打开命令行询问：
+`close` 关闭当前文档，`quit` 退出，`reload`（或无参数的 `edit`）从磁盘重新加载。三者都带可选参数 `DECISION [PATH]`：`DECISION` 为 `save` 或 `discard`，`PATH` 只跟在 `save` 后面，未命名文档保存到这里，有路径的文档改存到这里。干净文档直接执行；未保存文档按决定执行，没有决定时打开命令行询问：
 
 ```
 [unsaved src/a.cpp] :close 
@@ -550,324 +445,194 @@ Enter 依次处理：
   discard      [d] Discard the unsaved changes
 ```
 
-每一步都是一条命令：
-
-1. 按 `d`（或输入 `discard` 回车）得到 `close discard`，立即丢弃并关闭；`reload discard` 明确授权用磁盘内容替换本地内容。
-2. 按 `s` 或空输入回车得到 `close save`。未命名文档没有路径时继续打开 `[... needs a PATH] :close save `，在 PATH 参数位按目录补全。想存到别的路径时按 Tab（或用上下键选中 `save` 再按 Tab），得到 `close save ` 并停在 PATH 参数位。
-   单键只在这种编辑器提问的命令行里有效；自己输入的 `:close s` 中 `s` 是普通文字，可以直接写完 `close save PATH`。
-3. 有路径时请求保存并进入等待层（“Saving …; Esc cancels close”）。保存成功后再执行一次 `close`：文档已经干净则关闭；保存期间出现了新编辑则再次询问。
+1. `d`（或输入 `discard` 回车）得到 `close discard`，立即丢弃并关闭；`reload discard` 明确授权用磁盘内容替换本地内容。
+2. `s` 或空输入回车得到 `close save`。未命名文档继续打开 `[… needs a PATH] :close save `，在 PATH 参数位补全目录。想存到别处时按 Tab 得到 `close save ` 并停在 PATH 参数位。
+3. 有路径时请求保存并进入等待层（`Saving …; Esc cancels close`）。保存成功后再执行一次 `close`：文档已经干净则关闭，保存期间有新编辑则再次询问。
 4. 保存失败（写入失败、磁盘内容已变化、路径预检失败、请求被取消）时打开 `[save failed: …] :close save PATH`，可以修改后重试或 Esc 放弃。
 
-Runtime 在更新中观察 SaveId，并将带 Operation 身份的失败交给等待层；无关的失败和同一文档后来的另一次保存不会被等待层采用。等待期间 Esc 只取消离开流程，已经提交的保存继续完成。活动视图变化时等待层与命令行一样结束。已有保存任务时不启动新的关闭、重新加载或退出流程；未命名文档不能重新加载。
+等待层只采用带自己 Operation 身份的保存结果。等待期间 Esc 只取消离开流程，已提交的保存继续完成。已有保存任务时不启动新的关闭、重新加载或退出；未命名文档不能重新加载。
 
-`quit` 每次询问一个未保存的文档：当前文档未保存时先问它，否则问第一个未保存的文档，包括没有视图的文档。`quit discard` 丢弃并关闭该文档后再次执行 `quit`；`quit save` 保存成功后再次执行 `quit`。没有未保存文档且没有待处理保存时才输出退出请求。中途取消时，已经丢弃关闭的文档不会恢复，之前成功的保存仍然有效。`write-quit` 在当前文档未保存时等同 `quit save`，其他未保存文档仍逐个询问。
+`quit` 每次询问一个未保存的文档（先当前文档，再其他的，包括没有视图的），`quit discard` 和成功的 `quit save` 之后再次执行 `quit`，直到没有未保存文档和待处理的保存。中途取消时，已丢弃的不恢复，已保存的仍有效。`write-quit` 只自动保存当前文档。
 
 ### 保存时整理空白
 
-保存前，Application 按文档的选项做一次整理，作为单独的一步撤销，写入的就是整理后的文本：
-- `trim-trailing-whitespace`：去掉自文件加载或上次保存以来编辑过的行的行尾空格和制表符，与 ws-butler 相同；没有动过的行保持原样，不会在 diff 中出现无关的改动。编辑过的范围随之后的每次编辑映射，重新加载时清空。
-- `final-newline`：有内容但不以换行结尾时补一个换行，换行符跟随第一行（CRLF 文件补 `\r\n`）。光标在文件末尾时留在新换行之前，保存后接着输入仍在同一行。
-- 保存会被拒绝时（正在保存、没有路径、路径被占用）不做整理。scratch 文档不保存，也不记录编辑范围。
+保存前，Application 按文档的选项整理一次，作为单独的一步撤销，写入的就是整理后的文本：
+
+- `trim-trailing-whitespace`：去掉自加载或上次保存以来编辑过的行的行尾空格和制表符，与 ws-butler 相同，没动过的行保持原样。编辑过的范围随之后的编辑映射，重新加载时清空。
+- `final-newline`：有内容但不以换行结尾时补一个换行，换行符跟随第一行（CRLF 文件补 `\r\n`）。光标在文件末尾时留在新换行之前。
+- 保存会被拒绝时（正在保存、没有路径、路径被占用）不整理。scratch 文档不保存，也不记录编辑范围。
 
 ### 磁盘上的变化
 
-终端重新获得焦点时（以及执行 `check-files`），逐个比较打开的文件与加载或保存时的磁盘内容：
-- 内容变了、文档没有未保存的编辑、选项 `auto-reload` 为 true（默认）时，直接重新加载，光标和撤销历史保留。
-- 文档有未保存的编辑，或者 `auto-reload` 为 false 时，只在消息行报告 `PATH changed on disk`；之后可以 `reload discard` 采用磁盘内容，或者保存（保存会因内容冲突而失败，需要先决定）。
-- 文件被删除时报告 `PATH was deleted`，文档保持不变。
-- 没有变化时不改变消息行。比较读取整个文件，只在这些时机进行，不监视文件系统。正在保存的文档跳过。
+终端重新获得焦点时（以及 `check-files`），逐个比较打开的文件与加载或保存时的磁盘内容：
+
+- 内容变了、文档没有未保存的编辑、`auto-reload` 为 true（默认）时直接重新加载，光标和撤销历史保留。
+- 文档有未保存的编辑或 `auto-reload` 为 false 时，只报告 `PATH changed on disk`；之后可以 `reload discard` 采用磁盘内容，或者保存（会因内容冲突失败，需要先决定）。
+- 文件被删除时报告 `PATH was deleted`，文档不变。
+- 没有变化时不改变消息行。正在保存的文档跳过。比较读取整个文件，只在这些时机进行，不监视文件系统。
 
 ## 项目搜索
 
-`grep PATTERN` 在 Runtime 的后台线程中搜索：
-- **范围**：与项目文件 picker 相同，遵守 `.gitignore` 等忽略规则；跳过二进制文件和非 UTF-8 文件。
-- **匹配**：使用正则表达式，模式中没有大写字母时忽略大小写。
-- **顺序和上限**：文件按名字排序，所以每次结果顺序相同。最多列出 10,000 个匹配；单行结果超过 400 字节时截断。
-- **新搜索**：会取消还没完成的上一次搜索。
+`grep PATTERN` 在后台线程中搜索项目：
 
-结果写入 scratch 文档 `*grep*`，按文件分组：文件名单独一行（相对项目根目录），下面每行一个匹配 `  行:列  文本`，行号右对齐，列是从 1 开始的字节列，文本去掉行首缩进。文件之间空一行。文件名、行列和匹配到的文本分别着色；匹配高亮只作用于文本部分，搜数字时不会标到行号。结果文档（`*run*` 除外）默认 `line-numbers` 为 `off`，因为每行已经有自己的行号。
-- scratch 文档没有文件，永远不算未保存，关闭时不会询问。
-- 再次搜索会替换它的内容，并把光标和视口放回开头。
-- 它是普通文档，可以移动和搜索。
-- 没有匹配时只显示消息，不打开文档。
+- **范围**：遵守 `.gitignore` 等忽略规则，跳过隐藏文件、二进制文件和非 UTF-8 文件。
+- **匹配**：正则表达式，模式中没有大写字母时忽略大小写。
+- **顺序和上限**：文件按名字排序，结果顺序稳定。最多 10,000 个匹配；单行结果超过 400 字节时截断。
+- **新搜索**：取消还没完成的上一次。
+
+结果写入 scratch 文档 `*grep*`，按文件分组：文件名单独一行（相对项目根目录），下面每行一个匹配 `  行:列  文本`，行号右对齐，列是从 1 开始的字节列，文本去掉行首缩进，文件之间空一行。文件名、行列和匹配文本分别着色，匹配高亮只作用于文本部分。结果文档（`*run*` 除外）默认 `line-numbers` 为 `off`。scratch 文档永远不算未保存，关闭时不询问；再次搜索替换内容并把光标和视口放回开头；没有匹配时只显示消息。
 
 打开结果位置：
-- Normal 模式的回车执行 `jump`：当前行是位置行时打开该位置；在文件名行上时移到下面第一个结果并打开；否则移到下一行首个非空白字符。
-- `M-g n`/`M-g p`（`next-result`/`previous-result`）移动最近一次 `grep`、`run` 或扩展（`soda.results`）的结果文档的光标并打开对应位置。结果刚生成时，第一次 `next-result` 打开第一个结果。
-- 位置行有两种格式。`路径:行:列:` 或 `路径:行:` 是编译器常见的格式，列缺省按第一列处理，路径不能含空白。分组格式是缩进的 `行:列  文本`，路径取上方最近的非缩进行，所以可以含空白；`*run*` 不认这种格式，普通文档也不认，以免把编译器输出或文件内容误判为位置。相对路径以结果文档的目录为基准。
-- 打开位置使用 `OpenAt` 事件：文件还没加载时，行列随打开请求保存，加载完成后再放置光标，所以异步打开不需要另外的跳转步骤。
+
+- Normal 的 Enter 执行 `jump`：当前行是位置行时打开该位置；在文件名行上时移到下面第一个结果并打开；否则移到下一行首个非空白字符。
+- `M-g n` / `M-g p`（`next-result` / `previous-result`）在最近一次 `grep`、`run` 或扩展（`soda.results`）的结果文档中移动光标并打开对应位置。结果刚生成时，第一次 `next-result` 打开第一个结果。
+- 位置行有两种格式。`路径:行:列:` 或 `路径:行:` 是编译器常见的格式，列缺省为 1，路径不能含空白。分组格式是缩进的 `行:列  文本`，路径取上方最近的非缩进行，可以含空白；`*run*` 和普通文档不认分组格式。相对路径以结果文档的目录为基准。
+- 打开位置使用 `OpenAt` 事件：文件还没加载时，行列随打开请求保存，加载完成后再放置光标。
 
 ## 剪贴板
 
-Application 拥有一个跨文档共享的剪贴板。ClipboardAction 提供复制、剪切、粘贴和 `yank-pop`。存在选区时复制或剪切选区，否则操作光标所在整行，保留原来的换行字节；`kill-line-*`、`kill-word-*` 例外，总是从光标剪到行尾、行首或词边界。空行末尾没有可复制内容时保留此前剪贴板。
+Application 拥有一个跨文档共享的剪贴板，它是 Emacs 式的 kill ring：每次复制、剪切或从系统剪贴板读回新内容加一条，最新一条就是剪贴板，最多 120 条，与最新一条相同的文字不重复加入。`copy`、`cut` 有选区时作用于选区，否则作用于光标所在整行（保留原换行字节）；`kill-line-*`、`kill-word-*` 总是从光标剪到行尾、行首或词边界。剪切在事务成功后才替换剪贴板。粘贴是一次独立的可撤销编辑；撤销不改变剪贴板。
 
-复制保留文档、选区和历史；剪切在事务成功后才替换剪贴板，并将光标放到删除范围起点。粘贴在光标处插入或替换选区，作为一次独立的可撤销编辑。撤销恢复文档与选区，不改变剪贴板。模态层阻止这些文档命令；终端 bracketed paste 仍可直接输入到当前组件。
+- **连续剪切合并**：文档自上次剪切后没变、光标还在上次剪切留下的位置、这次剪掉的范围一端正在那里时，并进最新一条：向后剪接在后面，向前剪（`kill-line-start`、`kill-word-backward`）放在前面。所以 `C-k C-k` 剪掉一行连同换行是一条。判断看状态而不是上一个按键，宏和 Lua 的 `buf:kill` 也一样（`pairs` 模块用它）；复制或读回系统剪贴板之后不再合并。
+- **`yank-pop`（`M-y`）**：粘贴之后、文档和光标都没动过时，把刚粘贴的文字换成更早的一条，再按继续往前，过了最旧的回到最新的；否则报告 the last command was not a yank。它不改变剪贴板。
 
-剪贴板是 Emacs 式的 kill ring：每次复制、剪切或从系统剪贴板读回新内容都加一条，最新的一条就是剪贴板，最多保留 120 条，与最新一条相同的文字不重复加入。
-- **连续剪切合并**：剪切时，如果文档自上次剪切后没有变过、光标还在上次剪切留下的位置，并且这次剪掉的范围一端正好在那里，就并进最新的一条，向后剪接在后面，向前剪（`kill-line-start`、`kill-word-backward`）放在前面。所以 `C-k C-k` 剪掉一行连同换行，是一条，`M-d M-Backspace` 剪掉的两段也是一条。判断看的是状态而不是上一个按键，宏和 Lua 的 `buf:kill` 也一样（`pairs` 模块的剪切都用它）；复制或读回系统剪贴板之后不再合并。
-- **`yank-pop`（`M-y`）**：粘贴之后，文档和光标都没有动过时，把刚粘贴的文字换成 kill ring 里更早的一条，每再按一次换成更早的一条，过了最旧的回到最新的；否则报告 the last command was not a yank。它不改变剪贴板，之后的粘贴仍是最新的一条。
-
-剪贴板每次被替换时版本号加一。前端可以给 Runtime 提供一个 `SystemClipboard`，Runtime 据此与系统剪贴板同步：
-- **复制**：每次归约后，版本号变化就把新内容写入系统剪贴板。`kill` 也写入。
-- **粘贴**：`p`、`P`、`paste` 执行前先读取系统剪贴板。内容与应用剪贴板不同时，替换应用剪贴板：以换行结尾的按行粘贴，否则按字符粘贴。内容相同则保留原来的按行标记，所以 `yy` 之后 `p` 仍按行粘贴。读回的内容不会再写出去。
+选项 `clipboard` 为 `system`（默认）时，Runtime 通过前端提供的 `SystemClipboard` 与系统剪贴板同步：每次归约后剪贴板版本号变了就写出；粘贴事件执行前先读取，内容与应用剪贴板不同时加入 kill ring，读回的内容不再写出。`internal` 只用应用剪贴板。
 
 终端前端按环境选择实现（图形前端直接用窗口系统的剪贴板，见[图形界面](gui.md#输入)）：
-- 本机有图形会话时使用剪贴板工具：Wayland 用 `wl-copy` 和 `wl-paste`，X11 用 `xclip` 或 `xsel`，macOS 用 `pbcopy` 和 `pbpaste`。
-- 通过 SSH 登录，或没有找到这些工具时，复制以 OSC 52 转义序列写给终端，粘贴只用应用剪贴板。多数终端接受 OSC 52 写入，但很少允许程序读取。tmux 中需要 `set -g set-clipboard on`。
-- 写入在后台线程完成。读取最多等待 500 ms，超时就放弃，改用应用剪贴板。
+
+- 本机有图形会话时用剪贴板工具：Wayland 用 `wl-copy`、`wl-paste`，X11 用 `xclip` 或 `xsel`，macOS 用 `pbcopy`、`pbpaste`。
+- 通过 SSH 登录或没有这些工具时，复制以 OSC 52 写给终端，粘贴只用应用剪贴板。tmux 中需要 `set -g set-clipboard on`。
+- 写入在后台线程完成；读取最多等 500 ms，超时改用应用剪贴板。
 
 ## 鼠标
 
-前端把鼠标位置换算成当前视图中的字节偏移，再以 `UserInput::Pointer` 交给交互层；屏幕坐标不进入交互层。
-- **单击**：放置光标。
-- **拖动**：从按下处选到当前位置，模式不变。拖到文本区上下边缘之外时，选区延伸到可见区之外的行，视口跟随。
-- **滚轮**：每格滚动三行，最后一行最多滚到顶部。光标离开可见区时移到最近的可见行，保持列；有选区时移动的是选区头。
-- **标签栏**：单击切换到该文档，与 `buffer` 命令相同。
-- 打开交互层（命令行、搜索、帮助等）时，编辑区不响应鼠标。
+前端把鼠标位置换算成当前视图中的字节偏移，以 `UserInput::Pointer` 交给交互层，屏幕坐标不进入交互层。
 
-启用鼠标捕获后，终端自身的文本选择通常要按住 Shift 才能使用。
+- **单击**：放置光标；点在其他窗口时聚焦那个窗口。
+- **拖动**：从按下处选到当前位置，模式不变。拖到文本区上下边缘之外时选区继续延伸，视口跟随。
+- **滚轮**：每格滚动 `scroll-lines` 行（默认 3），最后一行最多滚到顶部。光标离开可见区时移到最近的可见行，保持列；有选区时移动的是选区头。
+- **标签栏**：单击切换到该文档，同 `buffer`。
+- **窗口边**：拖动分隔线调整窗口大小。
+- 有模态层（命令行、搜索、帮助等）时，编辑区不响应鼠标。
+
+选项 `mouse` 为 false 时不捕获鼠标，终端自身的文本选择可用；捕获时通常要按住 Shift 才能用终端选择。
 
 ## 高亮模式
 
-`highlight FACE PATTERN` 在所有文档中高亮正则表达式的每处匹配，`highlight-local` 只作用于当前文档，与 kakoune 的 regex highlighter 相同。高亮只在前端绘制可见行时匹配，不改变文本或语法分类，叠加在语法颜色之上，重叠时后开始的匹配优先。
+`highlight FACE PATTERN` 在所有文档中高亮正则表达式的每处匹配，`highlight-local` 只作用于当前文档，与 kakoune 的 regex highlighter 相同。高亮只在绘制可见行时匹配，不改变文本或语法分类，叠加在语法颜色之上，重叠时后开始的匹配优先。
 
-- **外观**：`todo`（加粗黄色）、`error`（红色）、`mark1` 到 `mark4`（四种背景色）；`mark` 依次取下一种背景色，用于逐个标记符号。
-- **替换与删除**：同一模式再次添加时替换原来的外观。`unhighlight PATTERN` 从当前文档和全局中去掉这个模式，不带参数时去掉全部；没有可去掉的高亮时报错。文档关闭时它的高亮一并删除。
-- **配置**：`init.lua` 可以用 `soda.command("highlight …")`；`highlight-local` 需要文档，只能在命令行、键位或钩子中使用。
+- **外观**：`todo`（加粗黄色）、`error`（红色）、`info`（蓝色）、`mark1` 到 `mark8`（八种背景色）；`mark` 依次取下一种背景色。
+- **替换与删除**：同一模式再次添加时替换外观。`unhighlight PATTERN` 从当前文档和全局中去掉这个模式，不带参数时去掉全部；没有可去掉的高亮时报错。文档关闭时它的高亮一并删除。
+- **配置**：`init.lua` 中用 `soda.command("highlight todo \\b(TODO|FIXME|XXX)\\b")`；`highlight-local` 需要文档，只能在命令行、键位或钩子中使用。
 
-TODO 高亮由这个原语在配置中写成：
+内置模块 `symbol-overlay` 用同一原语标记符号，对应 Emacs 的同名包。`SPC i`（`symbol-toggle`）标记光标处的符号，每个符号取一种没在用的颜色（共 8 种），再按一次取消；`SPC I`（`symbol-clear`）去掉当前文档的标记；`<a-n>` / `<a-p>` 到最近的另一个已标记符号。标记属于文档，不跨文档。
 
-```
-highlight todo \b(TODO|FIXME|XXX)\b
-```
-
-内置模块 `symbol-overlay` 用同一原语标记符号，对应 Emacs 的同名包。`SPC i`（`symbol-toggle`）标记光标处的符号，每个符号取一种没在用的颜色（共 8 种），再按一次取消；`SPC I`（`symbol-clear`）去掉当前文档的标记，不影响其他高亮和别的文档；`<a-n>` / `<a-p>` 到最近的另一个已标记符号。标记跟着文档，不跨文档。
-
-光标在标记上时，键位表 `mark` 优先于 Normal，离开标记就恢复原义；数字前缀、operator 和多键序列进行到一半时不受影响：
+光标在标记上时，键位表 `mark` 优先于 Normal（数字前缀、多键序列进行到一半时除外），离开标记恢复原义：
 
 | 键 | 命令 | 作用 |
 | --- | --- | --- |
 | `i` | `symbol-toggle` | 取消标记 |
-| `n` / `p` | `symbol-jump-next` / `symbol-jump-prev` | 下一处 / 上一处，到头回绕，光标保持在符号内的位置 |
+| `n` / `p` | `symbol-jump-next` / `symbol-jump-prev` | 下一处 / 上一处，到头回绕，保持光标在符号内的位置 |
 | `<` / `>` | `symbol-jump-first` / `symbol-jump-last` | 第一处 / 最后一处 |
 | `w` | `symbol-save` | 复制符号 |
 | `e` | `symbol-echo-mark` | 回到上次跳转之前的位置 |
 | `d` | `lsp-definition` | 到定义 |
 | `s` | `symbol-search` | 以符号为查询打开搜索 |
 | `q` | `symbol-query-replace` | 以符号为查询打开替换 |
-| `r` | `symbol-rename [NAME]` | 重命名当前文档里所有出现处，一步撤销，标记跟过去 |
+| `r` | `symbol-rename [NAME]` | 重命名当前文档中所有出现处，一步撤销 |
 | `h` | `symbol-help` | 列出这些键 |
 
-这些键遮住了 Normal 里的 `i`、`p`、`w`、`e`、`d`、`s`、`q`、`r`、`h` 等，和 Emacs 一样：symbol-overlay 把键表挂在 overlay 的 `keymap` 属性上，Emacs 查键时它排在 meow 所在的 `emulation-mode-map-alists` 之前。整张表不要时 `set mark-keys false`，对应 Emacs 的 `symbol-overlay-inhibit-map`，标记之间仍可以用 `<a-n>` / `<a-p>` 跳，也可以 `set-local` 只对某个文档关掉；只去掉个别键用 `unmap mark h`，改绑用 `map mark KEY COMMAND`。
+这与 Emacs 一致：symbol-overlay 的键表挂在 overlay 上，排在 meow 之前。整张表不要时 `set mark-keys false`（对应 `symbol-overlay-inhibit-map`），也可以 `set-local` 只对某个文档关掉；去掉个别键用 `unmap mark h`，改绑用 `map mark KEY COMMAND`。跳转后行尾显示位置（如 `[3/12]`），下一个键清除；Lua 用 `soda.indicator(line, text)` 显示同样的提示。
 
-跳转后行尾显示位置，比如 `[3/12]`，和 meow-visit 一样，下一个按键清除。Lua 用 `soda.indicator(line, text)` 显示。
-
-与 Emacs 的差别：没有 `t`（限定在函数内），没有 `symbol-overlay-mode` 的自动高亮；`s` 和 `q` 按字面子串匹配，所以 `foo` 也会命中 `foobar`；只有 `r` 和跳转按整个符号算。
+与 Emacs 的差别：没有 `t`（限定在函数内）和自动高亮；`s`、`q` 按字面子串匹配，只有 `r` 和跳转按整个符号算。
 
 ## 对每行或每处匹配输入按键
 
-`each-line KEYS` 和 `each-match PATTERN KEYS` 对应 meow 的 `meow-kmacro-lines`/`meow-kmacro-matches`。在很多场合它们可以代替多光标。
-- **范围**：选区覆盖的行；都没有时，`each-line` 只作用于光标所在行，`each-match` 作用于整个文档。
-- **执行**：KEYS 用按键记法书写，可以包含宏，如 `each-line @q`、`each-match foo ciwbar<esc>`。每个目标先回到 Normal 模式，光标放在行首或匹配开头，再像键入一样回放 KEYS。目标从下往上处理，所以对一行的修改不会移动上方的目标。
-- **撤销**：全部修改合并为一步撤销。
-- **失败**：某个目标上的按键失败时，只放弃这个目标剩下的按键，其余目标照常执行。最多处理 10,000 个目标。
+`each-line KEYS` 和 `each-match PATTERN KEYS` 对应 meow 的 `meow-kmacro-lines` / `meow-kmacro-matches`，在很多场合可以代替多光标。
+
+- **范围**：选区覆盖的行；没有选区时，`each-line` 只作用于光标所在行，`each-match` 作用于整个文档。
+- **执行**：KEYS 用按键记法书写，如 `each-line i#<esc>`、`each-match foo wsbar<esc>`。每个目标先回到 Normal，光标放在行首或匹配开头，再像键入一样回放 KEYS。目标从下往上处理，修改不会移动上方的目标。
+- **撤销**：全部修改合并为一步。
+- **失败**：某个目标上的按键失败时只放弃这个目标剩下的按键。最多处理 10,000 个目标。
 
 ## 行标记
 
-`flag-lines GROUP FACE SIGN LINES` 在当前文档行号栏的第一格画出 SIGN，与 kakoune 的 flag-lines 相同。它是给扩展用的原语：版本控制的增删改标记、构建报告错误的行、书签，都可以由配置或外部命令生成这条命令，编辑器本身不需要知道 git 或 LSP。
+`flag-lines GROUP FACE SIGN LINES` 在当前文档行号栏的第一格画出 SIGN，与 kakoune 的 flag-lines 相同。它是给扩展用的原语：版本控制标记（`git-flags` 模块）、构建错误、书签都由配置或外部命令生成这条命令。
 
-- **参数**：GROUP 是不含空白的组名；FACE 是 `todo`、`error` 或 `mark1` 到 `mark4`，标记用它的颜色；SIGN 是一个单宽字符，如 `+`、`~`、`✗`、`●`；LINES 是从 1 开始的行号或 `3-7` 这样的范围，用空格分隔，超过文档末尾的行被忽略。可以使用展开：`flag-lines bookmark mark1 ● %val{line}`。
-- **分组**：同一组可以多次添加，`unflag-lines GROUP` 只去掉这一组，不带参数时去掉当前文档的全部标记；没有可去掉的标记时报错。一行有多组标记时显示后添加的那组的。
-- **随编辑移动**：标记保存为行首的文档位置，随每次编辑映射。在行首插入的文字（包括在上方新开一行）把标记连同这一行一起推下去；整行被删除时，标记留给顶替它的下一行。文档关闭时标记一并删除。
-- **显示**：标记占行号栏的第一格，软换行的续行不显示。关掉行号时，只要文档有标记，就留出两格宽的标记栏。
+- **参数**：GROUP 是不含空白的组名；FACE 是 `todo`、`error`、`info` 或 `mark1` 到 `mark8`；SIGN 是一个单宽字符，如 `+`、`~`、`●`；LINES 是从 1 开始的行号或 `3-7` 这样的范围，用空格分隔，超过文档末尾的被忽略。可以使用展开：`flag-lines bookmark mark1 ● %val{line}`。
+- **分组**：同一组可以多次添加。`unflag-lines GROUP` 去掉这一组，不带参数时去掉当前文档的全部标记；没有可去掉的标记时报错。一行有多组标记时显示后添加的。
+- **随编辑移动**：标记保存为行首的文档位置。在行首插入的文字把标记连同这一行推下去；整行被删除时，标记留给顶替它的下一行。文档关闭时标记一并删除。
+- **显示**：占行号栏的第一格，软换行的续行不显示。关掉行号时，只要文档有标记就留出两格宽的标记栏。
 
 ## 屏幕标签跳转
 
-`jump-to`（`SPC j`）对应 avy 的 `avy-goto-char-2`：先输入两个字符，所有窗口显示的行中每处出现的位置都标上标签，再输入标签跳过去；目标在别的窗口时焦点随之移动。
-- 查询全是小写时不区分大小写，含大写时精确匹配。
-- 当前窗口的目标排在最前，其余窗口按布局顺序。标签按 `asdfghjkl` 主行优先；超过 26 处时全部用两个字母，标签之间没有前缀关系。只有一处时直接跳过去，没有时提示 `No XX on screen`。
-- 已输入的标签字母可以退格；Esc 取消；文本、窗口或焦点变化时标签失效并关闭。
-- 只看窗口可见的行；水平滚出窗口的位置也会分到标签，但不显示。
+`jump-to`（`q`、`SPC j`）对应 avy 的 `avy-goto-char-2`：先输入两个字符，所有窗口可见行中的每处出现都标上标签，再输入标签跳过去；目标在别的窗口时焦点随之移动。
 
-`window-pick`（`SPC w`）对应 ace-window：每个窗口的左上角显示一个标签，输入后聚焦那个窗口。只有两个窗口时直接切到另一个，只有一个时什么也不做。
+- 查询全小写时不区分大小写，含大写时精确匹配。
+- 当前窗口的目标排在最前，其余按布局顺序。标签按 `asdfghjkl` 主行优先；超过 26 处时全部用两个字母，标签之间没有前缀关系。只有一处时直接跳，没有时提示 `No XX on screen`。
+- 已输入的标签字母可以退格；Esc 取消；文本、窗口或焦点变化时标签关闭。
+- 只看窗口可见的行；水平滚出窗口的位置也分到标签，但不显示。
 
-`resize-window` 不带参数时进入 kitty 式的调整模式（`Layer::Resize`，状态栏显示 RESIZE）：`w` 加宽、`n` 变窄、`t` 加高、`s` 变矮，每步 2 列或 1 行，按住 Ctrl 加倍；`r` 让所有分屏恢复等分、侧边窗口恢复打开时的大小；Esc、Enter 或 `q` 退出。消息行显示当前窗口现在的行列数和进入模式时的行列数。模式直接读按键，不经过输入框的键位，所以 Ctrl 能改变步长。焦点换到别的窗口或窗口关闭时模式结束。
+`window-pick`（`SPC w`、`C-x C-o`）对应 ace-window：每个窗口左上角显示一个标签，输入后聚焦那个窗口；只有两个窗口时直接切到另一个。
 
-标签由交互层的 `Layer::Labels` 持有，前端用 `cell_of` 把文档位置换算成窗口内的格子再绘制。
+`resize-window` 不带参数时进入 kitty 式的调整模式（`Layer::Resize`，状态栏显示 RESIZE）：`w` 加宽、`n` 变窄、`t` 加高、`s` 变矮，每步 2 列或 1 行，按住 Ctrl 加倍；`r` 让所有分屏恢复等分、侧边窗口恢复打开时的大小；Esc、Enter、`q`、`C-g` 退出。消息行显示当前窗口现在和进入模式时的行列数。模式直接读按键，不经过输入框键位。焦点换到别的窗口或窗口关闭时模式结束。
+
+标签由 `Layer::Labels` 持有，前端用 `cell_of` 把文档位置换算成窗口内的格子再绘制。
 
 ## 跳转历史
 
-`<c-o>`（`jump-back`）回到跳转之前的位置，`<c-i>`（`jump-forward`）再前进。整个会话共用一个列表，和浏览器的后退一样：后退之后再跳到别处，前方的记录被丢弃，所以列表始终是走过的路径。这符合沿搜索结果和调用关系往下探、再一层层退回的用法。
+`C-o`（`jump-back`）回到跳转之前的位置，`C-i`（`jump-forward`）再前进；`M-,` / `C-M-,` 相同。整个会话共用一个列表，像浏览器的后退：后退之后再跳到别处，前方的记录被丢弃。
 
-- **记录什么**：离开的位置。切换文档一定记录，不论是打开文件、切 buffer、切窗口还是扩展调用 `soda.open`。同一文档内只有这些命令记录：`gg`、`G`、`%`、`/`、`?`、`n`、`N`、`*`、`#`、mark 跳转、`jump-to`，以及打开结果。没有实际移动时不记录。
-- **结果文档**：`*grep*` 这类 scratch 文档不是历史中的一站。从面板打开结果时，记录的是进入面板之前所在的文件位置。
-- **连续走结果**：连续用回车或 `M-g n`/`M-g p` 走同一份结果只算一次，所以一次 `<c-o>` 就回到开始看结果之前的地方；要在结果之间来回用 `M-g p`。其他跳转或新的结果会结束这一段。
-- **位置跟随编辑**；文档关闭时，它在列表里的位置一并删除。
-- **去重**：相邻两项在同一文档的同一行时只留一个，最多保留 100 项，不跨会话保存。
-- 传统终端发送的 `<c-i>` 就是 Tab，所以 Normal 模式的 `<tab>` 也绑定为 `jump-forward`。
+- **记录什么**：离开的位置。切换文档一定记录，不论是打开文件、切换缓冲区或窗口还是 `soda.open`。同一文档内只有这些记录：`o`/`O` 的分组选择、`goto`、`M-<`/`M->`、确认的搜索、`n` 与 `v`、`jump-to`、打开结果，以及 Lua 声明为跳转的移动。没有实际移动时不记录。
+- **结果文档**：`*grep*` 这类 scratch 文档不是历史中的一站，记录的是进入结果之前所在的文件位置。
+- **连续走结果**：连续用 Enter 或 `M-g n`/`M-g p` 走同一份结果只算一次，一次 `C-o` 就回到开始看结果之前的地方。其他跳转或新的结果结束这一段。
+- **位置跟随编辑**；文档关闭时，它的位置从列表删除。
+- **去重**：相邻两项在同一文档的同一行时只留一个，最多 100 项，不跨会话保存。
+- 传统终端发送的 `C-i` 就是 Tab，所以 Normal 的 Tab 也绑定为 `jump-forward`。
 
-## 导航与选择
+## 搜索与替换
 
-文档中的 `Ctrl-Left/Right` 按 Unicode 单词移动，`Ctrl-Backspace/Delete` 删除到前后词边界；已有选区时先删除选区。单词边界与输入组件采用相同规则，标点和空白是分隔符，跨行操作保留 grapheme 边界。查询逐行读取 rope，不生成全文字符串。SelectAll 命令全选；选区存在时 Tab 缩进所选行，Shift-Tab 反缩进，选区与事务一起映射；选区终点恰好位于下一行开头时不包含该行。没有选区时 Tab 按文档的 tab/space 策略插入缩进。
+`C-s` / `C-r`（`search` / `search-backward`）打开向前 / 向后搜索，Insert 中也可用。查询是 smart case 的正则表达式；输入时实时预览当前匹配并显示数量；`C-s` / `C-r`、`F3` / `Shift-F3` 走到下一处 / 上一处；Enter 确认，Esc 取消并恢复原选区与视口。确认后查询成为 Normal `n` 使用的当前搜索。
 
-`PageUp/PageDown` 移动一个视口减一行，保留目标逻辑列并同时移动视口；Shift 扩展选区。前端通过 `set_page_rows` 提供编辑区可见行数；零或一行视口仍至少移动一行。core 只理解指定行数的垂直移动。
+`SearchSession` 绑定一个视图，保存原选区、原视口、查询和结果。查询变化时从会话开始时的光标位置搜索；前后导航从当前匹配继续并环绕。结果只保存文档版本、匹配数量和当前范围，复用核心的逐行正则搜索，不保存匹配列表。预览通过 `SetSelection` 显示当前匹配；空查询或没有匹配时恢复原选区与视口。搜索不修改文本，不产生撤销记录。
 
-`goto LINE[:COLUMN]` 跳转到行列，行列从一开始，列使用包含 tab 和宽字符的逻辑列。越界位置限制到文档或行尾；非法输入使命令行保持打开并显示错误，取消不改变选区。
+原选区与视口用 `DocumentPosition` 保存，随 `Layers::observe` 收到的每个更新映射，包括其他视图对同一文档的编辑；文档修改后重新计算匹配。缺失更新导致过期版本错误，不会把旧坐标用到新文本。视图关闭时搜索结束；焦点切换时取消并恢复原视图状态。
 
-## 搜索生命周期
+`replace`（`M-%`、Normal `R`）建立绑定当前视图的替换会话，复用 `SearchSession` 的预览、映射与取消恢复。依次输入查询、替换文字（可为空），然后进入确认阶段。替换文字可以用 `$1`、`${name}` 引用分组，`$0` 是整个匹配，`$$` 是字面的 `$`。确认阶段 Enter 替换当前匹配，`F4` 或 `C-Enter` 替换所有匹配，`C-s` / `C-r`、`F3` / `Shift-F3` 选择前后匹配；替换后会话关闭，每次确认是一个可撤销事务。任一阶段取消都恢复进入前的选区与视口。
 
-`SearchSession` 绑定一个视图，保存原选区、原视口、查询和搜索结果。查询变化从会话开始时的光标位置搜索；前后导航从当前匹配继续并环绕。匹配结果保存文档版本、匹配数量和当前范围，复用核心的逐行正则搜索，不保存完整匹配列表。
+## Picker 后台引擎
 
-预览通过 `SetSelection` 命令显示当前匹配。空查询或没有匹配时恢复原选区与视口。确认将查询写入编辑会话，供后续查找使用；取消保留此前已确认的查询，并恢复原选区与视口。搜索不修改文本，也不生成文本撤销记录。
+项目文件补全的后台引擎：候选集、结果模型、匹配任务和身份规则。交互由命令行承担，`PickerSession` 是 `File` 参数位的补全器。代码在 `src/interaction/picker/`：`list.rs`（候选列表状态）、`source.rs`（文件来源）、`matching.rs`（匹配适配层）、`worker.rs`（后台执行）。
 
-原选区与视口使用 `DocumentPosition` 保存。Runtime 按顺序将每个成功的 Application 更新交给 `Layers::observe`，包括其他视图对同一文档的编辑。选区端点采用核心选区映射的方向与关联规则；文档修改后重新计算匹配，不映射旧匹配范围。缺失更新导致过期版本错误，不会将旧坐标应用到新文本。
+### 状态
 
-视图关闭时结束搜索。焦点切换时取消搜索并恢复原视图状态，保留新的活动视图。控制器输出的事件必须依次执行，每次执行的更新也必须交回交互层。
+`TextInput` 持有查询文字；`CandidateListState` 持有当前候选身份、是否主动选择和滚动位置；`PickerSession` 持有会话身份、有效查询及代次、结果快照和加载状态；候选来源定义候选身份和业务数据（`PathBuf`）；匹配适配层隔离模糊匹配库；Runtime 在 owner thread 应用结果。候选的展示文字和实际路径分别保存，同名候选身份不同，非 UTF-8 路径保留原始字节；列表下标只由排序派生，不确定业务对象。
 
-文档内搜索同步扫描当前快照，逐次查询的内存开销不随匹配数量增长。大型文件的输入延迟需要另行测量；项目搜索的任务调度、取消和异步结果契约在接入数据来源时建立。
+### 来源与匹配
 
-## 搜索替换
+打开时后台用 `ignore` 遍历根目录（`require_git(false)`，不读父目录和全局 Git ignore，不跟随符号链接，跳过隐藏路径和非普通文件，读不到的条目略过），形成候选集后再匹配最新查询。会话内复用这一集合，磁盘上的增删在重新进入后体现。匹配用 `nucleo-matcher` 的路径评分、smart case 和 smart normalization，查询是一个完整的 fuzzy needle；排序依次比较分数、展示文字、实际路径和身份，结果确定，不依赖线程完成顺序。只为展示的结果生成高亮。
 
-Replace 命令 建立绑定当前视图的替换会话，复用 `SearchSession` 的匹配预览、位置映射与取消恢复。先输入查询，再输入替换文字，最后进入确认阶段；替换文字可为空。查询与普通搜索一样是 smart case 的正则表达式，替换文字可以用 `$1`、`${name}` 引用分组，`$0` 是整个匹配，`$$` 是字面的 `$`。
+### 身份与接收
 
-确认阶段的 `Enter` 替换当前匹配，`F4` 或 `Ctrl-Enter` 替换整个文档中的所有匹配，`F3/Shift-F3` 选择前后匹配。替换完成后关闭会话；每次确认是一个可撤销事务。替换文字不会作为新的查询，也不会在输入过程中写入文档。任一阶段取消都恢复进入会话前的选区与视口；视图关闭或焦点切换时使用同一生命周期规则。文本更新后重新计算匹配，确认时由编辑控制器再次校验当前项。
+请求携带会话身份、来源代次和查询代次。来源代次在更换根目录或失败后重建候选集时递增；查询代次在有效查询变化时立即递增（所以 A→B→A 不会接受第一轮 A 的结果）。结果只在会话仍存在、三项身份都一致时被接受，每个请求只应用第一个结果；数据、排序和高亮属于同一个快照。
 
-## Picker 接入架构
+新查询使旧候选立即失效：旧候选留在屏幕上直到新结果到达，避免闪烁，但 Enter 和 Tab 不采用它们；没有旧候选时才显示加载状态。关闭会话立即使身份失效，再取消任务；迟到的结果不能重建会话。
 
-本节描述项目文件补全的后台引擎：候选集、结果模型、匹配任务和身份规则。交互（输入、候选导航、确认）由命令行承担，`PickerSession` 只作为 `File` 参数位的补全器，查询来自参数位文字。文件遍历和模糊匹配在后台执行，结果在 owner thread 应用。
+### 资源上限
 
-### 状态所有权
-
-候选导航和查询调度不进入 `TextInput`；下表中的输入与列表状态现在由命令行持有。
-
-| 部分 | 拥有的状态与职责 |
+| 项 | 上限 |
 | --- | --- |
-| `TextInput` | 查询文字、输入光标与文字选区，报告文字或选区变化 |
-| `CandidateListState` | 当前候选身份、用户是否主动选择、列表滚动位置；从结果模型读取行 |
-| `PickerResults<T>` | 当前有效查询的有序候选、匹配数量、候选总量与截断信息；界面结果只有一个所有者 |
-| `PickerSession` | 会话身份、有效查询、查询代次、结果模型与版本、加载状态、列表状态及生命周期；交互控制器据此输出任务和 Application 事件 |
-| 候选来源 | 枚举文件或按查询获取候选，定义候选身份、匹配字段与业务数据 |
-| 匹配适配层 | 根据候选集与查询过滤、排序并产生高亮范围，隔离实际模糊匹配库 |
-| Runtime | 执行任务、接收带身份的结果、按序观察更新，在 owner thread 修改交互状态 |
-| 前端 | 转换平台输入、提供尺寸与视口反馈、只读布局和绘制 |
+| 候选文件 | 100,000 个 |
+| 候选记账预算 | 64 MiB（候选对象、Arc 计数、路径与展示文字容量、向量实际容量），超出时报告截断 |
+| 展示的匹配 | 1,000 个 |
+| 查询 | 4,096 字节或 2,048 个 grapheme，超过时不调度匹配并显示错误（后者限制匹配器 `u16` 分数） |
 
-`CandidateListState` 不复制候选集合，也不根据列表下标确定业务对象。候选记录包含稳定身份、展示字段、匹配字段及类型化业务数据；文件候选的业务数据是 `PathBuf`。展示文字和实际路径分别保存，不能通过标签反推打开目标。显示名称相同的候选仍有不同身份，非 UTF-8 路径也必须保留实际路径字节。
+`PickerRunner` 使用一个常驻 worker、一个最新待执行请求槽和容量为 4 的完成队列，输入不会积累任务。取消在遍历项之间、匹配候选之间和等待队列容量时检查；会话丢弃时通过取消标志和 Waker 唤醒 worker 释放缓存。Runtime 每轮最多处理八个文件、picker 和路径补全完成结果，其余留到下一轮。任务 panic 时 worker 返回当前请求的错误快照并清空缓存；完成通道断开时报告一次失败，下一个请求重建 worker。
 
-候选身份在同一来源生命周期中跨查询保持稳定。跨来源组合时加来源命名空间。列表下标由当前排序派生，排序变化不会改变候选身份。匹配适配层将库返回的索引转换为展示文字的 UTF-8 范围，渲染继续使用 grapheme 和屏幕单元布局。
+### 选择
 
-### 输入归属
-
-Picker 默认将文字输入焦点留在 `TextInput`。当前候选与输入光标是独立状态：移动候选不改变查询、文字选区或键盘焦点。候选导航是会话处理的语义动作，不是输入框的左右移动或按词移动。
-
-输入路由顺序为：会话级确认、取消与候选动作；输入组件操作；阻止未识别输入继续传播。输入选区变化只重绘，文字变化才更新有效查询并调度匹配。结果到达和候选选择变化不重置输入框选区。
-
-导航接口表达上一项、下一项、分页、首项和末项，并显式提供是否环绕。具体按键与绑定上下文由前端适配；输入框与候选列表不会分别争抢同一个原始按键。页面大小由布局提供，尺寸变化只调整可见行和滚动，不改变查询。
-
-候选列表的选择是单选，键盘焦点与选择分别处理。以后增加预览交互时，由会话显式处理焦点变化；渲染不隐式转移焦点，也不启动查询。鼠标等未接入的输入仍由模态层阻止。
-
-### 查询与候选来源
-
-候选来源有两种执行方式：
-
-- 候选集来源：文件和命令等先建立候选集合，再根据查询进行本地过滤。文件遍历与查询匹配是不同任务，连续输入不会反复遍历文件系统。
-- 查询来源：项目文本搜索等按查询请求结果，查询变化取消旧请求。防抖由请求调度处理，输入框本身立即更新。
-
-文件 picker 打开时后台收集指定根目录的文件，形成候选集后再匹配最新查询。遍历期间保持加载状态。当前会话复用这一集合；磁盘上的新增或删除在重新打开 picker 或更换来源后体现。查询匹配与文件发现都由任务执行层承担，不在绘制函数中推进。
-
-遍历复用 `ignore`，尊重根目录内的 `.ignore`、`.gitignore` 和 Git exclude 规则；隐藏路径、符号链接和非普通文件不进入候选集。父目录与全局 Git ignore 配置不参与此来源。目录读取错误最多保留八条告警，根目录不存在或不是目录时返回错误状态。
-
-模糊匹配复用 `nucleo-matcher`，使用路径评分、smart case 和 smart normalization。查询作为一个完整 fuzzy needle，不解释筛选操作符。匹配适配层将库的 grapheme 索引转换为 UTF-8 展示范围；排序依次比较分数、展示文字、实际路径和身份。只为有界的展示结果生成高亮，不保存全部匹配行。
-
-查询代次在有效查询变化时立即递增，早于防抖或任务启动。即使输入从 A 变成 B 又变回 A，也不能接受第一轮 A 的结果。当前文字即查询；候选筛选语法以后由查询解析器定义。
-
-### 后台结果与资源契约
-
-候选任务属于交互会话。`Response.effects` 返回 `PickerEffect`，后台完成以 `PickerCompletion` 回到 owner thread。`Layers::start_picker` 先结束此前的模态会话，再安装 picker；`picker_finished` 只将结果交给当前 picker。Runtime 分别接收文件完成和 PickerCompletion；picker 结果只交给对应交互会话，文档核心不接收临时 widget 结果。
-
-请求携带会话身份、来源代次和查询代次。来源代次区分搜索根目录、数据来源的更换及失败后的候选集合重建。接收规则为：
-
-1. 接收会话仍存在，且三项请求身份均与当前状态一致。
-2. 每个请求只应用第一个结果。
-3. 数据与排序、高亮属于同一次结果快照，不能分别替换。
-
-新查询立即使旧查询候选失效：旧候选留在屏幕上直到结果到达，避免每次按键列表闪烁，但不再有效，Enter 和 Tab 都不采用它们，也不关闭会话。这时不显示加载状态；没有旧候选可显示时才显示。当前查询已有有效结果时，即使任务尚未完成，也可确认其中的候选。
-
-取消用于停止计算，接收校验保证正确性。关闭会话立即使身份失效，再取消所属任务；迟到结果、错误和完成通知不能重新创建会话。任务取消须覆盖遍历、匹配和等待发送容量的过程。
-
-`PickerRunner` 使用一个常驻 worker、一个最新待执行请求槽和容量为四的完成队列。默认最多收集 100,000 个文件，候选记录、Arc 计数器、字符串容量与候选向量实际容量的记账预算为 64 MiB，展示最多 1,000 个匹配。预算限制候选数据，不表示整个进程的内存上限；遍历器、匹配器和消息容器也有内存开销。查询超过 4,096 字节或 2,048 个 grapheme 时停止调度匹配并显示错误。这两个上限分别限制输入成本和匹配器 `u16` 分数的增长。预算检查先为候选对象及路径、展示文字的实际容量记账，再计算候选向量可保留的容量；向量按预算约束增长。达到候选集限制时报告截断；队列满时使用可取消的背压。匹配调度最多保留一个正在执行的请求和一个最新待执行请求，输入不会积累无限任务。Runtime 每轮按预算处理完成事件，保留处理键盘输入的机会。每个文件查询发布一个完整有序的结果快照。遍历中读不到的条目直接略过。Runtime 每轮分别处理最多八个文件、项目 picker 和路径补全完成结果。
-
-取消在遍历项之间、匹配候选之间和等待完成队列容量时检查。关闭与更换来源使旧任务失效；取消也清除待执行请求及缓存集合。Session 丢弃时通过取消标志和 Waker 唤醒 worker，即使没有另行发送取消效果，idle 缓存也会释放。大批候选的析构在调度锁外执行。Runtime 释放时关闭 worker 并回收线程。单次操作系统文件调用不由该取消机制强制中断。
-
-单个候选任务 panic 时，worker 返回当前请求的错误快照并清空缓存与匹配器状态，后续查询可以重新计算。任务错误使当前候选集合失效并更新来源代次，防止重建集合中的候选编号与此前身份混用。完成通道断开与暂时没有结果分别处理：断开报告一次 worker 失败，交互层清除候选并展示错误；下一个有效请求重建 worker。线程创建失败同样显示错误，不会停留在无反馈的加载状态。
-
-### 选择与生命周期
-
-选择保持由会话协调，规则与重新排序分开：
-
-| 变化 | 选择处理 |
-| --- | --- |
-| 有效查询或来源变化 | 清除旧选择，首批有效结果默认选择排序第一项 |
-| 同查询更新，用户尚未导航 | 默认选择当前最高排序候选 |
-| 同查询更新，用户已主动导航 | 按身份保留所选候选，不随新结果插入而跳到另一对象 |
-| 主动选择的候选消失 | 在旧位置附近选择有效候选；空列表清除选择 |
-| 窗口尺寸变化 | 保留候选身份，调整滚动以显示当前选择 |
-
-默认最高候选与用户主动选择是不同状态，不能仅凭下标判断。相同输入、候选集与排序策略必须产生确定的排序，分数相同时使用稳定排序字段，结果顺序不依赖线程完成顺序。
-
-确认时从当前有效结果取得业务数据，文件 picker 输出 `Application::Open`。不让后台工作线程直接打开编辑视图。确认产生一次结果并结束会话；取消结束会话并恢复原交互归属。文件打开由 Application 记录独立的打开意图代次与焦点版本。只有最新成功发起的打开请求，且发起后没有焦点变化，才可在完成时激活视图。较旧请求仍可创建后台视图，但不能覆盖最新意图。取消或读取失败不会重新激活更旧请求；前置校验失败不会替换此前有效意图。
-
-文件 picker 的列表预览不修改文档编辑选区。以后增加预览时，使用独立只读展示状态和独立请求身份，候选变化只触发预览请求。预览请求还校验当前候选身份，不能仅依据查询代次接受结果。
-
-### 接入与验证顺序
-
-候选列表位于 `src/interaction/picker/list.rs`；文件来源与匹配适配层分别位于 `source.rs` 和 `matching.rs`；`worker.rs` 执行有界后台任务。`PickerSession` 接入现有 `Layer`、`InputResult` 和 `Response`。当前保留明确的 Rust 类型与组件枚举，通过实际的第二个候选来源验证复用后再扩大扩展接口。
-
-验证需要包含：输入光标与候选导航互不干扰；同长度查询替换；同名候选确认；排序变化后的主动选择保持；新查询加载时确认；A/B/A 查询及乱序结果；关闭后结果到达；来源更换；非 UTF-8 路径；容量截断、取消和背压；分页和尺寸变化。假任务执行器可控制完成顺序，交互测试不依赖真实线程的时序。
-
-## 当前终端入口
-
-输入框使用“行编辑键”一节的默认键；文字输入或粘贴替换选区。Ctrl-P / Ctrl-N 和上下方向键选择候选，Tab / Shift-Tab 补全，Enter 确认，Esc / Ctrl-C 取消。
-
-命令行的默认操作见“命令行”一节：`M-x`、`SPC :`、`SPC f`、`SPC b` 分别以空串、空串、`project `、`buffer ` 进入；输入筛选，上下键选择，Tab 填入，Enter 执行，Esc 取消。`Home` / `End` 操作输入光标，候选导航不改变文字。
-
-搜索入口：
-
-- Normal 下 `/` / `?`：打开向前 / 向后搜索。
-- 输入查询：实时预览并显示匹配数量。
-- 搜索会话内 `F3` / `Shift-F3`：下一处 / 上一处。
-- `Enter`：确认查询与当前位置。
-- `Esc`：取消并恢复原位置。
-
-确认后，编辑区的 `n` 和 `N` 按已确认方向继续或反向使用查询。当前搜索为区分大小写的字面量匹配。
-
-## 设计参考
-
-meow：`~/.emacs.d/elpaca/sources/meow`，对照选区、keypad 和 beacon 语义。kakoune：`~/project/kakoune`，对照选区操作和宏。
-
-下列为本地源码参考位置。组件分层、会话与结果校验吸收这些设计，具体按键和执行策略由 Soda 的交互契约确定。
-
-| 项目与本地目录 | 源码 | 参考设计 |
-| --- | --- | --- |
-| Helix：`~/package/helix` | `helix-term/src/compositor.rs`、`helix-term/src/ui/prompt.rs` | 模态输入消费及路由完成后的动作处理 |
-| Helix：`~/package/helix` | `helix-term/src/ui/picker.rs`、`helix-term/src/ui/picker/handlers.rs` | Prompt 与候选导航组合、候选流、固定集合匹配和动态查询的区别、关闭后 injector 失效 |
-| IntelliJ：`~/project/intellij-community` | `platform/lang-impl/src/com/intellij/find/EditorSearchSession.java`、`platform/lang-impl/src/com/intellij/find/impl/livePreview/LivePreviewController.java` | 文档搜索会话、位置恢复和预览生命周期 |
-| IntelliJ：`~/project/intellij-community` | `platform/searchEverywhere/shared/src/SeItemsProvider.kt`、`platform/searchEverywhere/shared/src/SeItemData.kt` | 来源、候选身份、展示与业务对象分离，可背压的结果收集 |
-| IntelliJ：`~/project/intellij-community` | `platform/searchEverywhere/frontend/src/vm/SeTabVm.kt`、`platform/searchEverywhere/frontend/src/ui/SePopupContentPane.kt` | 查询状态与结果流、最新任务接管、输入框导航重定向、预览生命周期 |
-| IntelliJ：`~/project/intellij-community` | `platform/searchEverywhere/frontend/src/ui/SeResultListModel.kt`、`platform/searchEverywhere/frontend/src/SeSelectionListener.kt` | 列表结果有效性、选择保持、程序更新与用户选择的区别 |
-| Neovim：`~/package/neovim` | `runtime/lua/vim/ui.lua` | 选择结果与取消的区别，候选展示与实际值分开；内置默认 `select` 是编号列表 |
-| Neovim：`~/package/neovim` | `src/nvim/api/ui_events.in.h`、`src/nvim/popupmenu.c` | 输入光标、候选选择及列表展示分别表达 |
-| Neovim：`~/package/neovim` | `src/nvim/ex_getln.c` | 增量搜索的位置和视口恢复 |
-
-IntelliJ 的旧 `platform/lang-impl/src/com/intellij/ide/actions/searcheverywhere/SESearcher.java` 已标记废弃，新的 Search Everywhere 位于 `platform/searchEverywhere`；picker 分层以新实现为主要参考。Neovim 默认 `vim.ui.select` 不提供模糊匹配流水线，候选任务与调度主要参考 Helix 和 IntelliJ。
+查询或来源变化时清除选择，默认选排序第一项；同查询的结果更新时，用户没有导航就选第一项，导航过就按身份保留所选候选，它消失时选旧位置附近的一项；尺寸变化只调整滚动。确认时从当前有效结果取得路径并输出 `Application::Open`。Application 记录打开意图代次与焦点版本：只有最新发起、之后没有焦点变化的打开请求在完成时激活视图，较旧的请求只创建后台视图。
 
 ## 验证
 
-`cargo test --test picker` 验证候选排序与选择、模拟完成事件的版本校验、原生路径、真实文件来源、长查询限制、实际容量记账以及丢弃会话后的缓存释放；worker 单测验证取消可以结束完成队列背压，以及断开通道的报告与后续请求恢复。`cargo test --test application` 验证并发打开请求的完成顺序、取消和失败都不会覆盖最新意图。
-
-`cargo test --test interaction` 验证搜索预览、导航、确认和取消、跨视图修改后的锚点映射、关闭与焦点切换以及模态输入隔离。交互模块的输入组件测试覆盖有方向选区、按词操作、等长替换、过滤后为空的粘贴，以及组合字符和 grapheme 合并后的光标位置。Runtime 测试验证更新观察、重绘通知和响应失败处理；终端适配与布局测试验证修饰键、释放事件与选区裁剪。
-
-`tests/command_loop.rs` 通过前端无关入口验证键位和直接命令的等价行为、模态焦点阻止传播、确认取消只消费一次、另存为目标绑定、picker 任务生命周期以及无活动视图的行为。终端适配测试验证平台按键、修饰键、重复、释放和粘贴的转换；`cargo test --test runtime` 验证无前端的编辑、搜索、文件读写和完成结果处理。
-
-`cargo test --test workflows` 验证复制剪切粘贴、Unicode 导航、跳转、翻页和替换。`cargo test --test departure` 控制保存完成的时序，验证保存后关闭、取消等待、写入失败、新编辑、逐文档退出与重新加载保护。
-
-
+`tests/picker.rs` 和 worker 单测覆盖候选排序与选择、完成事件的身份校验、原生路径、查询上限、容量记账、缓存释放、背压取消和通道断开后的恢复；`tests/application.rs` 覆盖并发打开请求不覆盖最新意图；`tests/interaction.rs` 覆盖搜索预览、确认取消、跨视图映射和模态输入隔离；`tests/command_loop.rs` 覆盖键位与直接命令等价、确认取消只消费一次、picker 任务生命周期和无活动视图；`tests/departure.rs` 覆盖离开文档的保存时序；`tests/runtime.rs`、`tests/workflows.rs` 覆盖无前端的编辑、搜索、文件和剪贴板流程。模态、键位、命令行、跳转等各有同名测试文件（`tests/modal.rs`、`tests/keymaps.rs`、`tests/command_line.rs`、`tests/jumps.rs` 等）。
