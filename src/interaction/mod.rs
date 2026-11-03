@@ -33,7 +33,8 @@ mod search;
 pub use search::{SearchResults, SearchSession};
 mod jumps;
 mod keymap;
-pub use keymap::{BindingError, Context, Keymap, KeypadStart, LineEdit};
+pub use keymap::{BindingError, Context, Keymap, KeypadStart, LineEdit, Scope};
+use std::collections::HashMap;
 mod registry;
 pub use registry::{BUILTINS, Choice, CommandInfo, Registry, Slot, SlotKind};
 mod resize;
@@ -184,6 +185,9 @@ pub struct Layers {
     failed: bool,
     /// The parameter of the event whose hooks are running, `%val{hook}`.
     hook: Option<String>,
+    /// The names of the language servers serving each document, for the
+    /// keymaps of servers.
+    servers: HashMap<crate::editor::DocumentId, Vec<String>>,
 }
 impl Layers {
     /// Whether a command failed since `clear_failed`.
@@ -472,8 +476,17 @@ impl Layers {
     }
     /// The bindings in force in a context, user ones over defaults: keys
     /// and what they show.
-    pub fn bindings(&self, context: Context) -> Vec<(Vec<KeyStroke>, String)> {
-        self.keymap.bindings(context)
+    pub fn bindings(&self, keymap: &str) -> Option<Vec<(Vec<KeyStroke>, String)>> {
+        self.keymap.bindings_of(keymap)
+    }
+    /// Defines a keymap that holds in documents of its scope.
+    pub fn define_keymap(&mut self, name: &str, scope: Scope, doc: String) -> Result<(), String> {
+        self.keymap.define(name, scope, doc)
+    }
+    /// The names of the language servers serving each document, for the
+    /// keymaps of servers; a document left out has none.
+    pub fn set_servers(&mut self, servers: HashMap<crate::editor::DocumentId, Vec<String>>) {
+        self.servers = servers;
     }
     /// Recently used files, newest first.
     pub fn set_recent_files(&mut self, files: Vec<std::path::PathBuf>) {

@@ -258,22 +258,23 @@ impl Layers {
         self.route_recorded(input, true, app, time, file_root)
     }
     /// The key tables in force, first to be asked first: what the caret is
-    /// on or in, the mode, then what every mode shares.
-    pub(super) fn stack(&self, app: &Application) -> Vec<keymap::Context> {
+    /// on or in, the mode, the keymaps of the document, then what every
+    /// mode shares.
+    pub(super) fn stack(&self, app: &Application) -> Vec<keymap::Table> {
         use keymap::Context;
-        let mut stack = vec![];
+        let mut stack: Vec<keymap::Table> = vec![];
         match self.mode {
             EditMode::Insert => {
                 // Over the choices of a place, Tab goes on to the next.
                 let choosing = self.completion.choosing();
                 if choosing && self.snippet.active() {
-                    stack.push(Context::Snippet);
+                    stack.push(Context::Snippet.into());
                 }
                 if self.completion.visible() {
-                    stack.push(Context::Completion);
+                    stack.push(Context::Completion.into());
                 }
                 if !choosing && self.snippet.active() {
-                    stack.push(Context::Snippet);
+                    stack.push(Context::Snippet.into());
                 }
             }
             EditMode::Normal
@@ -286,7 +287,7 @@ impl Layers {
                     )
                     && app.on_mark() =>
             {
-                stack.push(Context::Mark)
+                stack.push(Context::Mark.into())
             }
             EditMode::Normal
                 if !self.modal.active()
@@ -295,16 +296,29 @@ impl Layers {
                         .and_then(|view| app.view(view))
                         .is_some_and(|view| app.is_tree(view.document_id)) =>
             {
-                stack.push(Context::Tree)
+                stack.push(Context::Tree.into())
             }
-            EditMode::Beacon => stack.push(Context::Beacon),
+            EditMode::Beacon => stack.push(Context::Beacon.into()),
             EditMode::Normal => {}
         }
-        stack.push(match self.mode {
-            EditMode::Insert => Context::Insert,
-            EditMode::Normal | EditMode::Beacon => Context::Normal,
-        });
-        stack.push(Context::Global);
+        stack.push(
+            match self.mode {
+                EditMode::Insert => Context::Insert,
+                EditMode::Normal | EditMode::Beacon => Context::Normal,
+            }
+            .into(),
+        );
+        if let Some(document) = app
+            .active_view()
+            .and_then(|view| app.view(view))
+            .map(|view| view.document_id)
+        {
+            let editor = app.workspace().editor(document).unwrap();
+            let language = editor.model().document().language();
+            let servers = self.servers.get(&document).map_or(&[][..], Vec::as_slice);
+            stack.extend(self.keymap.in_force(&language.profile().id, servers));
+        }
+        stack.push(Context::Global.into());
         stack
     }
     fn route_recorded(
@@ -462,7 +476,7 @@ impl Layers {
             && self.completion.commits(ch)
             && matches!(
                 self.keymap
-                    .resolve(&[keymap::Context::Completion], &[key], &|_| false)
+                    .resolve(&[keymap::Context::Completion.into()], &[key], &|_| false)
                     .0,
                 Resolution::Pass
             )
@@ -533,7 +547,7 @@ impl Layers {
                 }
                 // Choosing from a list is no use to a replay; moving
                 // through a snippet is, as it replays as one.
-                if self.sequence.source == Some(keymap::Context::Completion) {
+                if self.sequence.source == Some(keymap::Context::Completion.into()) {
                     self.modal.replay.unrecord();
                 }
                 return self.execute(command, app, time, file_root);

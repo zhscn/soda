@@ -27,13 +27,14 @@ soda.lsp.server("rust", { "rust-analyzer" }, {
 | `init` | `initialize` 的 `initializationOptions` |
 | `settings` | 回答 `workspace/configuration`：按 `section` 的点分路径取，没有的回答 null，不带 `section` 时给整张表；启动后也用 `workspace/didChangeConfiguration` 发一次 |
 | `roots` | 根目录标记：从文档所在目录往上，最近的含有其中任一文件或目录的目录；`"git"` 指 git 工作树顶层（`.git` 是文件的 submodule、linked worktree 也算）。也可以是函数 `function(path, done)`：返回目录，返回 `false` 表示没有，或返回 nil 之后调用 `done(目录或 false)`；回答之前这个文档不启动服务器。只影响服务器，`grep` 等仍按项目 |
+| `name` | 服务器的名字，默认是程序的文件名；`soda.keymap(..., { server = NAME })` 声明的键位表按它生效，所以经包装脚本启动时要写明 |
 | `auto` | 打开文档时是否自动启动：`true`（默认）总是；`"marked"` 只在根目录是找到的（标记、函数、跳转来源或 `lsp-start`）时；`false` 只由 `lsp-start` 启动 |
 
 单文件也能工作的服务器（clangd、pyright、lua-language-server）用默认值即可；要按项目建索引的适合 `"marked"`。rust-analyzer 会运行构建脚本，clangd 可能写 `.cache/clangd`，ccls 写 `.ccls-cache`，所以在哪里启动由配置决定。
 
 ## 命令
 
-`SPC` 键即 `C-c` 下的同名键（见[交互](interaction.md)）。
+这些键在 `lsp` 键位表里，只在有服务器服务的文档中生效（见[键位上下文](interaction.md#键位上下文)）；其他文档里按下它们是未定义的键，命令本身照样可以执行。`SPC` 键即 `C-c` 下的同名键。
 
 | 键 | 命令 | 作用 |
 | --- | --- | --- |
@@ -153,7 +154,7 @@ require("ccls").setup({
 })
 ```
 
-`setup` 让 C++ 使用 ccls：`command` 换程序，`languages` 默认 `{ "cpp" }`，`init`、`settings` 原样传给 `soda.lsp.server`，`roots` 默认 `.ccls-root`、`.ccls`、`compile_commands.json`，`auto` 默认 `"marked"`（ccls 会给整个根目录建索引）。标准功能走 `lsp` 模块；ccls 没有的（如 `SPC h`）直接说明。`setup({ keys = false })` 不绑定键。
+`setup` 让 C++ 使用 ccls：`command` 换程序，`languages` 默认 `{ "cpp" }`，`init`、`settings` 原样传给 `soda.lsp.server`，`roots` 默认 `.ccls-root`、`.ccls`、`compile_commands.json`，`auto` 默认 `"marked"`（ccls 会给整个根目录建索引）。标准功能走 `lsp` 模块；ccls 没有的（如 `SPC h`）直接说明。下表的键在 `ccls` 键位表里，只在 ccls 服务的文档中生效，同一个键优先于 `lsp` 表；`setup({ keys = false })` 不绑定它们，自己的键也绑到这张表：`soda.map("ccls", "<c-c>vc", "ccls-callers")`。
 
 | 键 | 命令 | 作用 |
 | --- | --- | --- |

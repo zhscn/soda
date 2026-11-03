@@ -1143,7 +1143,7 @@ mod tests {
         // the command's slots beside it.
         assert!(rows[12].starts_with(" COMMAND "), "{text}");
         assert!(rows[13].starts_with(":map normal "));
-        assert!(rows[13].trim_end().ends_with("map MODE KEYS COMMAND"));
+        assert!(rows[13].trim_end().ends_with("map KEYMAP KEYS COMMAND"));
         keys(&mut r, "<esc>");
         r.command(Command::Help);
         let text = screen(&mut r, 60, 14);

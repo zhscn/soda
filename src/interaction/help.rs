@@ -42,11 +42,19 @@ Configuration: ~/.config/soda/init.lua, with soda.map, soda.set, soda.hook and s
 /// Help generated from the effective key tables and command registry.
 pub fn text(keymap: &Keymap, registry: &Registry) -> String {
     let mut out = format!("{MODAL}\n\n{NOTES}\n");
-    for context in Context::ALL {
-        out.push_str(&format!("\n{} keys\n", context.name()));
+    let contexts = Context::ALL
+        .into_iter()
+        .map(|context| (format!("{} keys", context.name()), keymap.bindings(context)));
+    // Keymaps that hold in some documents only, with what they are for.
+    let documents = keymap
+        .document_bindings()
+        .into_iter()
+        .map(|(name, doc, bindings)| (format!("{name} keys: {doc}"), bindings));
+    for (heading, bindings) in contexts.chain(documents) {
+        out.push_str(&format!("\n{heading}\n"));
         // One row per target, listing every key bound to it.
         let mut rows: Vec<(String, String)> = vec![];
-        for (keys, label) in keymap.bindings(context) {
+        for (keys, label) in bindings {
             let keys = key_notation(&keys);
             match rows.iter_mut().find(|(_, existing)| *existing == label) {
                 Some(row) => row.0 = format!("{} {keys}", row.0),

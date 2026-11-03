@@ -301,7 +301,7 @@ fn matching_slots_complete_by_cursor_position_and_require_a_candidate() {
     assert!(
         rows(&r)
             .iter()
-            .any(|row| row.starts_with("map MODE KEYS COMMAND"))
+            .any(|row| row.starts_with("map KEYMAP KEYS COMMAND"))
     );
     keys(&mut r, "<esc>");
     // Buffer names require a match: Enter takes the selected candidate.

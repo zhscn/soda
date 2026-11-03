@@ -415,7 +415,7 @@ fn keypad_sequences_are_said_and_cancelled_and_step_back() {
 fn the_leader_is_ctrl_c_and_reaches_bindings_of_any_module() {
     let mut r = runtime("|a\n");
     r.command(Command::Map {
-        context: soda::interaction::Context::Global,
+        keymap: "global".into(),
         keys: KeyStroke::parse_sequence("<c-c>y").unwrap(),
         target: "append".into(),
         label: None,

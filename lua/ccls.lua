@@ -6,17 +6,24 @@
 --     init = { cache = { directory = "/tmp/ccls" } },
 --   })
 --
--- Options: `command` (default { "ccls" }), `init` (initializationOptions),
+-- Options: `command` (default { "ccls" }, which may be a wrapper),
+-- `init` (initializationOptions),
 -- `settings`, `roots` (default .ccls-root, .ccls, compile_commands.json),
 -- `auto` (default "marked": only where one of the roots is; lsp-start
 -- starts it anywhere),
 -- `languages` (default { "cpp" }) and `keys = false` to bind nothing.
 --
--- Keys under the leader: c and C open the callers and the callees as trees,
--- t and T the bases and the derived types, m and M the member variables and
--- functions.
+-- Keys, in the `ccls` keymap, which holds in documents ccls serves, over
+-- the `lsp` one: under the leader, c and C open the callers and the
+-- callees as trees, t and T the bases and the derived types, m and M the
+-- member variables and functions. Bind your own there:
+--
+--   soda.map("ccls", "<c-c>vc", "ccls-callers")
 
 local lsp = require("lsp")
+
+-- After `lsp`'s, so that it is asked first where both hold.
+soda.keymap("ccls", { server = "ccls", doc = "Documents ccls serves" })
 
 local M = {}
 
@@ -248,15 +255,17 @@ function M.setup(options)
       roots = options.roots or { ".ccls-root", ".ccls", "compile_commands.json" },
       -- It indexes the whole root: not a directory merely around a file.
       auto = options.auto == nil and "marked" or options.auto,
+      -- The `ccls` keymap holds in its documents, whatever runs it.
+      name = "ccls",
     })
   end
   if options.keys ~= false then
-    soda.map("global", "<c-c>c", "ccls-callers")
-    soda.map("global", "<c-c>C", "ccls-callees")
-    soda.map("global", "<c-c>t", "ccls-base")
-    soda.map("global", "<c-c>T", "ccls-derived")
-    soda.map("global", "<c-c>m", "ccls-members variables")
-    soda.map("global", "<c-c>M", "ccls-members functions")
+    soda.map("ccls", "<c-c>c", "ccls-callers")
+    soda.map("ccls", "<c-c>C", "ccls-callees")
+    soda.map("ccls", "<c-c>t", "ccls-base")
+    soda.map("ccls", "<c-c>T", "ccls-derived")
+    soda.map("ccls", "<c-c>m", "ccls-members variables")
+    soda.map("ccls", "<c-c>M", "ccls-members functions")
   end
 end
 

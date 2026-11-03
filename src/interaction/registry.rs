@@ -3,7 +3,7 @@
 //! user definitions share one replaceable namespace.
 use super::{
     Command, Departure, WindowCommand,
-    keymap::{Context, KeypadStart, LINE_EDITS, LineEdit, PROMPT_ACTIONS},
+    keymap::{KeypadStart, LINE_EDITS, LineEdit, PROMPT_ACTIONS},
     modal::{Action, Entry as InsertAt, Query, Step},
 };
 use crate::{
@@ -29,6 +29,8 @@ pub enum SlotKind {
     Face,
     /// A language id.
     Language,
+    /// A key table: a context, a document keymap or a language's keymap.
+    Keymap,
     /// A recently used file.
     Recent,
     /// One of the items of the question being asked.
@@ -48,6 +50,7 @@ impl SlotKind {
                 | Self::Option
                 | Self::Face
                 | Self::Language
+                | Self::Keymap
                 | Self::Recent
                 | Self::Item
         )
@@ -88,7 +91,7 @@ const OPTIONAL_PATH: Slot = Slot {
     required: false,
     ..PATH
 };
-const MODE: Slot = slot("MODE", SlotKind::Choice(&super::Context::CHOICES));
+const KEYMAP: Slot = slot("KEYMAP", SlotKind::Keymap);
 /// How to leave a document with unsaved changes: `save [PATH]` or `discard`.
 const DEPARTURE: &[Slot] = &[
     Slot {
@@ -345,9 +348,6 @@ fn departure(args: &str) -> Result<Option<Departure>, String> {
 fn split(args: &str) -> (&str, &str) {
     args.split_once(char::is_whitespace)
         .map_or((args, ""), |(head, tail)| (head, tail.trim_start()))
-}
-fn context(name: &str) -> Result<Context, String> {
-    Context::parse(name).ok_or_else(|| format!("unknown mode: {name}"))
 }
 fn keys(text: &str) -> Result<Vec<super::KeyStroke>, String> {
     super::KeyStroke::parse_sequence(text)
@@ -980,23 +980,23 @@ pub static BUILTINS: &[Builtin] = &[
     ),
     builtin!(
         "map",
-        [MODE, KEYS, slot("COMMAND", SlotKind::Rest)],
-        "Bind keys in global, normal, beacon, insert or prompt",
+        [KEYMAP, KEYS, slot("COMMAND", SlotKind::Rest)],
+        "Bind keys in a context, a document keymap or a language's keymap",
         |a| {
-            let (mode, rest) = split(a);
+            let (keymap, rest) = split(a);
             let (sequence, target) = split(rest);
             Ok(Command::Map {
-                context: context(mode)?,
+                keymap: required(keymap)?,
                 keys: keys(sequence)?,
                 target: required(target)?,
                 label: None,
             })
         }
     ),
-    builtin!("unmap", [MODE, KEYS], "Remove a user binding", |a| {
-        let (mode, sequence) = split(a);
+    builtin!("unmap", [KEYMAP, KEYS], "Remove a user binding", |a| {
+        let (keymap, sequence) = split(a);
         Ok(Command::Unmap {
-            context: context(mode)?,
+            keymap: required(keymap)?,
             keys: keys(&required(sequence)?)?,
         })
     }),

@@ -129,3 +129,40 @@ fn arrows_extend_a_selection_and_escape_drops_a_count() {
     send(&mut r, key('d'));
     assert_eq!(text(&r), "c");
 }
+#[test]
+fn a_language_keymap_holds_in_its_documents_only() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.rs"), "fn main() {}\n").unwrap();
+    std::fs::write(dir.path().join("b.txt"), "text\n").unwrap();
+    let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.start(Some(dir.path().join("a.rs")));
+    for _ in 0..200 {
+        r.poll();
+        if r.app().active_view().is_some() && text(&r) == "fn main() {}\n" {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    map(&mut r, "rust <c-c>z echo rust keys");
+    // The leader reads it too, as it reads `global`.
+    send(&mut r, key(' '));
+    send(&mut r, key('z'));
+    assert_eq!(r.message(), "rust keys");
+    r.command(Command::Named(format!(
+        "open {}",
+        dir.path().join("b.txt").display()
+    )));
+    for _ in 0..200 {
+        r.poll();
+        if text(&r) == "text\n" {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    send(&mut r, ctrl('c'));
+    send(&mut r, key('z'));
+    assert_eq!(r.message(), "C-c z is undefined");
+    // A name that is neither a context, a keymap nor a language.
+    map(&mut r, "nowhere <c-c>z nop");
+    assert_eq!(r.message(), "unknown keymap: nowhere");
+}

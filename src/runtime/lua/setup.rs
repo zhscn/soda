@@ -1,7 +1,7 @@
 //! `soda` functions that extend the editor: key bindings, hooks, commands
 //! and completion sources.
 use super::{Host, Runtime};
-use crate::interaction::{Command, Context, KeyStroke, key_notation};
+use crate::interaction::{Command, KeyStroke, key_notation};
 use mlua::{Function, Scope, Table, Value};
 use std::cell::RefCell;
 
@@ -62,14 +62,13 @@ pub(super) fn register<'scope, 'r: 'scope>(
     soda.set(
         "map",
         scope.create_function(
-            |_, (mode, keys, target, doc): (String, String, Value, Option<String>)| {
-                let context = context(&mode)?;
+            |_, (keymap, keys, target, doc): (String, String, Value, Option<String>)| {
                 let keys = KeyStroke::parse_sequence(&keys).map_err(mlua::Error::runtime)?;
                 // A function is kept and called by number; its label is
                 // what it says it does.
                 let (target, label) = match target {
                     Value::String(line) => (line.to_str()?.to_owned(), doc),
-                    Value::Function(function) if context != Context::Prompt => {
+                    Value::Function(function) if keymap != "prompt" => {
                         let id = host.keep(function)?;
                         let label = doc.unwrap_or_else(|| "Lua function".into());
                         (format!("lua-call {id}"), Some(label))
@@ -84,7 +83,7 @@ pub(super) fn register<'scope, 'r: 'scope>(
                     .borrow_mut()
                     .layers
                     .configure(Command::Map {
-                        context,
+                        keymap,
                         keys,
                         target,
                         label,
@@ -95,22 +94,48 @@ pub(super) fn register<'scope, 'r: 'scope>(
     )?;
     soda.set(
         "unmap",
-        scope.create_function(|_, (mode, keys): (String, String)| {
-            let context = context(&mode)?;
+        scope.create_function(|_, (keymap, keys): (String, String)| {
             let keys = KeyStroke::parse_sequence(&keys).map_err(mlua::Error::runtime)?;
             runtime
                 .borrow_mut()
                 .layers
-                .configure(Command::Unmap { context, keys })
+                .configure(Command::Unmap { keymap, keys })
+                .map_err(mlua::Error::runtime)
+        })?,
+    )?;
+    soda.set(
+        "keymap",
+        scope.create_function(|_, (name, options): (String, Option<Table>)| {
+            let (server, doc) = match &options {
+                Some(options) => (
+                    options.get::<Option<String>>("server")?,
+                    options.get::<Option<String>>("doc")?,
+                ),
+                None => (None, None),
+            };
+            // Only server keymaps are defined; a language's needs no definition.
+            let Some(server) = server else {
+                return Err(mlua::Error::runtime(
+                    "soda.keymap needs server = NAME, or \"*\" for any server",
+                ));
+            };
+            let scope = crate::interaction::Scope::Server((server != "*").then_some(server));
+            let doc = doc.unwrap_or_else(|| format!("Keys of the {name} keymap"));
+            runtime
+                .borrow_mut()
+                .layers
+                .define_keymap(&name, scope, doc)
                 .map_err(mlua::Error::runtime)
         })?,
     )?;
     soda.set(
         "bindings",
-        scope.create_function(|lua, mode: String| {
-            let context = context(&mode)?;
+        scope.create_function(|lua, keymap: String| {
+            let bindings = runtime.borrow().layers.bindings(&keymap);
+            let bindings = bindings
+                .ok_or_else(|| mlua::Error::runtime(format!("unknown keymap: {keymap}")))?;
             let out = lua.create_table()?;
-            for (keys, label) in runtime.borrow().layers.bindings(context) {
+            for (keys, label) in bindings {
                 let binding = lua.create_table()?;
                 binding.set("keys", key_notation(&keys))?;
                 binding.set("command", label)?;
@@ -199,9 +224,6 @@ pub(super) fn register<'scope, 'r: 'scope>(
         )?,
     )?;
     Ok(())
-}
-fn context(mode: &str) -> mlua::Result<Context> {
-    Context::parse(mode).ok_or_else(|| mlua::Error::runtime(format!("unknown mode: {mode}")))
 }
 /// The command a Lua hook runs: its function, with the event's parameter.
 fn hook_command(id: u64) -> String {

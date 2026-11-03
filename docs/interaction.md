@@ -145,19 +145,24 @@ Backspace 退掉上一个键，Esc 取消，计数跨过 keypad 保留。与 meo
 
 ### 键位上下文
 
-键位表有 `global`、`normal`、`beacon`、`insert`、`completion`、`snippet`、`mark`、`tree` 和 `prompt`（所有输入框、picker 与确认）。按键在一个栈中查找，先查到的算数，与 Emacs 读 active maps 一样（`Layers::stack`）：
+键位表有两类。上下文是固定的：`global`、`normal`、`beacon`、`insert`、`completion`、`snippet`、`mark`、`tree` 和 `prompt`（所有输入框、picker 与确认）。文档键位表只在部分文档里生效，相当于 Emacs minor mode 和 major mode 的 keymap：
+
+- **语言的表**以语言 id 命名（`cpp`、`rust`……），在这种语言的文档里生效，第一次往里绑定时建立。
+- **服务器的表**由模块用 `soda.keymap(name, { server = ... })` 声明，在这个服务器服务的文档里生效；`server = "*"` 表示任一服务器。服务器停掉或退出后，它的表随之失效。内置的 `lsp` 表属于任一服务器，`ccls` 表属于 ccls。
+
+按键在一个栈中查找，先查到的算数，与 Emacs 读 active maps 一样（`Layers::stack`）：
 
 | 模式 | 栈 |
 | --- | --- |
-| Insert | `completion`（列表显示时）、`snippet`（还有位置时；位置在提供选项时排到 `completion` 之前）、`insert`、`global` |
-| Normal | `mark`（光标在标记的符号上时）或 `tree`（在树文档中时）、`normal`、`global` |
-| Beacon | `beacon`、`normal`、`global` |
+| Insert | `completion`（列表显示时）、`snippet`（还有位置时；位置在提供选项时排到 `completion` 之前）、`insert`、文档键位表、`global` |
+| Normal | `mark`（光标在标记的符号上时）或 `tree`（在树文档中时）、`normal`、文档键位表、`global` |
+| Beacon | `beacon`、`normal`、文档键位表、`global` |
 
-`global` 是所有模式共有的键，`C-x`、`C-c` 下的键都在这里。模块把键绑到 `<c-c>` 下，就同时得到 `SPC` 入口。
+文档键位表中，服务器的表在前，后声明的先查（`ccls` 在 `lsp` 之后声明，所以同一个键以 `ccls` 的为准），语言的表在最后。它们和 `global` 一样不分模式，在模式表之下，所以遮不住 Normal 的单键，适合 `C-c` 开头的键。`global` 是所有模式共有的键，`C-x`、`C-c` 下的键都在这里。keypad 读不加修饰的键时查文档键位表和 `global`，所以绑到 `<c-c>` 下的键同时有 `SPC` 入口。
 
 每张表依次查找：
 
-1. 用户层：`map` 和 Rust `bind`（prompt 为 `bind_input`）写入；`unmap`、`unbind`、`unbind_input` 删除用户条目，默认解释随之恢复。
+1. 用户层：`map KEYMAP KEYS COMMAND` 写入，`unmap KEYMAP KEYS` 删除，默认解释随之恢复。`KEYMAP` 是上下文、已声明的文档键位表或语言 id，其他名字报错。
 2. 默认层：`interaction::keymap` 中的静态表，引用命令名并在启动时解析，测试保证每个默认条目都能解析。
 3. 都没有时：Normal 和 Beacon 忽略这个键；insert 和 prompt 的可打印字符直接输入。
 

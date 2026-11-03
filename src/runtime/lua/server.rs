@@ -46,9 +46,22 @@ pub(super) fn register<'scope, 'r: 'scope>(
                     Some(Value::Function(function)) => (vec![], Some(host.keep(function)?)),
                     Some(value) => (lua.from_value::<Vec<String>>(value)?, None),
                 };
+                let name = options
+                    .as_ref()
+                    .map(|o| o.get::<Option<String>>("name"))
+                    .transpose()?
+                    .flatten();
                 let server = command
                     .map(|command| -> mlua::Result<_> {
+                        // The program's file name unless told: what keymaps
+                        // of servers name it by.
+                        let name = name.unwrap_or_else(|| {
+                            std::path::Path::new(&command[0])
+                                .file_name()
+                                .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+                        });
                         Ok(crate::runtime::lsp::Server {
+                            name,
                             command,
                             init: json("init")?,
                             settings: json("settings")?,

@@ -321,7 +321,7 @@ fn configured_layers() -> Layers {
     ] {
         layers
             .configure(Command::Map {
-                context: soda::interaction::Context::Insert,
+                keymap: "insert".into(),
                 keys: KeyStroke::parse_sequence(keys).unwrap(),
                 target: target.into(),
                 label: None,

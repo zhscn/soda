@@ -29,15 +29,17 @@ pub enum Command {
     },
     /// A command line resolved through the registry when executed.
     Named(String),
+    /// Binds keys in a key table: a context, a document keymap or a
+    /// language's keymap, by name.
     Map {
-        context: super::Context,
+        keymap: String,
         keys: Vec<super::KeyStroke>,
         target: String,
         /// What help and key hints show; `None` shows the target.
         label: Option<String>,
     },
     Unmap {
-        context: super::Context,
+        keymap: String,
         keys: Vec<super::KeyStroke>,
     },
     /// Reads the next keys through the keypad.
@@ -339,13 +341,18 @@ impl Layers {
     pub fn configure(&mut self, command: Command) -> Result<(), String> {
         self.sequence.clear();
         self.modal.clear();
+        let table = |keymap: &mut super::Keymap, name: &str| {
+            keymap
+                .table(name)
+                .ok_or_else(|| format!("unknown keymap: {name}"))
+        };
         match command {
             Command::Map {
-                context: super::Context::Prompt,
+                keymap,
                 keys,
                 target,
                 ..
-            } => {
+            } if keymap == "prompt" => {
                 let input = super::keymap::prompt_action(target.trim())
                     .ok_or_else(|| format!("unknown prompt action: {target}"))?;
                 let [key] = keys[..] else {
@@ -356,7 +363,7 @@ impl Layers {
                     .map_err(|e| e.to_string())
             }
             Command::Map {
-                context,
+                keymap,
                 keys,
                 target,
                 label,
@@ -364,15 +371,16 @@ impl Layers {
                 if !self.registry.knows(&target) {
                     return Err(format!("unknown command: {target}"));
                 }
+                let table = table(&mut self.keymap, &keymap)?;
                 let label = label.unwrap_or_else(|| target.clone());
                 self.keymap
-                    .bind(context, &keys, Command::Named(target), label)
+                    .bind(table, &keys, Command::Named(target), label)
                     .map_err(|e| e.to_string())
             }
-            Command::Unmap { context, keys } => self
-                .keymap
-                .unbind(context, &keys)
-                .map_err(|e| e.to_string()),
+            Command::Unmap { keymap, keys } => {
+                let table = table(&mut self.keymap, &keymap)?;
+                self.keymap.unbind(table, &keys).map_err(|e| e.to_string())
+            }
             Command::Define {
                 name,
                 body,
@@ -511,6 +519,7 @@ impl Layers {
                     app,
                 )
                 .with_recent(self.recent_files.clone())
+                .with_keymaps(self.keymap.names())
                 .with_items(self.offer.as_ref().map_or(vec![], |(_, i)| i.clone()));
                 if let Some(note) = note {
                     line = line.with_note(note);

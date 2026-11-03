@@ -109,6 +109,8 @@ pub(super) enum Delivery {
 }
 /// How to run a language's server.
 pub(super) struct Server {
+    /// What keymaps of servers name it by.
+    pub name: String,
     pub command: Vec<String>,
     /// `initializationOptions` of `initialize`.
     pub init: Value,
@@ -412,6 +414,20 @@ impl Lsp {
             self.held.insert(*document, key.0.clone());
         }
         opened
+    }
+    /// The names of the servers each document is open in: what keymaps
+    /// of servers hold in.
+    pub fn serving(&self) -> HashMap<DocumentId, Vec<String>> {
+        let mut serving: HashMap<DocumentId, Vec<String>> = HashMap::new();
+        for ((language, _), client) in &self.clients {
+            let Some(name) = self.servers.get(language).map(|server| &server.name) else {
+                continue;
+            };
+            for document in client.opened.keys() {
+                serving.entry(*document).or_default().push(name.clone());
+            }
+        }
+        serving
     }
     /// Running, failed and stopped servers.
     pub fn servers(&self) -> Vec<Listed> {

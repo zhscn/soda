@@ -54,6 +54,7 @@ const FUNCTIONS: &[&str] = &[
     "keys",
     "map",
     "unmap",
+    "keymap",
     "face",
     "language",
     "bindings",
@@ -967,6 +968,7 @@ impl Runtime {
         if let Some(error) = failure.or(closed) {
             self.report(error);
         }
+        self.layers.set_servers(self.lsp.serving());
         if !deliveries.is_empty() {
             let view = self.app.active_view();
             self.lua_queue

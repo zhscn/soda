@@ -503,8 +503,34 @@ fn a_missing_server_is_said_once() {
         r.poll();
     }
     assert_eq!(r.message(), "quiet");
+    // Its keys hold only where a server serves the document.
     keys(&mut r, "<c-c>k");
+    assert_eq!(r.message(), "C-c k is undefined");
+    r.command(Command::Named("lsp-hover".into()));
     assert_eq!(r.message(), "No language server for this document");
+}
+#[test]
+fn keymaps_of_servers_hold_where_the_server_serves_the_later_first() {
+    let Some(mut f) = open_with(
+        "int a;\n",
+        r#"{ name = "fake" }"#,
+        r#"soda.keymap("fake", { server = "fake" })
+        soda.map("fake", "<c-c>k", "echo from fake")
+        soda.map("fake", "<c-c>y", "echo only fake")"#,
+    ) else {
+        return;
+    };
+    // `fake` was defined after `lsp`, so its key wins.
+    keys(&mut f.r, "<c-c>k");
+    assert_eq!(f.r.message(), "from fake");
+    keys(&mut f.r, "<space>y");
+    assert_eq!(f.r.message(), "only fake");
+    // Not where no server serves the document.
+    f.r.command(Command::Named("new".into()));
+    keys(&mut f.r, "<c-c>y");
+    assert_eq!(f.r.message(), "C-c y is undefined");
+    let defined = f.r.source_lua("bad", r#"soda.keymap("normal", { server = "x" })"#);
+    assert!(defined.is_err());
 }
 #[test]
 fn each_project_has_a_server_and_a_jump_stays_with_its_own() {
@@ -833,7 +859,9 @@ fn what_the_server_does_not_offer_is_said_and_not_asked() {
 fn ccls_hierarchies_open_level_by_level_and_skipped_branches_are_dim() {
     let Some(mut f) = open_with(
         "one\ntwo\nthree\nfour\n",
-        "",
+        // The fixture's server stands for ccls, whose keys hold in its
+        // documents.
+        r#"{ name = "ccls" }"#,
         r#"require("ccls").setup({ command = { "unused" } })"#,
     ) else {
         return;

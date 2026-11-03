@@ -87,6 +87,8 @@ pub struct CommandLine {
     recent: Vec<PathBuf>,
     /// The items of an `Item` slot.
     items: Vec<String>,
+    /// The key tables by name, for a KEYMAP slot.
+    keymaps: Vec<(String, String)>,
     /// The symbols of the document, nearest the caret first, once asked.
     symbols: Option<Vec<String>>,
     /// The rows are those of the last input, kept in view while the worker
@@ -204,6 +206,7 @@ impl CommandLine {
             matcher: Matcher::new(Config::DEFAULT),
             recent: vec![],
             items: vec![],
+            keymaps: vec![],
             symbols: None,
             stale: false,
         }
@@ -214,6 +217,11 @@ impl CommandLine {
         self
     }
     /// Items for an `Item` slot.
+    /// The key tables `map` and `unmap` may name, with what each is for.
+    pub fn with_keymaps(mut self, keymaps: Vec<(String, String)>) -> Self {
+        self.keymaps = keymaps;
+        self
+    }
     pub fn with_items(mut self, items: Vec<String>) -> Self {
         self.items = items;
         self
@@ -368,6 +376,28 @@ impl CommandLine {
                         mark(row, typed.into_iter().collect(), None)
                     })
                     .collect(),
+                Target::Slot(SlotKind::Keymap) => {
+                    let languages = crate::language::catalog().ids().map(|id| {
+                        (id.to_owned(), format!("Keys of {id} documents"))
+                    });
+                    let mut names = self.keymaps.clone();
+                    for (id, doc) in languages {
+                        if !names.iter().any(|(name, _)| *name == id) {
+                            names.push((id, doc));
+                        }
+                    }
+                    names
+                        .into_iter()
+                        .enumerate()
+                        .filter(|(_, (name, _))| name.starts_with(&query.text))
+                        .map(|(i, (name, doc))| {
+                            let label = format!("{name:<12} {doc}");
+                            let typed = (!query.text.is_empty()).then_some(0..query.text.len());
+                            let row = row(i as u64, label, Some(name), false);
+                            mark(row, typed.into_iter().collect(), Some(13))
+                        })
+                        .collect()
+                }
                 Target::Slot(SlotKind::Face) => crate::application::faces::names()
                     .enumerate()
                     .filter(|(_, name)| name.starts_with(&query.text))

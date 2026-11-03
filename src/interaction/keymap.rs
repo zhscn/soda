@@ -59,6 +59,41 @@ impl Context {
         Self::ALL.into_iter().find(|context| context.name() == name)
     }
 }
+/// A key table in a stack: one of the contexts, or a document keymap.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Table {
+    Context(Context),
+    /// By its place among the document keymaps.
+    Document(usize),
+}
+impl From<Context> for Table {
+    fn from(context: Context) -> Self {
+        Self::Context(context)
+    }
+}
+impl Table {
+    /// Tables that hold keys for every mode, as `global` does: what the
+    /// keypad reads its plain keys from.
+    fn shared(self) -> bool {
+        matches!(self, Self::Context(Context::Global) | Self::Document(_))
+    }
+}
+/// Where a document keymap is in force.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum Scope {
+    /// Documents in this language.
+    Language(String),
+    /// Documents a language server of this name serves; `None` for any.
+    Server(Option<String>),
+}
+/// A keymap that holds in some documents only, as an Emacs minor mode's.
+struct DocumentKeymap {
+    name: String,
+    doc: String,
+    scope: Scope,
+    layer: Layer<Command>,
+}
+
 #[test]
 fn every_context_has_its_choice_in_order() {
     for (index, context) in Context::ALL.into_iter().enumerate() {
@@ -611,6 +646,8 @@ pub(super) fn is_cancel(key: &KeyStroke) -> bool {
             || (key.control && matches!(key.code, Key::Char('[' | 'c' | 'g'))))
 }
 
+/// Keys and what each shows, as listings give them.
+pub type Bindings = Vec<(Vec<KeyStroke>, String)>;
 /// A binding target and the text shown for it in help.
 #[derive(Clone, Debug)]
 pub struct Binding<T> {
@@ -717,6 +754,8 @@ fn sequence(keys: &[KeyStroke]) -> Result<Vec<KeyStroke>, BindingError> {
 pub struct Keymap {
     edit: [Layer<Command>; 8],
     prompt: Layer<Input>,
+    /// In the order defined; a later one is asked first.
+    documents: Vec<DocumentKeymap>,
 }
 impl Default for Keymap {
     fn default() -> Self {
@@ -724,6 +763,7 @@ impl Default for Keymap {
         let mut keymap = Self {
             edit: Default::default(),
             prompt: Layer::default(),
+            documents: vec![],
         };
         let parse = |keys: &str| KeyStroke::parse_sequence(keys).unwrap();
         for (context, table) in [
@@ -756,16 +796,104 @@ impl Default for Keymap {
     }
 }
 impl Keymap {
-    pub fn bind(
+    /// Defines a document keymap, or gives one its description and scope
+    /// again. Its name may not be a context's or a language's.
+    pub fn define(&mut self, name: &str, scope: Scope, doc: String) -> Result<(), String> {
+        if Context::parse(name).is_some() {
+            return Err(format!("{name} is a key context"));
+        }
+        let language = crate::language::catalog().by_id(name).is_some();
+        if language != matches!(scope, Scope::Language(_)) {
+            return Err(format!("{name} is a language; its keymap needs no definition"));
+        }
+        match self.documents.iter_mut().find(|keymap| keymap.name == name) {
+            Some(keymap) => {
+                keymap.scope = scope;
+                keymap.doc = doc;
+            }
+            None => self.documents.push(DocumentKeymap {
+                name: name.to_owned(),
+                doc,
+                scope,
+                layer: Layer::default(),
+            }),
+        }
+        Ok(())
+    }
+    /// The table a name stands for: a context, a document keymap, or the
+    /// keymap of a language, made the first time it is named.
+    pub(super) fn table(&mut self, name: &str) -> Option<Table> {
+        if let Some(context) = Context::parse(name) {
+            return Some(Table::Context(context));
+        }
+        if let Some(index) = self.documents.iter().position(|k| k.name == name) {
+            return Some(Table::Document(index));
+        }
+        crate::language::catalog().by_id(name)?;
+        let doc = format!("Keys of {name} documents");
+        self.define(name, Scope::Language(name.to_owned()), doc).ok()?;
+        Some(Table::Document(self.documents.len() - 1))
+    }
+    /// The bindings of a table by name, for listings; `None` for a name
+    /// that is no table yet.
+    pub fn bindings_of(&self, name: &str) -> Option<Vec<(Vec<KeyStroke>, String)>> {
+        if let Some(context) = Context::parse(name) {
+            return Some(self.bindings(context));
+        }
+        let index = self.documents.iter().position(|k| k.name == name)?;
+        Some(self.table_bindings(Table::Document(index)))
+    }
+    /// The document keymaps in force in a document of `language` that the
+    /// servers named in `servers` serve: those of servers, the latest
+    /// defined first, then the language's.
+    pub(super) fn in_force(&self, language: &str, servers: &[String]) -> Vec<Table> {
+        let mut tables: Vec<Table> = (0..self.documents.len())
+            .rev()
+            .filter(|&index| match &self.documents[index].scope {
+                Scope::Server(None) => !servers.is_empty(),
+                Scope::Server(Some(name)) => servers.contains(name),
+                Scope::Language(_) => false,
+            })
+            .map(Table::Document)
+            .collect();
+        tables.extend(
+            self.documents
+                .iter()
+                .position(|k| k.scope == Scope::Language(language.to_owned()))
+                .map(Table::Document),
+        );
+        tables
+    }
+    /// Every table by name with what it is for: the contexts, then the
+    /// document keymaps.
+    pub fn names(&self) -> Vec<(String, String)> {
+        Context::CHOICES
+            .iter()
+            .map(|choice| (choice.word.to_owned(), choice.doc.to_owned()))
+            .chain(
+                self.documents
+                    .iter()
+                    .map(|keymap| (keymap.name.clone(), keymap.doc.clone())),
+            )
+            .collect()
+    }
+    fn layer(&self, table: Table) -> &Layer<Command> {
+        match table {
+            Table::Context(context) => &self.edit[context as usize],
+            Table::Document(index) => &self.documents[index].layer,
+        }
+    }
+    pub(super) fn bind(
         &mut self,
-        context: Context,
+        table: Table,
         keys: &[KeyStroke],
         command: Command,
         label: String,
     ) -> Result<(), BindingError> {
-        match context {
-            Context::Prompt => Err(BindingError::InvalidKey),
-            context => self.edit[context as usize].bind(keys, command, label),
+        match table {
+            Table::Context(Context::Prompt) => Err(BindingError::InvalidKey),
+            Table::Context(context) => self.edit[context as usize].bind(keys, command, label),
+            Table::Document(index) => self.documents[index].layer.bind(keys, command, label),
         }
     }
     pub fn bind_input(
@@ -776,28 +904,29 @@ impl Keymap {
     ) -> Result<(), BindingError> {
         self.prompt.bind(&[key], input, label)
     }
-    pub fn unbind(&mut self, context: Context, keys: &[KeyStroke]) -> Result<(), BindingError> {
-        match context {
-            Context::Prompt => self.prompt.unbind(keys),
-            context => self.edit[context as usize].unbind(keys),
+    pub(super) fn unbind(&mut self, table: Table, keys: &[KeyStroke]) -> Result<(), BindingError> {
+        match table {
+            Table::Context(Context::Prompt) => self.prompt.unbind(keys),
+            Table::Context(context) => self.edit[context as usize].unbind(keys),
+            Table::Document(index) => self.documents[index].layer.unbind(keys),
         }
     }
     /// The first table of `stack` that knows `keys`, as Emacs reads its
     /// active maps; `skip` passes over a binding that is off for now.
     pub(super) fn resolve(
         &self,
-        stack: &[Context],
+        stack: &[Table],
         keys: &[KeyStroke],
         skip: &dyn Fn(&Command) -> bool,
-    ) -> (Resolution<Command>, Context) {
-        for &context in stack {
-            match self.edit[context as usize].resolve(keys) {
+    ) -> (Resolution<Command>, Table) {
+        for &table in stack {
+            match self.layer(table).resolve(keys) {
                 Resolution::Pass => {}
                 Resolution::Complete(command) if skip(&command) => {}
-                resolution => return (resolution, context),
+                resolution => return (resolution, table),
             }
         }
-        (Resolution::Pass, Context::Global)
+        (Resolution::Pass, Table::Context(Context::Global))
     }
     /// Field keys are single strokes; printable characters insert text.
     pub(super) fn input(&self, key: KeyStroke) -> Input {
@@ -814,13 +943,13 @@ impl Keymap {
     }
     /// Next keys after a pending prefix and the label of each binding;
     /// a key that continues a longer sequence reports its own keys.
-    pub fn continuations(
+    pub(super) fn continuations(
         &self,
-        stack: &[Context],
+        stack: &[Table],
         prefix: &[KeyStroke],
     ) -> Vec<(KeyStroke, String)> {
         let mut out: Vec<(KeyStroke, String)> = vec![];
-        let bindings = stack.iter().flat_map(|context| self.bindings(*context));
+        let bindings = stack.iter().flat_map(|table| self.table_bindings(*table));
         for (keys, label) in bindings {
             if keys.len() <= prefix.len() || !keys.starts_with(prefix) {
                 continue;
@@ -851,6 +980,27 @@ impl Keymap {
             context => pairs(&self.edit[context as usize]),
         }
     }
+    fn table_bindings(&self, table: Table) -> Vec<(Vec<KeyStroke>, String)> {
+        match table {
+            Table::Context(context) => self.bindings(context),
+            Table::Document(index) => self.documents[index]
+                .layer
+                .effective()
+                .map(|b| (b.keys.clone(), b.label.clone()))
+                .collect(),
+        }
+    }
+    /// Each document keymap's name, description and effective bindings,
+    /// for help.
+    pub fn document_bindings(&self) -> Vec<(&str, &str, Bindings)> {
+        (0..self.documents.len())
+            .map(|index| {
+                let keymap = &self.documents[index];
+                let bindings = self.table_bindings(Table::Document(index));
+                (keymap.name.as_str(), keymap.doc.as_str(), bindings)
+            })
+            .collect()
+    }
 }
 
 /// How the keypad starts: `x` reads as `<c-x>`, the leader as `<c-c>` with
@@ -877,7 +1027,7 @@ pub(super) struct Sequence {
     keys: Vec<KeyStroke>,
     keypad: Option<Keypad>,
     /// The table that gave the last complete binding.
-    pub source: Option<Context>,
+    pub source: Option<Table>,
 }
 impl Sequence {
     pub fn active(&self) -> bool {
@@ -925,7 +1075,7 @@ impl Sequence {
     pub fn push_keypad(
         &mut self,
         key: KeyStroke,
-        stack: &[Context],
+        stack: &[Table],
         map: &Keymap,
     ) -> Resolution<Command> {
         let keypad = self.keypad.unwrap_or_default();
@@ -954,20 +1104,20 @@ impl Sequence {
             };
             let keys = [&self.keys[..], &[candidate]].concat();
             // A chord with Meta means what it means when typed; plain keys
-            // of Normal stay out of what the keypad reads.
-            let tables: &[Context] = if keypad.modifier.is_some() {
-                stack
+            // of the modes stay out of what the keypad reads.
+            let tables: Vec<Table> = if keypad.modifier.is_some() {
+                stack.to_vec()
             } else {
-                &[Context::Global]
+                stack.iter().copied().filter(|table| table.shared()).collect()
             };
-            match map.resolve(tables, &keys, &|_| false).0 {
-                Resolution::Prefix => {
+            match map.resolve(&tables, &keys, &|_| false) {
+                (Resolution::Prefix, _) => {
                     self.keys = keys;
                     self.keypad = Some(Keypad::default());
                     return Resolution::Prefix;
                 }
-                Resolution::Complete(command) => {
-                    self.source = Some(Context::Global);
+                (Resolution::Complete(command), table) => {
+                    self.source = Some(table);
                     self.clear();
                     return Resolution::Complete(command);
                 }
@@ -980,7 +1130,7 @@ impl Sequence {
     pub fn push(
         &mut self,
         key: KeyStroke,
-        stack: &[Context],
+        stack: &[Table],
         map: &Keymap,
         skip: &dyn Fn(&Command) -> bool,
     ) -> Resolution<Command> {
@@ -1037,7 +1187,7 @@ impl Sequence {
     /// keypad cannot type after a prefix, are left out.
     pub fn keypad_continuations(
         &self,
-        stack: &[Context],
+        stack: &[Table],
         map: &Keymap,
     ) -> Vec<(KeyStroke, String)> {
         let keypad = self.keypad.unwrap_or_default();
@@ -1054,7 +1204,8 @@ impl Sequence {
                 .map(|(key, label)| (plain(key), label))
                 .collect();
         }
-        let next = map.continuations(&[Context::Global], &self.keys);
+        let shared: Vec<Table> = stack.iter().copied().filter(|t| t.shared()).collect();
+        let next = map.continuations(&shared, &self.keys);
         let mut out: Vec<(KeyStroke, String)> = vec![];
         if !keypad.literal {
             for (key, label) in next.iter().filter(|(key, _)| key.control && !key.alt) {
@@ -1069,7 +1220,7 @@ impl Sequence {
         out
     }
     /// Whether a key goes on with the pending sequence.
-    pub fn continues(&self, key: KeyStroke, stack: &[Context], map: &Keymap) -> bool {
+    pub fn continues(&self, key: KeyStroke, stack: &[Table], map: &Keymap) -> bool {
         let keys = [&self.keys[..], &[key]].concat();
         !self.keys.is_empty()
             && !matches!(map.resolve(stack, &keys, &|_| false).0, Resolution::Pass)

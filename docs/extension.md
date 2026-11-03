@@ -109,9 +109,10 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 | `soda.option(name)` | 选项在当前文档的值，按类型返回布尔、整数或字符串 |
 | `soda.set(name, value, [local])` | 设置选项，`local` 为真时只对当前文档；不合法时报错 |
 | `soda.declare_option(name, spec)` | 声明模块自己的选项，见下文 |
-| `soda.map(mode, keys, target, [doc])` | 绑定按键：`target` 是命令行，或 Lua 函数（prompt 除外）；`doc` 显示在按键提示和帮助里 |
-| `soda.unmap(mode, keys)` | 去掉用户绑定，恢复默认 |
-| `soda.bindings(mode)` | 当前生效的绑定：`{ {keys = "<c-x>o", command = "window-next"}, ... }` |
+| `soda.map(keymap, keys, target, [doc])` | 绑定按键：`keymap` 是上下文、文档键位表或语言 id（见[键位上下文](interaction.md#键位上下文)）；`target` 是命令行，或 Lua 函数（prompt 除外）；`doc` 显示在按键提示和帮助里 |
+| `soda.unmap(keymap, keys)` | 去掉用户绑定，恢复默认 |
+| `soda.keymap(name, { server = NAME, doc = ... })` | 声明服务器的键位表：在名为 `NAME` 的语言服务器服务的文档里生效，`"*"` 表示任一服务器；再次调用更新说明和范围 |
+| `soda.bindings(keymap)` | 当前生效的绑定：`{ {keys = "<c-x>o", command = "window-next"}, ... }` |
 | `soda.face(name, spec)` | 设置界面或语法分类的颜色，见[终端界面](ui.md#主题) |
 | `soda.language(name, language)` | 同 `language-map` |
 | `soda.buffers()` | 所有打开的文档的句柄 |
@@ -164,11 +165,11 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 
 ### 内置模块
 
-`lua/` 下的模块编译进二进制。启动时加载的模块只增加命令和键位，用到时才做事；不随启动加载的要在 `init.lua` 里 `require`。不想要某个键时用 `unmap`。leader 指 Normal 的 `SPC`，它读作 `<c-c>`，所以这些键在 `global` 表里绑成 `<c-c>` 加一个键，所有模式下 `C-c` 加同一个键也能用。
+`lua/` 下的模块编译进二进制。启动时加载的模块只增加命令和键位，用到时才做事；不随启动加载的要在 `init.lua` 里 `require`。不想要某个键时用 `unmap`。leader 指 Normal 的 `SPC`，它读作 `<c-c>`，所以这些键绑成 `<c-c>` 加一个键，所有模式下 `C-c` 加同一个键也能用；与语言服务器有关的键在 `lsp`、`ccls` 表里，只在服务器服务的文档中生效。
 
 | 模块 | 内容 | 键位 |
 | --- | --- | --- |
-| `lsp` | 语言服务器的各项功能，见[语言服务器](lsp.md) | `<a-.>`、`<a-?>`，leader 下的 `k`、`c`、`C`、`t`、`T`、`R`、`a`、`s`、`S`、`h`、`.` |
+| `lsp` | 语言服务器的各项功能，见[语言服务器](lsp.md) | `lsp` 表：`<a-.>`、`<a-?>`，leader 下的 `k`、`c`、`C`、`t`、`T`、`R`、`a`、`s`、`S`、`h`、`.` |
 | `pairs` | 结构化编辑，见[交互层](interaction.md#结构化编辑) | 见交互层 |
 | `comment` | 切换行注释 | `<a-;>` |
 | `emacs` | Emacs 的单词大小写、对调和空白命令，见[交互层](interaction.md#emacs-键位) | 见交互层 |
@@ -179,7 +180,7 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 | `git-changes` | 把 `git diff` 的改动块列入 `*changes*` | leader 下的 `g` |
 | `git-flags` | 用行标记标出新增、修改和删除的行；每次打开、保存都运行 git，需 `require` | 无 |
 | `git` | 只读查询：`root(path)` 找工作树顶层；`status(path, fn)` 在后台得到根目录、分支、提交、上游和前后差几个提交，以及路径的跟踪、忽略、暂存、修改、冲突状态。需 `require` | 无 |
-| `ccls` | 让 C++ 使用 ccls 及其扩展（逐层的调用、继承、成员树，按语法树移动，变暗跳过的预处理分支）；`require("ccls").setup({...})`，见[语言服务器](lsp.md#ccls) | `setup` 后 leader 下的 `c`、`C`、`t`、`T`、`m`、`M` |
+| `ccls` | 让 C++ 使用 ccls 及其扩展（逐层的调用、继承、成员树，按语法树移动，变暗跳过的预处理分支）；`require("ccls").setup({...})`，见[语言服务器](lsp.md#ccls) | `ccls` 表：`setup` 后 leader 下的 `c`、`C`、`t`、`T`、`m`、`M` |
 
 ### 文档
 
