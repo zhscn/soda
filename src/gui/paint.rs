@@ -868,10 +868,14 @@ pub fn cursor(painter: &mut Painter, runtime: &Runtime, at: Rect, bar: bool) {
     let color = rgba(accent.bg, painter.fg);
     painter.clip = painter.caret_clip;
     if bar {
+        // As wide as the text is heavy, over the edge between characters;
+        // at the line start, half of it is left of the text, which shows.
+        let width = (painter.fonts.cell * 0.2).round().max(2.0);
+        painter.clip[0] -= width;
         painter.fill(
-            Rect::new(at.x.floor(), at.y + 1.0, 2.0, at.h - 2.0),
+            Rect::new((at.x - width / 2.0).round(), at.y + 1.0, width, at.h - 2.0),
             color,
-            1.0,
+            width / 2.0,
         );
     } else {
         painter.fill(at, faded(color, 0.45), 2.0);
