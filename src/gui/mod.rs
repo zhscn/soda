@@ -3,6 +3,7 @@
 //! monospace font, and the parts around it are arranged in pixels
 //! (`paint`). Runtime owns command execution, interaction state and task
 //! scheduling, as for the terminal.
+mod clipboard;
 mod input;
 mod paint;
 mod render;
@@ -187,6 +188,8 @@ impl Scrolling {
 pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
     let event_loop = EventLoop::new().map_err(io::Error::other)?;
     let runtime = host::start(path, config, Box::new(crate::clipboard::Clipboard::local()))?;
+    // Declared after the event loop, so dropped before it: the runtime's
+    // Wayland clipboard uses the loop's connection.
     let mut app = App {
         runtime,
         gui: None,
@@ -717,6 +720,11 @@ impl ApplicationHandler for App {
             Err(error) => return self.fail(event_loop, error),
         };
         window.set_ime_allowed(false);
+        // The window system's clipboard, once there is a window to reach
+        // it through; until then, and without it, the clipboard tools.
+        if let Some(clipboard) = clipboard::native(&window) {
+            self.runtime.set_system_clipboard(clipboard);
+        }
         let mut gui = Gui::new(renderer, window.scale_factor() as f32);
         gui.measure(&mut self.runtime);
         self.gui = Some(gui);

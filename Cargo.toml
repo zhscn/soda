@@ -35,13 +35,19 @@ pollster = { version = "0.4", optional = true }
 unicode-script = { version = "0.5", optional = true }
 wgpu = { version = "30", optional = true }
 winit = { version = "0.30.13", optional = true }
+arboard = { version = "3.7", default-features = false, optional = true }
+
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+smithay-clipboard = { version = "0.7.3", optional = true }
 
 [features]
 # The graphical frontend, the `soda-gui` program.
 gui = [
+    "dep:arboard",
     "dep:bytemuck",
     "dep:cosmic-text",
     "dep:pollster",
+    "dep:smithay-clipboard",
     "dep:unicode-script",
     "dep:wgpu",
     "dep:winit",
