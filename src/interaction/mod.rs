@@ -337,7 +337,14 @@ impl Layers {
     pub fn completion_sync(&mut self, app: &Application) -> (Option<completion::Request>, bool) {
         let editing = self.mode == EditMode::Insert && self.active.is_none();
         self.snippet.sync(app, editing);
+        if let Some(offer) = self.snippet.take_offer() {
+            self.completion.offer(app, offer);
+        }
         self.completion.sync(app, self.mode, self.active.is_some())
+    }
+    /// Paints the places of the snippet being filled in, when they changed.
+    pub fn snippet_paint(&mut self, app: &Application) -> Vec<Event> {
+        self.snippet.paint(app)
     }
     pub fn completion_results(
         &mut self,
@@ -517,14 +524,14 @@ impl Layers {
         time: Duration,
     ) -> Result<Response, EditError> {
         self.completion.observe(update);
-        self.snippet.observe(app, update);
+        // Mirrors follow their places in the same undo step.
+        let mirrored = self.snippet.observe(app, update, time);
         let searching = matches!(self.active, Some(Layer::Search { .. }));
         self.jumps.observe(app, update, searching);
-        let group_end = if update.active_changed {
-            self.end_insert_group(app, time)
-        } else {
-            vec![]
-        };
+        let mut group_end: Vec<Event> = mirrored.into_iter().collect();
+        if update.active_changed {
+            group_end.extend(self.end_insert_group(app, time));
+        }
         let active_document = app
             .active_view()
             .and_then(|id| app.view(id))

@@ -4,6 +4,7 @@ mod profile;
 mod structure;
 mod whitespace;
 use crate::core::Change;
+pub(crate) use profile::plain_json;
 pub use profile::{Analyzer, Catalog, Profile, catalog};
 pub(crate) use structure::Scanner;
 pub use structure::{Group, Item, ItemKind, Side};

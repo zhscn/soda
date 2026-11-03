@@ -1298,6 +1298,38 @@ mod tests {
     }
 
     #[test]
+    fn places_of_a_snippet_left_to_fill_are_drawn_with_their_face() {
+        let root = tempfile::tempdir().unwrap();
+        let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.start(None);
+        r.command(Command::SetMode(EditMode::Insert));
+        r.command(Command::Named("snippet ${1:aa} ${2:bb}".into()));
+        let text = screen(&mut r, 40, 10);
+        let row = text.lines().nth(1).unwrap();
+        let start = row.split("aa").next().unwrap().chars().count() as u16;
+        let theme = Theme::build("auto", &Default::default());
+        let areas = Areas::new(&r, 40, 10);
+        let texts = super::super::frames(
+            &r,
+            &mut crate::tui::highlight::Highlighter::default(),
+            &areas,
+        )
+        .unwrap();
+        let mut terminal = ratatui::Terminal::new(TestBackend::new(40, 10)).unwrap();
+        terminal
+            .draw(|frame| render(frame, &r, &theme, &areas, &texts))
+            .unwrap();
+        let cells = terminal.backend().buffer();
+        let underlined = |x| {
+            cells[(x, 1)]
+                .modifier
+                .contains(ratatui::style::Modifier::UNDERLINED)
+        };
+        // The place being filled is the selection; the next is marked.
+        assert!(!underlined(start) && underlined(start + 3) && underlined(start + 4));
+    }
+
+    #[test]
     fn the_selected_candidate_shows_in_gray_at_the_caret_and_not_in_the_text() {
         let root = tempfile::tempdir().unwrap();
         let mut r = Runtime::new(root.path().to_owned()).unwrap();

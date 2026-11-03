@@ -42,6 +42,10 @@ pub const UI_FACES: &[(&str, &str)] = &[
         "reference-write",
         "Places where the symbol at the caret is written",
     ),
+    (
+        "snippet",
+        "Other places of the snippet being filled in, and copies",
+    ),
     ("unnecessary", "Code a language server finds unused"),
     (
         "deprecated",

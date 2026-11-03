@@ -180,6 +180,9 @@ struct Session {
     replacing: Vec<u64>,
     /// Candidates whose source was asked to resolve them.
     resolving: Vec<(u64, i64)>,
+    /// The end of a snippet's place whose choices these are: accepting
+    /// replaces up to it, and the list goes when the caret passes it.
+    choice: Option<DocumentPosition>,
 }
 
 pub struct State {
@@ -251,6 +254,12 @@ impl State {
     pub(super) fn visible(&self) -> bool {
         self.session.as_ref().is_some_and(Session::shown)
     }
+    /// The list holds the choices of a snippet's place.
+    pub(super) fn choosing(&self) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(|s| s.choice.is_some() && s.shown())
+    }
     pub(super) fn selected(&self) -> bool {
         self.session.as_ref().is_some_and(|s| s.selected.is_some())
     }
@@ -314,6 +323,71 @@ impl State {
         }
         found
     }
+    /// Lists the choices of a snippet's place, the one it holds first.
+    pub(super) fn offer(&mut self, app: &Application, offer: super::snippet::Offer) {
+        let Some(view) = app.view(offer.view) else {
+            return;
+        };
+        let document = app
+            .workspace()
+            .editor(view.document_id)
+            .unwrap()
+            .model()
+            .document();
+        let (Ok(start), Ok(end)) = (
+            document.position(ByteOffset(offer.place.start), Association::Before),
+            document.position(ByteOffset(offer.place.end), Association::After),
+        ) else {
+            return;
+        };
+        self.generation += 1;
+        self.session = Some(Session {
+            view: offer.view,
+            start,
+            query: String::new(),
+            items: offer
+                .choices
+                .into_iter()
+                .map(|choice| Item::plain(choice, "", 0))
+                .collect(),
+            matches: vec![],
+            selected: None,
+            top: 0,
+            asked: vec![],
+            incomplete: vec![],
+            replacing: vec![],
+            resolving: vec![],
+            choice: Some(end),
+        });
+        self.filter(String::new(), document.snapshot().text(), offer.place.start);
+        if let Some(session) = &mut self.session {
+            session.selected = Some(0);
+        }
+    }
+    /// Keeps a list of choices while the caret is in its place: what is
+    /// typed there narrows it.
+    fn sync_choice(&mut self, app: &Application, mode: EditMode, blocked: bool) -> bool {
+        let session = self.session.as_ref().unwrap();
+        let current =
+            (mode == EditMode::Insert && !blocked && Some(session.view) == app.active_view())
+                .then(|| at_selection(app))
+                .flatten();
+        let start = session.start.offset.0;
+        let end = session.choice.unwrap().offset.0;
+        let Some((snapshot, range)) = current.filter(|(snapshot, range)| {
+            start <= range.start
+                && range.end <= end
+                && !snapshot.text()[start..range.start].contains('\n')
+        }) else {
+            self.session = None;
+            return true;
+        };
+        let query = snapshot.text()[start..range.start].to_owned();
+        if query != session.query {
+            self.filter(query, snapshot.text(), range.start);
+        }
+        true
+    }
     pub(super) fn trigger(&mut self) {
         self.manual = true;
     }
@@ -335,6 +409,14 @@ impl State {
                 Ok(Some(start)) => session.start = start,
                 _ => self.session = None,
             }
+            if let Some(session) = &mut self.session
+                && let Some(end) = &mut session.choice
+            {
+                match end.map(edit, false) {
+                    Ok(Some(mapped)) => *end = mapped,
+                    _ => self.session = None,
+                }
+            }
         }
     }
     /// Brings the session in line with the caret; returns a request for
@@ -348,6 +430,9 @@ impl State {
         let typed = std::mem::take(&mut self.typed);
         let manual = std::mem::take(&mut self.manual);
         let shown = self.visible();
+        if self.session.as_ref().is_some_and(|s| s.choice.is_some()) {
+            return (None, self.sync_choice(app, mode, blocked));
+        }
         let current = (mode == EditMode::Insert && !blocked)
             .then(|| at_caret(app))
             .flatten();
@@ -439,6 +524,7 @@ impl State {
             incomplete: vec![],
             replacing: vec![],
             resolving: vec![],
+            choice: None,
         });
         let others = workspace
             .documents()
@@ -641,6 +727,22 @@ impl State {
     }
     /// What accepting a candidate replaces, and with what.
     pub(super) fn accept(&mut self, replace: bool, app: &Application) -> Option<Accepted> {
+        if let Some(end) = self.session.as_ref().and_then(|s| s.choice) {
+            let (_, selection) = at_selection(app)?;
+            let session = self.session.take()?;
+            let item = session
+                .items
+                .get(*session.matches.get(session.selected.or(Some(0))?)?)?;
+            return Some(Accepted {
+                view: session.view,
+                edits: vec![],
+                range: session.start.offset.0..end.offset.0.max(selection.end),
+                caret: selection.start,
+                selected: selection.end,
+                text: item.text.clone(),
+                snippet: false,
+            });
+        }
         let (snapshot, caret) = at_caret(app)?;
         let session = self.session.take()?;
         let at = session.selected.or(replace.then_some(0))?;
@@ -660,6 +762,7 @@ impl State {
             edits: extra_changes(&snapshot, &item.edits, &range),
             range,
             caret,
+            selected: caret,
             text: item.text.clone(),
             snippet: item.snippet,
         })
@@ -693,25 +796,30 @@ impl State {
             .collect();
         // Only a candidate that goes on from what is typed reads as more of
         // it; one that would change the typed text has no preview.
-        let preview = session.selected.and_then(|at| {
-            let item = &session.items[*session.matches.get(at)?];
-            if item.back != 0 {
-                return None;
-            }
-            let text = if item.snippet {
-                super::snippet::parse(&item.text).text
-            } else {
-                item.text.clone()
-            };
-            let rest = text.strip_prefix(session.query.as_str())?;
-            let rest = rest.lines().next().unwrap_or_default();
-            let caret = session.start.offset.0 + session.query.len();
-            (!rest.is_empty()).then(|| (caret, rest.to_owned()))
-        });
+        let preview = session
+            .selected
+            .filter(|_| session.choice.is_none())
+            .and_then(|at| {
+                let item = &session.items[*session.matches.get(at)?];
+                if item.back != 0 {
+                    return None;
+                }
+                let text = if item.snippet {
+                    super::snippet::parse(&item.text).text
+                } else {
+                    item.text.clone()
+                };
+                let rest = text.strip_prefix(session.query.as_str())?;
+                let rest = rest.lines().next().unwrap_or_default();
+                let caret = session.start.offset.0 + session.query.len();
+                (!rest.is_empty()).then(|| (caret, rest.to_owned()))
+            });
         Some(Popup {
             rows,
             preview,
-            typed: session.query.len(),
+            typed: session.choice.map_or(session.query.len(), |end| {
+                end.offset.0.saturating_sub(session.start.offset.0)
+            }),
         })
     }
 }
@@ -764,9 +872,20 @@ pub(super) struct Accepted {
     /// Changes beside the replaced range, made in the same step.
     pub edits: Vec<crate::core::Change>,
     pub range: std::ops::Range<usize>,
+    /// The selection when it was accepted, which typing would replace.
     pub caret: usize,
+    pub selected: usize,
     pub text: String,
     pub snippet: bool,
+}
+fn at_selection(app: &Application) -> Option<(Snapshot, std::ops::Range<usize>)> {
+    let view = app.view(app.active_view()?)?;
+    let editor = app.workspace().editor(view.document_id)?;
+    let selection = editor.model().session(view.session_id)?.selection();
+    Some((
+        editor.model().document().snapshot().clone(),
+        selection.range(),
+    ))
 }
 fn at_caret(app: &Application) -> Option<(Snapshot, usize)> {
     let view = app.view(app.active_view()?)?;

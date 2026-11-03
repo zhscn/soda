@@ -37,6 +37,8 @@ pub(super) struct Theme {
     /// The symbol at the caret where else it stands, and where it is written.
     pub reference: Style,
     pub reference_write: Style,
+    /// Places of a snippet left to fill in, and their copies.
+    pub snippet: Style,
     pub unnecessary: Style,
     pub deprecated: Style,
     /// Notes after the text of their line, by severity from info up.
@@ -182,6 +184,7 @@ impl Theme {
             "inlay" => &mut self.inlay,
             "reference" => &mut self.reference,
             "reference-write" => &mut self.reference_write,
+            "snippet" => &mut self.snippet,
             "unnecessary" => &mut self.unnecessary,
             "deprecated" => &mut self.deprecated,
             "note-info" => &mut self.notes[0],
@@ -232,6 +235,9 @@ impl Theme {
             reference: Style::new().bg(c(p.gutter)),
             reference_write: Style::new()
                 .bg(c(p.gutter))
+                .add_modifier(Modifier::UNDERLINED),
+            snippet: Style::new()
+                .bg(c(p.bg_highlight))
                 .add_modifier(Modifier::UNDERLINED),
             unnecessary: Style::new().fg(c(p.comment)),
             deprecated: Style::new().add_modifier(Modifier::CROSSED_OUT),

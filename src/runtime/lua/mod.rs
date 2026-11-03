@@ -73,6 +73,7 @@ const FUNCTIONS: &[&str] = &[
     "create_file",
     "rename_file",
     "delete_file",
+    "json_decode",
     "completion_source",
     "buffer_list",
     "window_list",

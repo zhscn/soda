@@ -409,3 +409,155 @@ fn the_list_takes_tab_before_the_snippet() {
     keys(&mut r, "c");
     assert_eq!(shown(&r), "wonder\nwonder c|\n");
 }
+fn painted(r: &Runtime) -> Vec<String> {
+    let view = r.app().view(r.app().active_view().unwrap()).unwrap();
+    let text = text(r);
+    r.app()
+        .paints(view.document_id)
+        .into_iter()
+        .map(|(range, _)| text[range].to_owned())
+        .collect()
+}
+#[test]
+fn copies_of_a_place_follow_it_as_it_is_typed() {
+    let (_dir, mut r) = bundled("|\n");
+    r.command(Command::SetMode(EditMode::Normal));
+    r.command(Command::Named(
+        "snippet for (${1:i} = 0; $1 < ${2:n}; ++$1) ${1/(.*)/${1:/upcase}/}".into(),
+    ));
+    assert_eq!(text(&r), "for (i = 0; i < n; ++i) I\n");
+    keys(&mut r, "idx");
+    assert_eq!(shown(&r), "for (idx| = 0; idx < n; ++idx) IDX\n");
+    keys(&mut r, "<bs>");
+    assert_eq!(text(&r), "for (id = 0; id < n; ++id) ID\n");
+    keys(&mut r, "<tab>k<tab>");
+    assert_eq!(shown(&r), "for (id = 0; id < k; ++id) ID|\n");
+    // From Normal, the snippet, typing and copies are one step.
+    keys(&mut r, "<esc>u");
+    assert_eq!(text(&r), "\n");
+}
+#[test]
+fn typing_at_the_edge_of_a_place_stays_in_it() {
+    let (_dir, mut r) = bundled("|\n");
+    r.command(Command::Named("snippet ${1:a}${2:b}$3".into()));
+    keys(&mut r, "<right>x");
+    assert_eq!(shown(&r), "ax|b\n");
+    keys(&mut r, "<tab>");
+    keys(&mut r, "y");
+    assert_eq!(shown(&r), "axy|\n");
+    keys(&mut r, "<tab>z");
+    assert_eq!(shown(&r), "axyz|\n");
+}
+#[test]
+fn places_left_to_fill_and_copies_are_painted_until_the_end() {
+    let (_dir, mut r) = bundled("|\n");
+    r.command(Command::Named("snippet ${1:a} ${2:b} $1".into()));
+    assert_eq!(painted(&r), ["b", "a"]);
+    keys(&mut r, "<tab>");
+    assert_eq!(painted(&r), ["a", "a"]);
+    keys(&mut r, "<tab>");
+    assert!(painted(&r).is_empty());
+}
+#[test]
+fn a_place_with_choices_lists_them() {
+    let (_dir, mut r) = bundled("|\n");
+    r.command(Command::Named("snippet ${1|yes,no,maybe|}; ${2:x}".into()));
+    assert_eq!(text(&r), "yes; x\n");
+    assert_eq!(listed(&mut r), ["yes", "no", "maybe"]);
+    keys(&mut r, "<down><ret>");
+    assert_eq!(text(&r), "no; x\n");
+    // Typing narrows them; Tab goes on to the next place.
+    keys(&mut r, "<s-tab>");
+    keys(&mut r, "m");
+    assert_eq!(labels(&r), ["maybe"]);
+    keys(&mut r, "<tab>");
+    keys(&mut r, "y");
+    assert_eq!(shown(&r), "m; y|\n");
+}
+#[test]
+fn a_snippet_in_a_place_goes_back_to_the_outer_one() {
+    let (_dir, mut r) = bundled("|\n");
+    r.command(Command::Named("snippet f(${1:a}, ${2:b})".into()));
+    r.command(Command::Named("snippet g(${1:x}, ${2:y})".into()));
+    assert_eq!(text(&r), "f(g(x, y), b)\n");
+    keys(&mut r, "<tab>z<tab>");
+    assert_eq!(shown(&r), "f(g(x, z)|, b)\n");
+    keys(&mut r, "<tab>c");
+    assert_eq!(shown(&r), "f(g(x, z), c|)\n");
+}
+#[test]
+fn variables_take_the_file_and_the_selection() {
+    let (_dir, mut r) = bundled("|body\n");
+    r.command(Command::SetMode(EditMode::Normal));
+    r.command(Command::Edit(Edit::SetSelection(Selection {
+        anchor: 0,
+        head: 4,
+    })));
+    r.command(Command::Named(
+        "snippet // $TM_FILENAME_BASE\nif (${1:c}) { $TM_SELECTED_TEXT }".into(),
+    ));
+    assert_eq!(text(&r), "// a\nif (c) { body }\n");
+    // The places are filled in Insert.
+    keys(&mut r, "k");
+    assert_eq!(text(&r), "// a\nif (k) { body }\n");
+}
+#[test]
+fn a_macro_replays_a_snippet_with_what_filled_it() {
+    let (_dir, mut r) = bundled("|\n");
+    snippet_source(&mut r, "f(${1:a}, $1) $0;");
+    keys(&mut r, "<esc><f3>i");
+    keys(&mut r, "fo");
+    listed(&mut r);
+    keys(&mut r, "<tab>k<tab><esc><f4>");
+    assert_eq!(text(&r), "f(k, k) ;\n");
+    r.command(Command::Edit(Edit::SetSelection(Selection::caret(
+        text(&r).len(),
+    ))));
+    keys(&mut r, "<f4>");
+    assert_eq!(text(&r), "f(k, k) ;\nf(k, k) ;");
+}
+#[test]
+fn snippets_load_from_files_in_the_vscode_format() {
+    let (dir, mut r) = bundled("|\n");
+    let pack = dir.path().join("pack");
+    std::fs::create_dir_all(pack.join("snippets")).unwrap();
+    std::fs::write(
+        pack.join("package.json"),
+        r#"{ "contributes": { "snippets": [
+             { "language": ["plaintext", "rust"], "path": "./snippets/text.json" } ] } }"#,
+    )
+    .unwrap();
+    std::fs::write(
+        pack.join("snippets/text.json"),
+        r#"{
+          // Comments and trailing commas, as VSCode allows.
+          "Fori": { "prefix": ["fori", "loop"], "body": ["for ${1:i} {", "\t$0", "}"],
+                    "description": "A loop", },
+        }"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("one.json"),
+        r#"{ "x": { "prefix": "xyz", "body": "x($1)", "scope": "plaintext,c" } }"#,
+    )
+    .unwrap();
+    let path = pack.to_string_lossy().into_owned();
+    let one = dir.path().join("one.json").to_string_lossy().into_owned();
+    lua(
+        &mut r,
+        &format!(
+            r#"local s = require("snippets")
+               assert(s.load("{path}") == 4, "directory")
+               assert(s.load("{one}") == 2, "file")"#
+        ),
+    );
+    assert_eq!(r.message(), "");
+    keys(&mut r, "lo");
+    assert_eq!(listed(&mut r), ["loop"]);
+    keys(&mut r, "<tab>k");
+    assert_eq!(text(&r), "for k {\n    \n}\n");
+    keys(&mut r, "<esc>o");
+    r.command(Command::SetMode(EditMode::Insert));
+    keys(&mut r, "xy");
+    assert_eq!(listed(&mut r), ["xyz"]);
+}

@@ -206,6 +206,8 @@ pub fn emacs_notation(keys: &[KeyStroke]) -> String {
 pub enum UserInput {
     Key(KeyStroke),
     Paste(String),
+    /// A snippet a candidate expanded, as a macro replays it.
+    Snippet(String),
     Pointer(super::Pointer),
     Unrecognized,
     FocusLost,
@@ -262,10 +264,15 @@ impl Layers {
         let mut stack = vec![];
         match self.mode {
             EditMode::Insert => {
+                // Over the choices of a place, Tab goes on to the next.
+                let choosing = self.completion.choosing();
+                if choosing && self.snippet.active() {
+                    stack.push(Context::Snippet);
+                }
                 if self.completion.visible() {
                     stack.push(Context::Completion);
                 }
-                if self.snippet.active() {
+                if !choosing && self.snippet.active() {
                     stack.push(Context::Snippet);
                 }
             }
@@ -301,6 +308,7 @@ impl Layers {
             UserInput::Key(key) => !key.release,
             UserInput::Paste(_) => true,
             UserInput::Pointer(_)
+            | UserInput::Snippet(_)
             | UserInput::Unrecognized
             | UserInput::FocusLost
             | UserInput::FocusGained => false,
@@ -353,7 +361,8 @@ impl Layers {
             let input = match input {
                 UserInput::Key(key) => self.keymap.input(key),
                 UserInput::Paste(text) => Input::Paste(text),
-                UserInput::Unrecognized
+                UserInput::Snippet(_)
+                | UserInput::Unrecognized
                 | UserInput::FocusLost
                 | UserInput::FocusGained
                 | UserInput::Pointer(_) => Input::Unrecognized,
@@ -362,12 +371,15 @@ impl Layers {
         }
         let key = match input {
             UserInput::Key(key) => key,
-            UserInput::Paste(_) | UserInput::Unrecognized
+            UserInput::Paste(_) | UserInput::Snippet(_) | UserInput::Unrecognized
                 if self.sequence.active() || self.modal.active() =>
             {
                 self.sequence.clear();
                 self.modal.clear();
                 return Ok(pending(Message::Keep));
+            }
+            UserInput::Snippet(body) if self.mode == EditMode::Insert => {
+                return self.execute(Command::Snippet(body), app, time, file_root);
             }
             UserInput::Paste(text) if self.mode == EditMode::Insert => {
                 let mut result = self.execute(
@@ -508,11 +520,9 @@ impl Layers {
                 {
                     self.modal.last = Some(command.clone());
                 }
-                // Choosing from a list is no use to a replay.
-                if matches!(
-                    self.sequence.source,
-                    Some(keymap::Context::Completion | keymap::Context::Snippet)
-                ) {
+                // Choosing from a list is no use to a replay; moving
+                // through a snippet is, as it replays as one.
+                if self.sequence.source == Some(keymap::Context::Completion) {
                     self.modal.replay.unrecord();
                 }
                 return self.execute(command, app, time, file_root);

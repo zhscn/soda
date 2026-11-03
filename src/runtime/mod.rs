@@ -372,6 +372,10 @@ impl Runtime {
         if let Some(resolve) = self.layers.completion_resolve() {
             self.resolve_candidate(resolve);
         }
+        for event in self.layers.snippet_paint(&self.app) {
+            let _ = self.app.dispatch(event);
+            self.dirty = true;
+        }
         self.dirty |= changed;
     }
     /// Lets documents start language servers.

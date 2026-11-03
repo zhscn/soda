@@ -70,21 +70,36 @@ soda.completion.register({
 
 ## Snippet
 
-`snippet BODY` 在光标处展开，候选带 `snippet` 字段时确认后展开。语法是 LSP 的：`$1`、`${1:默认文字}`（可以嵌套）、`$0`（结束位置，缺省为末尾），`\$`、`\}`、`\\` 转义。`${1|a,b|}` 取第一项，变量为空或取默认值。同一个序号第二次出现时复制第一处当时的文字，**之后的输入不同步**，也就是没有 mirror。
+`snippet BODY` 在选区处展开，候选带 `snippet` 字段时确认后展开。在 Normal 里执行时先进入 Insert，选中的文字是 `$TM_SELECTED_TEXT`，可以写把选区包起来的 snippet。语法是 LSP 的，和 VSCode 一致：
+
+- `$1`、`${1:默认文字}`（可以嵌套）、`$0`（结束位置，缺省为末尾），`\$`、`\}`、`\\` 转义。
+- 同一个序号出现多次时，第一个带默认文字的是要填的位置，其余是**镜像**：在位置里打字时它们跟着变，和打字在同一个撤销步里。
+- `${1|a,b,c|}` 是选项：先放第一项，进入这个位置时列出所有选项，上下键选、回车确认，打字过滤；`Tab` 不确认，直接去下一个位置。
+- `${1/正则/格式/选项}` 是变换后的镜像，`${TM_FILENAME/正则/格式/}` 是变换后的变量。格式里有 `$1`、`${1:/upcase}`（还有 `downcase`、`capitalize`、`camelcase`、`pascalcase`）、`${1:+有匹配时}`、`${1:?有:无}`、`${1:-无匹配时}`；选项 `g` 替换所有匹配，`i`、`m`、`s` 同正则。正则是 Rust `regex` 的语法，没有环视。
+- 变量：`TM_SELECTED_TEXT`、`TM_CURRENT_LINE`、`TM_CURRENT_WORD`、`TM_LINE_INDEX`、`TM_LINE_NUMBER`、`TM_FILENAME`、`TM_FILENAME_BASE`、`TM_DIRECTORY`、`TM_FILEPATH`、`RELATIVE_FILEPATH`、`WORKSPACE_NAME`、`WORKSPACE_FOLDER`、`CLIPBOARD`、`CURSOR_INDEX`、`CURSOR_NUMBER`、`CURRENT_YEAR` 等日期时间（本地时间）、`RANDOM`、`RANDOM_HEX`、`UUID`、`LINE_COMMENT`、`BLOCK_COMMENT_START`、`BLOCK_COMMENT_END`。值为空时取 `${NAME:默认}` 的默认值；不认识的变量按规范变成一个写着变量名的位置，排在有序号的位置之后。补全展开时 `TM_SELECTED_TEXT` 为空。
 
 展开是一个撤销步。多行时，后面的行先加上当前行的缩进，行首的制表符算一层；然后每行走语言的 Reindent，C++ 得到 CST 算出的缩进。
 
-会话独立于补全：每个位置是一对随编辑映射的位置，起点靠前、终点靠后，在里面打字时范围跟着变大。Insert 中第一个位置选中，打字替换它。`Tab` / `Shift-Tab`（`snippet-next` / `snippet-previous`，上下文 `snippet`）在位置之间移动，列表显示时 `Tab` 先给列表，所以字段里可以继续补全。到达最后一个位置、光标离开 snippet 范围、回到 Normal 或切换视图时结束。
+会话独立于补全。正在填的位置吃掉两边的输入，其他位置和镜像不吃，所以紧挨着的两个位置不会互相吞字；空位置留在它在 snippet 里的那一侧。一次编辑把某个位置连同周围一起替换掉时，这个位置作废，`Tab` 跳过它。Insert 中第一个位置选中，打字替换它。`Tab` / `Shift-Tab`（`snippet-next` / `snippet-previous`，上下文 `snippet`）在位置之间移动，不算光标移动，所以从 Normal 展开到填完回到 Normal 是一个撤销步。列表显示时 `Tab` 先给列表（选项列表除外），所以字段里可以继续补全。其余要填的位置和镜像用 face `snippet` 标出，当前位置靠选区显示。到达最后一个位置、光标离开 snippet 范围、回到 Normal 或切换视图时结束。
+
+在一个位置里再展开 snippet 时，新的叠在旧的上面：内层到达最后一个位置或光标离开它的范围后，外层接着走，外层的镜像也跟着内层打的字变。
+
+宏录制时，补全展开的 snippet 记成 snippet 本身，之后在位置里打的字和 `Tab` 照常记录，所以重放时一样经过各个位置。候选的 `edits`（比如 `#include`）不重放：它们是服务器按原位置算出的绝对位置，重放只会重复插入。
 
 内置模块 `snippets` 把 snippet 变成候选，默认不带任何 snippet：
 
 ```lua
-require("snippets").add("cpp", {
+local snippets = require("snippets")
+snippets.add("cpp", {
   fori = "for (int ${1:i} = 0; $1 < ${2:n}; ++$1) {\n\t$0\n}",
+  main = { body = "int main() {\n\t$0\n}", description = "入口" },
 })
+-- VSCode 格式的文件，或带 package.json 的目录（比如 friendly-snippets）
+snippets.load("~/.config/soda/snippets/cpp.json", "cpp")
+snippets.load("~/src/friendly-snippets")
 ```
 
-限制：`.` 和宏重放时写入 snippet 展开的文字（候选的 `edits` 不重放），之后在位置里打的字和 `Tab` 不按 snippet 重放；snippet 里再展开 snippet 时，新的会话替换旧的；位置没有高亮，只有当前位置靠选区显示；紧挨着的两个位置，在前一个末尾打字会落进后一个。
+`load(path, [language])` 读 VSCode 格式：每项有 `prefix`（字符串或数组，每个都是一个候选）、`body`（字符串或行的数组）、`description`（候选旁边的说明），可以有 `scope`（逗号分隔的语言）。给了 `language` 时全部归到这个语言；目录按 `package.json` 的 `contributes.snippets` 找文件，给了 `language` 时只读这个语言的。文件可以有注释和尾随逗号。VSCode 的 `plaintext` 对应 soda 的 `text`。返回加入的条数。
 
 ## 与 capf 的区别
 

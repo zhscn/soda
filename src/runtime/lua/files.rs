@@ -3,7 +3,7 @@
 //! close with a delete.
 use super::Runtime;
 use crate::application::Event;
-use mlua::{Scope, Table};
+use mlua::{LuaSerdeExt, Scope, SerializeOptions, Table};
 use std::{
     cell::RefCell,
     path::{Path, PathBuf},
@@ -96,6 +96,20 @@ pub(super) fn register<'scope, 'r: 'scope>(
                 })?;
             }
             Ok(())
+        })?,
+    )?;
+    soda.set(
+        "json_decode",
+        scope.create_function(|lua, text: String| {
+            let value: serde_json::Value =
+                serde_json::from_str(&crate::language::plain_json(&text))
+                    .map_err(|e| mlua::Error::runtime(format!("json: {e}")))?;
+            lua.to_value_with(
+                &value,
+                SerializeOptions::new()
+                    .serialize_none_to_null(false)
+                    .serialize_unit_to_null(false),
+            )
         })?,
     )?;
     Ok(())

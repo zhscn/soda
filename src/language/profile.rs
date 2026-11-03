@@ -87,7 +87,7 @@ fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
 }
 /// JSON from the JSONC of language configurations: comments and trailing
 /// commas go, strings stay as they are.
-fn plain_json(source: &str) -> String {
+pub(crate) fn plain_json(source: &str) -> String {
     let mut out = String::with_capacity(source.len());
     let mut chars = source.chars().peekable();
     while let Some(c) = chars.next() {

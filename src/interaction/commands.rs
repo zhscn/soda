@@ -751,14 +751,48 @@ impl Layers {
                         .unwrap()
                         .selection();
                     let range = selection.range();
-                    self.expand_snippet(view, range, vec![], &body, app, time, &mut response);
+                    let selected = !range.is_empty();
+                    // Its places are filled in Insert.
+                    if self.mode == super::EditMode::Normal && !self.modal.active() {
+                        self.modal.insert_view = Some(view);
+                        self.mode = super::EditMode::Insert;
+                        self.modal.tag = None;
+                        response.events.push(Event::Edit {
+                            view,
+                            command: EditCommand::BeginUndoGroup(selection),
+                            time,
+                        });
+                    }
+                    self.expand_snippet(
+                        view,
+                        range,
+                        vec![],
+                        &body,
+                        selected,
+                        app,
+                        time,
+                        &mut response,
+                    );
                 }
             }
             Command::SnippetStep { backward } => {
-                if let Some((view, selection)) = self.snippet.step(backward) {
+                if let Some((view, selection)) = self.snippet.step(backward)
+                    && let Some(state) = app.view(view)
+                {
+                    // Not a move of its own: filling a snippet is one undo step.
+                    let version = app
+                        .workspace()
+                        .editor(state.document_id)
+                        .unwrap()
+                        .model()
+                        .document()
+                        .snapshot()
+                        .version();
+                    let mut tx = crate::core::Transaction::new(version, vec![]);
+                    tx.selection = Some(selection);
                     response.events.push(Event::Edit {
                         view,
-                        command: EditCommand::SetSelection(selection),
+                        command: EditCommand::Apply(tx),
                         time,
                     });
                 }
@@ -1283,6 +1317,7 @@ impl Layers {
             edits,
             range,
             caret,
+            selected,
             text,
             snippet,
         } = accepted;
@@ -1291,7 +1326,7 @@ impl Layers {
         let snapshot = editor.model().document().snapshot();
         let whole = snapshot.text();
         let before = whole[range.start..caret].chars().count();
-        let after = whole[caret..range.end].chars().count();
+        let after = whole[selected..range.end].chars().count();
         for key in std::iter::repeat_n(Key::Backspace, before)
             .chain(std::iter::repeat_n(Key::Delete, after))
         {
@@ -1299,8 +1334,11 @@ impl Layers {
                 .replay
                 .record(UserInput::Key(KeyStroke::plain(key)));
         }
+        // A snippet replays as one, so that its places are filled again.
         let typed = if snippet {
-            self.expand_snippet(view, range, edits, &text, app, time, response)
+            let snippet = text.clone();
+            self.expand_snippet(view, range, edits, &text, false, app, time, response);
+            UserInput::Snippet(snippet)
         } else {
             let start = range
                 .start
@@ -1314,24 +1352,25 @@ impl Layers {
                 command: EditCommand::Apply(tx),
                 time,
             });
-            text
+            UserInput::Paste(text)
         };
-        self.modal.replay.record(UserInput::Paste(typed));
+        self.modal.replay.record(typed);
     }
     /// Expands a snippet in place of a range as one undoable step, with
-    /// other edits; returns its text. Lines after the first get the
-    /// language's indentation.
+    /// other edits. Lines after the first get the language's indentation.
+    /// `selected` says the range is the selection, for `TM_SELECTED_TEXT`.
     #[allow(clippy::too_many_arguments)]
-    fn expand_snippet(
+    pub(super) fn expand_snippet(
         &mut self,
         view: crate::application::ViewId,
         range: std::ops::Range<usize>,
         edits: Vec<crate::core::Change>,
         body: &str,
+        selected: bool,
         app: &Application,
         time: Duration,
         response: &mut Response,
-    ) -> String {
+    ) {
         use crate::core::{Change, Selection, Transaction};
         let document = app.view(view).unwrap().document_id;
         let model = app.workspace().editor(document).unwrap().model().document();
@@ -1340,9 +1379,11 @@ impl Layers {
         let indent = snapshot.leading_whitespace(line).unwrap().to_string();
         let style = model.whitespace();
         let unit = crate::language::materialize(style.indent_width, 0, style.indent_width, &style);
-        let parsed = super::snippet::parse(body).indented(&indent, &unit);
+        let values = super::snippet::variables(app, document, range.clone(), selected);
+        let parsed = super::snippet::parse_with(body, &|name| values.get(name).cloned())
+            .indented(&indent, &unit);
         let depth = model.history_depth();
-        let first = parsed.stops[0].clone();
+        let first = parsed.stops[0].range.clone();
         // Where the snippet lands once the edits before it are made.
         let (bytes, lines) = shift(snapshot.text(), &edits, range.start);
         let start = range.start.saturating_add_signed(bytes);
@@ -1375,6 +1416,5 @@ impl Layers {
             offset: start,
             stops: parsed.stops,
         });
-        parsed.text
     }
 }

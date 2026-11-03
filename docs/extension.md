@@ -138,6 +138,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `soda.create_file(path)` | 写一个空文件，已有的会被清空；缺少的上级目录一并创建 |
 | `soda.rename_file(from, to)` | 在磁盘上改名，文件或目录都行，缺少的上级目录一并创建。打开着的文档跟着换路径，保存写到新位置；目标处原来打开的文档关闭 |
 | `soda.delete_file(path, [recursive])` | 删除文件或空目录，`recursive` 时连同目录内容；其中打开着的文档关闭，未保存的修改丢弃 |
+| `soda.json_decode(text)` | 把 JSON 文字转成 Lua 值，允许注释和尾随逗号（JSONC）；`null` 是 nil |
 | `soda.spawn(argv, fn, [options])` | 后台运行程序（不经过 shell），结束后调用 `fn(code, stdout, stderr)`，返回编号；见下文 |
 | `soda.kill(id)` | 停止 `soda.spawn` 启动的进程及其子进程，返回它是否还在运行 |
 | `soda.popup(text)` | 在光标旁的浮窗里显示文字，下一个按键关闭 |
@@ -179,7 +180,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `pairs` | 结构化编辑，见[交互层](interaction.md#结构化编辑) | 见交互层 |
 | `comment` | 切换行注释 | `<a-;>` |
 | `emacs` | Emacs 的单词大小写、对调和空白命令，见[交互层](interaction.md#emacs-键位) | 见交互层 |
-| `snippets` | 按语言注册 snippet，作为补全候选，见[补全](completion.md#snippet) | 无 |
+| `snippets` | 按语言注册 snippet 或读 VSCode 格式的文件，作为补全候选，见[补全](completion.md#snippet) | 无 |
 | `surround` | 在选区两侧加上成对的文本 | `SPC` 加括号或引号 |
 | `clang-format` | 用 clang-format 格式化文档或选中的行，只替换有变化的行 | 无 |
 | `symbol-overlay` | 标记符号并在标记之间跳转、改名，见[交互层](interaction.md#高亮模式) | leader 下的 `i`、`I`，`<a-n>`、`<a-p>`，以及 `mark` 键位表 |
