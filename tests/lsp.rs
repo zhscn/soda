@@ -979,3 +979,37 @@ fn a_selection_formats_only_its_range() {
     wait(&mut f.r, |r| text(r) == "one\nranged\n");
     assert!(f.log().contains("rangeFormat 1:0-1:2"), "{}", f.log());
 }
+#[test]
+fn a_server_that_exits_starts_again_until_it_exits_too_often() {
+    let Some(mut f) = open("x\n") else { return };
+    let starts = |f: &Fixture| f.log().matches("initialize ").count();
+    for round in 1..=3 {
+        f.r.source_lua("t", r#"soda.lsp.notify("exit-now", {})"#)
+            .unwrap();
+        wait(&mut f.r, |r| r.message().ends_with("starting it again"));
+        f.r.command(Command::Named("echo waiting".into()));
+        // Started again, with the document opened anew.
+        let log = f.log.clone();
+        wait(&mut f.r, move |_| {
+            std::fs::read_to_string(&log).is_ok_and(|log| {
+                log.matches("initialize ").count() == round + 1
+                    && log.matches("didOpen").count() == round + 1
+            })
+        });
+    }
+    f.r.source_lua("t", r#"soda.lsp.notify("exit-now", {})"#)
+        .unwrap();
+    wait(&mut f.r, |r| {
+        r.message().ends_with("lsp-restart tries again")
+    });
+    for _ in 0..50 {
+        f.r.poll();
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(starts(&f), 4);
+    f.r.command(Command::Named("lsp-restart".into()));
+    let log = f.log.clone();
+    wait(&mut f.r, move |_| {
+        std::fs::read_to_string(&log).is_ok_and(|log| log.matches("initialize ").count() == 5)
+    });
+}

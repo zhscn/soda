@@ -18,6 +18,10 @@ use std::{
 
 /// How long after an edit a document goes out without a request needing it.
 const SETTLE: Duration = Duration::from_millis(150);
+/// A server that exits is started again, unless it exited this many times
+/// within `CRASH_WINDOW`: then it waits for `lsp-restart`.
+const CRASHES: usize = 3;
+const CRASH_WINDOW: Duration = Duration::from_secs(180);
 
 enum Outgoing {
     Message(Value),
@@ -147,6 +151,8 @@ pub(super) struct Lsp {
     clients: HashMap<Key, Client>,
     /// Servers that failed; `lsp-restart` lets them try again.
     failed: Vec<Key>,
+    /// When each server exited lately.
+    crashes: HashMap<Key, Vec<Instant>>,
     handlers: HashMap<String, Vec<u64>>,
     incoming: (Sender<Incoming>, Receiver<Incoming>),
 }
@@ -157,6 +163,7 @@ impl Default for Lsp {
             servers: HashMap::new(),
             clients: HashMap::new(),
             failed: vec![],
+            crashes: HashMap::new(),
             handlers: HashMap::new(),
             incoming: mpsc::channel(),
         }
@@ -334,6 +341,7 @@ impl Lsp {
     }
     pub fn restart(&mut self, key: &Key) {
         self.failed.retain(|failed| failed != key);
+        self.crashes.remove(key);
         self.clients.remove(key);
     }
     /// A server's position encoding, capabilities and file watchers.
@@ -556,8 +564,24 @@ impl Lsp {
             match incoming {
                 Incoming::Closed(key) => {
                     if self.clients.remove(&key).is_some() {
-                        failure = Some(format!("language server for {} exited", key.0));
-                        self.failed.push(key);
+                        let crashes = self.crashes.entry(key.clone()).or_default();
+                        crashes.retain(|at| at.elapsed() < CRASH_WINDOW);
+                        crashes.push(Instant::now());
+                        // The next sync starts it again and opens its
+                        // documents anew.
+                        if crashes.len() <= CRASHES {
+                            failure = Some(format!(
+                                "language server for {} exited; starting it again",
+                                key.0
+                            ));
+                        } else {
+                            failure = Some(format!(
+                                "language server for {} exited {} times; lsp-restart tries again",
+                                key.0,
+                                crashes.len()
+                            ));
+                            self.failed.push(key);
+                        }
                     }
                 }
                 Incoming::Message(key, message) => {
