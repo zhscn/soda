@@ -166,7 +166,53 @@ fn references_and_callers_are_results() {
     wait(&mut f.r, |r| text(r).starts_with("one"));
     f.r.command(Command::Named("lsp-callers".into()));
     wait(&mut f.r, |r| text(r).contains("caller"));
-    assert_eq!(text(&f.r), "a.cpp\n  2:3  caller\n");
+    assert_eq!(text(&f.r), "▾ target  a.cpp:1\n  ▸ caller  a.cpp:2\n");
+    // A level at a time; nothing calls the caller, so it has no children.
+    keys(&mut f.r, "j<tab>");
+    wait(&mut f.r, |r| {
+        text(r) == "▾ target  a.cpp:1\n    caller  a.cpp:2\n"
+    });
+    // Enter goes to where the call is made.
+    keys(&mut f.r, "<ret>");
+    wait(&mut f.r, |r| text(r).starts_with("one"));
+    let view = f.r.app().view(f.r.app().active_view().unwrap()).unwrap();
+    let editor = f.r.app().workspace().editor(view.document_id).unwrap();
+    assert_eq!(
+        editor
+            .model()
+            .session(view.session_id)
+            .unwrap()
+            .selection()
+            .head,
+        6
+    );
+}
+#[test]
+fn types_open_level_by_level_from_the_type_at_the_caret() {
+    let Some(mut f) = open("base\n  derived\n") else {
+        return;
+    };
+    keys(&mut f.r, "<c-c>T");
+    wait(&mut f.r, |r| text(r).starts_with("▾ Base"));
+    assert_eq!(text(&f.r), "▾ Base  a.cpp:1\n  ▸ Derived  a.cpp:2\n");
+    keys(&mut f.r, "j<tab>");
+    wait(&mut f.r, |r| {
+        text(r) == "▾ Base  a.cpp:1\n    Derived  a.cpp:2\n"
+    });
+    assert!(f.log().contains("subtypes Derived"), "{}", f.log());
+    keys(&mut f.r, "<ret>");
+    wait(&mut f.r, |r| text(r).starts_with("base"));
+    let view = f.r.app().view(f.r.app().active_view().unwrap()).unwrap();
+    let editor = f.r.app().workspace().editor(view.document_id).unwrap();
+    assert_eq!(
+        editor
+            .model()
+            .session(view.session_id)
+            .unwrap()
+            .selection()
+            .head,
+        7
+    );
 }
 #[test]
 fn tokens_and_hints_arrive_after_the_diagnostics_and_move_with_the_text() {

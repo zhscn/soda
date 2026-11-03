@@ -66,7 +66,7 @@ while True:
             "diagnosticProvider": {"interFileDependencies": False, "workspaceDiagnostics": False},
             "hoverProvider": True, "renameProvider": {"prepareProvider": True}, "codeActionProvider": {"resolveProvider": True},
             "documentFormattingProvider": True, "documentRangeFormattingProvider": True, "documentSymbolProvider": True,
-            "callHierarchyProvider": True, "signatureHelpProvider": {},
+            "callHierarchyProvider": True, "typeHierarchyProvider": True, "signatureHelpProvider": {},
             "workspaceSymbolProvider": True,
             "workspace": {"fileOperations": {
                 "didCreate": {"filters": [{"pattern": {"glob": "**/*.cpp"}}]},
@@ -308,13 +308,24 @@ while True:
         log.write("answer %s %s\n" % (message["id"], json.dumps(message.get("result"), sort_keys=True)))
     elif method == "textDocument/hover":
         answer(message, {"contents": {"kind": "plaintext", "value": "first\n  second"}})
-    elif method == "textDocument/prepareCallHierarchy":
+    elif method in ("textDocument/prepareCallHierarchy", "textDocument/prepareTypeHierarchy"):
         uri = params["textDocument"]["uri"]
-        answer(message, [{"name": "target", "uri": uri}])
+        name = "target" if "Call" in method else "Base"
+        answer(message, [{"name": name, "uri": uri, "range": spot(uri, 0, 0)["range"],
+                          "selectionRange": spot(uri, 0, 0)["range"]}])
     elif method == "callHierarchy/incomingCalls":
+        # target is called by caller, which nothing calls.
         uri = params["item"]["uri"]
-        answer(message, [{"from": {"name": "caller", "uri": uri},
-                          "fromRanges": [spot(uri, 1, 2)["range"]]}])
+        caller = {"name": "caller", "uri": uri, "range": spot(uri, 0, 0)["range"],
+                  "selectionRange": spot(uri, 0, 0)["range"]}
+        answer(message, [{"from": caller, "fromRanges": [spot(uri, 1, 2)["range"]]}]
+               if params["item"]["name"] == "target" else [])
+    elif method == "typeHierarchy/subtypes":
+        log.write("subtypes %s\n" % params["item"]["name"])
+        uri = params["item"]["uri"]
+        derived = {"name": "Derived", "uri": uri, "range": spot(uri, 1, 0)["range"],
+                   "selectionRange": spot(uri, 1, 2)["range"]}
+        answer(message, [derived] if params["item"]["name"] == "Base" else [])
     elif method in ("$ccls/call", "$ccls/inheritance", "$ccls/member"):
         log.write("%s %s\n" % (method, json.dumps({k: v for k, v in params.items()
                                                     if k not in ("textDocument", "position")},

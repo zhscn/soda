@@ -247,6 +247,7 @@ fn initialize(root: &Path, init: &Value) -> Value {
                     "definition": {},
                     "references": {},
                     "callHierarchy": {},
+                    "typeHierarchy": {},
                     "publishDiagnostics": {
                         "relatedInformation": true,
                         "tagSupport": { "valueSet": [1, 2] },

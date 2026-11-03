@@ -33,12 +33,15 @@ rust-analyzer 默认不开，因为它会运行项目的构建脚本，打开一
 | `SPC s` | `lsp-symbols` | 从当前文档的符号大纲里选一个跳过去 |
 | `SPC S` | `lsp-workspace-symbols [QUERY]` | 在项目里按名字找符号并列出 |
 | `SPC k` | `lsp-hover` | 在光标旁的浮窗里显示光标处的信息，上面列出这一行的诊断；PageUp/PageDown 或 `<a-v>`/`<c-v>` 翻页，其他按键关闭 |
-| `SPC c` / `SPC C` | `lsp-callers` / `lsp-callees` | 列出调用者 / 被调用者，只有一层 |
+| `SPC c` / `SPC C` | `lsp-callers` / `lsp-callees` | 调用者 / 被调用者的树，逐层展开；回车跳到调用发生的地方 |
+| `SPC t` / `SPC T` | `lsp-supertypes` / `lsp-subtypes` | 基类 / 派生类的树（`typeHierarchy`），逐层展开；回车跳到类型的声明 |
 | `SPC R` | `lsp-rename [NAME]` | 重命名光标处的符号；没给名字时打开命令行，预填符号现在的名字。服务器支持 `prepareRename` 时先问它：光标处没有可以改名的符号就直接说明，名字取服务器给的，否则取光标处的词 |
 | `SPC a` | `lsp-code-action` | 列出光标或选区处的代码动作，选一个执行 |
 | | `lsp-format` | 让服务器格式化选区，没有选区时格式化整个文档，clangd 读 `.clang-format`；服务器不支持范围格式化时总是整个文档 |
 | | `lsp-diagnostics` | 列出所有诊断 |
 | | `lsp-restart` | 重启当前语言的服务器，失败后也用它重试 |
+
+调用层级和类型层级显示成树（见[树](extension.md#树)）：根节点是光标处的函数或类型，第一层随之取来，再往下展开一个节点时才问服务器那一层。
 
 列表是普通的结果文档，`]q` / `[q` 和回车都能用。诊断在行号栏按级别显示：错误 `E`、警告 `W`、其余 `I`，一行有多条时显示最严重的，范围加彩色下划线，消息的第一行显示在行尾（选项 `inline-notes`，见[界面](ui.md)），光标所在行的诊断完整显示在消息行（有其他消息时让位），状态栏显示文档的错误和警告数。
 
@@ -160,8 +163,8 @@ require("ccls").setup({
 
 | 键 | 命令 | 作用 |
 | --- | --- | --- |
-| `SPC c` / `SPC C` | `ccls-callers` / `ccls-callees` | 调用者 / 被调用者的树（`$ccls/call`），替换 `lsp` 模块的一层列表 |
-| `SPC t` / `SPC T` | `ccls-base` / `ccls-derived` | 基类 / 派生类的树（`$ccls/inheritance`） |
+| `SPC c` / `SPC C` | `ccls-callers` / `ccls-callees` | 调用者 / 被调用者的树（`$ccls/call`），替换 `lsp` 模块的标准调用层级，`callType` 包括经由基类和派生类的调用 |
+| `SPC t` / `SPC T` | `ccls-base` / `ccls-derived` | 基类 / 派生类的树（`$ccls/inheritance`），替换标准类型层级 |
 | `SPC m` / `SPC M` | `ccls-members variables` / `functions` | 成员变量 / 成员函数的树（`$ccls/member`），还可以是 `types` |
 | | `ccls-vars` | 列出光标处类型的变量（`$ccls/vars`） |
 | | `ccls-navigate up/down/left/right` | 按语法树移动到外层、第一个内层、前后相邻的声明（`$ccls/navigate`） |
@@ -174,6 +177,5 @@ ccls 发来的 `$ccls/publishSkippedRanges`（没有参与编译的预处理分�
 ## 限制
 
 - 没有 `roots` 时，服务器的根目录就是项目根目录，由版本库标记决定，不按 `compile_commands.json` 找；clangd 自己会按文件找。
-- 内置的调用层级只有一层；可以展开的树要用 `soda.tree` 自己写。
 - 不发 `willCreateFiles`、`willRenameFiles`、`willDeleteFiles`：这几个请求要等服务器回答一个编辑再动手，而文件操作本身就来自服务器的编辑。目录改名只报告目录本身，不展开成其中每个文件。
 - `completionItem/resolve` 只取说明和 detail；候选的其他修改要在列表里就给出。

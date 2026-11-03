@@ -8,7 +8,8 @@
 --
 -- Built in: <a-.> goes to the definition, <a-?> lists references, <a-,> comes
 -- back. Under the leader (SPC, which is <c-c>): k shows what the caret is on
--- in a box until the next key; c and C list the callers and the callees; R
+-- in a box until the next key; c and C open the callers and the callees as
+-- trees, t and T the base and the derived types; R
 -- renames and a offers code actions; s and S find symbols; h switches header
 -- and source; . goes to the implementations.
 -- Completion follows from the server being there.
@@ -112,6 +113,7 @@ local providers = {
   ["textDocument/rangeFormatting"] = "documentRangeFormattingProvider",
   ["textDocument/documentSymbol"] = "documentSymbolProvider",
   ["textDocument/prepareCallHierarchy"] = "callHierarchyProvider",
+  ["textDocument/prepareTypeHierarchy"] = "typeHierarchyProvider",
   ["textDocument/signatureHelp"] = "signatureHelpProvider",
   ["textDocument/completion"] = "completionProvider",
   ["workspace/symbol"] = "workspaceSymbolProvider",
@@ -252,40 +254,96 @@ soda.define_command("lsp-references", "List references to the symbol", function(
   end)
 end)
 
-local function hierarchy(kind, method, field)
-  ask("textDocument/prepareCallHierarchy", nil, function(items)
+-- Hierarchies as trees that open a level at a time: the item at the caret,
+-- then what `method` gives for each item. `entries(result)` turns an answer
+-- into { item, at }, `at` being where opening the node goes.
+local expansions = 0
+local function hierarchy(name, prepare, method, entries)
+  -- The tree's own document has no server; its nodes ask the source's.
+  local origin = soda.buffer()
+  local function node(item, at)
+    return {
+      label = item.name,
+      detail = relative(path_of(at.uri)) .. ":" .. (at.range.start.line + 1),
+      item = item,
+      at = at,
+    }
+  end
+  local function children(item, done)
+    expansions = expansions + 1
+    local asked = send(name .. " " .. expansions, method, { item = item }, function(result, failure)
+      if failure then
+        soda.message(failed(method, failure))
+        done({})
+        return
+      end
+      local nodes = {}
+      for _, entry in ipairs(entries(result or {})) do
+        table.insert(nodes, node(entry.item, entry.at))
+      end
+      done(nodes)
+    end, origin)
+    if not asked then
+      soda.message("The language server is gone")
+      done({})
+    end
+  end
+  ask(prepare, nil, function(items)
     if not items or #items == 0 then
-      soda.message("No call hierarchy here")
+      soda.message("No " .. name .. " here")
       return
     end
-    local function listed(result)
-      local entries = {}
-      for _, call in ipairs(result or {}) do
-        local item = call[field]
-        local range = field == "from" and call.fromRanges[1] or item.selectionRange
-        table.insert(entries, {
-          path = path_of(item.uri),
-          line = range.start.line,
-          column = range.start.character,
-          text = item.name,
-        })
-      end
-      show(kind, entries)
-    end
-    soda.lsp.request(method, { item = items[1] }, function(result, failure)
-      if failure then
-        soda.message(method .. ": " .. tostring(failure.message))
-      else
-        listed(result)
-      end
+    local root = items[1]
+    children(root, function(nodes)
+      local top = node(root, { uri = root.uri, range = root.selectionRange or root.range })
+      top.children, top.expanded = nodes, true
+      soda.tree({
+        name = name,
+        roots = { top },
+        expand = function(node, add)
+          children(node.item, add)
+        end,
+        open = function(node)
+          open_location(node.at, origin)
+        end,
+      })
     end)
   end)
 end
-soda.define_command("lsp-callers", "List the functions calling this one", function()
-  hierarchy("callers", "callHierarchy/incomingCalls", "from")
+-- Calls go to where the call is made; types to their declaration.
+local function callers(result)
+  local out = {}
+  for _, call in ipairs(result) do
+    local at = call.fromRanges and call.fromRanges[1] or call.from.selectionRange
+    table.insert(out, { item = call.from, at = { uri = call.from.uri, range = at } })
+  end
+  return out
+end
+local function callees(result)
+  local out = {}
+  for _, call in ipairs(result) do
+    table.insert(out, { item = call.to, at = { uri = call.to.uri, range = call.to.selectionRange } })
+  end
+  return out
+end
+local function types(result)
+  local out = {}
+  for _, item in ipairs(result) do
+    table.insert(out, { item = item, at = { uri = item.uri, range = item.selectionRange } })
+  end
+  return out
+end
+soda.define_command("lsp-callers", "Show the functions calling this one as a tree", function()
+  hierarchy("callers", "textDocument/prepareCallHierarchy", "callHierarchy/incomingCalls", callers)
 end)
-soda.define_command("lsp-callees", "List the functions this one calls", function()
-  hierarchy("callees", "callHierarchy/outgoingCalls", "to")
+soda.define_command("lsp-callees", "Show the functions this one calls as a tree", function()
+  hierarchy("callees", "textDocument/prepareCallHierarchy", "callHierarchy/outgoingCalls", callees)
+end)
+soda.define_command("lsp-supertypes", "Show the base types as a tree", function()
+  hierarchy("supertypes", "textDocument/prepareTypeHierarchy", "typeHierarchy/supertypes", types)
+end)
+soda.define_command("lsp-subtypes", "Show the derived types as a tree", function()
+  hierarchy("subtypes", "textDocument/prepareTypeHierarchy", "typeHierarchy/subtypes", types)
 end)
 
 -- The diagnostics of the caret's line, above what the server says.
@@ -1595,6 +1653,8 @@ soda.map("global", "<c-c>.", "lsp-implementation")
 soda.map("global", "<c-c>k", "lsp-hover")
 soda.map("global", "<c-c>c", "lsp-callers")
 soda.map("global", "<c-c>C", "lsp-callees")
+soda.map("global", "<c-c>t", "lsp-supertypes")
+soda.map("global", "<c-c>T", "lsp-subtypes")
 soda.map("global", "<c-c>R", "lsp-rename")
 soda.map("global", "<c-c>a", "lsp-code-action")
 soda.map("global", "<c-c>s", "lsp-symbols")
