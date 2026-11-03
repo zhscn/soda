@@ -184,6 +184,19 @@ impl Scrolling {
     }
 }
 
+/// Whether the active view has a selection, not just a caret.
+fn selected(runtime: &Runtime) -> bool {
+    let app = runtime.app();
+    app.active_view()
+        .and_then(|id| app.view(id))
+        .and_then(|view| {
+            let editor = app.workspace().editor(view.document_id)?;
+            let session = editor.model().session(view.session_id)?;
+            Some(!session.selection().range().is_empty())
+        })
+        .unwrap_or(false)
+}
+
 /// Run the graphical frontend using the shared owner-thread runtime.
 pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
     let mut builder = EventLoop::builder();
@@ -773,6 +786,11 @@ impl ApplicationHandler for App {
                         }
                         input::Menu::Paste => {
                             runtime.command(crate::interaction::Command::Named("paste".into()))
+                        }
+                        // With a selection, copying is `save`, which drops
+                        // it to show the copy was made, as M-w does.
+                        input::Menu::Command("copy") if selected(runtime) => {
+                            runtime.command(crate::interaction::Command::Named("save".into()))
                         }
                         input::Menu::Command(name) => {
                             runtime.command(crate::interaction::Command::Named(name.into()))

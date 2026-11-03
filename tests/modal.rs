@@ -616,4 +616,9 @@ fn saving_copies_the_selection_and_drops_it() {
     // The mark goes too: moving does not select again.
     keys(&mut r, "<a-f>");
     assert_eq!(shown(&r), "one two|\n");
+    // In Insert, a selection made with Shift goes the same way.
+    keys(&mut r, "i<s-left><s-left><s-left>");
+    r.command(Command::Named("save".into()));
+    assert_eq!(r.app().clipboard(), "two");
+    assert_eq!(shown(&r), "one |two\n");
 }
