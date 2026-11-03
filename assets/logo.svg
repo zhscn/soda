@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128"
+     fill="none" stroke="#1f2937" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+  <g transform="translate(0 6)">
+    <!-- can: lid, body and base, with short shoulders -->
+    <path d="M44 24 H84 L92 33 V95 L84 106 H44 L36 95 V33 Z"/>
+    <path d="M36 37 H92"/>
+    <path d="M36 91 H92"/>
+    <!-- pull tab, opened: hinged right of the middle, tilted outward -->
+    <g transform="translate(12 -2) rotate(-32 58 22)" stroke-width="3.5">
+      <rect x="57" y="17.5" width="17" height="7" rx="3.5"/>
+    </g>
+    <!-- bubbles -->
+    <g stroke-width="3.5">
+      <circle cx="56" cy="74" r="6.5"/>
+      <circle cx="72" cy="62" r="4.5"/>
+      <circle cx="60" cy="50" r="2.5" fill="#1f2937"/>
+    </g>
+  </g>
+</svg>
