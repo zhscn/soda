@@ -951,7 +951,9 @@ pub(crate) fn rows_between(
 /// area. Viewport decisions are applied by Runtime before this is called.
 /// The rows start `first` rows from the viewport's top, above it when
 /// negative, so that a frontend scrolling smoothly can show what comes
-/// into view; the caret's row counts from the first row shown.
+/// into view; the caret's row counts from the first row shown. `left`,
+/// when given, is where the rows start across instead of the viewport's
+/// horizontal scroll, as on the way to it.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn frame(
     app: &Application,
@@ -960,6 +962,7 @@ pub(crate) fn frame(
     measure: &dyn Measure,
     width: usize,
     first: isize,
+    left: Option<usize>,
     rows: u16,
     modal: &Overlay,
 ) -> Result<Option<Frame>, crate::application::Error> {
@@ -977,7 +980,7 @@ pub(crate) fn frame(
     let layout = Rows::new(app, view, measure, width).unwrap();
     let walk = layout.walk;
     let lines = layout.lines;
-    let left = view.viewport.horizontal_scroll;
+    let left = left.unwrap_or(view.viewport.horizontal_scroll);
     let mut output = Vec::new();
     // The rows shown, each with its line's segment.
     let (top, _) = layout.place(view.viewport.anchor.offset.0);
@@ -1280,6 +1283,7 @@ mod tests {
             &Cells,
             width.into(),
             0,
+            None,
             height,
             &Overlay::default(),
         )?
@@ -1424,6 +1428,7 @@ mod tests {
             &Cells,
             0,
             0,
+            None,
             0,
             &Overlay::default(),
         )
@@ -1552,6 +1557,7 @@ mod tests {
             &Cells,
             10,
             0,
+            None,
             4,
             &Overlay::default(),
         )
@@ -1773,6 +1779,7 @@ mod tests {
             &Pixels,
             200,
             0,
+            None,
             2,
             &Overlay::default(),
         )
@@ -1831,6 +1838,7 @@ mod tests {
                 &Cells,
                 10,
                 first,
+                None,
                 3,
                 &Overlay::default(),
             )

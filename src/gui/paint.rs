@@ -13,7 +13,7 @@ use super::{
     text::{Face, Fonts, Kind, UNIT},
 };
 use crate::{
-    application::{Area, Face as AppFace, ViewId},
+    application::{Area, Axis, Face as AppFace, ViewId},
     editor::DocumentId,
     interaction::{CommandLine, Layer},
     runtime::Runtime,
@@ -187,6 +187,39 @@ impl Areas {
             .iter()
             .find(|window| window.area.contains(x, y))
     }
+    /// The window whose right or bottom edge the pointer is on: in the
+    /// gap between it and a window to its right, or a few pixels either
+    /// side of where it meets a window below.
+    pub fn edge_at(&self, x: f32, y: f32) -> Option<(ViewId, Axis)> {
+        const REACH: f32 = 4.0;
+        self.windows.iter().find_map(|window| {
+            let area = window.area;
+            let (right, bottom) = (area.right(), area.bottom());
+            let beside = right + 1.0 < self.editor.right()
+                && (area.y..bottom).contains(&y)
+                && (right - REACH..right + self.scale.0 + REACH).contains(&x);
+            let above = bottom + 1.0 < self.editor.bottom()
+                && (area.x..right).contains(&x)
+                && (y - bottom).abs() <= REACH;
+            match (beside, above) {
+                (true, _) => Some((window.view, Axis::Columns)),
+                (_, true) => Some((window.view, Axis::Rows)),
+                _ => None,
+            }
+        })
+    }
+    /// How many cells the pointer at `(x, y)` is past `view`'s edge: how far
+    /// dragging it moves the edge.
+    pub fn edge_moved(&self, view: ViewId, axis: Axis, x: f32, y: f32) -> i32 {
+        let Some(window) = self.windows.iter().find(|w| w.view == view) else {
+            return 0;
+        };
+        let cells = match axis {
+            Axis::Columns => (x - window.area.right() - self.scale.0 / 2.0) / self.scale.0,
+            Axis::Rows => (y - window.area.bottom()) / self.scale.1,
+        };
+        cells.round() as i32
+    }
     /// Rows the command line may use for candidates.
     pub fn list_rows(&self) -> usize {
         usize::from(self.cells.1.saturating_sub(2)).min(10)
@@ -277,6 +310,8 @@ fn without_bg(style: Style) -> Style {
 pub struct Motion {
     pub scroll: f32,
     pub bar: f32,
+    /// Where the rows start across while the horizontal scroll eases.
+    pub left: Option<usize>,
 }
 
 /// One frame being drawn.
@@ -513,6 +548,7 @@ pub fn screen(
                 &measure,
                 window.width(),
                 first as isize,
+                moving.left,
                 rows,
             )?
         };

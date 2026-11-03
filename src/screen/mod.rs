@@ -30,6 +30,7 @@ use crate::{application::ViewId, runtime::Runtime};
 /// The text of a view in an area `width` across and `rows` down. The
 /// active view also shows Beacon's other selections, the digits that
 /// extend the selection, and the rest of the selected completion.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn text(
     runtime: &Runtime,
     view: ViewId,
@@ -37,6 +38,7 @@ pub(crate) fn text(
     measure: &dyn Measure,
     width: usize,
     first: isize,
+    left: Option<usize>,
     rows: u16,
 ) -> Result<Option<TextFrame>, crate::application::Error> {
     let overlay = if runtime.app().active_view() == Some(view) {
@@ -61,6 +63,7 @@ pub(crate) fn text(
         measure,
         width,
         first,
+        left,
         rows,
         &overlay,
     )

@@ -26,7 +26,7 @@ use winit::{
     event::{ElementState, Ime, MouseButton, MouseScrollDelta, WindowEvent},
     event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
     keyboard::ModifiersState,
-    window::{Window, WindowId},
+    window::{CursorIcon, Window, WindowId},
 };
 
 /// How long the caret takes to glide to a new place.
@@ -61,9 +61,10 @@ impl Glide {
             h: mix(from.h, to.h),
         })
     }
-    /// Moves the caret's way by `dy`, as the text under it scrolls.
-    fn shift(&mut self, dy: f32) {
+    /// Moves the caret's way by `(dx, dy)`, as the text under it scrolls.
+    fn shift(&mut self, (dx, dy): (f32, f32)) {
         for rect in [&mut self.from, &mut self.to].into_iter().flatten() {
+            rect.x += dx;
             rect.y += dy;
         }
     }
@@ -118,6 +119,13 @@ struct Scrolling {
     last: f32,
     /// When it last moved, for the scroll bar.
     moved: Option<std::time::Instant>,
+    /// Across: the viewport's horizontal scroll seen last, in measure
+    /// units, and where the rows started, easing from `across_from`.
+    across: usize,
+    across_from: f32,
+    across_start: Option<std::time::Instant>,
+    /// Where the rows started across at the last frame.
+    across_last: f32,
 }
 impl Scrolling {
     fn new(anchor: usize) -> Self {
@@ -128,7 +136,30 @@ impl Scrolling {
             start: None,
             last: 0.0,
             moved: None,
+            across: 0,
+            across_from: 0.0,
+            across_start: None,
+            across_last: 0.0,
         }
+    }
+    /// Where the rows start across now.
+    fn across_at(&self, now: std::time::Instant) -> f32 {
+        let t = self.across_start.map_or(1.0, |start| {
+            ((now - start).as_secs_f32() / SCROLL.as_secs_f32()).clamp(0.0, 1.0)
+        });
+        let t = 1.0 - (1.0 - t).powi(3);
+        self.across_from + (self.across as f32 - self.across_from) * t
+    }
+    /// The viewport scrolled across to `left`: from where the rows start
+    /// now, easing there when `smooth`.
+    fn across_to(&mut self, left: usize, smooth: bool, now: std::time::Instant) {
+        self.across_from = if smooth {
+            self.across_at(now)
+        } else {
+            left as f32
+        };
+        self.across = left;
+        self.across_start = smooth.then_some(now);
     }
     fn progress(&self, now: std::time::Instant) -> f32 {
         let t = self.start.map_or(1.0, |start| {
@@ -141,7 +172,7 @@ impl Scrolling {
         self.from + (self.to - self.from) * self.progress(now)
     }
     fn moving(&self, now: std::time::Instant) -> bool {
-        self.progress(now) < 1.0
+        self.progress(now) < 1.0 || self.across_at(now) != self.across as f32
     }
     /// How much the scroll bar shows: fully for a while after moving, then
     /// fading.
@@ -315,6 +346,10 @@ struct Gui {
     press: Option<usize>,
     /// The window whose scroll bar is being dragged.
     thumb: Option<ViewId>,
+    /// The window whose right or bottom edge is being dragged.
+    edge: Option<(ViewId, crate::application::Axis)>,
+    /// The pointer's shape: over an edge, which way it moves.
+    resizing: Option<crate::application::Axis>,
     /// Pixels scrolled that do not make a row yet, without smooth
     /// scrolling.
     scrolled: f32,
@@ -360,6 +395,8 @@ impl Gui {
             pointer: (0.0, 0.0),
             press: None,
             thumb: None,
+            edge: None,
+            resizing: None,
             scrolled: 0.0,
             scrolls: std::collections::BTreeMap::new(),
             preedit: String::new(),
@@ -440,12 +477,14 @@ impl Gui {
         }
         let scrolls = &self.scrolls;
         let motion = |view: ViewId| {
-            scrolls
-                .get(&view)
-                .map_or(paint::Motion::default(), |s| paint::Motion {
+            scrolls.get(&view).map_or(paint::Motion::default(), |s| {
+                let across = s.across_at(now);
+                paint::Motion {
                     scroll: s.at(now),
                     bar: s.bar(now),
-                })
+                    left: (across != s.across as f32).then(|| across.round() as usize),
+                }
+            })
         };
         let mut painter = Painter::new(&mut self.fonts, &mut self.renderer.atlas, &self.theme);
         let caret = paint::screen(
@@ -509,11 +548,11 @@ impl Gui {
     /// moved a few rows scrolls there smoothly; one that jumped further is
     /// just there. Returns how far the active window's text moved down on
     /// screen since the last frame, for the caret to go along.
-    fn settle(&mut self, runtime: &Runtime, areas: &Areas, now: std::time::Instant) -> f32 {
+    fn settle(&mut self, runtime: &Runtime, areas: &Areas, now: std::time::Instant) -> (f32, f32) {
         let smooth = runtime.app().options().bool(None, "smooth-scroll");
         let line = self.fonts.line;
         let active = runtime.app().active_view();
-        let mut shift = 0.0;
+        let mut shift = (0.0, 0.0);
         self.scrolls
             .retain(|view, _| areas.windows.iter().any(|window| window.view == *view));
         for window in &areas.windows {
@@ -521,10 +560,13 @@ impl Gui {
                 continue;
             };
             let anchor = view.viewport.anchor.offset.0;
-            let scrolling = self
-                .scrolls
-                .entry(window.view)
-                .or_insert_with(|| Scrolling::new(anchor));
+            let left = view.viewport.horizontal_scroll;
+            let scrolling = self.scrolls.entry(window.view).or_insert_with(|| {
+                let mut scrolling = Scrolling::new(anchor);
+                scrolling.across_to(left, false, now);
+                scrolling.across_last = left as f32;
+                scrolling
+            });
             if scrolling.anchor != anchor {
                 let reach = usize::from(window.rows) * 3 + 8;
                 let measure = Measured::new(&mut self.fonts);
@@ -542,16 +584,30 @@ impl Gui {
                     }
                     // Too far to scroll through: the text is just there.
                     None => {
-                        *scrolling = Scrolling::new(anchor);
-                        scrolling.moved = Some(now);
+                        *scrolling = Scrolling {
+                            moved: Some(now),
+                            across: scrolling.across,
+                            across_from: scrolling.across_from,
+                            across_start: scrolling.across_start,
+                            across_last: scrolling.across_last,
+                            ..Scrolling::new(anchor)
+                        };
                     }
                 }
             }
-            let at = scrolling.at(now);
+            if scrolling.across != left {
+                // Further than a few widths, it is just there.
+                let far =
+                    (left as f32 - scrolling.across_at(now)).abs() > window.width() as f32 * 3.0;
+                scrolling.across_to(left, smooth && !far, now);
+            }
+            let (at, across) = (scrolling.at(now), scrolling.across_at(now));
             if Some(window.view) == active {
-                shift = scrolling.last - at;
+                // Text further across shows further left.
+                shift = ((scrolling.across_last - across) / UNIT, scrolling.last - at);
             }
             scrolling.last = at;
+            scrolling.across_last = across;
         }
         shift
     }
@@ -572,6 +628,10 @@ impl Gui {
         let areas = self.areas(runtime);
         let (x, y) = self.pointer;
         if runtime.layer().is_some() {
+            return;
+        }
+        self.edge = areas.edge_at(x, y);
+        if self.edge.is_some() {
             return;
         }
         if areas.tabs.is_some_and(|tabs| tabs.contains(x, y)) {
@@ -646,6 +706,31 @@ impl Gui {
     fn drag(&mut self, runtime: &mut Runtime) {
         if self.thumb.is_some() {
             return self.drag_thumb(runtime);
+        }
+        let areas = self.areas(runtime);
+        if let Some((view, axis)) = self.edge {
+            let (x, y) = self.pointer;
+            let delta = areas.edge_moved(view, axis, x, y);
+            if delta != 0 {
+                runtime.input(UserInput::Pointer(Pointer::Edge { view, axis, delta }));
+            }
+            return;
+        }
+        // Over an edge, the pointer shows which way it moves.
+        let (x, y) = self.pointer;
+        let resizing = match self.press {
+            None if runtime.layer().is_none() => areas.edge_at(x, y).map(|(_, axis)| axis),
+            _ => None,
+        };
+        if resizing != self.resizing {
+            self.resizing = resizing;
+            if let Some(window) = self.renderer.window() {
+                window.set_cursor(match resizing {
+                    Some(crate::application::Axis::Columns) => CursorIcon::ColResize,
+                    Some(crate::application::Axis::Rows) => CursorIcon::RowResize,
+                    None => CursorIcon::Default,
+                });
+            }
         }
         let Some(anchor) = self.press else {
             return;
@@ -802,6 +887,17 @@ impl ApplicationHandler for App {
                         input::Menu::Command(name) => {
                             runtime.command(crate::interaction::Command::Named(name.into()))
                         }
+                        input::Menu::Hide => {
+                            #[cfg(target_os = "macos")]
+                            winit::platform::macos::ActiveEventLoopExtMacOS::hide_application(
+                                event_loop,
+                            );
+                        }
+                        input::Menu::Minimize => {
+                            if let Some(window) = gui.renderer.window() {
+                                window.set_minimized(true);
+                            }
+                        }
                     }
                 } else if let Some(stroke) = input::stroke(&event, gui.modifiers) {
                     runtime.input(UserInput::Key(stroke));
@@ -832,6 +928,7 @@ impl ApplicationHandler for App {
                 ElementState::Released => {
                     gui.press = None;
                     gui.thumb = None;
+                    gui.edge = None;
                 }
             },
             WindowEvent::MouseWheel { delta, .. } => {
@@ -959,5 +1056,70 @@ mod tests {
         scrolling.moved_by(20, 1.0, 20.0, 7.0, false, start);
         assert_eq!(scrolling.at(start), 7.0);
         assert!(!scrolling.moving(start));
+    }
+    #[test]
+    fn scrolling_across_eases_from_where_the_rows_start_now() {
+        let start = Instant::now();
+        let mut scrolling = Scrolling::new(0);
+        scrolling.across_to(100, false, start);
+        assert_eq!(scrolling.across_at(start), 100.0);
+        assert!(!scrolling.moving(start));
+        // Further across: the rows start where they were, then ease there.
+        scrolling.across_to(400, true, start);
+        assert_eq!(scrolling.across_at(start), 100.0);
+        let half = scrolling.across_at(start + SCROLL / 2);
+        assert!(half > 250.0 && half < 400.0, "{half}");
+        assert!(scrolling.moving(start + SCROLL / 2));
+        // Back again mid-way starts from where the rows show.
+        scrolling.across_to(0, true, start + SCROLL / 2);
+        assert_eq!(scrolling.across_at(start + SCROLL / 2), half);
+        assert_eq!(scrolling.across_at(start + SCROLL * 2), 0.0);
+        assert!(!scrolling.moving(start + SCROLL * 2));
+    }
+    #[test]
+    fn an_edge_between_windows_is_found_and_dragged_by_whole_cells() {
+        use crate::{application::Axis, interaction::Command, runtime::Runtime};
+        let mut runtime = Runtime::new(std::path::PathBuf::from("/")).unwrap();
+        runtime.start(None);
+        runtime.command(Command::Named("vsplit".into()));
+        let fonts = super::Fonts::new(super::text::Settings {
+            size: 14.0,
+            line_height: 135,
+            text: String::new(),
+            ui: String::new(),
+        });
+        let areas = super::Areas::new(&runtime, &fonts, 800.0, 400.0);
+        let [left, right] = &areas.windows[..] else {
+            panic!("two windows side by side");
+        };
+        let (gap, y) = (left.area.right() + 2.0, left.area.y + 50.0);
+        assert!(gap < right.area.x);
+        assert_eq!(areas.edge_at(gap, y), Some((left.view, Axis::Columns)));
+        // In the text, not an edge.
+        assert_eq!(areas.edge_at(left.area.x + 40.0, y), None);
+        let cell = right.area.x - left.area.right();
+        let middle = left.area.right() + cell / 2.0;
+        assert_eq!(areas.edge_moved(left.view, Axis::Columns, middle, y), 0);
+        assert_eq!(
+            areas.edge_moved(left.view, Axis::Columns, middle + 3.0 * cell, y),
+            3
+        );
+        assert_eq!(
+            areas.edge_moved(left.view, Axis::Columns, middle - 2.0 * cell, y),
+            -2
+        );
+        // One above another: where they meet.
+        runtime.command(Command::Named("only".into()));
+        runtime.command(Command::Named("split".into()));
+        let areas = super::Areas::new(&runtime, &fonts, 800.0, 400.0);
+        let [top, bottom] = &areas.windows[..] else {
+            panic!("two windows one above another");
+        };
+        let x = top.area.x + 100.0;
+        assert_eq!(
+            areas.edge_at(x, top.area.bottom() - 2.0),
+            Some((top.view, Axis::Rows))
+        );
+        assert_eq!(areas.edge_at(x, bottom.area.y + 30.0), None);
     }
 }

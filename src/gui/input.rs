@@ -80,6 +80,9 @@ fn function(key: NamedKey) -> Option<u8> {
 pub enum Menu {
     Command(&'static str),
     Paste,
+    /// Hides the program, as the system's own Command-H does.
+    Hide,
+    Minimize,
 }
 /// The macOS shortcut a key press is; none elsewhere, where Super belongs
 /// to the desktop.
@@ -105,6 +108,8 @@ pub fn menu(event: &KeyEvent, modifiers: ModifiersState) -> Option<Menu> {
         ("a", false) => Menu::Command("select-all"),
         ("s", false) => Menu::Command("write"),
         ("q", false) => Menu::Command("quit"),
+        ("h", false) => Menu::Hide,
+        ("m", false) => Menu::Minimize,
         _ => return None,
     })
 }
