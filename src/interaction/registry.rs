@@ -35,6 +35,8 @@ pub enum SlotKind {
     Recent,
     /// One of the items of the question being asked.
     Item,
+    /// A symbol of the current document.
+    Symbol,
     Word,
     Rest,
 }
@@ -545,6 +547,16 @@ pub static BUILTINS: &[Builtin] = &[
         |a| { Ok(path_or(a, Command::OpenProjectFile, interactive("project"))) }
     ),
     builtin!("search", "Search the document", Command::Search),
+    builtin!(
+        "visit",
+        [slot("SYMBOL", SlotKind::Symbol)],
+        "Select the next place of a symbol of the document, or of any text",
+        |a| Ok(if a.is_empty() {
+            interactive("visit")
+        } else {
+            Command::Visit(a.into())
+        })
+    ),
     builtin!(
         "search-backward",
         "Search the document backward",

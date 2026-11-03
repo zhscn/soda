@@ -511,3 +511,30 @@ fn keypad_hints_list_what_m_and_g_reach() {
     assert!(after_g.contains(&",".into()), "{after_g:?}");
     assert!(!after_g.contains(&"g".into()), "{after_g:?}");
 }
+#[test]
+fn visit_offers_the_symbols_of_the_document_and_selects_the_next_place() {
+    let mut r = runtime("add_x(add);\n|add + addend;\nadd;\n");
+    keys(&mut r, "v");
+    let rows = |r: &Runtime| match r.layer() {
+        Some(soda::interaction::Layer::CommandLine(line)) => line
+            .rows()
+            .iter()
+            .map(|row| row.candidate.label.clone())
+            .collect::<Vec<_>>(),
+        _ => panic!("no command line"),
+    };
+    // Nearest first, each once.
+    assert_eq!(rows(&r)[..3], ["add", "addend", "add_x"]);
+    r.input(UserInput::Paste("add".into()));
+    assert_eq!(rows(&r)[0], "add");
+    keys(&mut r, "<ret>");
+    // The symbol, not the start of a longer one.
+    assert_eq!(shown(&r), "add_x(add);\n[add]| + addend;\nadd;\n");
+    keys(&mut r, "n");
+    assert_eq!(shown(&r), "add_x(add);\nadd + addend;\n[add]|;\n");
+    // Text that is not a symbol is sought as it is written.
+    keys(&mut r, "v");
+    r.input(UserInput::Paste("d + a".into()));
+    keys(&mut r, "<ret>");
+    assert_eq!(shown(&r), "add_x(add);\nad[d + a]|ddend;\nadd;\n");
+}

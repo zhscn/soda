@@ -49,9 +49,9 @@ fn the_command_line_recalls_what_was_entered() {
 #[test]
 fn search_recalls_earlier_searches() {
     let mut r = runtime();
-    keys(&mut r, "vfoo<ret>vbar<ret>");
+    keys(&mut r, "<c-s>foo<ret><c-s>bar<ret>");
     assert_eq!(r.search_history(), ["foo", "bar"]);
-    keys(&mut r, "v<up>");
+    keys(&mut r, "<c-s><up>");
     assert_eq!(prompt(&r), "Find [1]: bar");
     keys(&mut r, "<up><ret>");
     assert_eq!(r.search_history(), ["bar", "foo"]);

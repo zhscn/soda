@@ -116,12 +116,12 @@ fn jumping_after_going_back_drops_what_lay_ahead() {
 fn a_search_counts_once_from_where_it_started() {
     let Project { mut r, _dir } = project();
     goto(&mut r, 5);
-    keys(&mut r, "vline 20<ret>");
+    keys(&mut r, "<c-s>line 20<ret>");
     assert_eq!(at(&r), here("a.txt", 20));
     keys(&mut r, "<c-o>");
     assert_eq!(at(&r), here("a.txt", 5));
     // A cancelled search went nowhere.
-    keys(&mut r, "vline 25<esc>");
+    keys(&mut r, "<c-s>line 25<esc>");
     assert_eq!(at(&r), here("a.txt", 5));
     keys(&mut r, "<c-i>");
     assert_eq!(at(&r), here("a.txt", 20));

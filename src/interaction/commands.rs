@@ -217,6 +217,8 @@ pub enum Command {
     Completion(super::completion::Action),
     /// Inserts a snippet at the caret.
     Snippet(String),
+    /// Searches for a symbol, or for text, and selects its next place.
+    Visit(String),
     SnippetStep {
         backward: bool,
     },
@@ -773,6 +775,41 @@ impl Layers {
                         time,
                         &mut response,
                     );
+                }
+            }
+            Command::Visit(text) => {
+                if let Some(view) = app.active_view()
+                    && let Some(state) = app.view(view)
+                {
+                    let editor = app.workspace().editor(state.document_id).unwrap();
+                    let snapshot = editor.model().document().snapshot();
+                    let symbol = text.chars().all(super::completion::is_word)
+                        && super::command_line::symbols(snapshot.text(), 0).contains(&text);
+                    let query = if symbol {
+                        crate::editor::search::SearchQuery::symbol(text.clone())
+                    } else {
+                        crate::editor::search::SearchQuery::new(regex::escape(&text))
+                    };
+                    self.modal.set_search(query.clone());
+                    self.history[super::history::SEARCH].record(&text);
+                    let head = editor
+                        .model()
+                        .session(state.session_id)
+                        .unwrap()
+                        .selection()
+                        .head;
+                    // From the caret, so the selection is not what is sought.
+                    response.events.push(Event::Edit {
+                        view,
+                        command: EditCommand::SetSearchQuery(query),
+                        time,
+                    });
+                    response.events.push(Event::Edit {
+                        view,
+                        command: EditCommand::SetSelection(crate::core::Selection::caret(head)),
+                        time,
+                    });
+                    response.commands.push(Command::Named("search-next".into()));
                 }
             }
             Command::SnippetStep { backward } => {

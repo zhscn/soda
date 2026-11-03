@@ -149,7 +149,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `soda.lsp.*` | 语言服务器接口，见[语言服务器](lsp.md) |
 
 `soda.define_command` 的 `options.args` 是参数位的数组，每一项是一种类型，或者一个表：
-- 类型：`file`（项目文件）、`path`、`buffer`、`option`、`face`、`language`、`recent`、`word`、`rest`；写成字符串时参数位必填，名字是类型的大写。
+- 类型：`file`（项目文件）、`path`、`buffer`、`option`、`face`、`language`、`recent`、`symbol`（当前文档的符号）、`word`、`rest`；写成字符串时参数位必填，名字是类型的大写。
 - 表：`{ name = "SIDE", choices = { { "left", "说明" }, "right" }, optional = true }`，或者 `{ name = "FILE", kind = "file" }`。`choices` 的每一项是词，或者词加说明；补全时只能从中选。
 
 最后一个参数位取到行尾，前面的取一个词；参数文本仍然整体交给函数。

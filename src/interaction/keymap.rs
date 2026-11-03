@@ -461,7 +461,7 @@ const NORMAL: &[(&str, &str)] = &[
     ("'", "join"),
     ("n", "search-next"),
     ("N", "search-pop"),
-    ("v", "search"),
+    ("v", "visit"),
     ("<c-s>", "search"),
     ("<c-r>", "search-backward"),
     ("u", "undo"),

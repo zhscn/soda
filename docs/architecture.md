@@ -2,7 +2,7 @@
 
 Soda 是以 TUI 交付、以 C++ 交互缩进为核心体验的 Rust 编辑器。首要目标是 CLion 式的即时缩进：namespace、类成员初始化列表、访问标签、参数与 lambda 续行，在一次回车中由增量维护的语法结构直接计算，不随文件变大而退化。其余编辑功能服务于这个目标，开箱即用但不追求大而全。
 
-规模以 kakoune（约 20k 行）为参照。它不是硬限制，但新增服务、扩展点和后台任务都要有具体使用场景、明确的状态所有者和生命周期，模块难以独立测试时先调整边界再扩大功能。
+新增服务、扩展点和后台任务都要有具体使用场景、明确的状态所有者和生命周期，模块难以独立测试时先调整边界再扩大功能。
 
 ## 1 优先级
 
@@ -80,7 +80,7 @@ C++ 缩进剩下的不一致都是个例：被 `#if/#else` 拆开的构造函数
 | --- | --- | --- |
 | llvm-project | `~/project/llvm-project` | `clang/lib/Format/` 的结构识别、token 角色、ContinuationIndenter 与空白生成 |
 | intellij-community | `~/project/intellij-community` | 缩进查询服务边界、Search Everywhere 的来源与结果管理 |
-| kakoune | `~/project/kakoune` | 命令、键位与扩展模型；选区与多选区；代码规模参照 |
+| kakoune | `~/project/kakoune` | 命令、键位与扩展模型；选区与多选区 |
 | meow | `~/.emacs.d/elpaca/sources/meow` | 模态编辑的语义与键位、keypad、beacon |
 | helix | `~/package/helix` | Rust 编辑内核与终端前端组织、keymap 与命令表 |
 | codemirror | `~/package/codemirror` | 状态、事务、历史分组与搜索 cursor |

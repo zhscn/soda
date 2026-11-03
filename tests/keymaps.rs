@@ -55,8 +55,9 @@ fn overrides_can_use_literal_sequences_without_affecting_insert_or_defaults() {
     send(&mut r, key('f'));
     assert_eq!(text(&r), " f");
     send(&mut r, KeyStroke::plain(Key::Esc));
+    // Defaults stay: `v` visits.
     send(&mut r, key('v'));
-    assert!(matches!(r.layer(), Some(Layer::Search { .. })));
+    assert!(matches!(r.layer(), Some(Layer::CommandLine(_))));
 }
 #[test]
 fn prefix_conflicts_and_reserved_cancellation_are_rejected_without_replacing_bindings() {

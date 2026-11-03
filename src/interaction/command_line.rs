@@ -87,6 +87,8 @@ pub struct CommandLine {
     recent: Vec<PathBuf>,
     /// The items of an `Item` slot.
     items: Vec<String>,
+    /// The symbols of the document, nearest the caret first, once asked.
+    symbols: Option<Vec<String>>,
     /// The rows are those of the last input, kept in view while the worker
     /// answers this one, so the list does not blink at each key. They can
     /// be looked at and not chosen.
@@ -202,6 +204,7 @@ impl CommandLine {
             matcher: Matcher::new(Config::DEFAULT),
             recent: vec![],
             items: vec![],
+            symbols: None,
             stale: false,
         }
     }
@@ -381,6 +384,7 @@ impl CommandLine {
                 Target::Slot(SlotKind::Item) => self.item_rows(&query.text),
                 Target::Slot(SlotKind::Path) => self.paths(&query.text, &mut response),
                 Target::Slot(SlotKind::File) => self.project_files(&query.text, &mut response),
+                Target::Slot(SlotKind::Symbol) => self.symbol_rows(app, &query.text),
                 Target::Slot(SlotKind::Word | SlotKind::Rest) => vec![],
             },
         };
@@ -414,6 +418,34 @@ impl CommandLine {
     }
     /// Items match fuzzily and answer with their number, so a title may
     /// hold any text.
+    fn symbol_rows(&mut self, app: &Application, query: &str) -> Vec<MatchedCandidate<Completion>> {
+        let symbols = self.symbols.get_or_insert_with(|| {
+            let Some(view) = app.active_view().and_then(|view| app.view(view)) else {
+                return vec![];
+            };
+            let editor = app.workspace().editor(view.document_id).unwrap();
+            let caret = editor
+                .model()
+                .session(view.session_id)
+                .unwrap()
+                .selection()
+                .head;
+            symbols(editor.model().document().snapshot().text(), caret)
+        });
+        self.matcher.config = Config::DEFAULT;
+        let mut ranked: Vec<_> = symbols
+            .iter()
+            .enumerate()
+            .filter_map(|(index, symbol)| {
+                let (score, highlights) = matched(&mut self.matcher, query, symbol)?;
+                let row = row(index as u64, symbol.clone(), Some(symbol.clone()), false);
+                Some((score, mark(row, highlights, None)))
+            })
+            .collect();
+        // Equal scores keep the nearest first.
+        ranked.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
+        ranked.into_iter().map(|(_, row)| row).collect()
+    }
     fn item_rows(&mut self, query: &str) -> Vec<MatchedCandidate<Completion>> {
         self.matcher.config = Config::DEFAULT;
         let mut ranked: Vec<_> = self
@@ -869,6 +901,40 @@ impl CommandLine {
 }
 
 /// Everything matches an empty query; otherwise a fuzzy match with its score.
+/// The symbols of a text, each once, nearest `caret` first: runs of word
+/// characters that do not start with a digit.
+pub(super) fn symbols(text: &str, caret: usize) -> Vec<String> {
+    let mut found: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    // Where the word being read starts, and whether it is a symbol.
+    let mut word: Option<(usize, bool)> = None;
+    for (at, ch) in text
+        .char_indices()
+        .chain(std::iter::once((text.len(), ' ')))
+    {
+        match (word, super::completion::is_word(ch)) {
+            (None, true) => word = Some((at, !ch.is_ascii_digit())),
+            (Some((from, symbol)), false) => {
+                if symbol {
+                    let distance = if at <= caret {
+                        caret - at
+                    } else {
+                        from.saturating_sub(caret)
+                    };
+                    let entry = found.entry(&text[from..at]).or_insert(distance);
+                    *entry = (*entry).min(distance);
+                }
+                word = None;
+            }
+            _ => {}
+        }
+    }
+    let mut symbols: Vec<_> = found.into_iter().collect();
+    symbols.sort_by_key(|(symbol, distance)| (*distance, *symbol));
+    symbols
+        .into_iter()
+        .map(|(symbol, _)| symbol.to_owned())
+        .collect()
+}
 fn matched(matcher: &mut Matcher, query: &str, shown: &str) -> Option<(u32, Vec<Range<usize>>)> {
     if query.is_empty() {
         Some((0, vec![]))

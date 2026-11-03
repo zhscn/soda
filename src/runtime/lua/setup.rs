@@ -223,11 +223,12 @@ fn slots(args: &Table) -> mlua::Result<&'static [crate::interaction::Slot]> {
             "face" => SlotKind::Face,
             "language" => SlotKind::Language,
             "recent" => SlotKind::Recent,
+            "symbol" => SlotKind::Symbol,
             "word" => SlotKind::Word,
             "rest" => SlotKind::Rest,
             name => {
                 return Err(mlua::Error::runtime(format!(
-                    "unknown argument kind {name}: use file, path, buffer, option, face, language, recent, word, rest or choices"
+                    "unknown argument kind {name}: use file, path, buffer, option, face, language, recent, symbol, word, rest or choices"
                 )));
             }
         })
