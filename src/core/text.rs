@@ -10,6 +10,7 @@ use std::{
 struct TextStorage {
     rope: Rope,
     contiguous: OnceLock<Arc<str>>,
+    lone_cr: OnceLock<bool>,
 }
 
 /// Immutable UTF-8 rope. Public positions are byte offsets, lines use LF/CRLF,
@@ -28,6 +29,7 @@ impl Snapshot {
             storage: Arc::new(TextStorage {
                 rope,
                 contiguous: OnceLock::new(),
+                lone_cr: OnceLock::new(),
             }),
             version,
         }
@@ -42,6 +44,17 @@ impl Snapshot {
         self.storage
             .contiguous
             .get_or_init(|| self.storage.rope.to_string().into())
+    }
+    /// Whether a `\r` stands anywhere but before a `\n`, where it is text
+    /// within a line rather than part of a line break.
+    pub fn has_lone_cr(&self) -> bool {
+        *self.storage.lone_cr.get_or_init(|| {
+            let bytes = self.text().as_bytes();
+            bytes
+                .iter()
+                .enumerate()
+                .any(|(at, byte)| *byte == b'\r' && bytes.get(at + 1) != Some(&b'\n'))
+        })
     }
     pub fn len_bytes(&self) -> usize {
         self.storage.rope.len_bytes()
