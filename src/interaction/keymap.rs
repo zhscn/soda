@@ -113,7 +113,7 @@ pub(super) const LINE_EDITS: &[(&str, LineEdit, &str)] = &[
     (
         "kill-line-start",
         LineEdit::KillLineStart,
-        "Delete to line start",
+        "Cut to line start",
     ),
     (
         "kill-line-end",
@@ -161,7 +161,10 @@ impl LineEdit {
             }),
             Self::DeleteWordBackward => Command::Modal(Action::EraseWord),
             Self::DeleteWordForward => Command::Edit(Edit::DeleteWord(Direction::Forward)),
-            Self::KillLineStart => Command::Modal(Action::EraseLineStart),
+            Self::KillLineStart => Command::Clipboard(ClipboardAction::Kill {
+                backward: true,
+                word: false,
+            }),
             Self::KillLineEnd => Command::Clipboard(ClipboardAction::Kill {
                 backward: false,
                 word: false,
@@ -454,6 +457,7 @@ const NORMAL: &[(&str, &str)] = &[
     ("<c-w>", "kill"),
     ("<a-w>", "save"),
     ("<c-y>", "put"),
+    ("<a-y>", "yank-pop"),
     ("<c-d>", "delete"),
     ("<a-d>", "delete-word-forward"),
     ("<a-bs>", "delete-word-backward"),
@@ -511,6 +515,7 @@ const TREE: &[(&str, &str)] = &[
 ];
 const INSERT: &[(&str, &str)] = &[
     ("<a-/>", "completion-trigger"),
+    ("<a-y>", "yank-pop"),
     ("<up>", "move-up"),
     ("<down>", "move-down"),
     ("<s-up>", "extend-move-up"),

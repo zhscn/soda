@@ -559,3 +559,51 @@ fn moving_up_and_down_keeps_a_column_until_something_else_moves_the_caret() {
     keys(&mut r, "<c-n><c-a><c-n>");
     assert_eq!(shown(&r), "abcdef\nabcdef\n|abcdef\n");
 }
+#[test]
+fn kills_one_after_another_join_and_yank_pop_goes_back_through_the_ring() {
+    let mut r = runtime("|one\ntwo\nthree\n");
+    keys(&mut r, "i<c-k><c-k><c-k>");
+    // Line, line break, line: one entry.
+    assert_eq!(shown(&r), "|\nthree\n");
+    assert_eq!(r.app().clipboard(), "one\ntwo");
+    // A kill elsewhere starts a new entry.
+    keys(&mut r, "<c-n><c-e><c-u>");
+    assert_eq!(shown(&r), "\n|\n");
+    assert_eq!(r.app().clipboard(), "three");
+    // Typing in between does too; killing backward puts the text in
+    // front of the forward kill.
+    keys(&mut r, "xyz<c-b><c-k><c-u>");
+    assert_eq!(shown(&r), "\n|\n");
+    assert_eq!(r.app().clipboard(), "xyz");
+    assert_eq!(r.app().kill_ring().count(), 3);
+    // Yank, then go back through the older entries, round to the newest.
+    keys(&mut r, "<c-y>");
+    assert_eq!(shown(&r), "\nxyz|\n");
+    keys(&mut r, "<a-y>");
+    assert_eq!(shown(&r), "\nthree|\n");
+    keys(&mut r, "<a-y>");
+    assert_eq!(shown(&r), "\none\ntwo|\n");
+    keys(&mut r, "<a-y>");
+    assert_eq!(shown(&r), "\nxyz|\n");
+    // Anything else in between, and M-y has nothing to replace.
+    keys(&mut r, "<c-b><a-y>");
+    assert_eq!(shown(&r), "\nxy|z\n");
+    assert!(r.message().contains("not a yank"), "{}", r.message());
+}
+#[test]
+fn yank_pop_follows_a_put_in_normal_and_stops_after_a_copy() {
+    let mut r = runtime("|one two\n");
+    keys(&mut r, "i<c-k><esc>ixy<c-a><c-k><esc>");
+    keys(&mut r, "<c-y>");
+    assert_eq!(shown(&r), "xy|\n");
+    keys(&mut r, "<a-y>");
+    assert_eq!(shown(&r), "one two|\n");
+    keys(&mut r, "<a-y>");
+    assert_eq!(shown(&r), "xy|\n");
+    // A copy changes the ring under the yank: nothing to replace.
+    r.command(Command::Named("copy".into()));
+    assert_eq!(r.app().clipboard(), "xy\n");
+    keys(&mut r, "<a-y>");
+    assert_eq!(shown(&r), "xy|\n");
+    assert!(r.message().contains("not a yank"), "{}", r.message());
+}

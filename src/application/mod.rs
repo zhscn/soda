@@ -364,6 +364,8 @@ pub enum Error {
     NoHighlight,
     /// `unflag-lines` found nothing to remove.
     NoFlags,
+    /// `yank-pop` not right after a yank.
+    NotAfterYank,
     /// A face or language that cannot be set.
     Setting(String),
     Edit(EditError),
@@ -388,6 +390,7 @@ impl fmt::Display for Error {
             Self::CannotResize => f.write_str("the window cannot change size that way"),
             Self::NoHighlight => f.write_str("no such highlight"),
             Self::NoFlags => f.write_str("no such flags"),
+            Self::NotAfterYank => f.write_str("the last command was not a yank"),
             Self::Setting(error) => f.write_str(error),
             Self::Edit(e) => e.fmt(f),
             Self::File(e) => e.fmt(f),
@@ -405,6 +408,7 @@ impl std::error::Error for Error {
             | Self::CannotResize
             | Self::NoHighlight
             | Self::NoFlags
+            | Self::NotAfterYank
             | Self::Setting(_) => None,
         }
     }
@@ -427,7 +431,13 @@ pub struct Application {
     focus_revision: u64,
     open_revision: u64,
     pending_opens: BTreeMap<OpenId, OpenIntent>,
-    clipboard: String,
+    /// Killed and copied text, newest first; the newest is the clipboard.
+    kill_ring: std::collections::VecDeque<String>,
+    /// Where the last kill left the caret, so that the next kill there
+    /// joins it.
+    killed: Option<clipboard::Rest>,
+    /// The text the last yank put in, for `yank-pop` to replace.
+    yanked: Option<clipboard::Yanked>,
     /// Counts clipboard replacements, so frontends can mirror them.
     clipboard_revision: u64,
     windows: Windows,

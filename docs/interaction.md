@@ -243,7 +243,7 @@ Normal 中：
 | `C-a`、`C-e`、`M-<`、`M->`、`M-f`、`M-b` | 行首、行尾、文档首尾、按词移动 |
 | `C-Space` | 开始字符选区，之后的移动扩展它 |
 | `C-g` | 取消选区 |
-| `C-w`、`M-w`、`C-y` | `kill`、`save`、`yank` |
+| `C-w`、`M-w`、`C-y`、`M-y` | `kill`、`save`、`yank`、`yank-pop` |
 | `C-d` | `delete` |
 | `C-s`、`C-r` | `search`、`search-backward` |
 | `M-d`、`M-Backspace` | 删除到词尾、词首 |
@@ -260,7 +260,7 @@ Insert 另有 `C-n`、`C-p`、`M-<`、`M->` 移动，`C-s`、`C-r` 搜索（结�
 
 输入框另有 `C-g` 取消、`C-j` 确认、`M-<` / `M->` 到第一个 / 最后一个候选、`C-v` / `M-v` 翻页、`C-s` / `C-r` 下一个 / 上一个匹配。
 
-`M-y`（kill ring）、连续 `C-k` 合并没有实现。Alt 加 Shift 的符号键在 kitty 协议下按美式键盘换算。
+Alt 加 Shift 的符号键在 kitty 协议下按美式键盘换算。
 
 ### 按键记法
 
@@ -278,11 +278,12 @@ Insert 和 prompt 共享一组 readline 风格的行编辑命令。名字只定�
 | Backspace / Ctrl-H、Delete / Ctrl-D | `delete-backward` / `delete-forward` | 删除字符簇；Insert 的退格保留按缩进单位回退 |
 | Ctrl-W、Ctrl-Backspace、Alt-Backspace | `delete-word-backward` | 删除到前一个词边界 |
 | Ctrl-Delete、Alt-D | `delete-word-forward` | 删除到后一个词边界 |
-| Ctrl-U | `kill-line-start` | 删除到行首 |
+| Ctrl-U | `kill-line-start` | 剪切到行首 |
 | Ctrl-K | `kill-line-end` | 剪切到行尾；位于行尾时剪切换行 |
 | Ctrl-Y | `yank` | 粘贴剪切内容 |
+| Alt-Y | `yank-pop` | 紧跟在粘贴后，换成 kill ring 里更早的一条；Insert 和 Normal 有，输入框没有 |
 
-Shift 加方向键、Home 和 End 扩展选区，对应 `extend-` 前缀的同名命令。Insert 中 `kill-line-end` 写入应用剪贴板，`yank` 等同于粘贴剪贴板；输入框使用组件自己的剪切缓冲。连续剪切不合并。Normal 不使用这组键；它的 Emacs 键见[Emacs 键位](#emacs-键位)。
+Shift 加方向键、Home 和 End 扩展选区，对应 `extend-` 前缀的同名命令。Insert 中 `kill-line-start`、`kill-line-end` 写入 kill ring，连续的剪切合并成一条（见[剪贴板](#剪贴板)），`yank` 等同于粘贴剪贴板；输入框使用组件自己的剪切缓冲。Normal 不使用这组键；它的 Emacs 键见[Emacs 键位](#emacs-键位)。
 
 Ctrl-N/Ctrl-P 上下移动；补全列表打开期间由补全使用。
 
@@ -596,15 +597,19 @@ Runtime 在更新中观察 SaveId，并将带 Operation 身份的失败交给等
 
 ## 剪贴板
 
-Application 拥有一个跨文档共享的剪贴板。ClipboardAction 提供复制、剪切、粘贴操作。存在选区时复制或剪切选区，否则操作光标所在整行，保留原来的换行字节。空行末尾没有可复制内容时保留此前剪贴板。
+Application 拥有一个跨文档共享的剪贴板。ClipboardAction 提供复制、剪切、粘贴和 `yank-pop`。存在选区时复制或剪切选区，否则操作光标所在整行，保留原来的换行字节。空行末尾没有可复制内容时保留此前剪贴板。
 
 复制保留文档、选区和历史；剪切在事务成功后才替换剪贴板，并将光标放到删除范围起点。粘贴在光标处插入或替换选区，作为一次独立的可撤销编辑。撤销恢复文档与选区，不改变剪贴板。模态层阻止这些文档命令；终端 bracketed paste 仍可直接输入到当前组件。
+
+剪贴板是 Emacs 式的 kill ring：每次复制、剪切或从系统剪贴板读回新内容都加一条，最新的一条就是剪贴板，最多保留 120 条，与最新一条相同的文字不重复加入。
+- **连续剪切合并**：剪切时，如果文档自上次剪切后没有变过、光标还在上次剪切留下的位置，并且这次剪掉的范围一端正好在那里，就并进最新的一条，向后剪接在后面，向前剪（`kill-line-start`）放在前面。所以 `C-k C-k` 剪掉一行连同换行，是一条。判断看的是状态而不是上一个按键，宏和 Lua 调用也一样；复制或读回系统剪贴板之后不再合并。
+- **`yank-pop`（`M-y`）**：粘贴之后，文档和光标都没有动过时，把刚粘贴的文字换成 kill ring 里更早的一条，每再按一次换成更早的一条，过了最旧的回到最新的；否则报告 the last command was not a yank。它不改变剪贴板，之后的粘贴仍是最新的一条。
 
 剪贴板每次被替换时版本号加一。前端可以给 Runtime 提供一个 `SystemClipboard`，Runtime 据此与系统剪贴板同步：
 - **复制**：每次归约后，版本号变化就把新内容写入系统剪贴板。`kill` 也写入。
 - **粘贴**：`p`、`P`、`paste` 执行前先读取系统剪贴板。内容与应用剪贴板不同时，替换应用剪贴板：以换行结尾的按行粘贴，否则按字符粘贴。内容相同则保留原来的按行标记，所以 `yy` 之后 `p` 仍按行粘贴。读回的内容不会再写出去。
 
-终端前端按环境选择实现：
+终端前端按环境选择实现（图形前端直接用窗口系统的剪贴板，见[图形界面](gui.md#输入)）：
 - 本机有图形会话时使用剪贴板工具：Wayland 用 `wl-copy` 和 `wl-paste`，X11 用 `xclip` 或 `xsel`，macOS 用 `pbcopy` 和 `pbpaste`。
 - 通过 SSH 登录，或没有找到这些工具时，复制以 OSC 52 转义序列写给终端，粘贴只用应用剪贴板。多数终端接受 OSC 52 写入，但很少允许程序读取。tmux 中需要 `set -g set-clipboard on`。
 - 写入在后台线程完成。读取最多等待 500 ms，超时就放弃，改用应用剪贴板。

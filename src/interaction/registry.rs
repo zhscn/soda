@@ -675,6 +675,11 @@ pub static BUILTINS: &[Builtin] = &[
     ),
     builtin!("paste", "Paste", Command::Clipboard(ClipboardAction::Paste)),
     builtin!(
+        "yank-pop",
+        "Replace the text just yanked with the older killed text",
+        Command::Clipboard(ClipboardAction::YankPop)
+    ),
+    builtin!(
         "page-up",
         "Scroll one page up",
         Command::Page {
