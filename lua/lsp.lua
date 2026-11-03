@@ -78,7 +78,8 @@ end
 -- Requests still waiting, by what they are for: a newer request for the
 -- same thing cancels the older, whose answer nobody wants any more.
 local pending = {}
-local function send(slot, method, params, answer)
+-- `buf` names the document whose server to ask, when not the current one.
+local function send(slot, method, params, answer, buf)
   soda.lsp.cancel(pending[slot])
   local id
   id = soda.lsp.request(method, params, function(result, failure)
@@ -86,7 +87,7 @@ local function send(slot, method, params, answer)
       pending[slot] = nil
     end
     answer(result, failure)
-  end)
+  end, buf)
   pending[slot] = id or nil
   return id
 end
@@ -198,10 +199,13 @@ local function location_entry(location)
   local range = location.range or location.targetSelectionRange
   return { path = path_of(uri), line = range.start.line, column = range.start.character }
 end
-local function open_location(location)
+-- Goes to a location; `buf` names whose server counted its columns, when
+-- that is not the current document's.
+local function open_location(location, buf)
   local entry = location_entry(location)
   local lines = lines_of(entry.path)
-  local byte = to_byte(lines[entry.line + 1] or "", entry.column, soda.lsp.info().encoding)
+  local info = soda.lsp.info(buf)
+  local byte = to_byte(lines[entry.line + 1] or "", entry.column, info and info.encoding or "utf-16")
   soda.open(entry.path, entry.line + 1, byte + 1)
 end
 
@@ -1330,3 +1334,19 @@ soda.map("global", "<c-c>a", "lsp-code-action")
 soda.map("global", "<c-c>s", "lsp-symbols")
 soda.map("global", "<c-c>S", "lsp-workspace-symbols")
 soda.map("global", "<c-c>h", "lsp-switch")
+
+-- What modules for one server's extensions, such as `ccls`, build on.
+return {
+  path_of = path_of,
+  uri_of = uri_of,
+  relative = relative,
+  to_byte = to_byte,
+  to_character = to_character,
+  here = here,
+  send = send,
+  supports = supports,
+  failed = failed,
+  show = show,
+  location_entry = location_entry,
+  open_location = open_location,
+}

@@ -1199,3 +1199,57 @@ fn trees_open_and_close_load_children_when_asked_and_hand_back_nodes() {
     keys(&mut r, "o");
     assert_eq!(r.message(), "open 2");
 }
+#[test]
+fn a_replaced_tree_lets_its_functions_go_and_a_redraw_keeps_the_view() {
+    let mut r = runtime();
+    lua(
+        &mut r,
+        r#"
+        held = setmetatable({}, { __mode = "k" })
+        do
+          local kept = {}
+          held[kept] = true
+          soda.tree({ name = "t", roots = { { label = "x", leaf = true } },
+                      open = function() return kept end })
+        end
+        local roots = {}
+        for i = 1, 200 do
+          roots[i] = { label = "n" .. i, children = { { label = "c" .. i, leaf = true } } }
+        end
+        soda.tree({ name = "t", roots = roots })
+        "#,
+    );
+    lua(
+        &mut r,
+        r#"collectgarbage() collectgarbage()
+           assert(next(held) == nil, "the first tree's function is still kept")"#,
+    );
+    // Far down a long tree, opening a node leaves the view where it was.
+    r.command(Command::Named("goto 150".into()));
+    let view = r.app().active_view().unwrap();
+    let start = {
+        let document = r.app().view(view).unwrap().document_id;
+        let editor = r.app().workspace().editor(document).unwrap();
+        editor
+            .model()
+            .document()
+            .snapshot()
+            .line_start(139)
+            .unwrap()
+    };
+    r.update_viewport(view, soda::core::ByteOffset(start), 0);
+    let top = |r: &Runtime| {
+        let view = r.app().view(r.app().active_view().unwrap()).unwrap();
+        let editor = r.app().workspace().editor(view.document_id).unwrap();
+        editor
+            .model()
+            .document()
+            .snapshot()
+            .line_of(view.viewport.anchor.offset.0)
+            .unwrap()
+    };
+    let before = top(&r);
+    assert!(before > 100, "{before}");
+    keys(&mut r, "<tab>");
+    assert_eq!(top(&r), before);
+}

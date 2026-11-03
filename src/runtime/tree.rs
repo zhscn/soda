@@ -208,7 +208,21 @@ impl super::Runtime {
             });
         }
         self.paint_tree(document, &tree);
-        self.trees.insert(buffer, tree);
+        if let Some(old) = self.trees.insert(buffer, tree) {
+            self.released.push(old.function);
+        }
+    }
+    /// Forgets the trees whose documents closed, and their functions.
+    pub(super) fn forget_closed_trees(&mut self) {
+        let workspace = self.app.workspace();
+        let released = &mut self.released;
+        self.trees.retain(|buffer, tree| {
+            let open = workspace.scratch(buffer).is_some();
+            if !open {
+                released.push(tree.function);
+            }
+            open
+        });
     }
     /// Colours the details of a tree's rows.
     fn paint_tree(&mut self, document: crate::editor::DocumentId, tree: &Tree) {

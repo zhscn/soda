@@ -72,6 +72,8 @@ pub struct Runtime {
     replay: std::collections::VecDeque<UserInput>,
     /// Trees Lua shows, by the name of their document.
     trees: std::collections::HashMap<String, tree::Tree>,
+    /// Lua functions nothing calls any more, to drop when Lua next runs.
+    released: Vec<u64>,
     replaying: bool,
     /// Hook events waiting to run: the event, its parameter and the view
     /// its commands act on.
@@ -151,6 +153,7 @@ impl Runtime {
             epoch: Instant::now(),
             replay: Default::default(),
             trees: Default::default(),
+            released: vec![],
             replaying: false,
             notices: vec![],
             hooking: false,

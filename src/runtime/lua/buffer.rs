@@ -53,7 +53,7 @@ pub(super) type Edited = RefCell<Vec<(DocumentId, usize)>>;
 fn error(message: impl Into<String>) -> mlua::Error {
     mlua::Error::runtime(message.into())
 }
-fn document(runtime: &Runtime, number: u64) -> mlua::Result<DocumentId> {
+pub(super) fn document(runtime: &Runtime, number: u64) -> mlua::Result<DocumentId> {
     runtime
         .app
         .workspace()

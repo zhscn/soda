@@ -446,6 +446,12 @@ impl Host {
     }
     fn request(&self, runtime: &mut Runtime, request: Request) -> mlua::Result<()> {
         let lua = &self.lua;
+        if !runtime.released.is_empty() {
+            let callbacks = self.callbacks()?;
+            for id in std::mem::take(&mut runtime.released) {
+                callbacks.set(id, Value::Nil)?;
+            }
+        }
         let runtime = RefCell::new(runtime);
         let edited = buffer::Edited::default();
         let result = lua.scope(|scope| {
@@ -853,6 +859,7 @@ impl Runtime {
     }
     /// Collects finished processes and calls their functions.
     pub(super) fn poll_lua(&mut self) {
+        self.forget_closed_trees();
         let Some(host) = &self.lua else {
             return;
         };
@@ -923,7 +930,10 @@ impl Runtime {
     }
     /// The server of the current document: its language and root.
     fn lsp_key(&self) -> Option<super::lsp::Key> {
-        let document = self.document().ok()?;
+        self.lsp_key_of(self.document().ok()?)
+    }
+    /// The server of a document: its language and root.
+    fn lsp_key_of(&self, document: crate::editor::DocumentId) -> Option<super::lsp::Key> {
         let editor = self.app.workspace().editor(document)?;
         let language = editor.model().document().language().profile().id.clone();
         Some((language, self.app.server_root_of(document)))

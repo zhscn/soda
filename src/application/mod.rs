@@ -1195,11 +1195,29 @@ impl Application {
                     .model()
                     .document()
                     .snapshot();
+                // Each view keeps the line at its top: the whole text is
+                // replaced, which would otherwise take every view to the start.
+                let tops: Vec<(ViewId, usize)> = views
+                    .iter()
+                    .map(|view| {
+                        let anchor = self.views[view].viewport.anchor.offset.0;
+                        (*view, snapshot.line_of(anchor).unwrap_or(0))
+                    })
+                    .collect();
                 let tx = crate::core::Transaction::new(
                     snapshot.version(),
                     vec![crate::core::Change::new(0..snapshot.len_bytes(), text)],
                 );
                 self.edit(first, Command::Apply(tx), Duration::ZERO, &mut update)?;
+                let document_model = self.workspace.editor(document).unwrap().model().document();
+                let snapshot = document_model.snapshot();
+                for (view, line) in tops {
+                    let line = line.min(snapshot.line_count().saturating_sub(1));
+                    let start = snapshot.line_start(line).unwrap_or(0);
+                    let anchor = document_model.position(ByteOffset(start), Association::Before)?;
+                    self.views.get_mut(&view).unwrap().viewport.anchor = anchor;
+                    update.changed_views.push(view);
+                }
                 for view in views {
                     self.edit(
                         view,

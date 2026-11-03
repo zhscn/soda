@@ -83,12 +83,12 @@ clangd 的重构类动作是命令：执行后由服务器发来 `workspace/appl
 
 ```lua
 soda.lsp.server(language, command)            -- nil 表示去掉
-soda.lsp.request(method, params, function(result, error) end)  -- 返回请求编号；没有服务器时返回 false
+soda.lsp.request(method, params, function(result, error) end, [buf])  -- 返回请求编号；没有服务器时返回 false
 soda.lsp.cancel(id)                           -- 发 $/cancelRequest，之后到的回答丢弃；回答已经到了时返回 false
-soda.lsp.notify(method, params)
+soda.lsp.notify(method, params, [buf])
 soda.lsp.on(method, function(params) end)     -- 服务器的通知和请求；对请求返回的值就是回答
 soda.lsp.uri()                                -- 当前文档的 URI
-soda.lsp.info()                               -- encoding、capabilities；没有服务器时为 nil
+soda.lsp.info([buf])                          -- encoding、capabilities、watchers；没有服务器时为 nil
 soda.lsp.restart()
 soda.lsp.array(t)                             -- 标记 t 是数组
 ```
@@ -107,7 +107,9 @@ soda.choose(title, items, function(index) end)  -- 从 items 里选一项，取�
 soda.popup(text)    -- 光标旁的浮窗，放不下时滚轮或翻页键滚动，边框上显示位置，其他按键关闭
 ```
 
-作用对象是当前文档的语言的服务器。
+作用对象是当前文档的语言的服务器；给了 `buf`（`soda.buffer()` 的句柄）时是那个文档的，比如树或结果文档本身没有服务器，展开节点时要问来源文档的服务器。
+
+`require("lsp")` 返回 `lua/lsp.lua` 的辅助函数，给针对某个服务器扩展的模块用：`path_of`、`uri_of`、`relative`、`to_byte`、`to_character`、`here`、`send`（同一用途的新请求取消旧请求）、`supports`、`failed`、`show`、`location_entry`、`open_location`。
 
 服务器发来的请求，有 `soda.lsp.on` 函数时交给它们，依次调用，第一个返回非 nil 的值作为回答；都返回 nil 或出错时回答默认值：`workspace/applyEdit` 为 `{ applied = true }`，`workspace/configuration` 按 `settings` 回答，其余为 null。服务器在拿到回答前等着，所以函数要立刻返回。没有函数的请求直接回答默认值。`workspace/applyEdit` 由 `lua/lsp.lua` 处理，回答编辑是否真的应用了。
 
@@ -121,6 +123,29 @@ soda.popup(text)    -- 光标旁的浮窗，放不下时滚轮或翻页键滚动
 2. 否则用文档的项目根目录；没有项目时用文件所在目录，所以 `/tmp` 下的单个文件也有服务器。
 
 跳到已经打开的文档时不改变它的服务器，除非它不属于任何项目。历史回跳（`<a-,>`）不算跳转。
+
+## ccls
+
+```lua
+require("ccls").setup({
+  init = { cache = { directory = "/tmp/ccls" }, compilationDatabaseDirectory = "build" },
+})
+```
+
+`setup` 让 C++ 改用 ccls（`command` 可以换程序，`languages` 默认 `{ "cpp" }`），`init`、`settings` 原样传给 `soda.lsp.server`，`roots` 默认 `.ccls-root`、`.ccls`、`compile_commands.json`，找不到时用项目根目录。标准功能和 clangd 一样走 `lsp` 模块；ccls 没有的（如 `SPC h` 头文件切换）会直接说明。
+
+| 键 | 命令 | 作用 |
+| --- | --- | --- |
+| `SPC c` / `SPC C` | `ccls-callers` / `ccls-callees` | 调用者 / 被调用者的树（`$ccls/call`），替换 `lsp` 模块的一层列表 |
+| `SPC t` / `SPC T` | `ccls-base` / `ccls-derived` | 基类 / 派生类的树（`$ccls/inheritance`） |
+| `SPC m` / `SPC M` | `ccls-members variables` / `functions` | 成员变量 / 成员函数的树（`$ccls/member`），还可以是 `types` |
+| | `ccls-vars` | 列出光标处类型的变量（`$ccls/vars`） |
+| | `ccls-navigate up/down/left/right` | 按语法树移动到外层、第一个内层、前后相邻的声明（`$ccls/navigate`） |
+| | `ccls-reload` | 让 ccls 重新索引项目 |
+
+树每次只取一层：根节点是光标处的符号，展开一个节点时按它的 `id` 再问一层，键见[树](extension.md#树)。`setup({ keys = false })` 不绑定键。
+
+ccls 发来的 `$ccls/publishSkippedRanges`（没有参与编译的预处理分支）用 `dim` 颜色画出，随编辑移动，下次通知时替换。
 
 ## 限制
 

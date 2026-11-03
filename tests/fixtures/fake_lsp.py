@@ -102,6 +102,10 @@ while True:
         log.write("%s %d %s\n" % (method, document["version"], json.dumps(text)))
         if method == "textDocument/didOpen":
             log.write("opened %s\n" % document["uri"].rsplit("/", 1)[1])
+        # ccls: lines 2 to 3 (zero-based 1 to 2) are not compiled.
+        write({"jsonrpc": "2.0", "method": "$ccls/publishSkippedRanges", "params": {
+            "uri": document["uri"], "skippedRanges": [
+                {"start": {"line": 1, "character": 0}, "end": {"line": 2, "character": 3}}]}})
         write({
             "jsonrpc": "2.0",
             "method": "textDocument/publishDiagnostics",
@@ -247,5 +251,26 @@ while True:
         uri = params["item"]["uri"]
         answer(message, [{"from": {"name": "caller", "uri": uri},
                           "fromRanges": [spot(uri, 1, 2)["range"]]}])
+    elif method in ("$ccls/call", "$ccls/inheritance", "$ccls/member"):
+        log.write("%s %s\n" % (method, json.dumps({k: v for k, v in params.items()
+                                                    if k not in ("textDocument", "position")},
+                                                   sort_keys=True)))
+        uri = "file://" + os.path.dirname(os.environ["FAKE_LSP_LOG"]) + "/a.cpp"
+        def item(id, name, line, count, children=()):
+            return {"id": id, "name": name, "fieldName": name + "_field", "kind": 2,
+                    "location": spot(uri, line, 0), "numChildren": count,
+                    "children": list(children)}
+        if "id" not in params:
+            answer(message, item("1", "root", 0, 2, [item("2", "first", 1, 1), item("3", "second", 2, 0)]))
+        else:
+            answer(message, item(params["id"], "x", 0, 1, [item("4", "deeper", 1, 0)]))
+    elif method == "$ccls/vars":
+        uri = params["textDocument"]["uri"]
+        answer(message, [spot(uri, 1, 0)])
+    elif method == "$ccls/navigate":
+        log.write("navigate %s\n" % params["direction"])
+        answer(message, [spot(params["textDocument"]["uri"], 2, 1)])
+    elif method == "$ccls/reload":
+        log.write("reload\n")
     elif method == "exit-now":
         sys.exit(0)

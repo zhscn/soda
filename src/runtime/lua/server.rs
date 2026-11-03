@@ -57,11 +57,12 @@ pub(super) fn register<'scope, 'r: 'scope>(
     soda.set(
         "lsp_request",
         scope.create_function(
-            |lua, (method, params, function): (String, Value, Function)| {
+            |lua, (method, params, function, buffer): (String, Value, Function, Option<Table>)| {
                 let params: serde_json::Value = lua.from_value(params)?;
+                let key = key_for(&runtime.borrow(), buffer)?;
                 let id = host.keep(function)?;
                 let mut runtime = runtime.borrow_mut();
-                let Some(key) = runtime.lsp_key() else {
+                let Some(key) = key else {
                     host.callbacks()?.set(id, Value::Nil)?;
                     return Ok(Value::Boolean(false));
                 };
@@ -92,14 +93,16 @@ pub(super) fn register<'scope, 'r: 'scope>(
     )?;
     soda.set(
         "lsp_notify",
-        scope.create_function(|lua, (method, params): (String, Value)| {
-            let params: serde_json::Value = lua.from_value(params)?;
-            let mut runtime = runtime.borrow_mut();
-            let Some(key) = runtime.lsp_key() else {
-                return Ok(false);
-            };
-            Ok(runtime.lsp.notify(&key, &method, params))
-        })?,
+        scope.create_function(
+            |lua, (method, params, buffer): (String, Value, Option<Table>)| {
+                let params: serde_json::Value = lua.from_value(params)?;
+                let mut runtime = runtime.borrow_mut();
+                let Some(key) = key_for(&runtime, buffer)? else {
+                    return Ok(false);
+                };
+                Ok(runtime.lsp.notify(&key, &method, params))
+            },
+        )?,
     )?;
     soda.set(
         "lsp_on",
@@ -122,9 +125,9 @@ pub(super) fn register<'scope, 'r: 'scope>(
     )?;
     soda.set(
         "lsp_info",
-        scope.create_function(|lua, ()| {
+        scope.create_function(|lua, buffer: Option<Table>| {
             let runtime = runtime.borrow();
-            let Some(key) = runtime.lsp_key() else {
+            let Some(key) = key_for(&runtime, buffer)? else {
                 return Ok(Value::Nil);
             };
             let Some((encoding, capabilities, watchers)) = runtime.lsp.client_of(&key) else {
@@ -152,4 +155,18 @@ pub(super) fn register<'scope, 'r: 'scope>(
         })?,
     )?;
     Ok(())
+}
+
+/// The server of a buffer handle, or of the current document without one.
+fn key_for(
+    runtime: &Runtime,
+    buffer: Option<Table>,
+) -> mlua::Result<Option<crate::runtime::lsp::Key>> {
+    match buffer {
+        None => Ok(runtime.lsp_key()),
+        Some(buffer) => {
+            let document = super::buffer::document(runtime, buffer.get("id")?)?;
+            Ok(runtime.lsp_key_of(document))
+        }
+    }
 }

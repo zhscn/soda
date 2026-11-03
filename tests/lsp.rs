@@ -778,3 +778,86 @@ fn what_the_server_does_not_offer_is_said_and_not_asked() {
         "The language server does not offer textDocument/hover"
     );
 }
+#[test]
+fn ccls_hierarchies_open_level_by_level_and_skipped_branches_are_dim() {
+    let Some(mut f) = open_with(
+        "one\ntwo\nthree\nfour\n",
+        "",
+        r#"require("ccls").setup({ command = { "unused" } })"#,
+    ) else {
+        return;
+    };
+    // The fixture's server replaced the one setup named.
+    let document =
+        f.r.app()
+            .view(f.r.app().active_view().unwrap())
+            .unwrap()
+            .document_id;
+    wait(&mut f.r, |r| !r.app().paints(document).is_empty());
+    let dim = soda::application::faces::index("dim").map(soda::application::Face::Named);
+    // From "two" to the third character of "three".
+    assert_eq!(f.r.app().paints(document), [(4..11, dim.unwrap())]);
+
+    keys(&mut f.r, "<c-c>c");
+    wait(&mut f.r, |r| text(r).starts_with("▾ root"));
+    assert_eq!(
+        text(&f.r),
+        "▾ root  a.cpp:1\n  ▸ first  a.cpp:2\n    second  a.cpp:3\n"
+    );
+    assert!(
+        f.log().contains(
+            r#"$ccls/call {"callType": 3, "callee": false, "hierarchy": true, "levels": 1}"#
+        ),
+        "{}",
+        f.log()
+    );
+    keys(&mut f.r, "j<tab>");
+    wait(&mut f.r, |r| text(r).contains("deeper"));
+    assert_eq!(
+        text(&f.r),
+        "▾ root  a.cpp:1\n  ▾ first  a.cpp:2\n      deeper  a.cpp:2\n    second  a.cpp:3\n"
+    );
+    assert!(f.log().contains(r#""id": "2""#), "{}", f.log());
+    // Enter goes there.
+    keys(&mut f.r, "j<ret>");
+    wait(&mut f.r, |r| text(r).starts_with("one"));
+
+    // Inheritance asks again with the node's kind; members show field names.
+    keys(&mut f.r, "<c-c>T");
+    wait(&mut f.r, |r| text(r).starts_with("▾ root"));
+    keys(&mut f.r, "j<tab>");
+    wait(&mut f.r, |r| text(r).contains("deeper"));
+    assert!(f.log().contains(r#"$ccls/inheritance {"derived": true, "hierarchy": true, "id": "2", "kind": 2, "levels": 1}"#), "{}", f.log());
+    let source = format!("buffer {}", f.dir.path().join("a.cpp").display());
+    f.r.command(Command::Named(source));
+    wait(&mut f.r, |r| text(r).starts_with("one"));
+    keys(&mut f.r, "<c-c>M");
+    wait(&mut f.r, |r| text(r).starts_with("▾ root_field"));
+    assert!(f.log().contains(r#""kind": 3"#), "{}", f.log());
+
+    let source = format!("buffer {}", f.dir.path().join("a.cpp").display());
+    f.r.command(Command::Named(source));
+    wait(&mut f.r, |r| text(r).starts_with("one"));
+    f.r.command(Command::Named("ccls-navigate down".into()));
+    wait(&mut f.r, |r| {
+        let view = r.app().view(r.app().active_view().unwrap()).unwrap();
+        let editor = r.app().workspace().editor(view.document_id).unwrap();
+        editor
+            .model()
+            .session(view.session_id)
+            .unwrap()
+            .selection()
+            .head
+            == 9
+    });
+    assert!(f.log().contains("navigate D"));
+    f.r.command(Command::Named("ccls-vars".into()));
+    wait(&mut f.r, |r| text(r).contains("2:1"));
+    let source = format!("buffer {}", f.dir.path().join("a.cpp").display());
+    f.r.command(Command::Named(source));
+    f.r.command(Command::Named("ccls-reload".into()));
+    let log = f.log.clone();
+    wait(&mut f.r, move |_| {
+        std::fs::read_to_string(&log).is_ok_and(|l| l.contains("reload"))
+    });
+}

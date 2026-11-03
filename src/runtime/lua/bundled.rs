@@ -4,6 +4,7 @@
 
 /// Every module, by the name `require` takes.
 pub(super) const MODULES: &[(&str, &str)] = &[
+    ("ccls", include_str!("../../../lua/ccls.lua")),
     (
         "clang-format",
         include_str!("../../../lua/clang-format.lua"),
@@ -22,8 +23,8 @@ pub(super) const MODULES: &[(&str, &str)] = &[
     ),
 ];
 /// Modules loaded at startup. They add commands and keys, and do nothing
-/// until those are used; `git-flags` runs git on every file, so it waits
-/// for a `require`.
+/// until those are used; `git-flags` runs git on every file, and `ccls`
+/// replaces clangd, so they wait for a `require`.
 pub(super) const STARTUP: &[&str] = &[
     "clang-format",
     "comment",
