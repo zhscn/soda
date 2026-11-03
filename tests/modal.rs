@@ -538,3 +538,24 @@ fn visit_offers_the_symbols_of_the_document_and_selects_the_next_place() {
     keys(&mut r, "<ret>");
     assert_eq!(shown(&r), "add_x(add);\nad[d + a]|ddend;\nadd;\n");
 }
+#[test]
+fn moving_up_and_down_keeps_a_column_until_something_else_moves_the_caret() {
+    cases(&[
+        // Through a short line and back to the column moving started at.
+        ("abcd|ef\nab\nabcdef\n", "jj", "abcdef\nab\nabcd|ef\n"),
+        // Going to the line start forgets the column; so does any other
+        // move of the caret between vertical ones.
+        ("abcd|ef\nabcdef\n", "<c-a>j", "abcdef\n|abcdef\n"),
+        (
+            "abcd|ef\nabcdef\nabcdef\n",
+            "j<c-a>j",
+            "abcdef\nabcdef\n|abcdef\n",
+        ),
+        ("abcd|ef\nab\nabcdef\n", "jhj", "abcdef\nab\na|bcdef\n"),
+    ]);
+    // In Insert, moving the caret between vertical moves forgets it too.
+    let mut r = runtime("abcd|ef\nabcdef\nabcdef\n");
+    r.command(Command::SetMode(EditMode::Insert));
+    keys(&mut r, "<c-n><c-a><c-n>");
+    assert_eq!(shown(&r), "abcdef\nabcdef\n|abcdef\n");
+}

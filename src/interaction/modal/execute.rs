@@ -483,9 +483,15 @@ impl Layers {
                 }
             }
             Step::Up | Step::Down => {
-                let goal = *self.modal.goal.get_or_insert_with(|| {
-                    logical_column_at(text, ByteOffset(head), width).unwrap()
-                });
+                let kept = self
+                    .modal
+                    .goal
+                    .filter(|(_, view, left)| *view == at.view && *left == head);
+                let goal = match kept {
+                    Some((goal, ..)) => goal,
+                    None => logical_column_at(text, ByteOffset(head), width).unwrap(),
+                };
+                self.modal.goal = Some((goal, at.view, head));
                 let line = text.line_of(head).unwrap().min(text::lines(text) - 1);
                 let target = if step == Step::Up {
                     line.saturating_sub(count)
@@ -500,7 +506,7 @@ impl Layers {
                     .0;
             }
         }
-        let goal = self.modal.goal;
+        let goal = self.modal.goal.map(|(goal, view, _)| (goal, view, to));
         let selection = if extend || held {
             let anchor = if at.selection.range().is_empty() || held || extend {
                 at.selection.anchor

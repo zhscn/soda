@@ -187,7 +187,10 @@ pub(in crate::interaction) struct State {
     /// The kind of the selection, while the selection is still that one.
     pub tag: Option<Tag>,
     pub history: Vec<(Selection, Option<Tag>)>,
-    pub goal: Option<LogicalColumn>,
+    /// The column moving up and down keeps to, with the view and the head
+    /// it left the caret at: once anything else moves the caret, such as
+    /// `C-a`, a click or a search, the next move takes the caret's column.
+    pub goal: Option<(LogicalColumn, ViewId, usize)>,
     pub last_find: Option<LastFind>,
     pub searches: Vec<SearchQuery>,
     pub insert_view: Option<ViewId>,
