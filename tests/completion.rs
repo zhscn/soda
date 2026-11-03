@@ -35,6 +35,8 @@ fn open(marked: &str) -> (tempfile::TempDir, Runtime) {
     let path = dir.path().join("a.txt");
     std::fs::write(&path, &source).unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(Some(path));
     let deadline = Instant::now() + Duration::from_secs(5);
     while r.app().active_view().is_none() || text(&r) != source {
@@ -338,7 +340,10 @@ fn an_item_starting_before_the_word_is_highlighted_by_what_it_matched() {
     keys(&mut r, "x.ab");
     assert_eq!(listed(&mut r), ["x.ab"]);
     // Scored on `x.ab`, the whole label lights up, not `ab` found in it.
-    assert_eq!(r.completion_popup().unwrap().rows[0].matched, [0..1, 1..2, 2..3, 3..4]);
+    assert_eq!(
+        r.completion_popup().unwrap().rows[0].matched,
+        [0..1, 1..2, 2..3, 3..4]
+    );
 }
 
 fn snippet_source(r: &mut Runtime, body: &str) {
@@ -350,6 +355,8 @@ fn snippet_source(r: &mut Runtime, body: &str) {
 fn bundled(marked: &str) -> (tempfile::TempDir, Runtime) {
     let (dir, mut r) = open(marked);
     r.load_startup_lua();
+    r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
+        .unwrap();
     assert_eq!(r.message(), "");
     (dir, r)
 }

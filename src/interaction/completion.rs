@@ -12,10 +12,7 @@ use crate::{
         picker::{atom, fuzzy_match},
     },
 };
-use nucleo_matcher::{
-    Config, Matcher, Utf32Str,
-    pattern::Atom,
-};
+use nucleo_matcher::{Config, Matcher, Utf32Str, pattern::Atom};
 use std::path::{Path, PathBuf};
 
 /// Rows of a page of candidates.

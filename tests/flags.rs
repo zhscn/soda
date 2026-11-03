@@ -17,6 +17,8 @@ fn line(r: &mut Runtime, command: &str) {
 }
 fn runtime(text: &str) -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(None);
     r.command(Command::SetMode(EditMode::Insert));
     r.command(Command::Edit(Edit::InsertText(text.into())));

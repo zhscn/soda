@@ -15,7 +15,9 @@ pub(super) const MODULES: &[(&str, &str)] = &[
     ("git-flags", include_str!("../../../lua/git-flags.lua")),
     ("git", include_str!("../../../lua/git.lua")),
     ("lsp", include_str!("../../../lua/lsp.lua")),
+    ("meow", include_str!("../../../lua/meow.lua")),
     ("pairs", include_str!("../../../lua/pairs.lua")),
+    ("puni", include_str!("../../../lua/puni.lua")),
     ("snippets", include_str!("../../../lua/snippets.lua")),
     ("surround", include_str!("../../../lua/surround.lua")),
     (
@@ -23,17 +25,23 @@ pub(super) const MODULES: &[(&str, &str)] = &[
         include_str!("../../../lua/symbol-overlay.lua"),
     ),
 ];
-/// Modules loaded at startup. They add commands and keys, and do nothing
-/// until those are used; `git-flags` runs git on every file, and `ccls`
-/// names a server, so they wait for a `require`.
+/// Modules loaded at startup, which is every one: loading one defines its
+/// commands, and the built-in ones bind Emacs's keys. A plugin changes
+/// nothing else until its `setup` (see docs/extension.md), so loading them
+/// all costs only their commands.
 pub(super) const STARTUP: &[&str] = &[
     "clang-format",
     "comment",
     "emacs",
-    "git-changes",
     "lsp",
     "pairs",
     "snippets",
+    "git",
+    "git-changes",
+    "git-flags",
+    "ccls",
+    "meow",
+    "puni",
     "surround",
     "symbol-overlay",
 ];

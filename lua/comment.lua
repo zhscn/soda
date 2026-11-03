@@ -55,5 +55,5 @@ end)
 
 
 for _, mode in ipairs({ "normal", "insert" }) do
-  soda.map(mode, "<a-;>", "comment")
+  soda.map_default(mode, "<a-;>", "comment")
 end

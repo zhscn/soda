@@ -1,8 +1,8 @@
 -- Flags lines that differ from what git has staged: + for added lines,
 -- ~ for changed ones and _ under the place where lines were removed.
--- Not started by default; add to init.lua:
+-- Off until setup, which runs git on every file opened and saved:
 --
---   require("git-flags")
+--   require("git-flags").setup()
 
 local function hunks(diff)
   local added, changed, removed = {}, {}, {}
@@ -38,6 +38,23 @@ local function update(path)
   end)
 end
 
-soda.hook("open", ".*", update)
-soda.hook("save", ".*", update)
 soda.define_command("git-flags", "Refresh the git flags of the buffer", function() update(soda.val("file")) end)
+
+local M = {}
+local hooks
+
+function M.setup()
+  if not hooks then
+    hooks = { soda.hook("open", ".*", update), soda.hook("save", ".*", update) }
+  end
+end
+
+function M.disable()
+  for _, id in ipairs(hooks or {}) do
+    soda.unhook(id)
+  end
+  hooks = nil
+  soda.unflag("git")
+end
+
+return M

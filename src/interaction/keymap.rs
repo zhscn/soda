@@ -1,7 +1,8 @@
 //! Context-scoped key tables. Defaults are command lines resolved through the
 //! registry; user bindings shadow them and unbinding restores the default.
 use super::{
-    Command, Input, InputKey, InputMotion, Key, KeyStroke, picker::ListMotion,
+    Command, Input, InputKey, InputMotion, Key, KeyStroke,
+    picker::ListMotion,
     registry::{Choice, Registry, word},
 };
 use crate::{
@@ -25,10 +26,12 @@ pub enum Context {
     Mark,
     /// Normal in a document that shows a tree; other keys go to Normal.
     Tree,
+    /// A document of results, such as grep's, below `Tree`.
+    Results,
     Prompt,
 }
 impl Context {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Global,
         Self::Normal,
         Self::Beacon,
@@ -37,11 +40,12 @@ impl Context {
         Self::Snippet,
         Self::Mark,
         Self::Tree,
+        Self::Results,
         Self::Prompt,
     ];
     /// Each context's name and what its keys are for, in the order of
     /// `ALL`; `map` offers them.
-    pub(super) const CHOICES: [Choice; 9] = [
+    pub(super) const CHOICES: [Choice; 10] = [
         word("global", "Keys of every mode, and of the keypad"),
         word("normal", "Normal mode keys"),
         word("beacon", "Beacon keys, over Normal's"),
@@ -50,6 +54,7 @@ impl Context {
         word("snippet", "Keys while a snippet has places left"),
         word("mark", "Keys with the caret on a marked symbol"),
         word("tree", "Keys in a document that shows a tree"),
+        word("results", "Keys in a document of results, such as grep's"),
         word("prompt", "Command line and prompt keys"),
     ];
     pub fn name(self) -> &'static str {
@@ -366,8 +371,9 @@ const GLOBAL: &[(&str, &str)] = &[
     ("<c-x>3", "vsplit"),
     ("<c-x>o", "window-next"),
     ("<c-x>^", "resize-window"),
-    ("<c-x><c-o>", "window-pick"),
     ("<c-x>u", "undo"),
+    ("<c-x>h", "select-all"),
+    ("<c-x><c-x>", "reverse"),
     ("<c-x>`", "next-result"),
     ("<c-x>pf", "project"),
     ("<c-x>pb", "buffer"),
@@ -400,41 +406,11 @@ const GLOBAL: &[(&str, &str)] = &[
     ("<c-x>(", "macro-start"),
     ("<c-x>)", "macro-end"),
     ("<c-x>e", "macro-end"),
-    ("<c-c>[", "macro-start"),
-    ("<c-c>]", "macro-end"),
-    ("<c-c>1", "digit-argument 1"),
-    ("<c-c>2", "digit-argument 2"),
-    ("<c-c>3", "digit-argument 3"),
-    ("<c-c>4", "digit-argument 4"),
-    ("<c-c>5", "digit-argument 5"),
-    ("<c-c>6", "digit-argument 6"),
-    ("<c-c>7", "digit-argument 7"),
-    ("<c-c>8", "digit-argument 8"),
-    ("<c-c>9", "digit-argument 9"),
-    ("<c-c>0", "digit-argument 0"),
-    ("<c-c>f", "project"),
-    ("<c-c>o", "window-pick"),
-    ("<c-c>b", "buffer"),
-    ("<c-c>:", "commands"),
-    ("<c-c>j", "jump-to"),
-    ("<c-c>w", "window-pick"),
-    ("<c-c>r", "recent"),
-    ("<c-c>H", "window-left"),
-    ("<c-c>J", "window-down"),
-    ("<c-c>K", "window-up"),
-    ("<c-c>L", "window-right"),
-    ("<c-c>W", "resize-window"),
 ];
-/// The keys of `meow`, and Emacs keys for the same moves.
+/// Normal's keys that type no character: Emacs's, for the same moves and
+/// edits as in Insert. The keys of characters come from a layout, such as
+/// the meow plugin's.
 const NORMAL: &[(&str, &str)] = &[
-    ("h", "left"),
-    ("j", "down"),
-    ("k", "up"),
-    ("l", "right"),
-    ("H", "left-expand"),
-    ("J", "down-expand"),
-    ("K", "up-expand"),
-    ("L", "right-expand"),
     ("<left>", "left"),
     ("<down>", "down"),
     ("<up>", "up"),
@@ -455,45 +431,9 @@ const NORMAL: &[(&str, &str)] = &[
     ("<a-gt>", "document-end"),
     ("<a-b>", "word-left"),
     ("<a-f>", "word-right"),
-    ("w", "next-word"),
-    ("b", "back-word"),
-    ("W", "next-symbol"),
-    ("B", "back-symbol"),
-    ("[", "mark-word"),
-    ("]", "mark-symbol"),
-    ("e", "select-line"),
-    ("o", "block"),
-    ("O", "to-block"),
-    ("f", "find"),
-    ("t", "till"),
-    (",", "inner-of-thing"),
-    (".", "bounds-of-thing"),
-    (";", "reverse"),
     ("<esc>", "cancel"),
     ("<c-g>", "cancel"),
     ("<c-[>", "cancel"),
-    ("z", "pop-selection"),
-    ("Z", "pop-all-selection"),
-    ("-", "negative-argument"),
-    ("0", "expand 0"),
-    ("1", "expand 1"),
-    ("2", "expand 2"),
-    ("3", "expand 3"),
-    ("4", "expand 4"),
-    ("5", "expand 5"),
-    ("6", "expand 6"),
-    ("7", "expand 7"),
-    ("8", "expand 8"),
-    ("9", "expand 9"),
-    ("i", "insert"),
-    ("a", "append"),
-    ("A", "open-below"),
-    ("I", "open-above"),
-    ("r", "kill"),
-    ("s", "change"),
-    ("d", "delete"),
-    ("y", "save"),
-    ("p", "put"),
     ("<c-w>", "kill"),
     ("<a-w>", "save"),
     ("<c-y>", "put"),
@@ -503,28 +443,8 @@ const NORMAL: &[(&str, &str)] = &[
     ("<a-d>", "kill-word-forward"),
     ("<a-bs>", "kill-word-backward"),
     ("<c-space>", "set-mark"),
-    ("'", "join"),
-    ("n", "search-next"),
-    ("N", "search-pop"),
-    ("v", "visit"),
     ("<c-s>", "search"),
     ("<c-r>", "search-backward"),
-    ("u", "undo"),
-    ("U", "redo"),
-    ("q", "jump-to"),
-    ("Q", "goto"),
-    ("R", "replace"),
-    ("/", "open"),
-    ("`", "repeat"),
-    ("G", "grab"),
-    ("S", "swap-grab"),
-    ("E", "macro-lines"),
-    ("V", "macro-matches"),
-    ("x", "keypad <c-x>"),
-    ("c", "keypad <c-c>"),
-    ("m", "keypad meta"),
-    ("g", "keypad ctrl-meta"),
-    ("<space>", "keypad leader"),
     ("<pagedown>", "page-down"),
     ("<pageup>", "page-up"),
     ("<ret>", "jump"),
@@ -554,7 +474,11 @@ const TREE: &[(&str, &str)] = &[
     ("<ret>", "tree-open"),
     ("<bs>", "tree-collapse"),
 ];
+const RESULTS: &[(&str, &str)] = &[("<ret>", "jump")];
 const INSERT: &[(&str, &str)] = &[
+    ("<c-space>", "set-mark"),
+    ("<c-w>", "kill-region"),
+    ("<a-w>", "kill-ring-save"),
     ("<a-/>", "completion-trigger"),
     ("<a-y>", "yank-pop"),
     ("<up>", "move-up"),
@@ -694,6 +618,27 @@ impl<T: Clone> Layer<T> {
         }
         Ok(())
     }
+    fn bind_default(
+        &mut self,
+        keys: &[KeyStroke],
+        target: T,
+        label: String,
+    ) -> Result<(), BindingError> {
+        let keys = sequence(keys)?;
+        // The latest default wins over one it equals or overlaps, as a
+        // later minor mode's keymap does.
+        self.defaults
+            .retain(|b| !(b.keys.starts_with(&keys) || keys.starts_with(&b.keys)));
+        self.defaults.insert(
+            0,
+            Binding {
+                keys,
+                target,
+                label,
+            },
+        );
+        Ok(())
+    }
     fn unbind(&mut self, keys: &[KeyStroke]) -> Result<(), BindingError> {
         let keys = keys
             .iter()
@@ -752,7 +697,7 @@ fn sequence(keys: &[KeyStroke]) -> Result<Vec<KeyStroke>, BindingError> {
 }
 
 pub struct Keymap {
-    edit: [Layer<Command>; 8],
+    edit: [Layer<Command>; 9],
     prompt: Layer<Input>,
     /// In the order defined; a later one is asked first.
     documents: Vec<DocumentKeymap>,
@@ -775,11 +720,18 @@ impl Default for Keymap {
             (Context::Snippet, SNIPPET),
             (Context::Mark, &[]),
             (Context::Tree, TREE),
+            (Context::Results, RESULTS),
         ] {
             for (keys, line) in table {
                 let target = registry.parse_builtin(line).unwrap();
-                keymap.edit[context as usize].defaults.push(Binding {
-                    keys: sequence(&parse(keys)).unwrap(),
+                let keys = sequence(&parse(keys)).unwrap();
+                // Insert's own keys come before the readline ones they replace.
+                let layer = &mut keymap.edit[context as usize];
+                if layer.defaults.iter().any(|binding| binding.keys == keys) {
+                    continue;
+                }
+                layer.defaults.push(Binding {
+                    keys,
                     target,
                     label: (*line).into(),
                 });
@@ -804,7 +756,9 @@ impl Keymap {
         }
         let language = crate::language::catalog().by_id(name).is_some();
         if language != matches!(scope, Scope::Language(_)) {
-            return Err(format!("{name} is a language; its keymap needs no definition"));
+            return Err(format!(
+                "{name} is a language; its keymap needs no definition"
+            ));
         }
         match self.documents.iter_mut().find(|keymap| keymap.name == name) {
             Some(keymap) => {
@@ -831,7 +785,8 @@ impl Keymap {
         }
         crate::language::catalog().by_id(name)?;
         let doc = format!("Keys of {name} documents");
-        self.define(name, Scope::Language(name.to_owned()), doc).ok()?;
+        self.define(name, Scope::Language(name.to_owned()), doc)
+            .ok()?;
         Some(Table::Document(self.documents.len() - 1))
     }
     /// The bindings of a table by name, for listings; `None` for a name
@@ -894,6 +849,25 @@ impl Keymap {
             Table::Context(Context::Prompt) => Err(BindingError::InvalidKey),
             Table::Context(context) => self.edit[context as usize].bind(keys, command, label),
             Table::Document(index) => self.documents[index].layer.bind(keys, command, label),
+        }
+    }
+    /// Binds keys as a default, as a plugin does: replaces a default of the
+    /// same keys, and gives way to user bindings.
+    pub(super) fn bind_default(
+        &mut self,
+        table: Table,
+        keys: &[KeyStroke],
+        command: Command,
+        label: String,
+    ) -> Result<(), BindingError> {
+        match table {
+            Table::Context(Context::Prompt) => Err(BindingError::InvalidKey),
+            Table::Context(context) => {
+                self.edit[context as usize].bind_default(keys, command, label)
+            }
+            Table::Document(index) => self.documents[index]
+                .layer
+                .bind_default(keys, command, label),
         }
     }
     pub fn bind_input(
@@ -1108,7 +1082,11 @@ impl Sequence {
             let tables: Vec<Table> = if keypad.modifier.is_some() {
                 stack.to_vec()
             } else {
-                stack.iter().copied().filter(|table| table.shared()).collect()
+                stack
+                    .iter()
+                    .copied()
+                    .filter(|table| table.shared())
+                    .collect()
             };
             match map.resolve(&tables, &keys, &|_| false) {
                 (Resolution::Prefix, _) => {
@@ -1185,11 +1163,7 @@ impl Sequence {
     /// stack, as the keypad resolves them; otherwise a Ctrl binding wins
     /// over a plain binding of that key, and chords with Meta, which the
     /// keypad cannot type after a prefix, are left out.
-    pub fn keypad_continuations(
-        &self,
-        stack: &[Table],
-        map: &Keymap,
-    ) -> Vec<(KeyStroke, String)> {
+    pub fn keypad_continuations(&self, stack: &[Table], map: &Keymap) -> Vec<(KeyStroke, String)> {
         let keypad = self.keypad.unwrap_or_default();
         let plain = |key: KeyStroke| KeyStroke {
             control: false,

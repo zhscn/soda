@@ -20,6 +20,20 @@ pub(super) fn register<'scope, 'r: 'scope>(
         })?,
     )?;
     soda.set(
+        "thing",
+        scope.create_function(|_, (key, kind): (String, Option<String>)| {
+            let mut chars = key.chars();
+            let (Some(key), None) = (chars.next(), chars.next()) else {
+                return Err(mlua::Error::runtime("soda.thing takes one character"));
+            };
+            runtime
+                .borrow_mut()
+                .layers
+                .define_thing(key, kind.as_deref())
+                .map_err(mlua::Error::runtime)
+        })?,
+    )?;
+    soda.set(
         "face",
         scope.create_function(|_, (name, spec): (String, Value)| {
             let spec = match spec {
@@ -59,39 +73,44 @@ pub(super) fn register<'scope, 'r: 'scope>(
                 .edit_event(crate::application::Event::SetFace { name, spec })
         })?,
     )?;
-    soda.set(
-        "map",
-        scope.create_function(
-            |_, (keymap, keys, target, doc): (String, String, Value, Option<String>)| {
-                let keys = KeyStroke::parse_sequence(&keys).map_err(mlua::Error::runtime)?;
-                // A function is kept and called by number; its label is
-                // what it says it does.
-                let (target, label) = match target {
-                    Value::String(line) => (line.to_str()?.to_owned(), doc),
-                    Value::Function(function) if keymap != "prompt" => {
-                        let id = host.keep(function)?;
-                        let label = doc.unwrap_or_else(|| "Lua function".into());
-                        (format!("lua-call {id}"), Some(label))
-                    }
-                    _ => {
-                        return Err(mlua::Error::runtime(
-                            "soda.map binds a command line, or a function outside prompt",
-                        ));
-                    }
-                };
-                runtime
-                    .borrow_mut()
-                    .layers
-                    .configure(Command::Map {
-                        keymap,
-                        keys,
-                        target,
-                        label,
-                    })
-                    .map_err(mlua::Error::runtime)
-            },
-        )?,
-    )?;
+    // `map` binds for the user; `map_default` for a plugin, as a default
+    // the user's bindings shadow.
+    for (name, default) in [("map", false), ("map_default", true)] {
+        soda.set(
+            name,
+            scope.create_function(
+                move |_, (keymap, keys, target, doc): (String, String, Value, Option<String>)| {
+                    let keys = KeyStroke::parse_sequence(&keys).map_err(mlua::Error::runtime)?;
+                    // A function is kept and called by number; its label is
+                    // what it says it does.
+                    let (target, label) = match target {
+                        Value::String(line) => (line.to_str()?.to_owned(), doc),
+                        Value::Function(function) if keymap != "prompt" => {
+                            let id = host.keep(function)?;
+                            let label = doc.unwrap_or_else(|| "Lua function".into());
+                            (format!("lua-call {id}"), Some(label))
+                        }
+                        _ => {
+                            return Err(mlua::Error::runtime(format!(
+                                "soda.{name} binds a command line, or a function outside prompt"
+                            )));
+                        }
+                    };
+                    runtime
+                        .borrow_mut()
+                        .layers
+                        .configure(Command::Map {
+                            keymap,
+                            keys,
+                            target,
+                            label,
+                            default,
+                        })
+                        .map_err(mlua::Error::runtime)
+                },
+            )?,
+        )?;
+    }
     soda.set(
         "unmap",
         scope.create_function(|_, (keymap, keys): (String, String)| {

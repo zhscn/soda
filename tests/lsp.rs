@@ -59,7 +59,11 @@ fn open_with(source: &str, options: &str, first: &str) -> Option<Fixture> {
     let log = dir.path().join("log");
     let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_lsp.py");
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.load_startup_lua();
+    r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
+        .unwrap();
     r.enable_lsp();
     r.source_lua("first", first).unwrap();
     let options = if options.is_empty() { "nil" } else { options };
@@ -492,7 +496,11 @@ fn a_missing_server_is_said_once() {
     let path = dir.path().join("a.cpp");
     std::fs::write(&path, "x\n").unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.load_startup_lua();
+    r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
+        .unwrap();
     r.enable_lsp();
     r.source_lua("t", r#"soda.lsp.server("cpp", { "/no/such/server" })"#)
         .unwrap();
@@ -529,7 +537,8 @@ fn keymaps_of_servers_hold_where_the_server_serves_the_later_first() {
     f.r.command(Command::Named("new".into()));
     keys(&mut f.r, "<c-c>y");
     assert_eq!(f.r.message(), "C-c y is undefined");
-    let defined = f.r.source_lua("bad", r#"soda.keymap("normal", { server = "x" })"#);
+    let defined =
+        f.r.source_lua("bad", r#"soda.keymap("normal", { server = "x" })"#);
     assert!(defined.is_err());
 }
 #[test]
@@ -547,6 +556,8 @@ fn each_project_has_a_server_and_a_jump_stays_with_its_own() {
     let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_lsp.py");
     let mut r = Runtime::started_in(base.clone()).unwrap();
     r.load_startup_lua();
+    r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
+        .unwrap();
     r.enable_lsp();
     r.source_lua(
         "test",
@@ -808,6 +819,8 @@ fn root_markers_choose_the_server_root() {
     let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_lsp.py");
     let mut r = Runtime::started_in(base.clone()).unwrap();
     r.load_startup_lua();
+    r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
+        .unwrap();
     r.enable_lsp();
     r.source_lua(
         "test",
@@ -862,7 +875,10 @@ fn ccls_hierarchies_open_level_by_level_and_skipped_branches_are_dim() {
         // The fixture's server stands for ccls, whose keys hold in its
         // documents.
         r#"{ name = "ccls" }"#,
-        r#"require("ccls").setup({ command = { "unused" } })"#,
+        r#"require("ccls").setup({ command = { "unused" } })
+        soda.map("ccls", "<c-c>c", "ccls-callers")
+        soda.map("ccls", "<c-c>T", "ccls-derived")
+        soda.map("ccls", "<c-c>M", "ccls-members functions")"#,
     ) else {
         return;
     };
@@ -1144,6 +1160,8 @@ fn server_in(base: &std::path::Path, file: &str, options: &str) -> (Runtime, Pat
     let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_lsp.py");
     let mut r = Runtime::started_in(base.to_owned()).unwrap();
     r.load_startup_lua();
+    r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
+        .unwrap();
     r.enable_lsp();
     r.source_lua(
         "test",

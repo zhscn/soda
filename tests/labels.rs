@@ -13,6 +13,8 @@ fn keys(r: &mut Runtime, notation: &str) {
 }
 fn runtime(text: &str) -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(None);
     r.set_page_rows(10);
     r.command(Command::SetMode(EditMode::Insert));

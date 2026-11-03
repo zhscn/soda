@@ -12,11 +12,17 @@ fn runtime(text: &str) -> Runtime {
     let plain = text.replacen('|', "", 1);
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
     r.start(None);
+    modal(&mut r);
     r.command(Command::SetMode(EditMode::Insert));
     r.command(Command::Edit(Edit::InsertText(plain)));
     r.command(Command::Edit(Edit::SetSelection(Selection::caret(caret))));
     r.command(Command::SetMode(EditMode::Normal));
     r
+}
+/// Turns on modal editing with the layout these tests are written for.
+fn modal(r: &mut Runtime) {
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
 }
 fn keys(r: &mut Runtime, notation: &str) {
     for key in KeyStroke::parse_sequence(notation).unwrap() {
@@ -243,6 +249,7 @@ fn blocks_use_the_structure_of_the_language() {
         std::fs::write(&path, before.replacen('|', "", 1)).unwrap();
         let mut r = Runtime::new(dir.path().into()).unwrap();
         r.start(Some(path));
+        modal(&mut r);
         while r.app().active_view().is_none() {
             r.poll();
             std::thread::sleep(std::time::Duration::from_millis(2));
@@ -419,6 +426,7 @@ fn the_leader_is_ctrl_c_and_reaches_bindings_of_any_module() {
         keys: KeyStroke::parse_sequence("<c-c>y").unwrap(),
         target: "append".into(),
         label: None,
+        default: false,
     });
     keys(&mut r, "<space>y");
     assert_eq!(r.edit_mode(), EditMode::Insert);

@@ -91,6 +91,12 @@ impl OptionInfo {
 
 pub const OPTIONS: &[OptionInfo] = &[
     OptionInfo {
+        name: "modal",
+        kind: Kind::Bool,
+        default: Value::Bool(false),
+        doc: "Modal editing: Normal between insertions, and the mode on the status line; the meow plugin sets it. Only the global value counts",
+    },
+    OptionInfo {
         name: "indent-width",
         kind: Kind::Int { min: 0, max: 16 },
         default: Value::Int(4),
@@ -111,7 +117,7 @@ pub const OPTIONS: &[OptionInfo] = &[
     OptionInfo {
         name: "auto-pairs",
         kind: Kind::Bool,
-        default: Value::Bool(true),
+        default: Value::Bool(false),
         doc: "Type brackets, and the quotes a language lists, in pairs; Backspace removes an empty pair",
     },
     OptionInfo {

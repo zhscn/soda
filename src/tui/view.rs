@@ -766,12 +766,6 @@ fn status(
     Clear.render(area, buf);
     buf.set_style(area, theme.status);
     let status = content::status(runtime, text);
-    let badge = match status.mode {
-        content::Mode::Normal => theme.mode_normal,
-        content::Mode::Insert => theme.mode_insert,
-        content::Mode::Beacon => theme.mode_visual,
-        content::Mode::Prompt(_) => theme.mode_prompt,
-    };
     let mut right: Vec<_> = status
         .segments
         .iter()
@@ -786,10 +780,13 @@ fn status(
     }
     let right = Line::from(right);
     let right_width = (right.width() as u16).min(area.width);
-    let mut left = vec![
-        Text::styled(format!(" {} ", status.mode.label()), badge),
-        Text::raw(" "),
-    ];
+    let mut left = match status.mode {
+        Some(mode) => vec![
+            Text::styled(format!(" {} ", mode.label()), mode_style(mode, theme)),
+            Text::raw(" "),
+        ],
+        None => vec![Text::raw(" ")],
+    };
     if let Some(document) = status.document {
         let mut marks = vec![];
         if document.dirty {
@@ -814,6 +811,14 @@ fn status(
         area.width.saturating_sub(right_width + 1),
     );
     buf.set_line(area.right() - right_width, area.y, &right, right_width);
+}
+fn mode_style(mode: content::Mode, theme: &Theme) -> Style {
+    match mode {
+        content::Mode::Normal => theme.mode_normal,
+        content::Mode::Insert => theme.mode_insert,
+        content::Mode::Beacon => theme.mode_visual,
+        content::Mode::Prompt(_) => theme.mode_prompt,
+    }
 }
 /// The style of a piece of the status line or the message row.
 fn role_style(role: Role, theme: &Theme) -> Style {
@@ -1070,6 +1075,8 @@ mod tests {
     fn options_choose_the_tab_bar_and_the_window_titles() {
         let root = tempfile::tempdir().unwrap();
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
+            .unwrap();
         r.start(None);
         r.command(Command::Edit(crate::editor::Command::InsertText(
             "first\n".into(),
@@ -1102,6 +1109,8 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(root.path().join("src")).unwrap();
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
+            .unwrap();
         assert!(screen(&mut r, 60, 14).contains("Find a project file"));
         r.start(None);
         r.command(Command::Edit(crate::editor::Command::InsertText(
@@ -1153,7 +1162,7 @@ mod tests {
                 .unwrap()
                 .starts_with("╭ Help · Esc closes")
         );
-        assert!(text.lines().nth(2).unwrap().starts_with("│ Modal editing"));
+        assert!(text.lines().nth(2).unwrap().starts_with("│ Editing"));
     }
     #[test]
     fn notes_underline_their_range_and_speak_at_the_caret() {
@@ -1161,6 +1170,8 @@ mod tests {
         use ratatui::style::Modifier;
         let root = tempfile::tempdir().unwrap();
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
+            .unwrap();
         r.start(None);
         r.command(Command::Edit(crate::editor::Command::InsertText(
             "one two\nthree\n".into(),
@@ -1228,6 +1239,8 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         std::fs::write(root.path().join("a.txt"), "alpha alder\n\n").unwrap();
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
+            .unwrap();
         r.start(Some(root.path().join("a.txt")));
         for _ in 0..500 {
             r.poll();
@@ -1265,6 +1278,8 @@ mod tests {
     fn the_selected_candidate_shows_its_documentation_beside_the_list() {
         let root = tempfile::tempdir().unwrap();
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
+            .unwrap();
         r.start(None);
         r.source_lua(
             "t",
@@ -1301,6 +1316,8 @@ mod tests {
     fn places_of_a_snippet_left_to_fill_are_drawn_with_their_face() {
         let root = tempfile::tempdir().unwrap();
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
+            .unwrap();
         r.start(None);
         r.command(Command::SetMode(EditMode::Insert));
         r.command(Command::Named("snippet ${1:aa} ${2:bb}".into()));
@@ -1321,6 +1338,8 @@ mod tests {
     fn the_selected_candidate_shows_in_gray_at_the_caret_and_not_in_the_text() {
         let root = tempfile::tempdir().unwrap();
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
+            .unwrap();
         r.start(None);
         r.command(Command::Edit(crate::editor::Command::InsertText(
             " end\n".into(),
@@ -1370,6 +1389,8 @@ mod tests {
         use crate::application::Event;
         let root = tempfile::tempdir().unwrap();
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
+            .unwrap();
         r.start(None);
         r.command(Command::Edit(crate::editor::Command::InsertText(
             "call(1, 2)\n".into(),
@@ -1422,6 +1443,8 @@ mod tests {
     fn an_indicator_stands_at_the_end_of_its_line_until_the_next_key() {
         let root = tempfile::tempdir().unwrap();
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
+            .unwrap();
         r.start(None);
         r.command(Command::Edit(crate::editor::Command::InsertText(
             "one\ntwo\n".into(),
@@ -1439,6 +1462,8 @@ mod tests {
     fn a_long_popup_scrolls_and_shows_its_place() {
         let root = tempfile::tempdir().unwrap();
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
+            .unwrap();
         r.start(None);
         let words: Vec<_> = (1..=30).map(|n| format!("line{n}")).collect();
         r.command(Command::Lua(format!(
@@ -1481,6 +1506,8 @@ mod tests {
     fn a_popup_wraps_in_a_box_by_the_caret() {
         let root = tempfile::tempdir().unwrap();
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
+            .unwrap();
         r.start(None);
         r.command(Command::Lua(
             r#"soda.popup("int value\n\nA long sentence that has to wrap")"#.into(),
@@ -1500,6 +1527,8 @@ mod tests {
     fn a_status_line_pushed_up_hides_the_text_under_it() {
         let root = tempfile::tempdir().unwrap();
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
+            .unwrap();
         r.start(None);
         r.command(Command::Edit(crate::editor::Command::InsertText(
             format!("{}\n", "x".repeat(50)).repeat(12),
@@ -1518,6 +1547,8 @@ mod tests {
     fn the_line_after_a_final_newline_shows_and_is_reachable() {
         let root = tempfile::tempdir().unwrap();
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
+            .unwrap();
         r.start(None);
         r.command(Command::Edit(crate::editor::Command::InsertText(
             "a\nb\n".into(),
@@ -1542,6 +1573,8 @@ mod tests {
     fn expand_digits_show_on_text_and_after_the_end_of_lines() {
         let root = tempfile::tempdir().unwrap();
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
+            .unwrap();
         r.start(None);
         r.command(Command::Edit(crate::editor::Command::InsertText(
             "ab\ncd ef gh\nij\n".into(),
@@ -1569,6 +1602,8 @@ mod tests {
     fn flags_take_the_first_gutter_cell() {
         let root = tempfile::tempdir().unwrap();
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
+            .unwrap();
         r.start(None);
         r.command(Command::Edit(crate::editor::Command::InsertText(
             "a\nb\nc".into(),
@@ -1598,6 +1633,8 @@ mod tests {
     fn line_numbers_follow_the_option() {
         let root = tempfile::tempdir().unwrap();
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
+            .unwrap();
         r.start(None);
         r.command(Command::Edit(crate::editor::Command::InsertText(
             "a\nb\nc\nd".into(),

@@ -8,6 +8,8 @@ use std::{path::PathBuf, time::Duration};
 
 fn runtime(text: &str) -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(None);
     r.command(Command::SetMode(EditMode::Insert));
     r.input(UserInput::Paste(text.into()));
@@ -126,6 +128,8 @@ fn open_accepts_a_path_argument() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("a b.txt"), "content").unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(None);
     keys(&mut r, "<a-x>");
     r.input(UserInput::Paste("open a b.txt".into()));

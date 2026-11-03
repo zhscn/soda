@@ -1,8 +1,8 @@
 //! Application command reduction. Commands resolve their targets on the owner
 //! thread and return ordered application events and platform effects.
 use super::{
-    CommandLine, HelpSession, Layer, Layers, Message, Response, SaveWait, SearchSession,
-    expand, registry::holds_commands,
+    CommandLine, HelpSession, Layer, Layers, Message, Response, SaveWait, SearchSession, expand,
+    registry::holds_commands,
 };
 use crate::{
     application::{Application, Axis, ClipboardAction, Direction, Event},
@@ -37,6 +37,9 @@ pub enum Command {
         target: String,
         /// What help and key hints show; `None` shows the target.
         label: Option<String>,
+        /// A plugin's binding: a default, which user bindings shadow and
+        /// which `unmap` does not take away.
+        default: bool,
     },
     Unmap {
         keymap: String,
@@ -367,15 +370,20 @@ impl Layers {
                 keys,
                 target,
                 label,
+                default,
             } => {
                 if !self.registry.knows(&target) {
                     return Err(format!("unknown command: {target}"));
                 }
                 let table = table(&mut self.keymap, &keymap)?;
                 let label = label.unwrap_or_else(|| target.clone());
-                self.keymap
-                    .bind(table, &keys, Command::Named(target), label)
-                    .map_err(|e| e.to_string())
+                let command = Command::Named(target);
+                if default {
+                    self.keymap.bind_default(table, &keys, command, label)
+                } else {
+                    self.keymap.bind(table, &keys, command, label)
+                }
+                .map_err(|e| e.to_string())
             }
             Command::Unmap { keymap, keys } => {
                 let table = table(&mut self.keymap, &keymap)?;
@@ -449,8 +457,10 @@ impl Layers {
         };
         let opening_path = matches!(command, Command::OpenPath(_));
         self.jumps.clear_pending();
-        // With a mark set, every move extends from it, as in Emacs.
-        let marked = self.mode != super::EditMode::Insert
+        // With a mark set, every move extends from it, as in Emacs; in
+        // Insert only when editing is not modal, as meow's Insert typing
+        // drops it.
+        let marked = (self.mode != super::EditMode::Insert || !super::modal_on(app))
             && super::modal::execute_place(app)
                 .and_then(|selection| self.modal.tag(selection))
                 .is_some_and(|tag| tag.kind == super::modal::Kind::Char);
@@ -464,6 +474,28 @@ impl Layers {
             }),
             command => command,
         };
+        // Typing and yanking go in at the caret and drop the selection, as
+        // Emacs does without delete-selection-mode; meow's Insert keeps its
+        // own way.
+        if self.mode == super::EditMode::Insert
+            && !super::modal_on(app)
+            && matches!(
+                command,
+                Command::Edit(
+                    EditCommand::TypeChar(_) | EditCommand::InsertText(_) | EditCommand::Enter
+                ) | Command::Clipboard(ClipboardAction::Paste)
+            )
+            && let Some(view) = active(app)
+            && let Some(selection) = super::modal::execute_place(app)
+            && !selection.range().is_empty()
+        {
+            self.modal.tag = None;
+            response.events.push(Event::Edit {
+                view: view.id,
+                command: EditCommand::SetSelection(crate::core::Selection::caret(selection.head)),
+                time,
+            });
+        }
         match &command {
             Command::ResultStep { .. } => self.jumps.expect_result(),
             Command::Modal(super::modal::Action::Found {
@@ -492,7 +524,12 @@ impl Layers {
                 if self.mode == super::EditMode::Beacon {
                     self.leave_beacon();
                 }
-                self.mode = mode;
+                // Without modal editing there is no other mode to be in.
+                self.mode = if super::modal_on(app) {
+                    mode
+                } else {
+                    super::EditMode::Insert
+                };
             }
             Command::Modal(action) => response = self.modal_execute(action, app, time),
             Command::Fail(message) => {
@@ -659,6 +696,7 @@ impl Layers {
                     Layer::Help(HelpSession::new(super::help::text(
                         &self.keymap,
                         &self.registry,
+                        super::modal_on(app),
                     ))),
                     app,
                     time,

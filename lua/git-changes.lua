@@ -1,9 +1,7 @@
 -- Lists the places that differ from what git has staged in *changes*, one
 -- per hunk, for Enter, ]q and [q. `git diff` output has no `path:line:` of
 -- its own, so this turns its hunk headers into locations.
--- Built in: SPC g.
-
-soda.command("display changes bottom")
+-- The command is there without setup, with no key.
 
 local function locations(diff)
   local list, path = {}, nil
@@ -43,4 +41,4 @@ soda.define_command("git-changes", "List the hunks git has not staged", function
     soda.results("changes", locations(out))
   end)
 end)
-soda.map("global", "<c-c>g", "git-changes")
+return {}

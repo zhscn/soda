@@ -38,6 +38,8 @@ fn press(name: &str, keys: &str, cases: &[(&str, &str)]) {
         let path = dir.path().join(name);
         std::fs::write(&path, &source).unwrap();
         let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+        r.source_lua("auto-pairs", r#"soda.set("auto-pairs", true)"#)
+            .unwrap();
         r.start(Some(path));
         let deadline = Instant::now() + Duration::from_secs(5);
         while r.app().active_view().is_none() || text(&r) != source {

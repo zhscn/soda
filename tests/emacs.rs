@@ -39,7 +39,11 @@ fn open(marked: &str, mode: EditMode) -> (tempfile::TempDir, Runtime) {
     let path = dir.path().join("a.txt");
     std::fs::write(&path, &source).unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.load_startup_lua();
+    r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
+        .unwrap();
     assert_eq!(r.message(), "");
     r.start(Some(path));
     let deadline = Instant::now() + Duration::from_secs(5);

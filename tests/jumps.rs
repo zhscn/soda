@@ -53,6 +53,8 @@ fn project() -> Project {
     std::fs::write(dir.path().join("b.txt"), "x\nneedle\ny\nneedle\n").unwrap();
     std::fs::write(dir.path().join("c.txt"), "needle\n").unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(Some(dir.path().join("a.txt")));
     wait(&mut r, |r| r.app().active_view().is_some());
     Project { _dir: dir, r }

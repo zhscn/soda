@@ -8,6 +8,8 @@ use std::{path::Path, time::Duration};
 
 fn runtime(root: &Path) -> Runtime {
     let mut r = Runtime::new(root.to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(None);
     r.command(Command::SetMode(EditMode::Normal));
     r

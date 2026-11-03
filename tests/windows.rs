@@ -9,6 +9,8 @@ use std::path::PathBuf;
 
 fn runtime(text: &str) -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(None);
     r.command(Command::SetMode(EditMode::Insert));
     r.command(Command::Edit(Edit::InsertText(text.into())));
@@ -163,6 +165,8 @@ fn grep_results_show_below_and_open_locations_in_the_other_window() {
     std::fs::write(root.path().join("a.txt"), "one\n  needle here\n").unwrap();
     std::fs::write(root.path().join("b.txt"), "needle\n").unwrap();
     let mut r = Runtime::new(root.path().to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(None);
     let main = r.app().active_view().unwrap();
     r.command(Command::Grep("needle".into()));

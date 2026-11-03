@@ -8,6 +8,8 @@ use std::path::PathBuf;
 
 fn runtime(text: &str) -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/project")).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(None);
     r.command(Command::SetMode(EditMode::Insert));
     r.command(Command::Edit(Edit::InsertText(text.into())));
@@ -88,6 +90,8 @@ fn the_column_limit_comes_from_clang_format() {
     std::fs::write(dir.path().join(".clang-format"), "ColumnLimit: 100\n").unwrap();
     std::fs::write(dir.path().join("a.cpp"), "int x;\n").unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.source_lua(
         "init.lua",
         r#"assert(soda.command([[hook open .*\.cpp set-local ruler %val{column-limit}]]))"#,

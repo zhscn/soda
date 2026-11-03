@@ -976,23 +976,28 @@ fn status(painter: &mut Painter, runtime: &Runtime, area: Rect, text: Option<&Te
     let (cell, line) = (painter.fonts.cell, painter.fonts.line);
     let top = area.y + (area.h - line) / 2.0;
     let status = content::status(runtime, text);
-    let badge = match status.mode {
-        content::Mode::Normal => theme.mode_normal,
-        content::Mode::Insert => theme.mode_insert,
-        content::Mode::Beacon => theme.mode_visual,
-        content::Mode::Prompt(_) => theme.mode_prompt,
-    };
-    let label = status.mode.label();
-    let bold = Face {
-        bold: true,
-        ..Face::UI
-    };
-    let width = painter.fonts.width(label, bold) + 1.6 * cell;
-    let (_, badge_bg) = painter.colors(badge);
-    let pill = Rect::new(cell * 0.6, area.y + 4.0, width, area.h - 8.0);
-    painter.fill(pill, badge_bg.unwrap_or(painter.fg), 7.0);
-    let style = badge.add_modifier(Modifier::BOLD);
-    painter.ui(pill.x + 0.8 * cell, top, label, style, width);
+    // The mode's pill, when there is a mode to name; the path follows it.
+    let mut left = cell * 0.6;
+    if let Some(mode) = status.mode {
+        let badge = match mode {
+            content::Mode::Normal => theme.mode_normal,
+            content::Mode::Insert => theme.mode_insert,
+            content::Mode::Beacon => theme.mode_visual,
+            content::Mode::Prompt(_) => theme.mode_prompt,
+        };
+        let label = mode.label();
+        let bold = Face {
+            bold: true,
+            ..Face::UI
+        };
+        let width = painter.fonts.width(label, bold) + 1.6 * cell;
+        let (_, badge_bg) = painter.colors(badge);
+        let pill = Rect::new(cell * 0.6, area.y + 4.0, width, area.h - 8.0);
+        painter.fill(pill, badge_bg.unwrap_or(painter.fg), 7.0);
+        let style = badge.add_modifier(Modifier::BOLD);
+        painter.ui(pill.x + 0.8 * cell, top, label, style, width);
+        left = pill.right() + cell;
+    }
     // The right side: segments, then the caret's place.
     let mut right: Vec<(String, Style)> = status
         .segments
@@ -1016,7 +1021,7 @@ fn status(painter: &mut Painter, runtime: &Runtime, area: Rect, text: Option<&Te
         x += w + gap;
     }
     if let Some(document) = status.document {
-        let x = pill.right() + cell;
+        let x = left;
         let room = (area.right() - total - x - gap).max(0.0);
         let style = theme.status.patch(theme.status_strong);
         let path = fitting(painter.fonts, &document.path, room - 6.0 * cell);

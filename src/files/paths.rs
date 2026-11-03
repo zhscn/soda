@@ -22,7 +22,10 @@ pub struct PathCompletion {
 /// The entries of a directory, directories first, symlinks to directories
 /// counted as directories. An empty list once `cancelled` is set; an
 /// error for a directory too large to offer.
-pub(crate) fn list(directory: &Path, cancelled: &AtomicBool) -> Result<Vec<DirectoryEntry>, String> {
+pub(crate) fn list(
+    directory: &Path,
+    cancelled: &AtomicBool,
+) -> Result<Vec<DirectoryEntry>, String> {
     let fail = |error| format!("{}: {error}", directory.display());
     let directory = std::fs::canonicalize(directory).map_err(fail)?;
     let mut entries = Vec::new();

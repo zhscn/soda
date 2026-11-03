@@ -15,6 +15,8 @@ fn ctrl(ch: char) -> KeyStroke {
 }
 fn runtime() -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(None);
     r
 }
@@ -135,6 +137,8 @@ fn a_language_keymap_holds_in_its_documents_only() {
     std::fs::write(dir.path().join("a.rs"), "fn main() {}\n").unwrap();
     std::fs::write(dir.path().join("b.txt"), "text\n").unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(Some(dir.path().join("a.rs")));
     for _ in 0..200 {
         r.poll();

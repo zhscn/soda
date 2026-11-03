@@ -106,7 +106,9 @@ pub(crate) struct StatusDocument {
 /// The status line: the mode and document on the left; on the right
 /// segments, then the caret's place.
 pub(crate) struct Status {
-    pub mode: Mode,
+    /// What keys do: a prompt's name, or the editing mode when editing is
+    /// modal; nothing in plain editing.
+    pub mode: Option<Mode>,
     pub document: Option<StatusDocument>,
     /// What is going on, extensions' segments, problem counts and the
     /// language.
@@ -115,8 +117,8 @@ pub(crate) struct Status {
     /// document its line is, in percent.
     pub place: Option<(usize, usize, usize)>,
 }
-pub(crate) fn mode(runtime: &Runtime) -> Mode {
-    match runtime.layer() {
+pub(crate) fn mode(runtime: &Runtime) -> Option<Mode> {
+    Some(match runtime.layer() {
         Some(Layer::CommandLine(_)) => Mode::Prompt("COMMAND"),
         Some(Layer::Search(session)) if session.is_replacing() => Mode::Prompt("REPLACE"),
         Some(Layer::Search(_)) => Mode::Prompt("SEARCH"),
@@ -124,12 +126,13 @@ pub(crate) fn mode(runtime: &Runtime) -> Mode {
         Some(Layer::Help(_)) => Mode::Prompt("HELP"),
         Some(Layer::Labels(_)) => Mode::Prompt("JUMP"),
         Some(Layer::Resize(_)) => Mode::Prompt("RESIZE"),
+        None if !crate::interaction::modal_on(runtime.app()) => return None,
         None => match runtime.edit_mode() {
             EditMode::Normal => Mode::Normal,
             EditMode::Insert => Mode::Insert,
             EditMode::Beacon => Mode::Beacon,
         },
-    }
+    })
 }
 /// The status line, with what the active window's text frame tells of the
 /// caret and problems.
@@ -193,10 +196,7 @@ pub(crate) enum Message<'a> {
 pub(crate) fn message<'a>(runtime: &'a Runtime, text: Option<&'a super::TextFrame>) -> Message<'a> {
     match runtime.layer() {
         Some(
-            layer @ (Layer::Search(_)
-            | Layer::Saving(_)
-            | Layer::Labels(_)
-            | Layer::Resize(_)),
+            layer @ (Layer::Search(_) | Layer::Saving(_) | Layer::Labels(_) | Layer::Resize(_)),
         ) => Message::Prompt(layer.presentation()),
         _ => {
             let quiet = runtime.message().is_empty();

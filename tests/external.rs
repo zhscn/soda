@@ -47,6 +47,8 @@ fn regaining_focus_reloads_clean_files_and_reports_the_rest() {
         std::fs::write(path, "old\n").unwrap();
     }
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(None);
     for path in [&clean, &kept, &gone, &edited] {
         open(&mut r, path);

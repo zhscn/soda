@@ -9,6 +9,8 @@ use std::{path::PathBuf, time::Duration};
 
 fn runtime() -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(None);
     r.command(Command::SetMode(EditMode::Insert));
     r.input(UserInput::Paste("one\ntwo\nthree".into()));
@@ -398,6 +400,8 @@ fn clang_format_extension_replaces_only_changed_lines() {
         return;
     }
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(None);
     r.command(Command::SetMode(EditMode::Insert));
     r.input(UserInput::Paste(
@@ -429,6 +433,8 @@ fn clang_format_extension_formats_only_the_selected_lines() {
         return;
     }
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(None);
     r.command(Command::SetMode(EditMode::Insert));
     r.input(UserInput::Paste("int  a;\nint  b;\nint  c;\n".into()));
@@ -449,6 +455,8 @@ fn clang_format_extension_drops_output_when_the_buffer_changed() {
         return;
     }
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(None);
     r.command(Command::SetMode(EditMode::Insert));
     r.input(UserInput::Paste("int  a;\n".into()));
@@ -469,6 +477,8 @@ fn clang_format_extension_drops_output_when_the_buffer_changed() {
 /// A runtime with these lines and the example extension loaded.
 fn extension(lines: &str, source: &str) -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(None);
     r.command(Command::SetMode(EditMode::Insert));
     r.input(UserInput::Paste(lines.into()));
@@ -486,8 +496,11 @@ fn comment_extension_says_when_a_buffer_has_no_marker() {
 }
 #[test]
 fn surround_extension_wraps_the_selection_from_a_key() {
-    let surround = include_str!("../lua/surround.lua");
-    let mut r = extension("one two\n", surround);
+    let surround = format!(
+        "(function() {} end)().setup()",
+        include_str!("../lua/surround.lua")
+    );
+    let mut r = extension("one two\n", &surround);
     keys(&mut r, "<a-lt>llll,w<c-c>(");
     assert_eq!(text(&r), "one (two)\n", "{}", r.message());
     assert_eq!(r.edit_mode(), EditMode::Normal);
@@ -511,6 +524,8 @@ fn commented(dir: &tempfile::TempDir, name: &str, lines: &str) -> Runtime {
     let path = dir.path().join(name);
     std::fs::write(&path, lines).unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(Some(path));
     for _ in 0..400 {
         r.poll();
@@ -584,6 +599,8 @@ fn lua_results_step_with_the_built_in_keys() {
     std::fs::write(dir.path().join("a.txt"), "one\ntwo\nthree\n").unwrap();
     std::fs::write(dir.path().join("b.txt"), "four\nfive\n").unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(None);
     lua(
         &mut r,
@@ -613,6 +630,8 @@ fn lua_results_follow_the_shape_of_the_largest_window() {
     std::fs::write(dir.path().join("a.txt"), "one\n").unwrap();
     let side = |width, height, setup: &str| {
         let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+        r.source_lua("modal", include_str!("fixtures/modal.lua"))
+            .unwrap();
         r.start(None);
         r.set_editing_area(width, height);
         if !setup.is_empty() {
@@ -635,6 +654,8 @@ fn lua_results_use_the_side_window_already_open() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("a.txt"), "one\n").unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(None);
     r.set_editing_area(256, 26);
     lua(&mut r, r#"soda.results("lint", { "a.txt:1:1: first" })"#);
@@ -649,6 +670,8 @@ fn lua_results_keep_a_configured_placement() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("a.txt"), "one\n").unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(None);
     lua(
         &mut r,
@@ -676,6 +699,8 @@ fn lua_opens_a_position_and_reports_a_bad_one() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("a.txt"), "one\ntwo\n").unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(None);
     lua(&mut r, r#"soda.open("a.txt", 2, 3)"#);
     wait(&mut r, |r| active_name(r).ends_with("a.txt"));
@@ -710,6 +735,8 @@ fn git_changes_extension_lists_each_hunk() {
     // A changed line, one that reads like a file header, and a removal.
     std::fs::write(&path, "a\nB\n++ b/fake\nc\ne\n").unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(None);
     lua(&mut r, include_str!("../lua/git-changes.lua"));
     r.command(Command::Named("git-changes".into()));
@@ -736,13 +763,20 @@ mod bundled {
         let mut r = runtime();
         r.load_startup_lua();
         assert_eq!(r.message(), "");
-        for name in ["comment", "surround", "clang-format", "git-changes"] {
+        for name in [
+            "comment",
+            "surround",
+            "clang-format",
+            "git-changes",
+            "git-flags",
+        ] {
             lua(&mut r, &format!("assert(package.loaded[{name:?}])"));
         }
+        // A plugin waits for its setup: git-flags runs git on no file.
         lua(
             &mut r,
-            r#"assert(not package.loaded["git-flags"])
-            assert(require("git-flags"))"#,
+            r#"assert(type(require("git-flags").setup) == "function")
+            assert(#soda.bindings("mark") == 0)"#,
         );
     }
     #[test]
@@ -752,6 +786,8 @@ mod bundled {
         let mut r = runtime();
         r.add_lua_modules(directory.path());
         r.load_startup_lua();
+        r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
+            .unwrap();
         lua(&mut r, "assert(require('comment') == 'mine')");
     }
     #[test]
@@ -1124,6 +1160,8 @@ fn files_are_created_renamed_and_deleted_and_documents_follow() {
     let base = dir.path().canonicalize().unwrap();
     std::fs::write(base.join("a.txt"), "a\n").unwrap();
     let mut r = Runtime::new(base.clone()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(Some(base.join("a.txt")));
     for _ in 0..500 {
         r.poll();

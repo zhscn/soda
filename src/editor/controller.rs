@@ -58,6 +58,29 @@ pub enum Command {
     ReplaceAll(String),
     ReloadText(String),
 }
+impl Command {
+    /// Whether the command may change the text, rather than the selection,
+    /// the view or the settings.
+    pub fn changes_text(&self) -> bool {
+        matches!(
+            self,
+            Self::InsertText(_)
+                | Self::TypeChar(_)
+                | Self::Enter
+                | Self::Reindent(_)
+                | Self::Apply(_)
+                | Self::Undo
+                | Self::Redo
+                | Self::Delete { .. }
+                | Self::DeleteWord(_)
+                | Self::InsertTab
+                | Self::InsertLiteralTab
+                | Self::IndentSelection { .. }
+                | Self::ReplaceCurrent(_)
+                | Self::ReplaceAll(_)
+        )
+    }
+}
 #[derive(Clone, Debug)]
 pub struct SessionUpdate {
     pub session_id: SessionId,

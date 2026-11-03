@@ -101,6 +101,10 @@ pub enum Action {
     Insert(Entry),
     Leave,
     Kill,
+    /// Emacs's `kill-region`: the selection, and nothing without one.
+    KillRegion,
+    /// Emacs's `kill-ring-save`: copies the selection, and nothing without one.
+    KillRingSave,
     Change,
     Delete,
     Save,
@@ -174,8 +178,75 @@ pub(super) struct Grab {
     pub start: DocumentPosition,
     pub end: DocumentPosition,
 }
+/// What a thing key selects, after `,` or `.`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Thing {
+    /// A balanced group opened by this bracket, from the language's structure.
+    Pair(char),
+    String,
+    Symbol,
+    Word,
+    Paragraph,
+    Line,
+    Buffer,
+}
+impl Thing {
+    /// Each kind by the name `soda.thing` takes.
+    pub const NAMES: [(&'static str, Thing); 10] = [
+        ("round", Thing::Pair('(')),
+        ("square", Thing::Pair('[')),
+        ("curly", Thing::Pair('{')),
+        ("angle", Thing::Pair('<')),
+        ("string", Thing::String),
+        ("symbol", Thing::Symbol),
+        ("word", Thing::Word),
+        ("paragraph", Thing::Paragraph),
+        ("line", Thing::Line),
+        ("buffer", Thing::Buffer),
+    ];
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::NAMES
+            .iter()
+            .find(|(word, _)| *word == name)
+            .map(|(_, thing)| *thing)
+    }
+}
+/// The thing each key names: meow's `meow-char-thing-table` to begin with.
+pub(in crate::interaction) struct Things(Vec<(char, Thing)>);
+impl Default for Things {
+    fn default() -> Self {
+        Self(vec![
+            ('r', Thing::Pair('(')),
+            ('s', Thing::Pair('[')),
+            ('c', Thing::Pair('{')),
+            ('g', Thing::String),
+            ('e', Thing::Symbol),
+            ('w', Thing::Word),
+            ('p', Thing::Paragraph),
+            ('l', Thing::Line),
+            ('b', Thing::Buffer),
+        ])
+    }
+}
+impl Things {
+    pub fn get(&self, key: char) -> Option<Thing> {
+        self.0
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, thing)| *thing)
+    }
+    /// Makes `key` name `thing`, or nothing when `None`.
+    pub fn set(&mut self, key: char, thing: Option<Thing>) {
+        self.0.retain(|(k, _)| *k != key);
+        if let Some(thing) = thing {
+            self.0.push((key, thing));
+        }
+    }
+}
 #[derive(Default)]
 pub(in crate::interaction) struct State {
+    /// The things `,` and `.` select, by key.
+    pub things: Things,
     /// The prefix argument: `None` until `SPC 3` or `-` start one.
     pub count: Option<usize>,
     pub negative: bool,

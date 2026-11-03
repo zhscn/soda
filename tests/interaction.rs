@@ -2,9 +2,7 @@ use soda::{
     application::{Application, Event, Update, ViewId},
     core::{ByteOffset, Change, Selection, Transaction},
     editor::{Command, Language, search::SearchQuery},
-    interaction::{
-        Input, InputKey, InputMotion, InputResult, Layer, Layers, SearchSession,
-    },
+    interaction::{Input, InputKey, InputMotion, InputResult, Layer, Layers, SearchSession},
 };
 use std::time::Duration;
 
@@ -492,7 +490,9 @@ fn all_builtin_sessions_share_the_cancel_lifecycle_contract() {
             "close".into(),
             "close save".into(),
         )),
-        Layer::Search(Box::new(SearchSession::new(&app, view).unwrap().replacing())),
+        Layer::Search(Box::new(
+            SearchSession::new(&app, view).unwrap().replacing(),
+        )),
         Layer::Search(Box::new(SearchSession::new(&app, view).unwrap())),
     ];
     for session in sessions {

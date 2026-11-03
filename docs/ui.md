@@ -18,7 +18,7 @@
 | --- | --- |
 | 标签栏 | 每个已加载文档一项（包括没有视图的），当前文档高亮，`●` 标记未保存；放不下时从左侧省略。选项 `tab-bar`：`auto`（默认）只在单窗口时显示，`on`、`off`。终端不足 4 行时省略。 |
 | 行号栏 | 第一格是行标记（`flag-lines`），行号右对齐、至少 3 位。选项 `line-numbers`：`absolute`（默认）、`relative`、`off`；`off` 时有标记的文档仍留标记列。窗口过窄时省略。最后一个换行之后的空行也是一行（同 Emacs），`a\n` 显示两行。 |
-| 状态栏 | 左：模式（NORMAL、INSERT、BEACON；交互层打开时为 COMMAND、SEARCH、REPLACE、SAVING、HELP、JUMP、RESIZE）、相对项目根的路径、`[+]` 与保存中标记。右：`recording`、未完成的按键、`searching…`/`run…`/`running…`、扩展用 `soda.status` 设置的段落、错误和警告数（`E3 W1`）、语言名、行:列、位置百分比。 |
+| 状态栏 | 左：模式（模态编辑时为 NORMAL、INSERT、BEACON，否则不显示；交互层打开时为 COMMAND、SEARCH、REPLACE、SAVING、HELP、JUMP、RESIZE）、相对项目根的路径、`[+]` 与保存中标记。右：`recording`、未完成的按键、`searching…`/`run…`/`running…`、扩展用 `soda.status` 设置的段落、错误和警告数（`E3 W1`）、语言名、行:列、位置百分比。 |
 | 消息行 | 输入层（搜索、替换、保存等）的输入；否则依次是 `soda.hint` 的文字、光标处注记的第一行、最近的消息。新消息盖过注记，下一个键后注记回来。启动页列出基本按键。 |
 
 行尾显示这一行最严重的注记（诊断等 `soda.note` 写下的）的第一行，同行还有别的时加 `(+N)`，颜色是 `note-error`、`note-warning`、`note-info`；开了 `wrap` 时在折行的最后一段。选项 `inline-notes` 关闭。

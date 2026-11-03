@@ -50,6 +50,8 @@ fn saving_trims_edited_lines_and_ends_with_a_line_break() {
     let path = dir.path().join("a.txt");
     std::fs::write(&path, "keep  \nedit\nlast").unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(Some(path.clone()));
     wait(&mut r, |r| text(r) == "keep  \nedit\nlast");
     keys(&mut r, "j<c-e>a \t<esc>");

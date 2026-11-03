@@ -368,6 +368,8 @@ pub enum Error {
     NotAfterYank,
     /// A face or language that cannot be set.
     Setting(String),
+    /// An edit typed into a document only the editor writes, by its name.
+    ReadOnly(String),
     Edit(EditError),
     File(FileError),
 }
@@ -392,6 +394,7 @@ impl fmt::Display for Error {
             Self::NoFlags => f.write_str("no such flags"),
             Self::NotAfterYank => f.write_str("the last command was not a yank"),
             Self::Setting(error) => f.write_str(error),
+            Self::ReadOnly(name) => write!(f, "Buffer is read-only: {name}"),
             Self::Edit(e) => e.fmt(f),
             Self::File(e) => e.fmt(f),
         }
@@ -409,6 +412,7 @@ impl std::error::Error for Error {
             | Self::NoHighlight
             | Self::NoFlags
             | Self::NotAfterYank
+            | Self::ReadOnly(_)
             | Self::Setting(_) => None,
         }
     }
@@ -938,6 +942,21 @@ impl Application {
             update,
         )
     }
+    /// Whether a document is read-only: a scratch document, which only the
+    /// editor writes, as Emacs's special buffers.
+    pub fn is_read_only(&self, document: DocumentId) -> bool {
+        self.workspace
+            .file(document)
+            .is_some_and(|file| file.scratch().is_some())
+    }
+    /// Refuses an edit asked for in a read-only document.
+    fn writable(&self, view: ViewId) -> Result<(), Error> {
+        let document = self.views.get(&view).ok_or(Error::UnknownView)?.document_id;
+        if self.is_read_only(document) {
+            return Err(Error::ReadOnly(self.document_name(document)));
+        }
+        Ok(())
+    }
     fn scratch(
         &mut self,
         name: &str,
@@ -1350,9 +1369,15 @@ impl Application {
                 command,
                 time,
             } => {
+                if command.changes_text() {
+                    self.writable(view)?;
+                }
                 self.edit(view, command, time, &mut update)?;
             }
             Event::Clipboard { view, action, time } => {
+                if !matches!(action, ClipboardAction::Copy) {
+                    self.writable(view)?;
+                }
                 self.clipboard_action(view, action, time, &mut update)?;
             }
             Event::SetClipboard(text) => self.set_clipboard(text),

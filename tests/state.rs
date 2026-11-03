@@ -39,6 +39,8 @@ fn carets_and_histories_outlive_the_session() {
     std::fs::write(&a, "one\ntwo\nthree\n").unwrap();
     std::fs::write(&b, "x\ny\n").unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(None);
     open(&mut r, &a);
     keys(&mut r, "2jll");

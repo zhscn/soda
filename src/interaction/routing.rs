@@ -263,43 +263,46 @@ impl Layers {
     pub(super) fn stack(&self, app: &Application) -> Vec<keymap::Table> {
         use keymap::Context;
         let mut stack: Vec<keymap::Table> = vec![];
-        match self.mode {
-            EditMode::Insert => {
-                // Over the choices of a place, Tab goes on to the next.
-                let choosing = self.completion.choosing();
-                if choosing && self.snippet.active() {
-                    stack.push(Context::Snippet.into());
-                }
-                if self.completion.visible() {
-                    stack.push(Context::Completion.into());
-                }
-                if !choosing && self.snippet.active() {
-                    stack.push(Context::Snippet.into());
-                }
+        if self.mode == EditMode::Insert {
+            // Over the choices of a place, Tab goes on to the next.
+            let choosing = self.completion.choosing();
+            if choosing && self.snippet.active() {
+                stack.push(Context::Snippet.into());
             }
-            EditMode::Normal
-                if !self.modal.active()
-                    && app.options().bool(
-                        app.active_view()
-                            .and_then(|view| app.view(view))
-                            .map(|view| view.document_id),
-                        "mark-keys",
-                    )
-                    && app.on_mark() =>
-            {
-                stack.push(Context::Mark.into())
+            if self.completion.visible() {
+                stack.push(Context::Completion.into());
             }
-            EditMode::Normal
-                if !self.modal.active()
-                    && app
-                        .active_view()
-                        .and_then(|view| app.view(view))
-                        .is_some_and(|view| app.is_tree(view.document_id)) =>
-            {
-                stack.push(Context::Tree.into())
+            if !choosing && self.snippet.active() {
+                stack.push(Context::Snippet.into());
             }
-            EditMode::Beacon => stack.push(Context::Beacon.into()),
-            EditMode::Normal => {}
+        }
+        // What the caret is on or in holds over the table that moves it:
+        // Normal's, or Insert's when editing is not modal, as Emacs's
+        // overlay and special buffer keymaps hold over typing.
+        let moving = match self.mode {
+            EditMode::Normal => !self.modal.active(),
+            EditMode::Insert => !super::modal_on(app) && !self.completion.visible(),
+            EditMode::Beacon => false,
+        };
+        let document = app
+            .active_view()
+            .and_then(|view| app.view(view))
+            .map(|view| view.document_id);
+        if moving && app.options().bool(document, "mark-keys") && app.on_mark() {
+            stack.push(Context::Mark.into());
+        } else if moving && document.is_some_and(|document| app.is_tree(document)) {
+            stack.push(Context::Tree.into());
+        } else if moving
+            && document
+                .and_then(|document| app.workspace().file(document))
+                .and_then(|file| file.scratch())
+                .and_then(super::grep::results_kind)
+                .is_some()
+        {
+            stack.push(Context::Results.into());
+        }
+        if self.mode == EditMode::Beacon {
+            stack.push(Context::Beacon.into());
         }
         stack.push(
             match self.mode {

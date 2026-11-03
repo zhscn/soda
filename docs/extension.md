@@ -36,10 +36,11 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 
 | 选项 | 取值 | 默认 | 作用 |
 | --- | --- | --- | --- |
+| `modal` | true/false | false | 模态编辑：插入之间回到 Normal，状态栏显示模式名；由 meow 插件设置，只看全局值 |
 | `indent-width` | 0–16 | 4 | 每级缩进的列数 |
 | `tab-width` | 1–16 | 4 | 制表位间隔 |
 | `expand-tab` | true/false | true | 用空格缩进；false 时用制表符 |
-| `auto-pairs` | true/false | true | 成对输入括号和语言列出的引号，退格删除空的一对 |
+| `auto-pairs` | true/false | false | 成对输入括号和语言列出的引号，退格删除空的一对；同 Emacs 的 `electric-pair-mode`，默认关 |
 | `line-numbers` | absolute/relative/off | absolute | 行号栏；relative 时光标行显示自身行号，其他行显示距离 |
 | `tab-bar` | auto/on/off | auto | 文档标签行；auto 只在单窗口时显示 |
 | `window-title` | true/false | true | 有多个窗口时在每个窗口顶部显示标题 |
@@ -100,7 +101,7 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 
 ## Lua
 
-启动时先加载内置模块，再运行 `init.lua`，所以配置可以改写内置模块的命令和键位。配置目录下 `lua/` 中的模块可以 `require`，同名文件优先于内置模块；启动目录不在搜索路径上。`lua CODE` 在命令行上执行一段 Lua。Lua 通过全局表 `soda` 操作编辑器：
+启动时先加载内置模块（见[插件](#插件)），再运行 `init.lua`，所以配置可以改写内置模块的命令和键位。配置目录下 `lua/` 中的模块可以 `require`，同名文件优先于内置模块；启动目录不在搜索路径上。`lua CODE` 在命令行上执行一段 Lua。Lua 通过全局表 `soda` 操作编辑器：
 
 | 函数 | 作用 |
 | --- | --- |
@@ -110,11 +111,13 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 | `soda.set(name, value, [local])` | 设置选项，`local` 为真时只对当前文档；不合法时报错 |
 | `soda.declare_option(name, spec)` | 声明模块自己的选项，见下文 |
 | `soda.map(keymap, keys, target, [doc])` | 绑定按键：`keymap` 是上下文、文档键位表或语言 id（见[键位上下文](interaction.md#键位上下文)）；`target` 是命令行，或 Lua 函数（prompt 除外）；`doc` 显示在按键提示和帮助里 |
-| `soda.unmap(keymap, keys)` | 去掉用户绑定，恢复默认 |
+| `soda.map_default(keymap, keys, target, [doc])` | 插件绑定按键：参数同 `soda.map`，但作为默认绑定，见[插件](#插件) |
+| `soda.unmap(keymap, keys)` | 去掉用户绑定，恢复默认（内置的或插件的） |
 | `soda.keymap(name, { server = NAME, doc = ... })` | 声明服务器的键位表：在名为 `NAME` 的语言服务器服务的文档里生效，`"*"` 表示任一服务器；再次调用更新说明和范围 |
 | `soda.bindings(keymap)` | 当前生效的绑定：`{ {keys = "<c-x>o", command = "window-next"}, ... }` |
 | `soda.face(name, spec)` | 设置界面或语法分类的颜色，见[终端界面](ui.md#主题) |
 | `soda.language(name, language)` | 同 `language-map` |
+| `soda.thing(key, kind)` | 让 `,`、`.` 之后的 `key` 选中一种 thing：`round`、`square`、`curly`、`angle`、`string`、`symbol`、`word`、`paragraph`、`line`、`buffer`；`kind` 为 nil 时去掉。初始是 meow 的 `r s c g e w p l b` |
 | `soda.buffers()` | 所有打开的文档的句柄 |
 | `soda.windows()` | 屏幕上的窗口 `{buffer, x, y, width, height, active}`，分屏窗口按阅读顺序，然后是侧边窗口 |
 | `soda.defer(ms, fn)` / `soda.cancel(id)` | `ms` 毫秒后在当前视图上调用 `fn` 一次，返回编号；`cancel` 取消还没到时间的，返回是否取消了 |
@@ -163,24 +166,56 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 - **时限**：一个请求最多运行 3 秒，超时报错 `lua: … stopped after 3 s`。超时后 `pcall`、`xpcall`、`coroutine.resume` 不再吞掉错误，循环里捕获也停不住它。下一个请求重新计时。
 - **钩子和命令**：`soda.hook` 和 `soda.define_command` 保存函数本身，在命令表和钩子里表现为 `lua-call ID`，所以按键提示和帮助显示 `doc` 或命令名。
 
-### 内置模块
+### 插件
 
-`lua/` 下的模块编译进二进制。启动时加载的模块只增加命令和键位，用到时才做事；不随启动加载的要在 `init.lua` 里 `require`。不想要某个键时用 `unmap`。leader 指 Normal 的 `SPC`，它读作 `<c-c>`，所以这些键绑成 `<c-c>` 加一个键，所有模式下 `C-c` 加同一个键也能用；与语言服务器有关的键在 `lsp`、`ccls` 表里，只在服务器服务的文档中生效。
+没有配置的 soda 是裸 Emacs：只有 Insert，Emacs 的键，状态栏没有模式名。`lua/` 下的模块编译进二进制，启动时全部加载，分两种：
 
-| 模块 | 内容 | 键位 |
+- **内置模块**补齐裸 Emacs 本来就有的东西，加载即生效，只绑 Emacs 自己的默认键。
+- **插件**对应 Emacs 里要另装、另开的包。加载只定义命令（`M-x` 能用），`setup(options)` 才打开。
+
+插件的约定：
+
+1. **加载无副作用**。`require(name)` 只定义命令，不绑键、不加钩子、不设选项、不启动进程、不改显示。所以启动可以全部加载，不用的插件只多几个命令名。
+2. **`setup(options)` 打开插件**。键、钩子、选项、键位表声明都在这里。重复调用不重复加钩子。能关的插件另有 `disable()`。
+3. **键是默认绑定**。插件用 `soda.map_default` 绑键：它们和 Rust 里的默认键同一层，用户的 `soda.map` 遮住它们，`unmap` 去掉用户绑定后插件的键回来；后绑的默认键替换相同或互为前缀的默认键，如 puni 的 `<c-k>` 替换内置的 `kill-line-end`。要整个不要插件的键，传 `keys = false`；要关掉其中一个，把它绑到 `nop`。
+4. **`C-c` 加字母留给用户**。这是 Emacs 的约定，内置模块和插件都不在默认键里占用；leader（Normal 的 `SPC`，读作 `<c-c>`）下的键由用户自己绑。插件可以绑在自己的键位表里（`mark`、`lsp`、`ccls`），也可以绑 Emacs 的标准键。
+5. **插件之间**只通过命令名和键位表协作，不互相 `require` 内部函数；`lsp` 例外，它把服务器接口交给 `ccls` 这样的扩展。
+6. **模态编辑本身也是插件**。选区种类、Beacon、keypad 这套机制在 Rust 里，`modal` 选项决定用不用它；`meow` 插件设这个选项，再给出 Normal 中能打出字符的键（布局）。打不出字符的键（`C-f`、方向键、Esc、Enter）是内置的默认键。
+
+内置模块：
+
+| 模块 | 内容 | 键 |
 | --- | --- | --- |
-| `lsp` | 语言服务器的各项功能，见[语言服务器](lsp.md) | `lsp` 表：`<a-.>`、`<a-?>`，leader 下的 `k`、`c`、`C`、`t`、`T`、`R`、`a`、`s`、`S`、`h`、`.` |
-| `pairs` | 结构化编辑，见[交互层](interaction.md#结构化编辑) | 见交互层 |
-| `comment` | 切换行注释 | `<a-;>` |
-| `emacs` | Emacs 的单词大小写、对调和空白命令，见[交互层](interaction.md#emacs-键位) | 见交互层 |
+| `emacs` | 单词大小写、对调、空白、`open-line`、`back-to-indentation`，见[交互层](interaction.md#emacs-键位) | Emacs 的默认键 |
+| `comment` | 切换行注释 | `M-;` |
+| `pairs` | 按表达式移动、选中、剪切，以及 puni 的各个命令，见[交互层](interaction.md#结构化编辑) | `C-M-f`、`C-M-b`、`C-M-u`、`C-M-Space`、`C-M-k`、`C-M-Backspace` |
+| `lsp` | 语言服务器的各项功能，没有服务器时什么也不做，见[语言服务器](lsp.md) | `lsp` 表：`M-.`、`M-?` |
 | `snippets` | snippet 作为补全候选，见[补全](completion.md#snippet) | 无 |
-| `surround` | 在选区两侧加上成对的文本 | leader 加括号或引号 |
 | `clang-format` | 用 clang-format 格式化文档或选中的行，只替换有变化的行 | 无 |
-| `symbol-overlay` | 标记符号、在标记间跳转、改名，见[交互层](interaction.md#高亮模式) | leader 下的 `i`、`I`，`<a-n>`、`<a-p>`，以及 `mark` 键位表 |
-| `git-changes` | 把 `git diff` 的改动块列入 `*changes*` | leader 下的 `g` |
-| `git-flags` | 用行标记标出新增、修改和删除的行；每次打开、保存都运行 git，需 `require` | 无 |
-| `git` | 只读查询：`root(path)` 找工作树顶层；`status(path, fn)` 在后台得到根目录、分支、提交、上游和前后差几个提交，以及路径的跟踪、忽略、暂存、修改、冲突状态。需 `require` | 无 |
-| `ccls` | 让 C++ 使用 ccls 及其扩展（逐层的调用、继承、成员树，按语法树移动，变暗跳过的预处理分支）；`require("ccls").setup({...})`，见[语言服务器](lsp.md#ccls) | `ccls` 表：`setup` 后 leader 下的 `c`、`C`、`t`、`T`、`m`、`M` |
+| `git` | 只读查询：`root(path)` 找工作树顶层；`status(path, fn)` 在后台得到根目录、分支、提交、上游和前后差几个提交，以及路径的跟踪、忽略、暂存、修改、冲突状态 | 无 |
+| `git-changes` | `git-changes` 命令：把 `git diff` 的改动块列入 `*changes*` | 无 |
+
+插件：
+
+| 插件 | `setup` 打开什么 | 选项 |
+| --- | --- | --- |
+| `meow` | 模态编辑：设 `modal`，绑 Normal 的布局，加 thing；`disable()` 回到只有 Insert | `layout`：`"qwerty"`（默认，meow README 的 QWERTY 布局，去掉 soda 没有的命令）、`{ 键 = 命令 }` 或 false；`things`：`{ a = "angle" }` |
+| `puni` | puni-mode-map 的键：Insert 的 Backspace、`M-Backspace`、`C-Backspace`、`C-w` 不拆配对，`C-k`、`C-M-a`、`C-M-e` | `keys = false` |
+| `symbol-overlay` | `mark` 表：光标在标记上时的单键，见[交互层](interaction.md#高亮模式)；`mark-keys` 选项可关 | `keys = false` |
+| `surround` | `C-c` 加括号或引号（Normal 中 `SPC` 加同样的键） | `keys = false` |
+| `git-flags` | 打开、保存时运行 git，用行标记标出新增、修改和删除的行；`disable()` 关掉 | 无 |
+| `ccls` | 让 C++ 使用 ccls，声明 `ccls` 键位表，变暗跳过的预处理分支，见[语言服务器](lsp.md#ccls) | `command`、`init`、`settings`、`roots`、`auto`、`languages` |
+
+插件的命令没有用户键，用户在 `init.lua` 里绑：
+
+```lua
+require("meow").setup()
+require("puni").setup()
+require("symbol-overlay").setup()
+soda.map("global", "<c-c>i", "symbol-toggle")
+require("ccls").setup()
+soda.map("ccls", "<c-c>vc", "ccls-callers")   -- ccls 表在 setup 之后才有
+```
 
 ### 文档
 

@@ -45,6 +45,8 @@ fn hooks_from_configuration_shape_new_and_opened_documents() {
     std::fs::write(&python, "x").unwrap();
     std::fs::write(&text, "y").unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.source_lua(
         "init.lua",
         r#"
@@ -73,6 +75,8 @@ fn hooks_follow_modes_focus_saves_and_closes() {
     let path = dir.path().join("f.txt");
     std::fs::write(&path, "").unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(None);
     line(&mut r, "hook mode insert set scroll-lines 9");
     line(&mut r, "hook mode normal set scroll-lines 5");
@@ -103,6 +107,8 @@ fn hooks_follow_modes_focus_saves_and_closes() {
 #[test]
 fn hooks_that_fire_themselves_stop() {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(None);
     line(&mut r, "hook new .* new");
     line(&mut r, "new");

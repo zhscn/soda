@@ -377,9 +377,9 @@ impl CommandLine {
                     })
                     .collect(),
                 Target::Slot(SlotKind::Keymap) => {
-                    let languages = crate::language::catalog().ids().map(|id| {
-                        (id.to_owned(), format!("Keys of {id} documents"))
-                    });
+                    let languages = crate::language::catalog()
+                        .ids()
+                        .map(|id| (id.to_owned(), format!("Keys of {id} documents")));
                     let mut names = self.keymaps.clone();
                     for (id, doc) in languages {
                         if !names.iter().any(|(name, _)| *name == id) {
@@ -478,7 +478,11 @@ impl CommandLine {
         ranked(&mut self.matcher, query, shown, |_| false)
             .map(|(index, shown, highlights)| {
                 let number = (index + 1).to_string();
-                mark(row(index as u64, shown, Some(number), false), highlights, None)
+                mark(
+                    row(index as u64, shown, Some(number), false),
+                    highlights,
+                    None,
+                )
             })
             .collect()
     }

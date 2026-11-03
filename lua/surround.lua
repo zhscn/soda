@@ -1,7 +1,10 @@
 -- Puts a pair around the selection: `surround (`, `surround "`, or
 -- two words for any pair, as in `surround <b> </b>`. An opening bracket
 -- brings its closing one; any other single argument goes on both sides.
--- Built in: SPC followed by a bracket or quote.
+-- The command is there without setup. setup binds C-c (SPC in Normal)
+-- followed by a bracket or quote; `keys = false` binds none.
+--
+--   require("surround").setup()
 
 local closing = { ["("] = ")", ["["] = "]", ["{"] = "}", ["<"] = ">" }
 
@@ -27,6 +30,16 @@ soda.define_command("surround", "Put a pair around the selection", function(argu
   buf:edit({ { from, from, open }, { to, to, close } })
 end)
 
-for _, key in ipairs({ "(", "[", "{", '"', "'", "`" }) do
-  soda.map("global", "<c-c>" .. key, "surround " .. key)
+local M = {}
+
+function M.setup(options)
+  options = options or {}
+  if options.keys == false then
+    return
+  end
+  for _, key in ipairs({ "(", "[", "{", '"', "'", "`" }) do
+    soda.map_default("global", "<c-c>" .. key, "surround " .. key)
+  end
 end
+
+return M

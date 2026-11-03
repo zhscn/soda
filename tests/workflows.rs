@@ -15,6 +15,13 @@ impl Editor {
             app: Application::default(),
             layers: insert_layers(),
         };
+        // Typing over a selection replaces it in meow's Insert; plain
+        // editing is Emacs's, tested in plain.rs.
+        editor.event(Event::SetOption {
+            scope: soda::options::Scope::Global,
+            name: "modal",
+            value: soda::options::Value::Bool(true),
+        });
         editor.event(Event::NewDocument(Language::PlainText));
         editor.command(Command::Edit(Edit::InsertText(text.into())));
         editor.select(Selection::caret(0));

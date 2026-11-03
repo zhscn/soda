@@ -36,7 +36,11 @@ fn open(name: &str, marked: &str, mode: EditMode) -> (tempfile::TempDir, Runtime
     let path = dir.path().join(name);
     std::fs::write(&path, &source).unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.load_startup_lua();
+    r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
+        .unwrap();
     assert_eq!(r.message(), "");
     r.start(Some(path));
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -317,11 +321,15 @@ fn a_group_split_by_conditional_compilation_is_not_a_group() {
     check("a.cpp", EditMode::Insert, &[(kill, "<c-k>", killed)]);
 }
 #[test]
-fn unmapping_a_key_brings_back_the_built_in_one() {
+fn a_user_binding_shadows_a_plugin_key_until_unmapped() {
     let (_dir, mut r) = open("a.cpp", "f(a)|;", EditMode::Insert);
-    r.command(Command::Named("unmap insert <bs>".into()));
+    r.command(Command::Named("map insert <bs> delete-backward".into()));
     keys(&mut r, "<bs>");
     assert_eq!(shown(&r), "f(a|;");
+    // puni's soft Backspace again, which leaves the pair whole.
+    r.command(Command::Named("unmap insert <bs>".into()));
+    keys(&mut r, ")<bs>");
+    assert_eq!(shown(&r), "f(a|);");
 }
 #[test]
 fn built_in_keys_reach_their_commands() {

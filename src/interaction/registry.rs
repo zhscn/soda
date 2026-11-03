@@ -837,7 +837,7 @@ pub static BUILTINS: &[Builtin] = &[
     ),
     builtin!(
         "inner-of-thing",
-        "Select inside a thing: r s c a brackets, g string, e w symbol word, p l b",
+        "Select inside a thing: r s c brackets, g string, e w symbol word, p l b",
         modal(Action::ThingAt { inner: true })
     ),
     builtin!(
@@ -906,6 +906,16 @@ pub static BUILTINS: &[Builtin] = &[
         modal(Action::Delete)
     ),
     builtin!("save", "Copy the selection", modal(Action::Save)),
+    builtin!(
+        "kill-region",
+        "Cut the selection; without one, say so",
+        modal(Action::KillRegion)
+    ),
+    builtin!(
+        "kill-ring-save",
+        "Copy the selection; without one, say so",
+        modal(Action::KillRingSave)
+    ),
     builtin!(
         "put",
         "Paste at the caret, leaving the selection in place",
@@ -990,6 +1000,7 @@ pub static BUILTINS: &[Builtin] = &[
                 keys: keys(sequence)?,
                 target: required(target)?,
                 label: None,
+                default: false,
             })
         }
     ),

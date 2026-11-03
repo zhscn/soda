@@ -28,6 +28,10 @@ fn shown(r: &Runtime) -> String {
 fn plain() -> (tempfile::TempDir, Runtime) {
     let dir = tempfile::tempdir().unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
+    r.source_lua("auto-pairs", r#"soda.set("auto-pairs", true)"#)
+        .unwrap();
     r.start(None);
     (dir, r)
 }
@@ -36,6 +40,10 @@ fn cpp() -> (tempfile::TempDir, Runtime) {
     let path = dir.path().join("a.cpp");
     std::fs::write(&path, "").unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
+    r.source_lua("auto-pairs", r#"soda.set("auto-pairs", true)"#)
+        .unwrap();
     r.start(Some(path));
     let deadline = Instant::now() + Duration::from_secs(5);
     while r.app().active_view().is_none() {

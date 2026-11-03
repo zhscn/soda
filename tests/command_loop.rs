@@ -325,6 +325,7 @@ fn configured_layers() -> Layers {
                 keys: KeyStroke::parse_sequence(keys).unwrap(),
                 target: target.into(),
                 label: None,
+                default: false,
             })
             .unwrap();
     }

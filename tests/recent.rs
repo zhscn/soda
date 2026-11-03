@@ -49,6 +49,8 @@ fn recent_files_come_newest_first_and_survive_the_session() {
         std::fs::write(dir.path().join(name), name).unwrap();
     }
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(None);
     for name in names {
         open(&mut r, &dir.path().join(name));
@@ -62,6 +64,8 @@ fn recent_files_come_newest_first_and_survive_the_session() {
     // Another session starts from what this one left.
     let text = r.persist();
     let mut next = Runtime::new(dir.path().to_owned()).unwrap();
+    next.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     next.restore(&text);
     next.start(None);
     keys(&mut next, "<space>r");

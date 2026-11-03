@@ -7,12 +7,12 @@
 -- or a module does, as ccls's setup does.
 --
 -- Keys, in the `lsp` keymap, which holds in documents a server serves:
--- <a-.> goes to the definition, <a-?> lists references, <a-,> comes
--- back. Under the leader (SPC, which is <c-c>): k shows what the caret is on
--- in a box until the next key; c and C open the callers and the callees as
--- trees, t and T the base and the derived types; R
--- renames and a offers code actions; s and S find symbols; h switches header
--- and source; . goes to the implementations.
+-- <a-.> goes to the definition, <a-?> lists references, <a-,> comes back,
+-- as xref's. The other commands (lsp-hover, lsp-rename, lsp-code-action,
+-- lsp-callers and so on) have no keys; bind them in that keymap:
+--
+--   soda.map("lsp", "<c-c>k", "lsp-hover")
+--
 -- Completion follows from the server being there.
 
 -- What `require("lsp")` returns, filled in at the end; `token_category`
@@ -1686,19 +1686,8 @@ soda.completion.register({
 })
 
 soda.keymap("lsp", { server = "*", doc = "Documents a language server serves" })
-soda.map("lsp", "<a-.>", "lsp-definition")
-soda.map("lsp", "<a-?>", "lsp-references")
-soda.map("lsp", "<c-c>.", "lsp-implementation")
-soda.map("lsp", "<c-c>k", "lsp-hover")
-soda.map("lsp", "<c-c>c", "lsp-callers")
-soda.map("lsp", "<c-c>C", "lsp-callees")
-soda.map("lsp", "<c-c>t", "lsp-supertypes")
-soda.map("lsp", "<c-c>T", "lsp-subtypes")
-soda.map("lsp", "<c-c>R", "lsp-rename")
-soda.map("lsp", "<c-c>a", "lsp-code-action")
-soda.map("lsp", "<c-c>s", "lsp-symbols")
-soda.map("lsp", "<c-c>S", "lsp-workspace-symbols")
-soda.map("lsp", "<c-c>h", "lsp-switch")
+soda.map_default("lsp", "<a-.>", "lsp-definition")
+soda.map_default("lsp", "<a-?>", "lsp-references")
 
 -- What modules for one server's extensions, such as `ccls`, build on.
 for name, value in pairs({

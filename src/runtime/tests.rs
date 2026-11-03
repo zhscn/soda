@@ -20,6 +20,9 @@ fn key_with(code: KeyCode, modifiers: u8) -> KeyStroke {
 }
 fn host() -> Runtime {
     let mut runtime = Runtime::new(PathBuf::from("/")).unwrap();
+    runtime
+        .source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
+        .unwrap();
     runtime.start(None);
     runtime.command(Action::SetMode(crate::interaction::EditMode::Insert));
     runtime
@@ -389,6 +392,8 @@ fn work_done_elsewhere_wakes_the_loop_and_deadlines_say_when_to_look() {
         atomic::{AtomicUsize, Ordering},
     };
     let mut host = Runtime::new(PathBuf::from("/")).unwrap();
+    host.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
+        .unwrap();
     host.start(None);
     // Nothing typed, nothing running: nothing to look for.
     assert_eq!(host.deadline(), None);

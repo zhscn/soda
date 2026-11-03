@@ -11,19 +11,17 @@
 -- `settings`, `roots` (default .ccls-root, .ccls, compile_commands.json),
 -- `auto` (default "marked": only where one of the roots is; lsp-start
 -- starts it anywhere),
--- `languages` (default { "cpp" }) and `keys = false` to bind nothing.
+-- and `languages` (default { "cpp" }).
 --
--- Keys, in the `ccls` keymap, which holds in documents ccls serves, over
--- the `lsp` one: under the leader, c and C open the callers and the
--- callees as trees, t and T the bases and the derived types, m and M the
--- member variables and functions. Bind your own there:
+-- The commands are there without setup: ccls-callers and ccls-callees
+-- open the callers and the callees as trees, ccls-base and ccls-derived
+-- the bases and the derived types, ccls-members the members. They have no
+-- keys; bind them in the `ccls` keymap, which setup defines and which
+-- holds in documents ccls serves, over the `lsp` one:
 --
 --   soda.map("ccls", "<c-c>vc", "ccls-callers")
 
 local lsp = require("lsp")
-
--- After `lsp`'s, so that it is asked first where both hold.
-soda.keymap("ccls", { server = "ccls", doc = "Documents ccls serves" })
 
 local M = {}
 
@@ -52,17 +50,6 @@ local function paint_skipped()
   end
   soda.paint("ccls-skipped", spans)
 end
-soda.lsp.on("$ccls/publishSkippedRanges", function(params)
-  skipped[params.uri] = params.skippedRanges
-  if params.uri == soda.lsp.uri() then
-    paint_skipped()
-  end
-end)
-soda.hook("focus", ".*", function()
-  if skipped[soda.lsp.uri() or ""] then
-    paint_skipped()
-  end
-end)
 
 -- A node of ccls's hierarchies as a tree node: its name and where it is.
 local function node_of(item, field)
@@ -246,8 +233,25 @@ soda.define_command("ccls-reload", "Make ccls index the project again", function
 end)
 
 -- Runs ccls for C++.
+local started = false
 function M.setup(options)
   options = options or {}
+  if not started then
+    started = true
+    -- After `lsp`'s, so that it is asked first where both hold.
+    soda.keymap("ccls", { server = "ccls", doc = "Documents ccls serves" })
+    soda.lsp.on("$ccls/publishSkippedRanges", function(params)
+      skipped[params.uri] = params.skippedRanges
+      if params.uri == soda.lsp.uri() then
+        paint_skipped()
+      end
+    end)
+    soda.hook("focus", ".*", function()
+      if skipped[soda.lsp.uri() or ""] then
+        paint_skipped()
+      end
+    end)
+  end
   for _, language in ipairs(options.languages or { "cpp" }) do
     soda.lsp.server(language, options.command or { "ccls" }, {
       init = options.init,
@@ -258,14 +262,6 @@ function M.setup(options)
       -- The `ccls` keymap holds in its documents, whatever runs it.
       name = "ccls",
     })
-  end
-  if options.keys ~= false then
-    soda.map("ccls", "<c-c>c", "ccls-callers")
-    soda.map("ccls", "<c-c>C", "ccls-callees")
-    soda.map("ccls", "<c-c>t", "ccls-base")
-    soda.map("ccls", "<c-c>T", "ccls-derived")
-    soda.map("ccls", "<c-c>m", "ccls-members variables")
-    soda.map("ccls", "<c-c>M", "ccls-members functions")
   end
 end
 

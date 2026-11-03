@@ -44,8 +44,8 @@ soda 取了够用的部分（`Layers::stack`），先查到的算数：
 
 | 模式 | 栈 |
 | --- | --- |
-| Insert | `completion`（列表显示时）、`snippet`（还有位置时；在选项列表上时排到 `completion` 之前）、`insert`、`global` |
-| Normal | `mark`（光标在标记上时）或 `tree`（树文档里）、`normal`、`global` |
+| Insert | `completion`（列表显示时）、`snippet`（还有位置时；在选项列表上时排到 `completion` 之前）、不是模态编辑时同 Normal 的 `mark`/`tree`/`results`、`insert`、`global` |
+| Normal | `mark`（光标在标记上时）、`tree`（树文档里）或 `results`（结果文档里）、`normal`、`global` |
 | Beacon | `beacon`、`normal`、`global` |
 
 补全、snippet、标记盖过下层，都只是栈里的普通表，路由里没有特判。
@@ -110,6 +110,17 @@ soda 把种类和它标记的选区存在一起（`Tag`），读取时比较选�
 
 结构分析需要可变访问（C++ 会话有增量缓存），交互层只拿到不可变的 Application。所以 `o`、`O` 和括号 thing 产出 `Command::Effect(Structure)`，runtime 拿编辑器问 CST，再以 `Action::Found` 送回交互层设定选区和种类。交互层因此保持纯粹，测试可以直接驱动。
 
+### 3.10 模态编辑是插件，不是默认
+
+没有配置的 soda 应当和裸 Emacs 差不多，meow 在 Emacs 里也是另装的包。所以模态编辑拆成两半：
+
+- **机制在 Rust**：选区种类、Beacon、keypad、宏都留在 `interaction/modal/`，不搬进 Lua。它们要在每个键上读写选区和种类，跨过 Lua 边界既慢又会把种类、Beacon 位置这类状态暴露成接口。
+- **开关和布局在插件**：`modal` 选项决定用不用这套机制，默认关；关着时只有 Insert，Esc 是 `keyboard-quit`，状态栏不显示模式名，`C-Space` 之后的移动扩展选区。`meow` 插件设这个选项，并给出 Normal 中能打出字符的键。meow 本身也没有默认键位，README 给的 `meow-setup` 是让用户抄的；插件的 `qwerty` 布局对应它，作者自己的布局写在自己的 `init.lua`。
+
+打不出字符的 Normal 键（`C-f`、方向键、Esc、Enter）仍是 Rust 的默认键：它们相当于 meow 把没有绑定的键交回 Emacs 的全局表，不属于布局。thing 表同理：默认是 meow 的 `meow-char-thing-table`，`soda.thing` 对应 `meow-thing-register`。
+
+`modal` 只在变化时起作用（`Layers::sync_modal`，每次操作结束时调用）：打开时停在 Insert 而没有插入在进行的，回到 Normal；关掉时离开 Beacon，回到 Insert。
+
 ## 4 参照的调研
 
 **kakoune**
@@ -145,14 +156,14 @@ soda 把种类和它标记的选区存在一起（`Tag`），读取时比较选�
 
 - Lua 命令在 Beacon 里只作用于主选区，Lua 也读不到其余选区。
 - Lua 设的选区不带种类，数字不能扩展它。
-- Lua 不能新建键位表，只能往已有的表里加键。
+- Lua 只能声明服务器的键位表（`soda.keymap`），不能新建其他种类的表。
 - 没有 undo-in-selection、sync-grab、跳回 grab、`d`（defun）thing；`y` 在没有选区时报错。
 - 数字提示的消失时间固定为 1.5 秒，不是选项。
 
 ## 7 以后调整时
 
-- **加键**：按 meow 语义加在 `interaction/keymap.rs` 的表里，命令注册在 `registry.rs`。不要重新引入 operator 语法或“没有绑定时交给某个分析器”的兜底。
+- **加键**：能打出字符的 Normal 键属于布局，加在 `lua/meow.lua` 的 `qwerty` 表里（只放 meow README 里有的）；打不出字符的加在 `interaction/keymap.rs` 的表里。命令注册在 `registry.rs`。不在默认键里占用 `C-c` 加字母。不要重新引入 operator 语法或“没有绑定时交给某个分析器”的兜底。
 - **加选择命令**：在 `modal/text.rs` 写纯函数求位置，在 `execute.rs` 里通过 `select` 设定选区和种类。需要结构信息的，加一个 `Query` 变体交给 runtime。
 - **让某种操作支持多选区**：在 `beacon.rs` 里处理，不要把选区列表推进核心，除非 Normal 也要有多选区（那是推翻 3.4，需要重新评估事务、历史和渲染）。
 - **加一张生效条件特殊的键位表**：加进 `Layers::stack`，不要在路由里写特判。
-- **测试**：模态行为在 `tests/modal.rs`，用 `|` 表示光标、`[ ]` 表示选区，期望值以 meow 的实际行为为准；有意偏离 meow 的地方在测试里写明。
+- **测试**：模态行为在 `tests/modal.rs`，布局来自 `tests/fixtures/modal.lua`；没有配置时的行为在 `tests/plain.rs`。用 `|` 表示光标、`[ ]` 表示选区，期望值以 meow 的实际行为为准；有意偏离 meow 的地方在测试里写明。

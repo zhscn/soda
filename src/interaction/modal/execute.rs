@@ -1,5 +1,5 @@
 //! What each key does to the selection, and what it does with one.
-use super::{Action, Effect, Entry, Grab, Kind, LastFind, Query, Read, Step, Tag, text};
+use super::{Action, Effect, Entry, Grab, Kind, LastFind, Query, Read, Step, Tag, Thing, text};
 use crate::{
     application::{Application, ClipboardAction, Event, View, ViewId},
     core::{
@@ -10,6 +10,9 @@ use crate::{
     interaction::{Command, EditMode, Layers, Message, Response},
 };
 use std::time::Duration;
+
+/// Emacs's word for a region command without a region.
+const NO_REGION: &str = "The mark is not set now, so there is no region";
 
 /// The text a command works on.
 pub(super) struct Place<'a> {
@@ -269,6 +272,10 @@ impl Layers {
             }
             Action::Expand(digit) => return self.expand_selection(&at, digit, response),
             Action::Insert(entry) => self.enter_insert(&at, entry, &mut response),
+            // Without modal editing, leaving Insert is Emacs's C-g.
+            Action::Leave if !crate::interaction::modal_on(app) => {
+                return self.modal_execute(Action::Cancel, app, time);
+            }
             Action::Leave => {
                 if self.mode == EditMode::Beacon {
                     self.leave_beacon();
@@ -285,6 +292,11 @@ impl Layers {
                     .events
                     .push(at.event(Edit::EndUndoGroup(Selection::caret(at.selection.head))));
             }
+            Action::KillRegion | Action::KillRingSave if at.selection.range().is_empty() => {
+                return self.fail(response, NO_REGION);
+            }
+            Action::KillRegion => return self.modal_execute(Action::Kill, app, time),
+            Action::KillRingSave => return self.modal_execute(Action::Save, app, time),
             Action::Kill | Action::Delete if self.beacon_active() => {
                 self.beacon_delete(&at, matches!(action, Action::Kill), &mut response);
             }
@@ -713,28 +725,24 @@ impl Layers {
         mut response: Response,
     ) -> Response {
         let head = at.selection.head;
-        let open = match ch {
-            'r' => Some('('),
-            's' => Some('['),
-            'c' => Some('{'),
-            'a' => Some('<'),
-            _ => None,
+        let Some(thing) = self.modal.things.get(ch) else {
+            return self.fail(response, &format!("No thing called {ch}"));
         };
-        if let Some(open) = open {
-            response
-                .commands
-                .push(Command::Effect(Box::new(Effect::Structure(
-                    Query::Pair { open, inner },
-                    at.selection,
-                ))));
-            return response;
-        }
-        let range = match ch {
-            'g' => text::quoted(at.text, head, inner),
-            'e' => text::thing_at(at.text, head, true),
-            'w' => text::thing_at(at.text, head, false),
-            'p' => text::paragraph(at.text, head, inner),
-            'l' => {
+        let range = match thing {
+            Thing::Pair(open) => {
+                response
+                    .commands
+                    .push(Command::Effect(Box::new(Effect::Structure(
+                        Query::Pair { open, inner },
+                        at.selection,
+                    ))));
+                return response;
+            }
+            Thing::String => text::quoted(at.text, head, inner),
+            Thing::Symbol => text::thing_at(at.text, head, true),
+            Thing::Word => text::thing_at(at.text, head, false),
+            Thing::Paragraph => text::paragraph(at.text, head, inner),
+            Thing::Line => {
                 let line = at.text.line_of(head).unwrap();
                 Some(if inner {
                     text::first(at.text, line)..at.text.line_content_range(line).unwrap().end
@@ -742,8 +750,7 @@ impl Layers {
                     at.text.line_range(line).unwrap()
                 })
             }
-            'b' => Some(0..at.text.len_bytes()),
-            _ => return self.fail(response, &format!("No thing called {ch}")),
+            Thing::Buffer => Some(0..at.text.len_bytes()),
         };
         let Some(range) = range else {
             return self.fail(response, "No such thing here");

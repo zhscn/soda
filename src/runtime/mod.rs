@@ -280,10 +280,7 @@ impl Runtime {
     /// Layout feedback is applied through the same update path as commands.
     /// Modal surfaces that hide the editing cursor preserve its viewport.
     pub fn update_viewport(&mut self, view: ViewId, anchor: ByteOffset, horizontal_scroll: usize) {
-        if matches!(
-            self.layer(),
-            None | Some(Layer::Search(_))
-        ) {
+        if matches!(self.layer(), None | Some(Layer::Search(_))) {
             self.dispatch(Event::SetViewport {
                 view,
                 anchor,
@@ -518,6 +515,7 @@ impl Runtime {
         }
         self.hooking = true;
         for round in 0.. {
+            self.layers.sync_modal(&self.app);
             let now = (self.layers.edit_mode(), self.app.active_view());
             if now.0 != self.seen.0 {
                 self.notices.push(("mode", now.0.name().into(), None));

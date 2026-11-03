@@ -22,6 +22,9 @@ fn headless_runtime_opens_edits_saves_and_observes_completion() {
     let path = directory.path().join("file.txt");
     std::fs::write(&path, "old").unwrap();
     let mut runtime = Runtime::new(directory.path().to_owned()).unwrap();
+    runtime
+        .source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     runtime.start(Some(path.clone()));
     runtime.command(Command::SetMode(soda::interaction::EditMode::Insert));
     wait(&mut runtime, |runtime| {

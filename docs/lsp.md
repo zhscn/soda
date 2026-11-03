@@ -34,21 +34,21 @@ soda.lsp.server("rust", { "rust-analyzer" }, {
 
 ## 命令
 
-这些键在 `lsp` 键位表里，只在有服务器服务的文档中生效（见[键位上下文](interaction.md#键位上下文)）；其他文档里按下它们是未定义的键，命令本身照样可以执行。`SPC` 键即 `C-c` 下的同名键。
+`M-.`、`M-?` 是 xref 的键，绑在 `lsp` 键位表里，只在有服务器服务的文档中生效（见[键位上下文](interaction.md#键位上下文)）；其他文档里按下它们是未定义的键，命令本身照样可以执行。其余命令和 Emacs 的 eglot 一样没有键（`C-c` 加字母留给用户），绑到同一张表里：`soda.map("lsp", "<c-c>k", "lsp-hover")`。下表标着“建议”的键是作者配置里的，供参考。
 
 | 键 | 命令 | 作用 |
 | --- | --- | --- |
 | `M-.` | `lsp-definition` | 到定义，有多处时列出；`M-,` 回来 |
 | | `lsp-declaration` / `lsp-type-definition` | 到声明 / 类型的定义 |
-| `SPC .` | `lsp-implementation` | 到实现（虚函数的覆盖、派生类等） |
+| 建议 `C-c .` | `lsp-implementation` | 到实现（虚函数的覆盖、派生类等） |
 | `M-?` | `lsp-references` | 列出引用 |
-| `SPC h` | `lsp-switch` | 头文件与源文件切换（clangd 扩展） |
-| `SPC s` / `SPC S` | `lsp-symbols` / `lsp-workspace-symbols [QUERY]` | 当前文档的符号大纲 / 按名字在项目里找符号 |
-| `SPC k` | `lsp-hover` | 光标旁的浮窗显示光标处的信息，上面列出这一行的诊断 |
-| `SPC c` / `SPC C` | `lsp-callers` / `lsp-callees` | 调用者 / 被调用者的树；回车跳到调用处 |
-| `SPC t` / `SPC T` | `lsp-supertypes` / `lsp-subtypes` | 基类 / 派生类的树；回车跳到声明 |
-| `SPC R` | `lsp-rename [NAME]` | 重命名；没给名字时打开命令行，预填现在的名字（服务器支持 `prepareRename` 时问它，没有可改名的符号就直接说明） |
-| `SPC a` | `lsp-code-action` | 列出光标或选区处的代码动作，选一个执行 |
+| 建议 `C-c h` | `lsp-switch` | 头文件与源文件切换（clangd 扩展） |
+| 建议 `C-c s` / `C-c S` | `lsp-symbols` / `lsp-workspace-symbols [QUERY]` | 当前文档的符号大纲 / 按名字在项目里找符号 |
+| 建议 `C-c k` | `lsp-hover` | 光标旁的浮窗显示光标处的信息，上面列出这一行的诊断 |
+| 建议 `C-c c` / `C-c C` | `lsp-callers` / `lsp-callees` | 调用者 / 被调用者的树；回车跳到调用处 |
+| 建议 `C-c t` / `C-c T` | `lsp-supertypes` / `lsp-subtypes` | 基类 / 派生类的树；回车跳到声明 |
+| 建议 `C-c R` | `lsp-rename [NAME]` | 重命名；没给名字时打开命令行，预填现在的名字（服务器支持 `prepareRename` 时问它，没有可改名的符号就直接说明） |
+| 建议 `C-c a` | `lsp-code-action` | 列出光标或选区处的代码动作，选一个执行 |
 | | `lsp-format` | 格式化选区，没有选区或服务器不支持范围格式化时格式化整个文档 |
 | | `lsp-diagnostics` | 列出所有诊断 |
 | | `lsp-restart` | 重启当前语言的服务器，失败后也用它重试 |
@@ -154,13 +154,13 @@ require("ccls").setup({
 })
 ```
 
-`setup` 让 C++ 使用 ccls：`command` 换程序，`languages` 默认 `{ "cpp" }`，`init`、`settings` 原样传给 `soda.lsp.server`，`roots` 默认 `.ccls-root`、`.ccls`、`compile_commands.json`，`auto` 默认 `"marked"`（ccls 会给整个根目录建索引）。标准功能走 `lsp` 模块；ccls 没有的（如 `SPC h`）直接说明。下表的键在 `ccls` 键位表里，只在 ccls 服务的文档中生效，同一个键优先于 `lsp` 表；`setup({ keys = false })` 不绑定它们，自己的键也绑到这张表：`soda.map("ccls", "<c-c>vc", "ccls-callers")`。
+`setup` 让 C++ 使用 ccls：`command` 换程序，`languages` 默认 `{ "cpp" }`，`init`、`settings` 原样传给 `soda.lsp.server`，`roots` 默认 `.ccls-root`、`.ccls`、`compile_commands.json`，`auto` 默认 `"marked"`（ccls 会给整个根目录建索引）。标准功能走 `lsp` 模块；ccls 没有的（如 `lsp-switch`）直接说明。`setup` 声明 `ccls` 键位表，只在 ccls 服务的文档中生效，同一个键优先于 `lsp` 表。下表的命令没有键，绑到这张表（在 `setup` 之后）：`soda.map("ccls", "<c-c>vc", "ccls-callers")`。
 
 | 键 | 命令 | 作用 |
 | --- | --- | --- |
-| `SPC c` / `SPC C` | `ccls-callers` / `ccls-callees` | 调用者 / 被调用者的树（`$ccls/call`），含经由基类和派生类的调用 |
-| `SPC t` / `SPC T` | `ccls-base` / `ccls-derived` | 基类 / 派生类的树（`$ccls/inheritance`） |
-| `SPC m` / `SPC M` | `ccls-members variables` / `functions` | 成员变量 / 成员函数的树（`$ccls/member`），还可以是 `types` |
+| 建议 `C-c vc` / `C-c vC` | `ccls-callers` / `ccls-callees` | 调用者 / 被调用者的树（`$ccls/call`），含经由基类和派生类的调用 |
+| 建议 `C-c vb` / `C-c vd` | `ccls-base` / `ccls-derived` | 基类 / 派生类的树（`$ccls/inheritance`） |
+| 建议 `C-c vm` / `C-c vM` | `ccls-members variables` / `functions` | 成员变量 / 成员函数的树（`$ccls/member`），还可以是 `types` |
 | | `ccls-vars` | 列出光标处类型的变量（`$ccls/vars`） |
 | | `ccls-navigate up/down/left/right` | 按语法树移到外层、第一个内层、前后相邻的声明（`$ccls/navigate`） |
 | | `ccls-reload` | 重新索引项目 |

@@ -5,13 +5,10 @@
 -- Where they have no answer, as with an unfinished expression, the commands
 -- do what the built-in ones do.
 --
--- Built in, with Emacs's keys: <c-a-f> <c-a-b> <c-a-u> <c-a-a> <c-a-e> move
--- in every mode; <a-o> and <c-a-space> select in Normal; <c-k>,
--- <c-a-k>, <c-a-bs>, <c-s-right> and <c-s-left> work in Normal and Insert;
--- Backspace and word deletion are soft in Insert. To keep a built-in key,
--- unmap it:
---
---   soda.unmap("insert", "<bs>")
+-- Built in, with Emacs's own keys, in Insert and Normal: <c-a-f> <c-a-b>
+-- <c-a-u> move, <c-a-space> selects the expression, <c-a-k> and
+-- <c-a-bs> kill one. The rest, puni's keys among them, come with the puni
+-- plugin: require("puni").setup().
 
 local function before(a, b)
   return a[1] < b[1] or (a[1] == b[1] and a[2] < b[2])
@@ -302,25 +299,10 @@ soda.define_command("sexp-kill-backward", "Kill the previous expression", functi
 end)
 
 for _, mode in ipairs({ "normal", "insert" }) do
-  soda.map(mode, "<c-a-f>", "sexp-forward")
-  soda.map(mode, "<c-a-b>", "sexp-backward")
-  soda.map(mode, "<c-a-u>", "sexp-up")
-  soda.map(mode, "<c-a-a>", "sexp-beginning")
-  soda.map(mode, "<c-a-e>", "sexp-end")
+  soda.map_default(mode, "<c-a-f>", "sexp-forward")
+  soda.map_default(mode, "<c-a-b>", "sexp-backward")
+  soda.map_default(mode, "<c-a-u>", "sexp-up")
+  soda.map_default(mode, "<c-a-space>", "sexp-expand")
+  soda.map_default(mode, "<c-a-k>", "sexp-kill-forward")
+  soda.map_default(mode, "<c-a-bs>", "sexp-kill-backward")
 end
-for _, mode in ipairs({ "normal" }) do
-  soda.map(mode, "<a-o>", "sexp-expand")
-  soda.map(mode, "<c-a-space>", "sexp-expand")
-end
-for _, mode in ipairs({ "normal", "insert" }) do
-  soda.map(mode, "<c-k>", "sexp-kill")
-  soda.map(mode, "<c-a-k>", "sexp-kill-forward")
-  soda.map(mode, "<c-a-bs>", "sexp-kill-backward")
-  soda.map(mode, "<c-s-right>", "sexp-slurp")
-  soda.map(mode, "<c-s-left>", "sexp-barf")
-end
-soda.map("insert", "<bs>", "soft-backspace")
-soda.map("insert", "<c-h>", "soft-backspace")
-soda.map("insert", "<c-w>", "kill-region-or-word")
-soda.map("insert", "<c-bs>", "soft-kill-word")
-soda.map("insert", "<a-bs>", "soft-kill-word")

@@ -42,8 +42,9 @@ mod session;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum EditMode {
-    Insert,
+    /// Typing inserts; the only mode unless `modal` is set.
     #[default]
+    Insert,
     Normal,
     /// Many selections inside a grabbed range.
     Beacon,
@@ -188,6 +189,8 @@ pub struct Layers {
     /// The names of the language servers serving each document, for the
     /// keymaps of servers.
     servers: HashMap<crate::editor::DocumentId, Vec<String>>,
+    /// The `modal` option as last seen.
+    modal_seen: bool,
 }
 impl Layers {
     /// Whether a command failed since `clear_failed`.
@@ -246,6 +249,40 @@ impl Layers {
     }
     pub fn edit_mode(&self) -> EditMode {
         self.mode
+    }
+    /// Makes a key after `,` and `.` select a kind of thing, by its name in
+    /// `Thing::NAMES`; `None` takes the key's thing away.
+    pub fn define_thing(&mut self, key: char, kind: Option<&str>) -> Result<(), String> {
+        let thing = match kind {
+            Some(name) => Some(modal::Thing::parse(name).ok_or_else(|| {
+                let names: Vec<_> = modal::Thing::NAMES.iter().map(|(word, _)| *word).collect();
+                format!("no thing kind {name}; one of {}", names.join(", "))
+            })?),
+            None => None,
+        };
+        self.modal.things.set(key, thing);
+        Ok(())
+    }
+    /// Follows the `modal` option when it changes: turned on, Insert
+    /// becomes Normal; turned off, every mode becomes Insert.
+    pub fn sync_modal(&mut self, app: &crate::application::Application) {
+        let on = modal_on(app);
+        if on == self.modal_seen {
+            return;
+        }
+        self.modal_seen = on;
+        self.modal.tag = None;
+        if on {
+            // An insertion under way ends as it would have.
+            if self.mode == EditMode::Insert && self.modal.insert_view.is_none() {
+                self.mode = EditMode::Normal;
+            }
+        } else if self.mode != EditMode::Insert {
+            if self.mode == EditMode::Beacon {
+                self.leave_beacon();
+            }
+            self.mode = EditMode::Insert;
+        }
     }
     /// Keys typed toward an unfinished binding or command, if any.
     pub fn pending(&self) -> Option<String> {
@@ -654,4 +691,9 @@ impl Layers {
             _ => false,
         }
     }
+}
+
+/// Whether editing is modal: Normal between insertions.
+pub(crate) fn modal_on(app: &crate::application::Application) -> bool {
+    app.options().bool(None, "modal")
 }

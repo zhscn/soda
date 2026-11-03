@@ -10,9 +10,17 @@
 --   h  list these keys             r  rename all its occurrences
 --
 -- A jump shows its place at the end of the line, as meow does: [3/12].
--- Built in: SPC i marks the symbol or takes its mark off; SPC I takes
--- off the marks of this document; <a-n> and <a-p> go to the nearest other
--- marked symbol. Those of the mark are in the `mark` context of `map`.
+-- The commands are there without setup: symbol-toggle marks the symbol or
+-- takes its mark off, symbol-clear takes off the marks of this document,
+-- symbol-switch-forward and -backward go to the nearest other marked
+-- symbol. As in Emacs they have no keys; bind them yourself:
+--
+--   require("symbol-overlay").setup()
+--   soda.map("global", "<c-c>i", "symbol-toggle")
+--
+-- setup binds the keys above on a mark, in the `mark` context of `map`;
+-- `keys = false` binds none. The `mark-keys` option turns them off, as
+-- Emacs's symbol-overlay-inhibit-map.
 
 local COLOURS = 8
 -- Mark colour by symbol, by buffer.
@@ -263,23 +271,29 @@ soda.define_command("symbol-help", "Show the keys of a marked symbol", function(
   }, "\n"))
 end)
 
-for key, command in pairs({
-  i = "symbol-toggle",
-  h = "symbol-help",
-  n = "symbol-jump-next",
-  p = "symbol-jump-prev",
-  ["<lt>"] = "symbol-jump-first",
-  ["<gt>"] = "symbol-jump-last",
-  w = "symbol-save",
-  e = "symbol-echo-mark",
-  d = "lsp-definition",
-  s = "symbol-search",
-  q = "symbol-query-replace",
-  r = "symbol-rename",
-}) do
-  soda.map("mark", key, command)
+local M = {}
+
+function M.setup(options)
+  options = options or {}
+  if options.keys == false then
+    return
+  end
+  for key, command in pairs({
+    i = "symbol-toggle",
+    h = "symbol-help",
+    n = "symbol-jump-next",
+    p = "symbol-jump-prev",
+    ["<lt>"] = "symbol-jump-first",
+    ["<gt>"] = "symbol-jump-last",
+    w = "symbol-save",
+    e = "symbol-echo-mark",
+    d = "lsp-definition",
+    s = "symbol-search",
+    q = "symbol-query-replace",
+    r = "symbol-rename",
+  }) do
+    soda.map_default("mark", key, command)
+  end
 end
-soda.map("global", "<c-c>i", "symbol-toggle")
-soda.map("global", "<c-c>I", "symbol-clear")
-soda.map("normal", "<a-n>", "symbol-switch-forward")
-soda.map("normal", "<a-p>", "symbol-switch-backward")
+
+return M

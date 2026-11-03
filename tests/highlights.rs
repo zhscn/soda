@@ -17,6 +17,8 @@ fn line(r: &mut Runtime, command: &str) {
 }
 fn runtime(text: &str) -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
     r.start(None);
     r.command(Command::SetMode(EditMode::Insert));
     r.command(Command::Edit(Edit::InsertText(text.into())));
@@ -83,6 +85,8 @@ fn patterns_highlight_globally_or_in_one_document() {
 fn symbols_are_marked_in_turn_and_taken_off_without_touching_the_rest() {
     let mut r = runtime("alpha beta gamma\n");
     r.load_startup_lua();
+    r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
+        .unwrap();
     line(&mut r, "highlight todo TODO");
     keys(&mut r, "<space>i");
     line(&mut r, "goto 1:7");
@@ -138,6 +142,8 @@ fn keys_on_a_mark_jump_between_its_occurrences_and_show_the_place() {
     // Offsets: foo 0, bar 4, foo 8, foobar 12 (not foo), foo 19.
     let mut r = runtime("foo bar foo foobar\nfoo end\n");
     r.load_startup_lua();
+    r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
+        .unwrap();
     keys(&mut r, "<space>i");
     assert_eq!(indicator(&r), ["[1/3]"]);
     keys(&mut r, "n");
@@ -178,6 +184,8 @@ fn keys_on_a_mark_jump_between_its_occurrences_and_show_the_place() {
 fn keys_mean_what_they_always_do_off_a_mark_and_in_a_count() {
     let mut r = runtime("foo bar foo\n");
     r.load_startup_lua();
+    r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
+        .unwrap();
     keys(&mut r, "<space>i");
     // w on the mark copies; h shows the keys and any key closes them.
     keys(&mut r, "h");
@@ -208,6 +216,8 @@ fn keys_mean_what_they_always_do_off_a_mark_and_in_a_count() {
 fn an_option_keeps_the_keys_of_normal_on_a_mark() {
     let mut r = runtime("foo bar foo\n");
     r.load_startup_lua();
+    r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
+        .unwrap();
     keys(&mut r, "<space>i");
     line(&mut r, "set mark-keys false");
     // On the mark, i is Insert, as with symbol-overlay-inhibit-map.
@@ -224,6 +234,8 @@ fn an_option_keeps_the_keys_of_normal_on_a_mark() {
 fn renaming_changes_every_occurrence_in_one_step_and_keeps_the_colour() {
     let mut r = runtime("foo bar foobar foo\n");
     r.load_startup_lua();
+    r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
+        .unwrap();
     keys(&mut r, "<space>i");
     keys(&mut r, "r");
     match r.layer() {
@@ -246,6 +258,8 @@ fn renaming_changes_every_occurrence_in_one_step_and_keeps_the_colour() {
 fn switching_goes_to_the_nearest_other_marked_symbol() {
     let mut r = runtime("one two one three two\n");
     r.load_startup_lua();
+    r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
+        .unwrap();
     keys(&mut r, "<space>i");
     line(&mut r, "goto 1:5");
     keys(&mut r, "<space>i");
@@ -264,6 +278,8 @@ fn switching_goes_to_the_nearest_other_marked_symbol() {
 fn each_mark_takes_a_colour_nobody_is_using() {
     let mut r = runtime("aa bb cc\n");
     r.load_startup_lua();
+    r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
+        .unwrap();
     keys(&mut r, "<space>i");
     line(&mut r, "goto 1:4");
     keys(&mut r, "<space>i");
@@ -280,6 +296,8 @@ fn each_mark_takes_a_colour_nobody_is_using() {
 fn no_symbol_here_says_so() {
     let mut r = runtime("   \n");
     r.load_startup_lua();
+    r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
+        .unwrap();
     keys(&mut r, "<space>i");
     assert_eq!(r.message(), "No symbol here");
 }
@@ -289,6 +307,8 @@ fn a_mark_opens_search_and_replace_with_its_symbol() {
     use soda::interaction::Layer;
     let mut r = runtime("foo bar foo\n");
     r.load_startup_lua();
+    r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
+        .unwrap();
     keys(&mut r, "<space>i");
     keys(&mut r, "s");
     match r.layer() {
