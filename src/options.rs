@@ -141,6 +141,12 @@ pub const OPTIONS: &[OptionInfo] = &[
         doc: "Show a language server's hints between the characters of a line",
     },
     OptionInfo {
+        name: "inline-notes",
+        kind: Kind::Bool,
+        default: Value::Bool(true),
+        doc: "Show the worst note of a line, such as a diagnostic, after its text",
+    },
+    OptionInfo {
         name: "wrap",
         kind: Kind::Bool,
         default: Value::Bool(false),

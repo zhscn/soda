@@ -795,6 +795,7 @@ pub(super) fn frame(
     let flags = app.flags(view.document_id);
     let notes = app.notes(view.document_id);
     let paints = app.paints(view.document_id);
+    let inline_notes = options.bool(Some(view.document_id), "inline-notes");
     let mut text = std::borrow::Cow::Borrowed("");
     for ((number, row), segment) in &shown {
         let number = *number;
@@ -863,6 +864,28 @@ pub(super) fn frame(
                 column: usize::MAX,
                 text: format!(" {text}"),
                 face: Some(Face::Todo),
+            });
+        }
+        if last_row != Some(false)
+            && inline_notes
+            && let Some((note, more)) = worst_note(&notes, start..start + text.len())
+        {
+            let first = note.text.lines().next().unwrap_or_default();
+            let first: String = first.chars().filter(|c| !c.is_control()).collect();
+            let more = if more > 0 {
+                format!(" (+{more})")
+            } else {
+                String::new()
+            };
+            hints.push(Inlay {
+                column: usize::MAX,
+                text: format!("    {}{more}", first.trim()),
+                face: crate::application::faces::index(match note.severity {
+                    Severity::Error => "note-error",
+                    Severity::Warning => "note-warning",
+                    Severity::Info => "note-info",
+                })
+                .map(Face::Named),
             });
         }
         let marks = Marks {
@@ -946,6 +969,23 @@ pub(super) fn frame(
         note,
         problems,
     }))
+}
+
+/// The worst note starting on a line, the latest of equals, and how many
+/// others start there.
+fn worst_note<'a>(
+    notes: &'a [crate::application::Note<'a>],
+    line: std::ops::Range<usize>,
+) -> Option<(&'a crate::application::Note<'a>, usize)> {
+    let mut on_line = notes.iter().filter(|note| {
+        line.contains(&note.range.start) || (line.is_empty() && note.range.start == line.start)
+    });
+    let first = on_line.next()?;
+    let (worst, count) = on_line.fold((first, 1), |(worst, count), note| {
+        let worse = note.severity >= worst.severity;
+        (if worse { note } else { worst }, count + 1)
+    });
+    Some((worst, count - 1))
 }
 
 pub(super) fn prompt_row(

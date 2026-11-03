@@ -159,6 +159,7 @@ pub struct Layers {
     keymap: Keymap,
     modal: modal::State,
     completion: completion::State,
+    retype: Option<KeyStroke>,
     snippet: snippet::State,
     /// The input being routed comes from a macro.
     replaying: bool,
@@ -349,9 +350,29 @@ impl Layers {
         self.completion
             .results(generation, source, items, incomplete, app)
     }
-    /// Adds a source of candidates, asked also after these characters.
-    pub fn completion_source(&mut self, id: u64, triggers: Vec<char>) {
-        self.completion.register(id, triggers);
+    /// Adds a source of candidates, asked also after these characters,
+    /// with a function that tells more about a candidate.
+    pub fn completion_source(&mut self, id: u64, triggers: Vec<char>, resolve: Option<u64>) {
+        self.completion.register(id, triggers, resolve);
+    }
+    /// A key to route once more after the response it came with, as if
+    /// typed then: the commit character after the candidate it accepted.
+    pub fn take_retype(&mut self) -> Option<KeyStroke> {
+        self.retype.take()
+    }
+    /// A question about the selected candidate, for its source.
+    pub fn completion_resolve(&mut self) -> Option<completion::Resolve> {
+        self.completion.resolve()
+    }
+    /// What a source told about a candidate; whether to redraw.
+    pub fn completion_resolved(
+        &mut self,
+        source: u64,
+        key: i64,
+        detail: Option<String>,
+        doc: Option<String>,
+    ) -> bool {
+        self.completion.resolved(source, key, detail, doc)
     }
     /// The list to show under the caret.
     pub fn completion_popup(&self) -> Option<completion::Popup> {

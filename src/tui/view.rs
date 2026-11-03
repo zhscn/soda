@@ -361,6 +361,46 @@ fn completions(
             style.patch(theme.detail),
         );
     }
+    if let Some(doc) = popup.rows.iter().find(|r| r.selected && !r.doc.is_empty()) {
+        documentation(buf, area, Rect::new(x, y, wide, high), &doc.doc, theme);
+    }
+}
+
+/// The selected candidate's documentation, in a box beside the list on
+/// whichever side has more room, from the list's top row down.
+fn documentation(buf: &mut Buffer, area: Rect, list: Rect, doc: &str, theme: &Theme) {
+    let (left, right) = (list.x - area.x, area.right().saturating_sub(list.right()));
+    let room = left.max(right);
+    if room < 16 {
+        return;
+    }
+    let widest = (room - 4).min(72);
+    let lines = layout::wrap(doc.trim_end(), usize::from(widest));
+    let high = (lines.len() as u16 + 2).min(area.bottom().saturating_sub(list.y));
+    if high < 3 {
+        return;
+    }
+    let inner = lines
+        .iter()
+        .map(|line| layout::plain(line, 0, usize::from(widest)).chars().count())
+        .max()
+        .unwrap_or(0) as u16;
+    let wide = inner + 4;
+    let x = if right >= left {
+        list.right()
+    } else {
+        list.x - wide
+    };
+    float_box(buf, Rect::new(x, list.y, wide, high), theme);
+    for (row, line) in lines.iter().take(usize::from(high - 2)).enumerate() {
+        buf.set_stringn(
+            x + 2,
+            list.y + 1 + row as u16,
+            layout::plain(line, 0, usize::from(inner)),
+            usize::from(inner),
+            theme.float,
+        );
+    }
 }
 
 /// Draws the labels still possible over the text, or over each window.
@@ -1143,6 +1183,14 @@ mod tests {
         let rows: Vec<_> = text.lines().collect();
         assert_eq!(rows[9].trim_end(), "second word", "{text}");
         assert!(rows[8].contains("E1") && rows[8].contains("W1"), "{text}");
+        // Each line's worst note, its first line only, after the text.
+        assert!(rows[1].contains("one two    second word"), "{text}");
+        assert!(!rows[1].contains("more"), "{text}");
+        assert!(rows[2].contains("three    broken"), "{text}");
+        r.command(Command::Named("set inline-notes false".into()));
+        let plain = screen(&mut r, 60, 10);
+        assert!(!plain.lines().nth(2).unwrap().contains("broken"), "{plain}");
+        r.command(Command::Named("set inline-notes true".into()));
         let theme = Theme::build("auto", &Default::default());
         let areas = Areas::new(&r, 60, 10);
         let texts = super::super::frames(
@@ -1211,6 +1259,42 @@ mod tests {
         assert!(rows[top - 1].contains("al"), "{text}");
         assert!(rows[top + 1].contains("│ al"), "{text}");
         assert!(rows[top + 3].contains("╰"), "{text}");
+    }
+
+    #[test]
+    fn the_selected_candidate_shows_its_documentation_beside_the_list() {
+        let root = tempfile::tempdir().unwrap();
+        let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.start(None);
+        r.source_lua(
+            "t",
+            r#"soda.completion.register({ complete = function(context, sink)
+              sink:add({ { label = "alpha", doc = "What alpha is" }, { label = "alder" } })
+              sink:done()
+            end })"#,
+        )
+        .unwrap();
+        r.command(Command::SetMode(EditMode::Insert));
+        keys(&mut r, "al");
+        for _ in 0..500 {
+            r.poll();
+            if r.completion_popup().is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let text = screen(&mut r, 60, 12);
+        assert!(
+            !text.contains("What alpha is"),
+            "only once selected: {text}"
+        );
+        keys(&mut r, "<down>");
+        let text = screen(&mut r, 60, 12);
+        let row = text
+            .lines()
+            .find(|row| row.contains("What alpha is"))
+            .expect(&text);
+        assert!(row.contains("alpha"), "beside the list: {text}");
     }
 
     #[test]

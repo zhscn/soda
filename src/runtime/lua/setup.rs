@@ -177,14 +177,18 @@ pub(super) fn register<'scope, 'r: 'scope>(
     )?;
     soda.set(
         "completion_source",
-        scope.create_function(|_, (triggers, function): (String, Function)| {
-            let id = host.keep(function)?;
-            runtime
-                .borrow_mut()
-                .layers
-                .completion_source(id, triggers.chars().collect());
-            Ok(())
-        })?,
+        scope.create_function(
+            |_, (triggers, function, resolve): (String, Function, Option<Function>)| {
+                let id = host.keep(function)?;
+                let resolve = resolve.map(|resolve| host.keep(resolve)).transpose()?;
+                runtime.borrow_mut().layers.completion_source(
+                    id,
+                    triggers.chars().collect(),
+                    resolve,
+                );
+                Ok(())
+            },
+        )?,
     )?;
     Ok(())
 }

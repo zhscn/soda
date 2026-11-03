@@ -3,8 +3,8 @@
 //! what to do with its answers, is Lua's: `lua/lsp.lua`.
 //!
 //! A server is started for the first document of a language under a root,
-//! so two projects have two servers. Documents are sent whole, shortly after typing stops and before any request. Bytes are
-//! written on a thread, so that a large document costs the editor nothing.
+//! so two projects have two servers. Documents are sent whole, shortly
+//! after typing stops and before any request. Bytes are written on a thread, so that a large document costs the editor nothing.
 use crate::{application::Application, core::Snapshot, editor::DocumentId};
 use serde_json::{Value, json};
 use std::{
@@ -196,7 +196,16 @@ fn initialize(root: &Path) -> Value {
                 "general": { "positionEncodings": ["utf-8", "utf-16"] },
                 "textDocument": {
                     "synchronization": { "didSave": true },
-                    "completion": { "completionItem": { "snippetSupport": true } },
+                    "completion": {
+                        "completionItem": {
+                            "snippetSupport": true,
+                            "commitCharactersSupport": true,
+                            "insertReplaceSupport": true,
+                            "documentationFormat": ["plaintext"],
+                            "resolveSupport": { "properties": ["documentation", "detail"] },
+                        },
+                        "completionList": { "itemDefaults": ["commitCharacters", "editRange"] },
+                    },
                     "hover": { "contentFormat": ["plaintext"] },
                     "definition": {},
                     "references": {},
@@ -205,7 +214,7 @@ fn initialize(root: &Path) -> Value {
                     "rename": {},
                     "inlayHint": {},
                     "semanticTokens": {
-                        "requests": { "full": true },
+                        "requests": { "full": { "delta": true } },
                         "tokenTypes": [
                             "namespace", "type", "class", "enum", "interface", "struct",
                             "typeParameter", "parameter", "variable", "property", "enumMember",
@@ -228,7 +237,14 @@ fn initialize(root: &Path) -> Value {
                         },
                     },
                 },
-                "workspace": { "applyEdit": true },
+                "workspace": {
+                    "applyEdit": true,
+                    "workspaceEdit": {
+                        "documentChanges": true,
+                        "resourceOperations": ["create", "rename", "delete"],
+                        "failureHandling": "abort",
+                    },
+                },
             },
         },
     })
@@ -345,8 +361,21 @@ impl Lsp {
             let client = self.clients.get_mut(&key).unwrap();
             let snapshot = model.snapshot();
             let version = snapshot.version();
+            // A document whose file was renamed is another document to the
+            // server: the old one closes and the new one opens.
+            let current = uri(path);
+            if let Some(opened) = client.opened.get(&document)
+                && opened.uri != current
+            {
+                let old = client.opened.remove(&document).unwrap();
+                client.send(Outgoing::Message(json!({
+                    "jsonrpc": "2.0",
+                    "method": "textDocument/didClose",
+                    "params": { "textDocument": { "uri": old.uri } },
+                })));
+            }
             let Some(opened) = client.opened.get_mut(&document) else {
-                let uri = uri(path);
+                let uri = current;
                 client.opened.insert(
                     document,
                     Opened {
@@ -413,6 +442,26 @@ impl Lsp {
             "jsonrpc": "2.0", "id": id, "method": method, "params": params,
         })));
         true
+    }
+    /// Tells the server that a request's answer is no longer wanted, and
+    /// drops it when it comes; false when it already came.
+    pub fn cancel(&mut self, function: u64) -> bool {
+        for client in self.clients.values_mut() {
+            let Some(id) = client
+                .waiting
+                .iter()
+                .find(|(_, waiting)| **waiting == function)
+                .map(|(id, _)| *id)
+            else {
+                continue;
+            };
+            client.waiting.remove(&id);
+            client.send(Outgoing::Message(json!({
+                "jsonrpc": "2.0", "method": "$/cancelRequest", "params": { "id": id },
+            })));
+            return true;
+        }
+        false
     }
     pub fn notify(&mut self, key: &Key, method: &str, params: Value) -> bool {
         let Some(client) = self.clients.get_mut(key) else {

@@ -375,6 +375,42 @@ impl Workspace {
         }
         self.discard_document(id)
     }
+    /// Follows a file renamed on disk: the document stands for `path` from
+    /// now on, and what was saved stays saved, since the bytes moved with it.
+    pub fn relocate(&mut self, id: DocumentId, path: PathBuf) -> Result<FileUpdate, FileError> {
+        self.collect_events();
+        if self.pending.contains_key(&id) {
+            return Err(FileError::Busy);
+        }
+        if self.paths.get(&path).is_some_and(|other| *other != id) {
+            return Err(FileError::PathInUse(path));
+        }
+        let editor = self
+            .editors
+            .get_mut(&id)
+            .ok_or(FileError::UnknownDocument)?;
+        let file = self.files.get_mut(&id).ok_or(FileError::UnknownDocument)?;
+        let (configuration, problem) = self.service.usable_configuration(&path);
+        let language_changed = editor
+            .execute(Command::SetLanguage(
+                self.service.language(&path, &configuration),
+            ))?
+            .language_changed;
+        file.configuration = configuration;
+        file.config_problem = problem;
+        if let Some(old) = file.path.replace(path.clone()) {
+            self.paths.remove(&old);
+        }
+        self.paths.insert(path.clone(), id);
+        let saved_revision = file.saved_revision.unwrap_or_default();
+        Ok(FileUpdate {
+            document_id: id,
+            path,
+            saved_revision,
+            dirty: self.is_dirty(id),
+            language_changed,
+        })
+    }
     /// Explicitly discard local edits. Outstanding saves must finish first.
     pub fn discard_document(&mut self, id: DocumentId) -> Result<(), FileError> {
         self.collect_events();

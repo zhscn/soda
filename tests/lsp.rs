@@ -509,3 +509,151 @@ fn each_project_has_a_server_and_a_jump_stays_with_its_own() {
     assert_eq!(roots(), 2, "{}", read());
     assert_eq!(r.app().project(), Some(base.join("library")));
 }
+#[test]
+fn a_newer_request_cancels_the_older() {
+    let Some(mut f) = open("x\n") else { return };
+    // Both go out before either answer is read.
+    f.r.command(Command::Named("lsp-hover".into()));
+    f.r.command(Command::Named("lsp-hover".into()));
+    let log = f.log.clone();
+    wait(&mut f.r, move |_| {
+        std::fs::read_to_string(&log).is_ok_and(|log| log.contains("cancel "))
+    });
+    wait(&mut f.r, |r| r.popup() == Some("first\n  second"));
+    // A request whose answer came is no longer cancelled.
+    f.r.source_lua(
+        "t",
+        r#"
+        local id = soda.lsp.request("textDocument/hover", {}, function() end)
+        assert(soda.lsp.cancel(id) == true)
+        assert(soda.lsp.cancel(id) == false)
+        assert(soda.lsp.cancel(nil) == false)
+        "#,
+    )
+    .unwrap();
+}
+#[test]
+fn tokens_after_an_edit_come_as_changes_to_the_last() {
+    use soda::syntax::Category;
+    let Some(mut f) = open("é one\nsome text\n") else {
+        return;
+    };
+    let document =
+        f.r.app()
+            .view(f.r.app().active_view().unwrap())
+            .unwrap()
+            .document_id;
+    wait(&mut f.r, |r| !r.app().tokens(document, 0..99).is_empty());
+    f.r.command(Command::SetMode(EditMode::Insert));
+    keys(&mut f.r, "xx");
+    let log = f.log.clone();
+    wait(&mut f.r, move |_| {
+        std::fs::read_to_string(&log).is_ok_and(|log| log.contains("delta 1"))
+    });
+    // Column 2 for one unit of "xxé one" is the é.
+    wait(&mut f.r, |r| {
+        r.app().tokens(document, 0..99).first() == Some(&(2..4, Category::Function))
+    });
+    assert_eq!(
+        f.r.app().tokens(document, 0..99)[1],
+        (13..14, Category::Parameter),
+        "the rest stays as it was"
+    );
+}
+#[test]
+fn completion_ranges_say_how_far_enter_and_tab_replace() {
+    let Some(mut f) = open("tail\n") else { return };
+    f.r.command(Command::SetMode(EditMode::Insert));
+    keys(&mut f.r, "qq");
+    wait(&mut f.r, |r| {
+        r.completion_popup()
+            .is_some_and(|popup| popup.rows.len() == 2)
+    });
+    // Enter takes the insert range, which ends at the caret.
+    keys(&mut f.r, "<down><ret>");
+    assert_eq!(text(&f.r), "qq_replacetail\n");
+    keys(&mut f.r, "<esc>u");
+    assert_eq!(text(&f.r), "qqtail\n");
+    // Tab takes the replace range: two bytes past the caret, not the word.
+    f.r.command(Command::Edit(Edit::SetSelection(Selection::caret(2))));
+    f.r.command(Command::SetMode(EditMode::Insert));
+    keys(&mut f.r, "<bs>q");
+    wait(&mut f.r, |r| r.completion_popup().is_some());
+    keys(&mut f.r, "<tab>");
+    assert_eq!(text(&f.r), "qq_replaceil\n");
+}
+#[test]
+fn a_selected_candidate_is_resolved_and_a_commit_character_accepts_it() {
+    let Some(mut f) = open("tail\n") else { return };
+    f.r.command(Command::SetMode(EditMode::Insert));
+    keys(&mut f.r, "qq");
+    wait(&mut f.r, |r| {
+        r.completion_popup()
+            .is_some_and(|popup| popup.rows.len() == 2)
+    });
+    keys(&mut f.r, "<down><down>");
+    wait(&mut f.r, |r| {
+        r.completion_popup().is_some_and(|popup| {
+            popup
+                .rows
+                .iter()
+                .any(|row| row.selected && row.doc == "Some docs" && row.detail == "resolved")
+        })
+    });
+    assert!(f.log().contains("resolve 7"), "{}", f.log());
+    // The chosen candidate goes in, then the character after it.
+    keys(&mut f.r, ".");
+    assert_eq!(text(&f.r), "qq_doc.tail\n");
+}
+#[test]
+fn edits_create_rename_and_delete_files_and_open_documents_follow() {
+    let Some(mut f) = open("one\n") else { return };
+    let base = f.dir.path().canonicalize().unwrap();
+    std::fs::create_dir_all(base.join("old")).unwrap();
+    std::fs::write(base.join("old/x.cpp"), "x\n").unwrap();
+    std::fs::write(base.join("gone.cpp"), "bye\n").unwrap();
+    f.r.command(Command::Named("lsp-rename files".into()));
+    wait(&mut f.r, |r| r.message().starts_with("Applied"));
+    assert_eq!(
+        f.r.message(),
+        "Applied: 1 open, 1 written to disk, 1 created, 2 renamed, 1 deleted"
+    );
+    assert_eq!(
+        std::fs::read_to_string(base.join("made/new.cpp")).unwrap(),
+        "// new\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(base.join("new/x.cpp")).unwrap(),
+        "y\n"
+    );
+    assert!(!base.join("old").exists() && !base.join("gone.cpp").exists());
+    // The open document moved with its file and took the edit.
+    assert!(!base.join("a.cpp").exists());
+    assert_eq!(
+        std::fs::read_to_string(base.join("c.cpp")).unwrap(),
+        "one\n"
+    );
+    assert_eq!(text(&f.r), "renamed\n");
+    let view = f.r.app().view(f.r.app().active_view().unwrap()).unwrap();
+    let file = f.r.app().workspace().file(view.document_id).unwrap();
+    assert_eq!(file.path(), Some(base.join("c.cpp").as_path()));
+    let log = f.log.clone();
+    wait(&mut f.r, move |_| {
+        std::fs::read_to_string(&log)
+            .is_ok_and(|log| log.contains("didClose a.cpp") && log.contains("opened c.cpp"))
+    });
+}
+#[test]
+fn file_operations_that_cannot_all_be_done_do_nothing() {
+    let Some(mut f) = open("one\n") else { return };
+    let base = f.dir.path().canonicalize().unwrap();
+    std::fs::write(base.join("gone.cpp"), "here\n").unwrap();
+    f.r.command(Command::Named("lsp-rename clash".into()));
+    wait(&mut f.r, |r| r.message().starts_with("Not applied"));
+    assert!(
+        f.r.message().ends_with("gone.cpp already exists"),
+        "{}",
+        f.r.message()
+    );
+    assert!(base.join("a.cpp").exists() && !base.join("c.cpp").exists());
+}

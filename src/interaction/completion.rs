@@ -42,6 +42,22 @@ pub struct Item {
     /// `text` is a snippet, not plain text.
     pub snippet: bool,
     pub detail: String,
+    /// Documentation, shown beside the list while the candidate is selected.
+    pub doc: String,
+    /// Characters that, typed while the candidate is selected, accept it
+    /// and then go in after it.
+    pub commit: Vec<char>,
+    /// How far past the caret accepting replaces, in bytes after the caret
+    /// when the source answered: by Enter (none: nothing) and by Tab (none:
+    /// the rest of the word). The language server's insert and replace
+    /// ranges.
+    pub ahead: [Option<usize>; 2],
+    /// The same as bytes before the end of the line, which typing at the
+    /// caret leaves alone; set on arrival.
+    ends: [Option<usize>; 2],
+    /// What the source's `resolve` knows the candidate by, when it can
+    /// tell more about it.
+    pub key: Option<i64>,
     /// Bytes before the anchor that this candidate also replaces: a file
     /// name holds more than the word at the caret.
     pub back: usize,
@@ -66,6 +82,11 @@ impl Item {
             label,
             snippet: false,
             detail: detail.into(),
+            doc: String::new(),
+            commit: vec![],
+            ahead: [None; 2],
+            ends: [None; 2],
+            key: None,
             back,
             edits: vec![],
             source: BUILTIN,
@@ -79,6 +100,16 @@ pub const BUILTIN: u64 = 0;
 struct Source {
     id: u64,
     triggers: Vec<char>,
+    /// A function that tells more about a candidate with a key.
+    resolve: Option<u64>,
+}
+/// A question for a source's `resolve` about the selected candidate.
+pub struct Resolve {
+    pub generation: u64,
+    pub source: u64,
+    pub function: u64,
+    pub key: i64,
+    pub view: ViewId,
 }
 /// Who to ask about a position.
 pub struct Asked {
@@ -115,6 +146,8 @@ pub struct Directory {
 
 pub struct Row {
     pub label: String,
+    /// The selected candidate's documentation.
+    pub doc: String,
     pub detail: String,
     /// The ranges of `label` that match what is typed.
     pub matched: Vec<std::ops::Range<usize>>,
@@ -142,6 +175,8 @@ struct Session {
     incomplete: Vec<u64>,
     /// Sources whose earlier answer goes when their next one comes.
     replacing: Vec<u64>,
+    /// Candidates whose source was asked to resolve them.
+    resolving: Vec<(u64, i64)>,
 }
 
 pub struct State {
@@ -216,8 +251,65 @@ impl State {
     pub(super) fn selected(&self) -> bool {
         self.session.as_ref().is_some_and(|s| s.selected.is_some())
     }
-    pub(super) fn register(&mut self, id: u64, triggers: Vec<char>) {
-        self.sources.push(Source { id, triggers });
+    pub(super) fn register(&mut self, id: u64, triggers: Vec<char>, resolve: Option<u64>) {
+        self.sources.push(Source {
+            id,
+            triggers,
+            resolve,
+        });
+    }
+    /// Whether typing `ch` accepts the selected candidate first.
+    pub(super) fn commits(&self, ch: char) -> bool {
+        self.chosen().is_some_and(|item| item.commit.contains(&ch))
+    }
+    /// The candidate the user moved to.
+    fn chosen(&self) -> Option<&Item> {
+        let session = self.session.as_ref().filter(|s| s.shown())?;
+        session.items.get(*session.matches.get(session.selected?)?)
+    }
+    /// A question to the selected candidate's source, once for each.
+    pub(super) fn resolve(&mut self) -> Option<Resolve> {
+        let item = self.chosen()?;
+        let key = item.key?;
+        let source = item.source;
+        let function = self.sources.iter().find(|s| s.id == source)?.resolve?;
+        let session = self.session.as_mut()?;
+        if session.resolving.contains(&(source, key)) {
+            return None;
+        }
+        session.resolving.push((source, key));
+        Some(Resolve {
+            generation: self.generation,
+            source,
+            function,
+            key,
+            view: session.view,
+        })
+    }
+    /// Takes what a source told about a candidate; false when it is gone.
+    pub(super) fn resolved(
+        &mut self,
+        source: u64,
+        key: i64,
+        detail: Option<String>,
+        doc: Option<String>,
+    ) -> bool {
+        let Some(session) = &mut self.session else {
+            return false;
+        };
+        let mut found = false;
+        for item in &mut session.items {
+            if item.source == source && item.key == Some(key) {
+                if let Some(detail) = &detail {
+                    item.detail.clone_from(detail);
+                }
+                if let Some(doc) = &doc {
+                    item.doc.clone_from(doc);
+                }
+                found = true;
+            }
+        }
+        found
     }
     pub(super) fn trigger(&mut self) {
         self.manual = true;
@@ -343,6 +435,7 @@ impl State {
             asked: vec![],
             incomplete: vec![],
             replacing: vec![],
+            resolving: vec![],
         });
         let others = workspace
             .documents()
@@ -439,9 +532,21 @@ impl State {
         if incomplete && !session.incomplete.contains(&source) {
             session.incomplete.push(source);
         }
-        session
-            .items
-            .extend(items.into_iter().map(|item| Item { source, ..item }));
+        // How far the line goes past the caret stays the same while typing
+        // goes on before it, so that is where replacing ends.
+        let text = snapshot.text();
+        let line_end = text[caret..].find('\n').map_or(text.len(), |at| caret + at);
+        let line_end = text[..line_end].trim_end_matches('\r').len().max(caret);
+        session.items.extend(items.into_iter().map(|item| {
+            let ends = item
+                .ahead
+                .map(|ahead| ahead.map(|n| line_end - (caret + n).min(line_end)));
+            Item {
+                source,
+                ends,
+                ..item
+            }
+        }));
         let query = std::mem::take(&mut session.query);
         session.matches.clear();
         self.filter(query, snapshot.text(), caret);
@@ -539,10 +644,12 @@ impl State {
         let item = session.items.get(*session.matches.get(at)?)?;
         let text = snapshot.text();
         let from = session.start.offset.0.checked_sub(item.back)?;
-        let to = if replace {
-            word_end(text, caret)
-        } else {
-            caret
+        let line_end = text[caret..].find('\n').map_or(text.len(), |at| caret + at);
+        let line_end = text[..line_end].trim_end_matches('\r').len().max(caret);
+        let to = match (item.ends[usize::from(replace)], replace) {
+            (Some(tail), _) => line_end.saturating_sub(tail).max(caret),
+            (None, true) => word_end(text, caret),
+            (None, false) => caret,
         };
         let range = from..to;
         Some(Accepted {
@@ -567,11 +674,17 @@ impl State {
                 let item = &session.items[*index];
                 let matched = fuzzy_match(&mut matcher, &session.query, &item.label)
                     .map_or(vec![], |(_, ranges)| ranges);
+                let selected = session.selected == Some(at);
                 Row {
                     label: item.label.clone(),
+                    doc: if selected {
+                        item.doc.clone()
+                    } else {
+                        String::new()
+                    },
                     detail: item.detail.clone(),
                     matched,
-                    selected: session.selected == Some(at),
+                    selected,
                 }
             })
             .collect();

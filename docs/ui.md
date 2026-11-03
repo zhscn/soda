@@ -23,6 +23,8 @@
 | 状态栏 | 左侧是模式标签（NORMAL、INSERT、BEACON；有交互层时显示 COMMAND、SEARCH、REPLACE、SAVING、HELP）、相对项目根目录的路径、`[+]` 与保存中标记；右侧是未完成的按键、外部命令运行状态、扩展用 `soda.status` 设置的段落、诊断计数、语言、行:列和位置百分比。 |
 | 消息行 | 最近的消息，没有时留空；启动页列出基本按键。搜索、替换和保存等待在这一行显示输入与光标。 |
 
+行尾显示这一行最严重的注记（诊断等 `soda.note` 写下的），只取第一行文字，同一行还有别的注记时后面加 `(+N)`；颜色是 `note-error`、`note-warning`、`note-info`。开了 `wrap` 时显示在折行的最后一段。选项 `inline-notes` 关闭显示，这时注记只在光标所在行时显示在消息行。
+
 编辑区文本按语法着色，分类与配色见[语法高亮](syntax.md)；状态栏显示的语言名来自高亮所用的语言（C++、Rust、TypeScript 等，未识别时为 text）。
 
 ## 窗口
@@ -106,7 +108,7 @@
 
 `face NAME [SPEC]`（Lua 里是 `soda.face(name, spec)`）把一个具名部分的颜色和属性改掉，盖在主题上。SPEC 是若干个词：`fg:#rrggbb`、`bg:#rrggbb`（颜色写 `default` 时用终端自己的颜色），以及属性 `bold`、`italic`、`underline`、`dim`、`reverse`。没写的颜色沿用主题；只要写了任何属性，就用这些属性替换主题的属性，`plain` 表示不要任何属性。不带 SPEC 时恢复主题的样子。Lua 里 spec 也可以是表：`{ fg = "#ff0000", bold = true }`，`nil` 恢复主题。
 
-可以设置的名字有界面部分（`text`、`selection`、`cursor-line`、`gutter`、`status`、`mode-normal`、`mode-insert`、`mode-beacon`、`mode-prompt`、`title`、`border`、`float`、`label`、`todo`、`mark1`…`mark8` 等，命令行里可以补全，说明见 `src/application/faces.rs`），以及每个语法分类 `syntax.comment`、`syntax.keyword`、`syntax.string` 等。`face` 可以写在 `init.lua` 里，也可以随时执行，下一帧生效。
+可以设置的名字有界面部分（`text`、`selection`、`cursor-line`、`gutter`、`status`、`mode-normal`、`mode-insert`、`mode-beacon`、`mode-prompt`、`title`、`border`、`float`、`label`、`todo`、`note-error`、`note-warning`、`note-info`、`mark1`…`mark8` 等，命令行里可以补全，说明见 `src/application/faces.rs`），以及每个语法分类 `syntax.comment`、`syntax.keyword`、`syntax.string` 等。`face` 可以写在 `init.lua` 里，也可以随时执行，下一帧生效。
 
 `COLORTERM` 为 `truecolor` 或 `24bit` 时输出 24 位颜色，否则换算为最接近的 xterm 256 色。主题设置整屏背景，不依赖终端自身的配色。
 

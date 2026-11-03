@@ -34,6 +34,8 @@ pub(super) struct Theme {
     pub marker: Style,
     /// Words shown in the text that are not part of it.
     pub inlay: Style,
+    /// Notes after the text of their line, by severity from info up.
+    pub notes: [Style; 3],
     pub status_error: Style,
     pub status_warning: Style,
     /// Notes that are neither errors nor warnings.
@@ -173,6 +175,9 @@ impl Theme {
             "candidate-selected" => &mut self.candidate_selected,
             "marker" => &mut self.marker,
             "inlay" => &mut self.inlay,
+            "note-info" => &mut self.notes[0],
+            "note-warning" => &mut self.notes[1],
+            "note-error" => &mut self.notes[2],
             "status-error" => &mut self.status_error,
             "status-warning" => &mut self.status_warning,
             "info" => &mut self.info,
@@ -215,6 +220,8 @@ impl Theme {
             candidate_selected: Style::new().bg(c(p.bg_highlight)),
             marker: Style::new().fg(c(p.blue)),
             inlay: Style::new().fg(c(p.comment)).add_modifier(Modifier::ITALIC),
+            notes: [p.blue, p.yellow, p.red]
+                .map(|fg| Style::new().fg(c(fg)).add_modifier(Modifier::ITALIC)),
             status_error: on(p.red, p.bg_dark).add_modifier(Modifier::BOLD),
             status_warning: on(p.yellow, p.bg_dark).add_modifier(Modifier::BOLD),
             info: Style::new().fg(c(p.blue)),

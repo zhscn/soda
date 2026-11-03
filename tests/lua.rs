@@ -1067,3 +1067,72 @@ fn lua_sets_status_line_segments() {
     lua(&mut r, r#"soda.status("git", nil)"#);
     assert_eq!(r.status_segments().len(), 1);
 }
+#[test]
+fn files_are_created_renamed_and_deleted_and_documents_follow() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().canonicalize().unwrap();
+    std::fs::write(base.join("a.txt"), "a\n").unwrap();
+    let mut r = Runtime::new(base.clone()).unwrap();
+    r.start(Some(base.join("a.txt")));
+    for _ in 0..500 {
+        r.poll();
+        if r.app().active_view().is_some() && r.app().workspace().documents().count() == 1 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let path = |r: &Runtime| {
+        let view = r.app().view(r.app().active_view().unwrap()).unwrap();
+        let file = r.app().workspace().file(view.document_id).unwrap();
+        file.path().map(|p| p.to_owned())
+    };
+    assert_eq!(path(&r), Some(base.join("a.txt")));
+    lua(
+        &mut r,
+        r#"
+        assert(soda.file_kind("a.txt") == "file")
+        assert(soda.file_kind(".") == "directory")
+        assert(soda.file_kind("nothing") == nil)
+        soda.create_file("deep/er/b.txt")
+        assert(soda.file_kind("deep/er/b.txt") == "file")
+        soda.rename_file("a.txt", "moved/c.txt")
+        "#,
+    );
+    assert_eq!(path(&r), Some(base.join("moved/c.txt")));
+    assert_eq!(
+        std::fs::read_to_string(base.join("moved/c.txt")).unwrap(),
+        "a\n"
+    );
+    // Saving writes to the new name.
+    r.command(Command::SetMode(EditMode::Insert));
+    r.input(UserInput::Paste("x".into()));
+    r.command(Command::Save { choose_path: false });
+    for _ in 0..500 {
+        r.poll();
+        if std::fs::read_to_string(base.join("moved/c.txt")).unwrap() == "xa\n" {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(
+        std::fs::read_to_string(base.join("moved/c.txt")).unwrap(),
+        "xa\n"
+    );
+    assert!(!base.join("a.txt").exists());
+    lua(
+        &mut r,
+        r#"soda.delete_file("moved", true) soda.delete_file("deep", true)"#,
+    );
+    assert!(!base.join("moved").exists() && !base.join("deep").exists());
+    assert_eq!(
+        r.app()
+            .workspace()
+            .documents()
+            .filter(|d| { r.app().workspace().file(*d).unwrap().path().is_some() })
+            .count(),
+        0,
+        "the deleted file's document closed"
+    );
+    let failed = r.source_lua("t", r#"soda.delete_file("nothing")"#);
+    assert!(failed.unwrap_err().contains("nothing"));
+}

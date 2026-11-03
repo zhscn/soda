@@ -19,9 +19,11 @@ local diagnostics = {}
 local severities = { "error", "warning" }
 
 local function path_of(uri)
-  return (uri:gsub("^file://", ""):gsub("%%(%x%x)", function(hex)
+  local path = uri:gsub("^file://", ""):gsub("%%(%x%x)", function(hex)
     return string.char(tonumber(hex, 16))
-  end))
+  end)
+  -- A directory's URI may end in a slash.
+  return #path > 1 and path:gsub("/+$", "") or path
 end
 local function relative(path)
   local root = soda.val("root")
@@ -73,6 +75,22 @@ local function here()
   }
 end
 
+-- Requests still waiting, by what they are for: a newer request for the
+-- same thing cancels the older, whose answer nobody wants any more.
+local pending = {}
+local function send(slot, method, params, answer)
+  soda.lsp.cancel(pending[slot])
+  local id
+  id = soda.lsp.request(method, params, function(result, failure)
+    if pending[slot] == id then
+      pending[slot] = nil
+    end
+    answer(result, failure)
+  end)
+  pending[slot] = id or nil
+  return id
+end
+
 -- Asks about the caret; says so if there is nobody to ask.
 local function ask(method, extend, answer)
   local params = here()
@@ -90,7 +108,7 @@ local function ask(method, extend, answer)
       answer(result)
     end
   end
-  if not soda.lsp.request(method, params, respond) then
+  if not send(method, method, params, respond) then
     soda.message("No language server for this document")
   end
 end
@@ -300,13 +318,12 @@ local token_categories = {
   enumMember = "constant", ["function"] = "function", method = "function", macro = "macro",
   comment = "comment",
 }
-local function show_tokens(buf, result, legend, encoding)
+local function show_tokens(buf, data, legend, encoding)
   local names = {}
   for index, name in ipairs(legend.tokenTypes) do
     names[index] = token_categories[name] or ""
   end
   local count, tokens = buf:line_count(), {}
-  local data = result.data or {}
   local line, character, row, text = 0, 0, nil, nil
   for at = 1, #data, 5 do
     if data[at] > 0 then
@@ -350,6 +367,60 @@ local function show_inlays(buf, result, encoding)
   soda.inlays(hints)
 end
 
+-- The last tokens of each document and the server's name for them, so that
+-- the next answer can be only what changed.
+local token_results = {}
+-- Old token data with a server's edits made: each replaces `deleteCount`
+-- numbers from `start` (zero-based) with its own `data`.
+local function apply_token_edits(old, edits)
+  table.sort(edits, function(a, b)
+    return a.start < b.start
+  end)
+  local new, size, at = {}, 0, 0
+  for _, edit in ipairs(edits) do
+    table.move(old, at + 1, edit.start, size + 1, new)
+    size = size + math.max(edit.start - at, 0)
+    for _, number in ipairs(edit.data or {}) do
+      size = size + 1
+      new[size] = number
+    end
+    at = edit.start + (edit.deleteCount or 0)
+  end
+  table.move(old, at + 1, #old, size + 1, new)
+  return new
+end
+local function ask_tokens(buf, uri, info, revision)
+  local provider = info.capabilities.semanticTokensProvider
+  local full = provider.full
+  local previous = token_results[uri]
+  local method = "textDocument/semanticTokens/full"
+  local params = { textDocument = { uri = uri } }
+  if type(full) == "table" and full.delta and previous and previous.id then
+    method = method .. "/delta"
+    params.previousResultId = previous.id
+  end
+  send("tokens " .. uri, method, params, function(result, failure)
+    if failure or not result then
+      -- The server may have forgotten what the edits would be against.
+      token_results[uri] = nil
+      return
+    end
+    local data = result.data
+    if result.edits then
+      if not previous then
+        return
+      end
+      data = apply_token_edits(previous.data, result.edits)
+    end
+    data = data or {}
+    token_results[uri] = { id = result.resultId, data = data }
+    -- Kept even for text that has changed: the server counts from it.
+    if buf:revision() == revision then
+      show_tokens(buf, data, provider.legend, info.encoding)
+    end
+  end)
+end
+
 -- Asks for what is drawn over the text. A server reports diagnostics when it
 -- has finished with a change, so that is when to ask. An answer about text
 -- that has changed since would land in the wrong places, and is dropped.
@@ -361,14 +432,8 @@ local function decorate()
   local buf = soda.buffer()
   local revision = buf:revision()
   local document = { uri = uri }
-  local provider = info.capabilities.semanticTokensProvider
-  if provider then
-    local params = { textDocument = document }
-    soda.lsp.request("textDocument/semanticTokens/full", params, function(result)
-      if result and buf:revision() == revision then
-        show_tokens(buf, result, provider.legend, info.encoding)
-      end
-    end)
+  if info.capabilities.semanticTokensProvider then
+    ask_tokens(buf, uri, info, revision)
   end
   if info.capabilities.inlayHintProvider then
     local whole = {
@@ -376,7 +441,7 @@ local function decorate()
       ["end"] = { line = buf:line_count(), character = 0 },
     }
     local params = { textDocument = document, range = whole }
-    soda.lsp.request("textDocument/inlayHint", params, function(result)
+    send("inlays " .. uri, "textDocument/inlayHint", params, function(result)
       if buf:revision() == revision then
         show_inlays(buf, result, info.encoding)
       end
@@ -411,21 +476,6 @@ soda.define_command("lsp-diagnostics", "List the server's diagnostics", function
   show("diagnostics", entries)
 end)
 
--- The edits of a WorkspaceEdit by URI, or nil and why it cannot be applied.
-local function edits_of(edit)
-  local files = {}
-  for uri, edits in pairs(edit.changes or {}) do
-    files[uri] = edits
-  end
-  for _, change in ipairs(edit.documentChanges or {}) do
-    if not change.textDocument then
-      return nil, "it creates, renames or deletes files"
-    end
-    files[change.textDocument.uri] = change.edits
-  end
-  return files
-end
-
 -- Changes for an open document, in the order of `buf:edit`.
 local function buffer_changes(buf, edits, encoding)
   local count = buf:line_count()
@@ -447,14 +497,8 @@ local function buffer_changes(buf, edits, encoding)
   return changes
 end
 
--- The new text of a file on disk, or nil and why not.
-local function edited_file(path, edits, encoding)
-  local file, failure = io.open(path, "rb")
-  if not file then
-    return nil, failure
-  end
-  local text = file:read("a")
-  file:close()
+-- A file's text with a server's edits made.
+local function edited_text(text, edits, encoding)
   local starts, at = { 1 }, 1
   while true do
     local newline = text:find("\n", at, true)
@@ -495,52 +539,231 @@ local function edited_file(path, edits, encoding)
   return text
 end
 
--- Applies a WorkspaceEdit: open documents through their buffers, so that it
--- can be undone, other files on disk. Nothing is applied unless all of it
--- can be. `origin` is a buffer and revision the answer was asked for.
-local function apply_edit(edit, origin)
-  local files, problem = edits_of(edit)
-  if not files then
-    soda.message("Not applied: " .. problem)
+local function read_file(path)
+  local file, failure = io.open(path, "rb")
+  if not file then
+    return nil, failure
+  end
+  local text = file:read("a")
+  file:close()
+  return text
+end
+
+-- Whether `path` is `under` or inside it; the rest of the path if so.
+local function inside(path, under)
+  if path == under then
+    return ""
+  end
+  if path:sub(1, #under + 1) == under .. "/" then
+    return path:sub(#under + 1)
+  end
+end
+
+-- A WorkspaceEdit as steps in order: a file's edits, or a file created,
+-- renamed or deleted.
+local function steps_of(edit)
+  local steps = {}
+  if edit.documentChanges then
+    for _, change in ipairs(edit.documentChanges) do
+      if change.kind then
+        table.insert(steps, change)
+      else
+        table.insert(steps, { kind = "edit", uri = change.textDocument.uri, edits = change.edits })
+      end
+    end
+  else
+    for uri, edits in pairs(edit.changes or {}) do
+      table.insert(steps, { kind = "edit", uri = uri, edits = edits })
+    end
+  end
+  return steps
+end
+
+-- What to do for a WorkspaceEdit, worked out against the files as each step
+-- leaves them, or nil and why it cannot be done. Nothing is touched yet.
+local function plan_edit(steps, encoding)
+  -- Each step changes what a path holds: { buf }, { text }, { directory },
+  -- or false for nothing. Earlier states come from the steps before, and
+  -- from the files themselves.
+  local history, actions = {}, {}
+  local function look(path)
+    for at = #history, 1, -1 do
+      local change = history[at]
+      if change.set == path then
+        return change.value
+      elseif change.gone and inside(path, change.gone) then
+        return false
+      elseif change.to then
+        local rest = inside(path, change.to)
+        if rest then
+          path = change.from .. rest
+        end
+      end
+    end
+    local buf = soda.buffer(path)
+    if buf then
+      return { buf = buf }
+    end
+    local kind = soda.file_kind(path)
+    if kind == "directory" then
+      return { directory = true }
+    elseif kind == "file" then
+      return { disk = path }
+    end
     return false
   end
+  local open, written, made, created, renamed, deleted = {}, {}, {}, 0, 0, 0
+  for _, step in ipairs(steps) do
+    local options = step.options or {}
+    if step.kind == "edit" then
+      local path = path_of(step.uri)
+      local now = look(path)
+      if not now or now.directory then
+        return nil, path .. " does not exist"
+      end
+      if now.buf then
+        table.insert(actions, { buf = now.buf, edits = step.edits })
+        open[now.buf.id] = true
+      else
+        local text = now.text
+        if not text then
+          local failure
+          text, failure = read_file(now.disk)
+          if not text then
+            return nil, tostring(failure)
+          end
+        end
+        text = edited_text(text, step.edits, encoding)
+        table.insert(history, { set = path, value = { text = text } })
+        table.insert(actions, { write = path, text = text })
+        -- A file this edit creates is counted once, as created.
+        written[path] = not made[path] or nil
+      end
+    elseif step.kind == "create" then
+      local path = path_of(step.uri)
+      local now = look(path)
+      if not now or options.overwrite then
+        if now and now.buf then
+          table.insert(actions, { buf = now.buf, clear = true })
+          open[now.buf.id] = true
+        else
+          table.insert(history, { set = path, value = { text = "" } })
+          table.insert(actions, { create = path })
+          made[path] = true
+          created = created + 1
+        end
+      elseif not options.ignoreIfExists then
+        return nil, path .. " already exists"
+      end
+    elseif step.kind == "rename" then
+      local from, to = path_of(step.oldUri), path_of(step.newUri)
+      if not look(from) then
+        return nil, from .. " does not exist"
+      end
+      local skip = false
+      if look(to) and not options.overwrite then
+        if not options.ignoreIfExists then
+          return nil, to .. " already exists"
+        end
+        skip = true
+      end
+      if not skip then
+        table.insert(history, { gone = to })
+        table.insert(history, { from = from, to = to })
+        table.insert(actions, { from = from, to = to })
+        renamed = renamed + 1
+      end
+    elseif step.kind == "delete" then
+      local path = path_of(step.uri)
+      local now = look(path)
+      if now then
+        table.insert(history, { gone = path })
+        table.insert(actions, { delete = path, recursive = options.recursive })
+        deleted = deleted + 1
+      elseif not options.ignoreIfNotExists then
+        return nil, path .. " does not exist"
+      end
+    else
+      return nil, "unknown change " .. tostring(step.kind)
+    end
+  end
+  local count = function(set)
+    local n = 0
+    for _ in pairs(set) do
+      n = n + 1
+    end
+    return n
+  end
+  return actions, {
+    open = count(open),
+    written = count(written),
+    created = created,
+    renamed = renamed,
+    deleted = deleted,
+  }
+end
+
+-- Applies a WorkspaceEdit: open documents through their buffers, so that it
+-- can be undone, other files on disk, and files created, renamed and
+-- deleted in order. Nothing is applied unless all of it can be. `origin` is
+-- a buffer and revision the answer was asked for.
+local function apply_edit(edit, origin)
   if origin and origin.buffer:revision() ~= origin.revision then
     soda.message("Not applied: the document changed in the meantime")
     return false
   end
   local info = soda.lsp.info()
   local encoding = info and info.encoding or "utf-8"
-  local open, closed = {}, {}
-  for uri, edits in pairs(files) do
-    local path = path_of(uri)
-    local buf = soda.buffer(path)
-    if buf then
-      table.insert(open, { buf = buf, changes = buffer_changes(buf, edits, encoding) })
-    else
-      local text, failure = edited_file(path, edits, encoding)
-      if not text then
-        soda.message("Not applied: " .. tostring(failure))
-        return false
+  local actions, counts = plan_edit(steps_of(edit), encoding)
+  if not actions then
+    soda.message("Not applied: " .. counts)
+    return false
+  end
+  for _, action in ipairs(actions) do
+    local ok, failure = pcall(function()
+      if action.buf and action.clear then
+        local whole = { start = { line = 0, character = 0 }, ["end"] = { line = 1 / 0, character = 0 } }
+        action.buf:edit(buffer_changes(action.buf, { { range = whole, newText = "" } }, encoding))
+      elseif action.buf then
+        action.buf:edit(buffer_changes(action.buf, action.edits, encoding))
+      elseif action.write then
+        local file = assert(io.open(action.write, "wb"))
+        file:write(action.text)
+        file:close()
+      elseif action.create then
+        soda.create_file(action.create)
+      elseif action.from then
+        soda.rename_file(action.from, action.to)
+      elseif action.delete then
+        soda.delete_file(action.delete, action.recursive)
       end
-      table.insert(closed, { path = path, text = text })
-    end
-  end
-  for _, target in ipairs(open) do
-    target.buf:edit(target.changes)
-  end
-  for _, target in ipairs(closed) do
-    local file, failure = io.open(target.path, "wb")
-    if not file then
+    end)
+    if not ok then
       soda.message("Partly applied: " .. tostring(failure))
       return false
     end
-    file:write(target.text)
-    file:close()
   end
-  local total = #open + #closed
-  local summary = "Applied to " .. total .. (total == 1 and " file" or " files")
-  if #closed > 0 then
-    summary = summary .. ": " .. #open .. " open, " .. #closed .. " written to disk"
+  local parts = {}
+  local function part(n, words)
+    if n > 0 then
+      table.insert(parts, n .. " " .. words)
+    end
+  end
+  part(counts.open, "open")
+  part(counts.written, "written to disk")
+  part(counts.created, "created")
+  part(counts.renamed, "renamed")
+  part(counts.deleted, "deleted")
+  local summary
+  if counts.created + counts.renamed + counts.deleted > 0 then
+    -- A renamed file may be edited too, so there is no one total.
+    summary = "Applied: " .. table.concat(parts, ", ")
+  else
+    local total = counts.open + counts.written
+    summary = "Applied to " .. total .. (total == 1 and " file" or " files")
+    if counts.written > 0 then
+      summary = summary .. ": " .. table.concat(parts, ", ")
+    end
   end
   soda.message(summary)
   return true
@@ -757,7 +980,7 @@ soda.completion.register({
     elseif context.trigger then
       local params = here()
       if params then
-        soda.lsp.request("textDocument/signatureHelp", params, function(result)
+        send("signature", "textDocument/signatureHelp", params, function(result)
           soda.hint(signature_of(result))
         end)
       end
@@ -781,39 +1004,89 @@ soda.define_command("lsp-restart", "Restart the language server", function()
   soda.lsp.restart()
 end)
 
+-- Documentation as text, from a string or MarkupContent.
+local function text_of(documentation)
+  if type(documentation) == "table" then
+    return documentation.value
+  end
+  return documentation
+end
+
+-- A candidate's ranges as the completion list counts them: bytes before the
+-- word it replaces, and bytes after the caret for Enter (insert) and Tab
+-- (replace). `line` is the line as it was asked about, `caret` a zero-based
+-- byte in it. A single range is where Enter ends; Tab still takes the rest
+-- of the word.
+local function spans(range, line, caret, prefix, row, encoding)
+  local insert, replace = range, nil
+  if range.insert then
+    insert, replace = range.insert, range.replace
+  end
+  if insert.start.line ~= row or insert["end"].line ~= row then
+    return nil
+  end
+  local start = to_byte(line, insert.start.character, encoding)
+  local after = function(position)
+    if position and position.line == row then
+      return math.max(to_byte(line, position.character, encoding) - caret, 0)
+    end
+  end
+  return math.max(caret - start - #prefix, 0), after(insert["end"]), after(replace and replace["end"])
+end
+
+-- The items of the latest answer, for resolving the one selected.
+local listed = {}
+
 soda.completion.register({
   triggers = { ".", ">", ":" },
   complete = function(context, sink)
     local trigger = context.trigger
-    local line = trigger and soda.buffer():line(context.line) or ""
+    local buf = soda.buffer()
+    local line = buf:line(context.line)
     local before = line:sub(math.max(context.column - 2, 1), context.column - 1)
     if (trigger == ">" and before ~= "->") or (trigger == ":" and before ~= "::") then
       sink:done()
       return
     end
     local params = here()
-    if not params then
+    local info = soda.lsp.info()
+    if not params or not info then
       sink:done()
       return
     end
-    local asked = soda.lsp.request("textDocument/completion", params, function(result)
+    local encoding = info.encoding
+    local provider = info.capabilities.completionProvider or {}
+    local asked = send("completion", "textDocument/completion", params, function(result)
       local list = result and (result.items or result) or {}
+      local defaults = result and result.itemDefaults or {}
+      local everywhere = provider.allCommitCharacters
       local items = {}
-      local buf = soda.buffer()
-      local info = soda.lsp.info()
-      local encoding = info and info.encoding or "utf-8"
-      for _, item in ipairs(list) do
+      listed = list
+      for index, item in ipairs(list) do
         local edit = item.textEdit
-        local text = edit and edit.newText or item.insertText or item.label
+        local range = edit and (edit.range or edit) or defaults.editRange
+        local text = edit and edit.newText or item.textEditText or item.insertText or item.label
         local candidate = {
           label = (item.label:gsub("^%s+", "")),
           filter = item.filterText,
           detail = item.detail,
+          doc = text_of(item.documentation),
         }
-        if item.insertTextFormat == 2 then
+        if (item.insertTextFormat or defaults.insertTextFormat) == 2 then
           candidate.snippet = text
         else
           candidate.text = text
+        end
+        if range then
+          candidate.back, candidate.insert, candidate.replace =
+            spans(range, line, context.column - 1, context.prefix, context.line - 1, encoding)
+        end
+        local commit = item.commitCharacters or defaults.commitCharacters or everywhere
+        if commit then
+          candidate.commit = table.concat(commit)
+        end
+        if provider.resolveProvider then
+          candidate.key = index
         end
         -- Made with the candidate in one step, such as the `#include` the
         -- name needs.
@@ -828,6 +1101,18 @@ soda.completion.register({
     if not asked then
       sink:done()
     end
+  end,
+  -- Documentation the server leaves out of the list until asked.
+  resolve = function(key, done)
+    local item = listed[key]
+    if not item then
+      return
+    end
+    send("resolve", "completionItem/resolve", item, function(result)
+      if result then
+        done({ detail = result.detail, doc = text_of(result.documentation) })
+      end
+    end)
   end,
 })
 

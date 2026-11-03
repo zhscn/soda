@@ -55,13 +55,18 @@ while True:
             "semanticTokensProvider": {
                 "legend": {"tokenTypes": ["function", "variable", "parameter"],
                            "tokenModifiers": []},
-                "full": True,
+                "full": {"delta": True},
             },
+            "completionProvider": {"resolveProvider": True},
         }})
+    elif method == "textDocument/didClose":
+        log.write("didClose %s\n" % params["textDocument"]["uri"].rsplit("/", 1)[1])
     elif method in ("textDocument/didOpen", "textDocument/didChange"):
         document = params["textDocument"]
         text = params.get("contentChanges", [{}])[0].get("text", document.get("text"))
         log.write("%s %d %s\n" % (method, document["version"], json.dumps(text)))
+        if method == "textDocument/didOpen":
+            log.write("opened %s\n" % document["uri"].rsplit("/", 1)[1])
         write({
             "jsonrpc": "2.0",
             "method": "textDocument/publishDiagnostics",
@@ -82,7 +87,16 @@ while True:
         uri = params["textDocument"]["uri"]
         answer(message, [spot(uri, 0, 0), spot(uri, 1, 2)])
     elif method == "textDocument/completion":
+        position = params["position"]
+        line, character = position["line"], position["character"]
+        def span(start, end):
+            return {"start": {"line": line, "character": start},
+                    "end": {"line": line, "character": end}}
         answer(message, {"isIncomplete": False, "items": [
+            {"label": "qq_replace", "textEdit": {
+                "newText": "qq_replace", "insert": span(character - 2, character),
+                "replace": span(character - 2, character + 2)}},
+            {"label": "qq_doc", "commitCharacters": ["."], "data": 7},
             {"label": " server_call(int a)", "filterText": "server_call",
              "insertTextFormat": 2, "textEdit": {
                  "newText": "server_call(${1:int a})", "range": spot("", 0, 0)["range"]}},
@@ -91,10 +105,23 @@ while True:
              "insertText": "server_vector", "additionalTextEdits": [
                  {"newText": "#include <vector>\n", "range": spot("", 0, 0)["range"]}]},
         ]})
+    elif method == "completionItem/resolve":
+        log.write("resolve %s\n" % json.dumps(params.get("data")))
+        params["documentation"] = {"kind": "plaintext", "value": "Some docs"}
+        params["detail"] = "resolved"
+        answer(message, params)
+    elif method == "$/cancelRequest":
+        log.write("cancel %s\n" % json.dumps(params["id"]))
     elif method == "textDocument/semanticTokens/full":
         # On line 0, column 1 for 2 units; then line 1, column 0 for 3, of a
         # type the client does not show, and a parameter at column 4.
-        answer(message, {"data": [0, 1, 2, 0, 0, 1, 0, 3, 1, 0, 0, 4, 1, 2, 0]})
+        answer(message, {"resultId": "1",
+                         "data": [0, 1, 2, 0, 0, 1, 0, 3, 1, 0, 0, 4, 1, 2, 0]})
+    elif method == "textDocument/semanticTokens/full/delta":
+        # The first token moves to column 2 for one unit.
+        log.write("delta %s\n" % params["previousResultId"])
+        answer(message, {"resultId": "2",
+                         "edits": [{"start": 1, "deleteCount": 2, "data": [2, 1]}]})
     elif method == "textDocument/inlayHint":
         answer(message, [{"position": {"line": 0, "character": 2}, "label": "a:",
                           "paddingRight": True},
@@ -123,6 +150,28 @@ while True:
         answer(message, spot(params["textDocument"]["uri"], 1, 2))
     elif method == "textDocument/typeDefinition":
         answer(message, [])
+    elif method == "textDocument/rename" and params["newName"] in ("files", "clash"):
+        uri = params["textDocument"]["uri"]
+        base = uri.rsplit("/", 1)[0]
+        made = base + "/made/new.cpp"
+        if params["newName"] == "clash":
+            answer(message, {"documentChanges": [
+                {"kind": "rename", "oldUri": uri, "newUri": base + "/c.cpp"},
+                {"kind": "create", "uri": base + "/gone.cpp"},
+            ]})
+            continue
+        answer(message, {"documentChanges": [
+            {"kind": "create", "uri": made},
+            {"textDocument": {"uri": made, "version": None},
+             "edits": [replacement(0, 0, 0, "// new\n")]},
+            {"kind": "rename", "oldUri": uri, "newUri": base + "/c.cpp"},
+            {"textDocument": {"uri": base + "/c.cpp", "version": None},
+             "edits": [replacement(0, 0, 3, "renamed")]},
+            {"kind": "rename", "oldUri": base + "/old", "newUri": base + "/new"},
+            {"textDocument": {"uri": base + "/new/x.cpp", "version": None},
+             "edits": [replacement(0, 0, 1, "y")]},
+            {"kind": "delete", "uri": base + "/gone.cpp"},
+        ]})
     elif method == "textDocument/rename":
         log.write("rename %s\n" % params["newName"])
         uri = params["textDocument"]["uri"]

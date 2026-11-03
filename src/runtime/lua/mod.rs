@@ -11,6 +11,7 @@ use super::Runtime;
 mod buffer;
 mod bundled;
 mod editor;
+mod files;
 mod marks;
 mod server;
 mod setup;
@@ -65,11 +66,16 @@ const FUNCTIONS: &[&str] = &[
     "results",
     "open",
     "clipboard",
+    "file_kind",
+    "create_file",
+    "rename_file",
+    "delete_file",
     "completion_source",
     "buffer_list",
     "window_list",
     "lsp_server",
     "lsp_request",
+    "lsp_cancel",
     "lsp_notify",
     "lsp_on",
     "lsp_uri",
@@ -155,7 +161,7 @@ local completion_source = soda.completion_source
 soda.completion_source = nil
 soda.completion = {}
 soda.lsp = {}
-for _, name in ipairs({ "server", "request", "notify", "on", "uri", "info", "restart", "array" }) do
+for _, name in ipairs({ "server", "request", "cancel", "notify", "on", "uri", "info", "restart", "array" }) do
   soda.lsp[name] = soda["lsp_" .. name]
   soda["lsp_" .. name] = nil
 end
@@ -164,7 +170,10 @@ function soda.completion.register(source)
   if type(source.complete) ~= "function" then
     error("a completion source needs a complete function", 2)
   end
-  completion_source(table.concat(triggers), source.complete)
+  if source.resolve ~= nil and type(source.resolve) ~= "function" then
+    error("resolve is a function", 2)
+  end
+  completion_source(table.concat(triggers), source.complete, source.resolve)
 end
 "#;
 const IMPLEMENTATION: &str = "soda.implementation";
@@ -200,14 +209,29 @@ pub(super) enum Request {
         source: u64,
         asked: Arc<Asked>,
     },
+    /// A source's `resolve`, about the candidate with this key.
+    Resolve {
+        function: u64,
+        source: u64,
+        key: i64,
+    },
     Lsp(super::lsp::Delivery),
 }
 /// What a source answered, whenever it does.
-struct Answer {
-    generation: u64,
-    source: u64,
-    items: Vec<Item>,
-    incomplete: bool,
+enum Answer {
+    Items {
+        generation: u64,
+        source: u64,
+        items: Vec<Item>,
+        incomplete: bool,
+    },
+    /// More about one candidate.
+    Resolved {
+        source: u64,
+        key: i64,
+        detail: Option<String>,
+        doc: Option<String>,
+    },
 }
 impl From<LuaRequest> for Request {
     fn from(request: LuaRequest) -> Self {
@@ -304,7 +328,7 @@ impl Host {
         context.set("column", asked.column)?;
         context.set("trigger", asked.trigger.map(String::from))?;
         let generation = asked.generation;
-        let answer = move |items, incomplete| Answer {
+        let answer = move |items, incomplete| Answer::Items {
             generation,
             source,
             items,
@@ -335,6 +359,27 @@ impl Host {
             .get::<Function>(source)?
             .call::<()>((context, sink))
     }
+    /// Calls a source's `resolve` with a candidate's key and a function to
+    /// call with `{ detail, doc }`, now or later.
+    fn resolve(&self, function: u64, source: u64, key: i64) -> mlua::Result<()> {
+        let sender = self.answers.0.clone();
+        let done = self.lua.create_function(move |_, more: Option<Table>| {
+            let field = |name: &str| -> mlua::Result<Option<String>> {
+                more.as_ref()
+                    .map_or(Ok(None), |more| more.get::<Option<String>>(name))
+            };
+            let _ = sender.send(Answer::Resolved {
+                source,
+                key,
+                detail: field("detail")?,
+                doc: field("doc")?,
+            });
+            Ok(())
+        })?;
+        self.callbacks()?
+            .get::<Function>(function)?
+            .call::<()>((key, done))
+    }
     fn callbacks(&self) -> mlua::Result<Table> {
         self.lua.named_registry_value(CALLBACKS)
     }
@@ -362,6 +407,7 @@ impl Host {
             buffer::register(scope, &soda, &runtime, &edited)?;
             editor::register(scope, &soda, &runtime, self)?;
             marks::register(scope, &soda, &runtime)?;
+            files::register(scope, &soda, &runtime)?;
             setup::register(scope, &soda, &runtime, self)?;
             server::register(scope, &soda, &runtime, self)?;
             lua.set_named_registry_value(IMPLEMENTATION, soda)?;
@@ -390,6 +436,11 @@ impl Host {
                     function.call::<()>((job.code, job.stdout, job.stderr))
                 }
                 Request::Complete { source, asked } => self.complete(source, &asked),
+                Request::Resolve {
+                    function,
+                    source,
+                    key,
+                } => self.resolve(function, source, key),
                 Request::Lsp(super::lsp::Delivery::Answer {
                     function,
                     result,
@@ -437,6 +488,14 @@ fn item(table: &Table) -> mlua::Result<Item> {
     if let Some(text) = table.get("text")? {
         item.text = text;
     }
+    if let Some(doc) = table.get("doc")? {
+        item.doc = doc;
+    }
+    if let Some(commit) = table.get::<Option<String>>("commit")? {
+        item.commit = commit.chars().collect();
+    }
+    item.ahead = [table.get("insert")?, table.get("replace")?];
+    item.key = table.get("key")?;
     if let Some(snippet) = snippet {
         item.text = snippet;
         item.snippet = true;
@@ -705,6 +764,16 @@ impl Runtime {
             self.run_lua();
         }
     }
+    /// Asks a source about the selected candidate.
+    pub(super) fn resolve_candidate(&mut self, resolve: crate::interaction::completion::Resolve) {
+        let request = Request::Resolve {
+            function: resolve.function,
+            source: resolve.source,
+            key: resolve.key,
+        };
+        self.lua_queue.push_back((request, Some(resolve.view)));
+        self.run_lua();
+    }
     /// Collects finished processes and calls their functions.
     pub(super) fn poll_lua(&mut self) {
         let Some(host) = &self.lua else {
@@ -712,13 +781,22 @@ impl Runtime {
         };
         let answers: Vec<_> = host.answers.1.try_iter().collect();
         for answer in answers {
-            self.dirty |= self.layers.completion_results(
-                answer.generation,
-                answer.source,
-                answer.items,
-                answer.incomplete,
-                &self.app,
-            );
+            self.dirty |= match answer {
+                Answer::Items {
+                    generation,
+                    source,
+                    items,
+                    incomplete,
+                } => self
+                    .layers
+                    .completion_results(generation, source, items, incomplete, &self.app),
+                Answer::Resolved {
+                    source,
+                    key,
+                    detail,
+                    doc,
+                } => self.layers.completion_resolved(source, key, detail, doc),
+            };
         }
         let Some(host) = &self.lua else {
             return;

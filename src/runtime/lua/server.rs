@@ -35,13 +35,33 @@ pub(super) fn register<'scope, 'r: 'scope>(
                 let id = host.keep(function)?;
                 let mut runtime = runtime.borrow_mut();
                 let Some(key) = runtime.lsp_key() else {
-                    return Ok(false);
+                    host.callbacks()?.set(id, Value::Nil)?;
+                    return Ok(Value::Boolean(false));
                 };
                 let Runtime { lsp, app, .. } = &mut **runtime;
                 lsp.sync(app, true);
-                Ok(lsp.request(&key, &method, params, id))
+                // The function's id names the request, for `soda.lsp.cancel`.
+                if lsp.request(&key, &method, params, id) {
+                    Ok(Value::Integer(id as i64))
+                } else {
+                    host.callbacks()?.set(id, Value::Nil)?;
+                    Ok(Value::Boolean(false))
+                }
             },
         )?,
+    )?;
+    soda.set(
+        "lsp_cancel",
+        scope.create_function(|_, request: Option<u64>| {
+            let Some(request) = request else {
+                return Ok(false);
+            };
+            let cancelled = runtime.borrow_mut().lsp.cancel(request);
+            if cancelled {
+                host.callbacks()?.set(request, Value::Nil)?;
+            }
+            Ok(cancelled)
+        })?,
     )?;
     soda.set(
         "lsp_notify",

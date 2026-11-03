@@ -341,6 +341,16 @@ impl Runtime {
             .layers
             .route_input(input, &self.app, time, &self.app.root());
         self.input_result(result, time);
+        // A commit character goes in after the candidate it accepted.
+        if let Some(key) = self.layers.take_retype() {
+            let result = self.layers.route_again(
+                crate::interaction::UserInput::Key(key),
+                &self.app,
+                time,
+                &self.app.root(),
+            );
+            self.input_result(result, time);
+        }
         self.settle(time);
         self.complete();
     }
@@ -351,6 +361,9 @@ impl Runtime {
             if request.asked.builtin {
                 self.completions.request(request);
             }
+        }
+        if let Some(resolve) = self.layers.completion_resolve() {
+            self.resolve_candidate(resolve);
         }
         self.dirty |= changed;
     }

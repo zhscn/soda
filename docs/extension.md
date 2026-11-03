@@ -132,6 +132,10 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `soda.results(kind, lines)` | 把结果行写入 `*kind*` 并设为最近的结果，回车和 `M-g n`/`M-g p` 与 `grep`、`run` 的结果相同；`lines` 可以是 `路径:行:列:` 行，或文件名行加缩进的 `行:列  文本` 分组行；其他行留作标题，一个位置都没有时只显示消息 |
 | `soda.open(path, [line], [column])` | 打开文件并放置光标，行列从 1 开始，列按字节；打开是异步的，文件内容要在之后的请求里读 |
 | `soda.clipboard([text])` | 带文字时替换剪贴板内容，与编辑器自己的复制一样同步到系统剪贴板；不带时返回粘贴会用的内容，先读系统剪贴板 |
+| `soda.file_kind(path)` | `"file"`、`"directory"`，不存在时为 nil；相对路径以项目根目录为基准，下同 |
+| `soda.create_file(path)` | 写一个空文件，已有的会被清空；缺少的上级目录一并创建 |
+| `soda.rename_file(from, to)` | 在磁盘上改名，文件或目录都行，缺少的上级目录一并创建。打开着的文档跟着换路径，保存写到新位置；目标处原来打开的文档关闭 |
+| `soda.delete_file(path, [recursive])` | 删除文件或空目录，`recursive` 时连同目录内容；其中打开着的文档关闭，未保存的修改丢弃 |
 | `soda.spawn(argv, fn, [options])` | 后台运行程序（不经过 shell），结束后调用 `fn(code, stdout, stderr)`，返回编号；见下文 |
 | `soda.kill(id)` | 停止 `soda.spawn` 启动的进程及其子进程，返回它是否还在运行 |
 | `soda.popup(text)` | 在光标旁的浮窗里显示文字，下一个按键关闭 |

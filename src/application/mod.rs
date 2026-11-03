@@ -116,6 +116,11 @@ pub enum Event {
         document: DocumentId,
         discard: bool,
     },
+    /// A document's file was renamed on disk: it stands for `path` now.
+    Relocate {
+        document: DocumentId,
+        path: PathBuf,
+    },
     Edit {
         view: ViewId,
         command: Command,
@@ -286,9 +291,9 @@ impl Event {
             | Self::Reload { view, .. }
             | Self::Focus(view)
             | Self::CloseView(view) => Operation::View(*view),
-            Self::CloseDocument { document, .. } | Self::AddView(document) => {
-                Operation::Document(*document)
-            }
+            Self::CloseDocument { document, .. }
+            | Self::Relocate { document, .. }
+            | Self::AddView(document) => Operation::Document(*document),
             _ => Operation::Other,
         }
     }
@@ -1133,6 +1138,10 @@ impl Application {
                 update.closed_views = ids;
                 update.closed_documents.push(document);
                 update.notices.push(Notice::Closed(name));
+            }
+            Event::Relocate { document, path } => {
+                let file = self.workspace.relocate(document, path)?;
+                self.accept_file(file, None, &mut update);
             }
             Event::Split(axis) => {
                 let active = self.active.ok_or(Error::UnknownView)?;

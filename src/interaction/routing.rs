@@ -233,6 +233,17 @@ impl Layers {
     ) -> Result<InputResult, EditError> {
         self.route_recorded(input, false, app, time, file_root)
     }
+    /// Routes a key once more, as typed but not recorded again: the commit
+    /// character after the candidate it accepted.
+    pub fn route_again(
+        &mut self,
+        input: UserInput,
+        app: &Application,
+        time: Duration,
+        file_root: &Path,
+    ) -> Result<InputResult, EditError> {
+        self.route(input, app, time, file_root)
+    }
     /// Routes input replayed by a macro; a macro being recorded
     /// keeps the keys that started the replay, not the replayed ones.
     pub fn route_replayed(
@@ -408,6 +419,32 @@ impl Layers {
             if let Some(edit) = edit {
                 return Ok(InputResult::Handled(self.beacon_type(edit, app, time)));
             }
+        }
+        // A commit character takes the chosen candidate, then goes in as
+        // typed, unless the list itself binds it.
+        if self.mode == EditMode::Insert
+            && !self.sequence.active()
+            && !key.alt
+            && !key.control
+            && let Key::Char(ch) = key.code
+            && self.completion.commits(ch)
+            && matches!(
+                self.keymap
+                    .resolve(&[keymap::Context::Completion], &[key], &|_| false)
+                    .0,
+                Resolution::Pass
+            )
+        {
+            let result = self.execute(
+                Command::Completion(super::completion::Action::Accept),
+                app,
+                time,
+                file_root,
+            );
+            if matches!(result, Ok(InputResult::Handled(_))) {
+                self.retype = Some(key);
+            }
+            return result;
         }
         let stack = self.stack(app);
         let cancel = keymap::is_cancel(&key) && !self.sequence.continues(key, &stack, &self.keymap);

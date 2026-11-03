@@ -52,10 +52,16 @@ soda.completion.register({
     sink:add({ { label = "name", detail = "field" } })  -- 可多次调用，可以晚些调用
     sink:done({ incomplete = true })                    -- 前缀变化时再问这个来源
   end,
+  resolve = function(key, done) end,  -- 可选：选中带 key 的候选时补充 detail 和 doc
 })
 ```
 
 `complete` 在编辑线程上运行，要做慢的事就交给 `soda.spawn`，在回调里继续写 `sink`；会话结束后才到的结果被丢弃。候选的字段：`label`（必需）、`detail`、`filter`（匹配用的文字，默认是 `label`）、`text`（插入的文字，默认是 `label`）、`snippet`（插入一段 snippet，优先于 `text`）、`back`（比当前单词多替换的字节数）、`edits`（同时做的其他修改，格式同 `buffer:edit`：`{ {行, 列}, {行, 列}, 文字 }`，从 1 开始的行号和字节列，比如名字需要的 `#include`）。`edits` 和替换在同一个撤销步里；其中任何一处超出文档或碰到被替换的范围时，全部不做。
+
+- `insert`、`replace`：Enter 和 Tab 替换到光标后多少字节，按来源回答时的光标计；缺省时 Enter 不替换光标后的文字，Tab 替换到词尾。到达时换算成离行尾的距离，因为在光标处继续输入不改变它。这对应语言服务器的 insert 和 replace 两个范围。
+- `commit`：commit 字符组成的字符串。候选被选中（动过选中项）之后输入其中的字符，先确认候选，再输入这个字符；`completion` 上下文绑定了这个键时以绑定为准。
+- `doc`：说明，选中时显示在列表旁边，哪边地方大放哪边。
+- `key`：整数，来源用它认出候选。来源有 `resolve` 时，候选第一次被选中就调用 `resolve(key, done)`，`done({ detail = ..., doc = ... })` 可以晚些调用，给出的字段替换原来的。
 
 没有字符触发时询问所有来源和内置来源；由字符触发时只询问声明了这个字符的来源，单词没有意义。相同匹配度下 Lua 来源排在内置来源之前。
 
@@ -79,7 +85,6 @@ require("snippets").add("cpp", {
 
 ## 后续
 
-- 候选还缺 `commit_chars`、延迟解析和 insert/replace 两个范围。
 - 灰字预览：选中项在光标处用绘制层显示，不写入文档。
 
 ## 与 capf 的区别
