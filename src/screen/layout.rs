@@ -924,14 +924,42 @@ pub(crate) struct ViewportAdjustment {
     pub horizontal_scroll: usize,
 }
 
+/// Rows from the one starting at offset `from` to the one starting at
+/// `to`, both viewport anchors of a view: negative when `to` is above. None
+/// when they are more than `limit` rows apart.
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+pub(crate) fn rows_between(
+    app: &Application,
+    id: ViewId,
+    measure: &dyn Measure,
+    width: usize,
+    from: usize,
+    to: usize,
+    limit: usize,
+) -> Option<isize> {
+    let view = app.view(id)?;
+    let layout = Rows::new(app, view, measure, width)?;
+    let (from, _) = layout.place(from);
+    let (to, _) = layout.place(to);
+    match layout.distance(from, to, limit) {
+        Some(rows) => Some(rows as isize),
+        None => Some(-(layout.distance(to, from, limit)? as isize)),
+    }
+}
+
 /// Render an immutable application projection of the active view's text
 /// area. Viewport decisions are applied by Runtime before this is called.
+/// The rows start `first` rows from the viewport's top, above it when
+/// negative, so that a frontend scrolling smoothly can show what comes
+/// into view; the caret's row counts from the first row shown.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn frame(
     app: &Application,
     id: ViewId,
     highlighter: &mut Highlighter,
     measure: &dyn Measure,
     width: usize,
+    first: isize,
     rows: u16,
     modal: &Overlay,
 ) -> Result<Option<Frame>, crate::application::Error> {
@@ -952,7 +980,8 @@ pub(crate) fn frame(
     let left = view.viewport.horizontal_scroll;
     let mut output = Vec::new();
     // The rows shown, each with its line's segment.
-    let (mut place, _) = layout.place(view.viewport.anchor.offset.0);
+    let (top, _) = layout.place(view.viewport.anchor.offset.0);
+    let mut place = layout.step(top, first);
     let mut shown: Vec<(Place, Segment)> = vec![];
     let mut segments = layout.segments(place.0);
     while shown.len() < usize::from(rows) {
@@ -1250,6 +1279,7 @@ mod tests {
             &mut Highlighter::default(),
             &Cells,
             width.into(),
+            0,
             height,
             &Overlay::default(),
         )?
@@ -1394,6 +1424,7 @@ mod tests {
             &Cells,
             0,
             0,
+            0,
             &Overlay::default(),
         )
         .unwrap()
@@ -1520,6 +1551,7 @@ mod tests {
             &mut Highlighter::default(),
             &Cells,
             10,
+            0,
             4,
             &Overlay::default(),
         )
@@ -1740,6 +1772,7 @@ mod tests {
             &mut Highlighter::default(),
             &Pixels,
             200,
+            0,
             2,
             &Overlay::default(),
         )
@@ -1779,5 +1812,40 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(follow.horizontal_scroll, 81 + 10 - 50);
+    }
+    #[test]
+    fn frames_start_rows_away_from_the_top_and_anchors_count_rows_between() {
+        let mut app = app("a\nb\nc\nd\ne", Language::PlainText);
+        let view = app.active_view().unwrap();
+        app.dispatch(Event::SetViewport {
+            view,
+            anchor: ByteOffset(4),
+            horizontal_scroll: 0,
+        })
+        .unwrap();
+        let lines = |first| {
+            let frame = super::frame(
+                &app,
+                view,
+                &mut Highlighter::default(),
+                &Cells,
+                10,
+                first,
+                3,
+                &Overlay::default(),
+            )
+            .unwrap()
+            .unwrap();
+            frame.rows.iter().map(|row| row.line).collect::<Vec<_>>()
+        };
+        // From the top, a row above it, and a row below.
+        assert_eq!(lines(0), [2, 3, 4]);
+        assert_eq!(lines(-1), [1, 2, 3]);
+        assert_eq!(lines(1), [3, 4]);
+        let between = |from, to| super::rows_between(&app, view, &Cells, 10, from, to, 10);
+        assert_eq!(between(0, 6), Some(3));
+        assert_eq!(between(6, 0), Some(-3));
+        assert_eq!(between(4, 4), Some(0));
+        assert_eq!(super::rows_between(&app, view, &Cells, 10, 0, 8, 2), None);
     }
 }

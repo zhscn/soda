@@ -8,21 +8,43 @@ use std::collections::BTreeMap;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Kind {
     Bool,
-    Int { min: u32, max: u32 },
+    Int {
+        min: u32,
+        max: u32,
+    },
     Choice(&'static [&'static str]),
+    /// Any text, such as a font's name.
+    Text,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Value {
     Bool(bool),
     Int(u32),
     Choice(&'static str),
+    Text(&'static str),
+}
+/// Texts options have taken, kept for the life of the process: each value
+/// is stored once however often it is set, and values stay `Copy`.
+static TEXTS: std::sync::RwLock<std::collections::BTreeSet<&'static str>> =
+    std::sync::RwLock::new(std::collections::BTreeSet::new());
+fn intern(text: &str) -> &'static str {
+    if let Some(known) = TEXTS.read().unwrap().get(text) {
+        return known;
+    }
+    let mut texts = TEXTS.write().unwrap();
+    if let Some(known) = texts.get(text) {
+        return known;
+    }
+    let text: &'static str = Box::leak(text.to_owned().into_boxed_str());
+    texts.insert(text);
+    text
 }
 impl std::fmt::Display for Value {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Bool(value) => write!(f, "{value}"),
             Self::Int(value) => write!(f, "{value}"),
-            Self::Choice(value) => f.write_str(value),
+            Self::Choice(value) | Self::Text(value) => f.write_str(value),
         }
     }
 }
@@ -53,6 +75,7 @@ impl OptionInfo {
                 .find(|word| **word == text)
                 .map(|word| Value::Choice(word))
                 .ok_or_else(|| format!("{name} takes one of {}", words.join(", "))),
+            Kind::Text => Ok(Value::Text(intern(text))),
         }
     }
     /// What the option accepts, for help and completion.
@@ -61,6 +84,7 @@ impl OptionInfo {
             Kind::Bool => "true or false".into(),
             Kind::Int { min, max } => format!("{min} to {max}"),
             Kind::Choice(words) => words.join(", "),
+            Kind::Text => "any text".into(),
         }
     }
 }
@@ -198,6 +222,30 @@ pub const OPTIONS: &[OptionInfo] = &[
         doc: "Colors: dark, light, or auto to follow the terminal's background",
     },
     OptionInfo {
+        name: "font",
+        kind: Kind::Text,
+        default: Value::Text(""),
+        doc: "Font family of the text in the graphical frontend; empty takes fontconfig's monospace",
+    },
+    OptionInfo {
+        name: "ui-font",
+        kind: Kind::Text,
+        default: Value::Text(""),
+        doc: "Font family of tabs, the status line and panels in the graphical frontend; empty takes the system's",
+    },
+    OptionInfo {
+        name: "line-height",
+        kind: Kind::Int { min: 100, max: 300 },
+        default: Value::Int(135),
+        doc: "Height of a row of text in the graphical frontend, in percent of the font size",
+    },
+    OptionInfo {
+        name: "smooth-scroll",
+        kind: Kind::Bool,
+        default: Value::Bool(true),
+        doc: "Scroll smoothly in the graphical frontend, and by pixels on a touchpad",
+    },
+    OptionInfo {
         name: "font-size",
         kind: Kind::Int { min: 6, max: 72 },
         default: Value::Int(14),
@@ -268,6 +316,7 @@ pub enum Declared {
     Bool(bool),
     Int { default: u32, min: u32, max: u32 },
     Choice { default: String, words: Vec<String> },
+    Text(String),
 }
 /// Declares an option. Declaring one again the same way is no change, so
 /// a module may be loaded twice; the editor's options cannot be declared.
@@ -305,6 +354,7 @@ pub fn declare(name: &str, declared: Declared, doc: &str) -> Result<&'static Opt
             }
             (Kind::Choice(&[]), Value::Choice(""))
         }
+        Declared::Text(default) => (Kind::Text, Value::Text(intern(default))),
     };
     let mut declared_options = DECLARED.write().unwrap();
     if let Some(known) = declared_options.iter().find(|option| option.name == name) {
@@ -379,6 +429,12 @@ impl Options {
         match self.get(document, name) {
             Value::Choice(value) => value,
             value => panic!("{name} is not a choice: {value}"),
+        }
+    }
+    pub fn text(&self, document: Option<DocumentId>, name: &str) -> &'static str {
+        match self.get(document, name) {
+            Value::Text(value) => value,
+            value => panic!("{name} is not a text: {value}"),
         }
     }
     /// Sets a value checked with `OptionInfo::parse`.

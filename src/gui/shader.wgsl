@@ -14,6 +14,8 @@ struct Instance {
     @location(2) color: vec4<f32>,
     // kind, corner radius, line thickness
     @location(3) params: vec4<f32>,
+    // left, top, right, bottom: nothing outside shows
+    @location(4) clip: vec4<f32>,
 };
 struct Varying {
     @builtin(position) position: vec4<f32>,
@@ -22,6 +24,7 @@ struct Varying {
     @location(2) color: vec4<f32>,
     @location(3) params: vec4<f32>,
     @location(4) size: vec2<f32>,
+    @location(5) clip: vec4<f32>,
 };
 
 @vertex
@@ -39,6 +42,7 @@ fn vertex(@builtin(vertex_index) index: u32, instance: Instance) -> Varying {
     out.color = instance.color;
     out.params = instance.params;
     out.size = instance.rect.zw;
+    out.clip = instance.clip;
     return out;
 }
 
@@ -50,6 +54,10 @@ fn rounded(point: vec2<f32>, half: vec2<f32>, radius: f32) -> f32 {
 
 @fragment
 fn fragment(in: Varying) -> @location(0) vec4<f32> {
+    if in.position.x < in.clip.x || in.position.y < in.clip.y
+        || in.position.x >= in.clip.z || in.position.y >= in.clip.w {
+        discard;
+    }
     let kind = u32(in.params.x);
     let radius = min(in.params.y, min(in.size.x, in.size.y) * 0.5);
     let center = in.local - in.size * 0.5;

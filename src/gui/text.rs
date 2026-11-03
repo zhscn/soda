@@ -10,7 +10,7 @@
 //! `monospace` family, and for Chinese, Japanese and Korean the monospace
 //! font of the language. Without fontconfig, as on macOS, the platform's
 //! defaults stand.
-use super::render::{Atlas, COLOR, Instance, MASK};
+use super::render::{Atlas, COLOR, Instance, MASK, UNCLIPPED};
 use crate::screen::{Cells, Font, Measure};
 use cosmic_text::{
     Attrs, Buffer, CacheKey, Fallback, Family, FontSystem, LayoutGlyph, Metrics, PlatformFallback,
@@ -22,24 +22,44 @@ use unicode_script::Script;
 /// Measured units in a pixel; the layout counts in fractions of a pixel.
 pub const UNIT: f32 = 64.0;
 
-/// A font of the frontend: text or hints, plain, bold or italic.
+/// What a font is for.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum Kind {
+    /// The document's text, monospace on the grid.
+    Text,
+    /// Hints and notes in the text, smaller.
+    Hint,
+    /// Tabs, the status line and words in panels, proportional.
+    Ui,
+}
+/// A font of the frontend: its kind, plain, bold or italic.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct Face {
-    pub hint: bool,
+    pub kind: Kind,
     pub bold: bool,
     pub italic: bool,
 }
 impl Face {
-    pub const TEXT: Self = Self {
-        hint: false,
-        bold: false,
-        italic: false,
-    };
-    pub const HINT: Self = Self {
-        hint: true,
-        bold: false,
-        italic: false,
-    };
+    pub const TEXT: Self = Self::plain(Kind::Text);
+    pub const HINT: Self = Self::plain(Kind::Hint);
+    pub const UI: Self = Self::plain(Kind::Ui);
+    pub const fn plain(kind: Kind) -> Self {
+        Self {
+            kind,
+            bold: false,
+            italic: false,
+        }
+    }
+}
+
+/// What the fonts are set to: sizes in pixels, a row's height in percent
+/// of the text's size, and the families, empty for fontconfig's choice.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Settings {
+    pub size: f32,
+    pub line_height: u32,
+    pub text: String,
+    pub ui: String,
 }
 
 /// Where a glyph image went in the atlas, and how it sits on the pen.
@@ -131,22 +151,27 @@ impl Fallback for Fallbacks {
 
 pub struct Fonts {
     system: FontSystem,
-    /// The text font; the generic family would let any monospace font with
-    /// a character stand in for it, not the one fontconfig prefers.
-    family: Option<String>,
     swash: SwashCache,
+    settings: Option<Settings>,
+    /// The families of text and of the parts around it. A name rather than
+    /// the generic family: that one lets any monospace font with a
+    /// character stand in, not the one fontconfig prefers.
+    family: Option<String>,
+    ui_family: Option<String>,
     /// The text font's size and a column's width, in pixels.
     pub size: f32,
     pub cell: f32,
     /// A row's height, and its baseline from the row's top.
     pub line: f32,
     pub baseline: f32,
+    /// The baseline of the parts around the text, in a row as high.
+    pub ui_baseline: f32,
     hint_size: f32,
     shaped: HashMap<(String, Face), Rc<[LayoutGlyph]>>,
     placed: HashMap<CacheKey, Option<Placed>>,
 }
 impl Fonts {
-    pub fn new(size: f32) -> Self {
+    pub fn new(settings: Settings) -> Self {
         let locale = locale();
         let mut db = cosmic_text::fontdb::Database::new();
         db.load_system_fonts();
@@ -154,27 +179,41 @@ impl Fonts {
         let fallbacks = Fallbacks::new(&locale);
         let mut fonts = Self {
             system: FontSystem::new_with_locale_and_db_and_fallback(locale, db, fallbacks),
-            family: fontconfig("monospace"),
             swash: SwashCache::new(),
+            settings: None,
+            family: None,
+            ui_family: None,
             size: 0.0,
             cell: 0.0,
             line: 0.0,
             baseline: 0.0,
+            ui_baseline: 0.0,
             hint_size: 0.0,
             shaped: HashMap::new(),
             placed: HashMap::new(),
         };
-        fonts.resize(size);
+        fonts.configure(settings);
         fonts
     }
-    /// Sets the text size in pixels, and measures the grid again.
-    pub fn resize(&mut self, size: f32) {
-        if size == self.size {
+    /// Takes new settings, and measures the grid again when they change.
+    pub fn configure(&mut self, settings: Settings) {
+        if self.settings.as_ref() == Some(&settings) {
             return;
         }
+        let named = |name: &str, pattern: &str| {
+            Some(name.to_owned())
+                .filter(|name| !name.is_empty())
+                .or_else(|| fontconfig(pattern))
+        };
+        self.family = named(&settings.text, "monospace");
+        self.ui_family = named(&settings.ui, "sans-serif");
+        let size = settings.size;
         self.size = size;
         self.hint_size = (size * 0.86).round();
-        self.line = (size * 1.35).round();
+        self.line = (size * settings.line_height as f32 / 100.0)
+            .round()
+            .max(size);
+        self.settings = Some(settings);
         self.shaped.clear();
         self.placed.clear();
         self.cell = 0.0;
@@ -184,20 +223,30 @@ impl Fonts {
             .first()
             .map_or(size * 0.6, |glyph| glyph.w);
         self.shaped.clear();
-        let mut buffer = Buffer::new(&mut self.system, Metrics::new(size, self.line));
-        let attrs = Attrs::new().family(self.family());
+        self.baseline = self.baseline_of(Face::TEXT);
+        self.ui_baseline = self.baseline_of(Face::UI);
+    }
+    /// Where a font's baseline sits in a row, with the row's height spread
+    /// evenly above and below its line.
+    fn baseline_of(&mut self, face: Face) -> f32 {
+        let mut buffer = Buffer::new(&mut self.system, Metrics::new(self.size, self.line));
+        let attrs = Attrs::new().family(self.family_of(face.kind));
         buffer.set_text("0", &attrs, Shaping::Advanced, None);
         buffer.shape_until_scroll(&mut self.system, false);
-        self.baseline = buffer
+        buffer
             .layout_runs()
             .next()
-            .map_or(size, |run| run.line_y)
-            .round();
+            .map_or(self.size, |run| run.line_y)
+            .round()
     }
-    fn family(&self) -> Family<'_> {
-        match &self.family {
+    fn family_of(&self, kind: Kind) -> Family<'_> {
+        let (name, generic) = match kind {
+            Kind::Ui => (&self.ui_family, Family::SansSerif),
+            _ => (&self.family, Family::Monospace),
+        };
+        match name {
             Some(name) => Family::Name(name),
-            None => Family::Monospace,
+            None => generic,
         }
     }
     /// A column's width in measured units.
@@ -209,14 +258,18 @@ impl Fonts {
         if let Some(glyphs) = self.shaped.get(&(text.to_owned(), face)) {
             return glyphs.clone();
         }
-        let size = if face.hint { self.hint_size } else { self.size };
+        let size = if face.kind == Kind::Hint {
+            self.hint_size
+        } else {
+            self.size
+        };
         let mut buffer = Buffer::new(&mut self.system, Metrics::new(size, self.line));
         buffer.set_size(None, None);
-        if !face.hint && self.cell > 0.0 {
+        if face.kind == Kind::Text && self.cell > 0.0 {
             buffer.set_monospace_width(Some(self.cell));
         }
         let attrs = Attrs::new()
-            .family(self.family())
+            .family(self.family_of(face.kind))
             .weight(if face.bold {
                 Weight::BOLD
             } else {
@@ -241,13 +294,13 @@ impl Fonts {
         self.shaped.insert((text.to_owned(), face), glyphs.clone());
         glyphs
     }
-    /// How wide a run is in pixels: whole columns for text, its glyphs for
-    /// hints.
+    /// How wide a run is in pixels: whole columns for text, its glyphs
+    /// otherwise.
     pub fn width(&mut self, text: &str, face: Face) -> f32 {
-        if face.hint {
-            self.shape(text, face).iter().map(|glyph| glyph.w).sum()
-        } else {
+        if face.kind == Kind::Text {
             Cells.width(text, Font::Text) as f32 * self.cell
+        } else {
+            self.shape(text, face).iter().map(|glyph| glyph.w).sum()
         }
     }
     /// Draws a run of text with its pen starting at `x` on the baseline
@@ -269,7 +322,7 @@ impl Fonts {
         let mut cluster = (usize::MAX, 0.0, 0.0);
         for (index, glyph) in glyphs.iter().enumerate() {
             if glyph.start != cluster.0 {
-                let column = if face.hint {
+                let column = if face.kind != Kind::Text {
                     glyph.x
                 } else {
                     // A glyph narrower than its columns, as a Chinese
@@ -306,6 +359,7 @@ impl Fonts {
                 uv: placed.uv,
                 color,
                 params: [if placed.color { COLOR } else { MASK }, 0.0, 0.0, 0.0],
+                clip: UNCLIPPED,
             });
         }
     }

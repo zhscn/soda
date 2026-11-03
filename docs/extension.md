@@ -28,7 +28,7 @@ kakoune 没有脚本语言，所以要用 `%sh{}` 和 `evaluate-commands` 把 sh
 选项是带类型的命名值，由 Application 持有，前端与交互层只读。
 
 - **作用域**：全局，以及单个文档。读取时先查文档，再查全局，最后用内置默认值。文档关闭时它的选项一并删除。
-- **类型**：布尔、带范围的整数、固定选项之一。设置时按类型校验，失败时不改变原值。
+- **类型**：布尔、带范围的整数、固定选项之一、任意文字（如字体名）。设置时按类型校验，失败时不改变原值。
 - **命令**：`set NAME VALUE` 设置全局值；`set-local NAME VALUE` 只对当前文档生效；`unset-local NAME` 去掉文档值，回到全局值。`init.lua` 运行时还没有文档，所以只设置全局值。
 - **生效**：选项变化作为 Application 更新传播。编辑行为相关的选项（缩进）由 Application 推给对应文档的编辑器；显示相关的选项由前端每帧读取。
 
@@ -55,6 +55,9 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `final-newline` | true/false | true | 保存时给有内容的文件补上末尾换行 |
 | `auto-reload` | true/false | true | 磁盘上变化了的文件没有未保存编辑时自动重新加载 |
 | `clipboard` | system/internal | system | internal 时复制和粘贴不经过系统剪贴板 |
+| `font`、`ui-font` | 文字 | 空 | 图形界面的正文和界面字体，见[图形界面](gui.md) |
+| `font-size`、`line-height` | 6–72、100–300 | 14、135 | 图形界面的字号（点）和行高（字号的百分比） |
+| `smooth-caret`、`smooth-scroll` | true/false | true | 图形界面的光标滑动和平滑滚动 |
 | `mark-keys` | true/false | true | 光标在标记的符号上时 `mark` 键位表生效；false 对应 Emacs 的 `symbol-overlay-inhibit-map`，Normal 的键不被遮住 |
 
 `set` 在解析命令行时就按类型检查取值，所以错误在命令执行前报告，Application 收到的永远是合法值。布尔值也接受 yes/no、on/off。`set` 和 `set-local` 的选项名可以在命令行中补全，候选附带说明。
@@ -163,7 +166,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 
 进程在自己的进程组里运行，`soda.kill` 停掉整个组；被信号停止的进程，结束函数收到的 `code` 是 nil。
 
-模块的选项用 `soda.declare_option(name, spec)` 声明，之后与内置选项一样可以 `set`、`set-local`、`%opt{}` 和补全。类型由 `spec.default` 决定：布尔；整数，可以给 `min`、`max`；字符串时必须给 `choices`，取值只能是其中之一。`spec.doc` 是说明。同样的声明重复执行没有影响，换一种声明报错；不能声明内置选项的名字。选项名只能用小写字母、数字和 `-`。
+模块的选项用 `soda.declare_option(name, spec)` 声明，之后与内置选项一样可以 `set`、`set-local`、`%opt{}` 和补全。类型由 `spec.default` 决定：布尔；整数，可以给 `min`、`max`；字符串给了 `choices` 时取值只能是其中之一，不给时是任意文字。`spec.doc` 是说明。同样的声明重复执行没有影响，换一种声明报错；不能声明内置选项的名字。选项名只能用小写字母、数字和 `-`。
 
 - **执行模型**：Lua 运行在编辑器线程上，同一时间只运行一个请求（一段代码、一次钩子或命令调用、一个进程的回调）。请求运行时 `soda` 的函数直接作用于编辑器。请求中引发的 Lua（例如 `soda.command` 触发的钩子、执行的 `lua` 命令）排队，等当前请求返回后运行。
 - **作用对象**：每个请求在它产生时所在的视图上运行，就像钩子一样。所以 `soda.spawn` 的回调作用于调用 `spawn` 时的文档，即使用户已经切换到别的文档；焦点不因此改变。

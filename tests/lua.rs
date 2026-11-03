@@ -913,6 +913,32 @@ fn modules_declare_options_and_read_typed_values() {
     lua(&mut r, r#"assert(soda.option("test-depth") == 7)"#);
 }
 #[test]
+fn text_options_take_any_words_from_lua_and_the_command_line() {
+    let mut r = runtime();
+    lua(
+        &mut r,
+        r#"
+        -- A string default without choices declares a text option.
+        soda.declare_option("test-name", { default = "none" })
+        assert(soda.option("test-name") == "none")
+        soda.set("test-name", "Two Words")
+        assert(soda.option("test-name") == "Two Words")
+        -- The frontend's fonts are text options; empty is the default.
+        assert(soda.option("font") == "" and soda.option("ui-font") == "")
+        soda.set("font", "JetBrains Mono")
+        assert(soda.option("font") == "JetBrains Mono")
+        assert(soda.option("line-height") == 135)
+        assert(not pcall(soda.set, "line-height", 50))
+        "#,
+    );
+    r.command(Command::Named("set ui-font Noto Sans".into()));
+    lua(&mut r, r#"assert(soda.option("ui-font") == "Noto Sans")"#);
+    // Setting the same text again stores it once.
+    let first = r.app().options().text(None, "ui-font");
+    r.command(Command::Named("set ui-font Noto Sans".into()));
+    assert!(std::ptr::eq(first, r.app().options().text(None, "ui-font")));
+}
+#[test]
 fn lua_lists_buffers_and_windows() {
     let mut r = runtime();
     keys(&mut r, "<c-x>3");

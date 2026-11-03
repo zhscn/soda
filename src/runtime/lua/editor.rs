@@ -103,7 +103,9 @@ pub(super) fn register<'scope, 'r: 'scope>(
             Ok(match runtime.app.options().get(document, &name) {
                 Option::Bool(value) => Value::Boolean(value),
                 Option::Int(value) => Value::Integer(value.into()),
-                Option::Choice(value) => Value::String(lua.create_string(value)?),
+                Option::Choice(value) | Option::Text(value) => {
+                    Value::String(lua.create_string(value)?)
+                }
             })
         })?,
     )?;
@@ -156,15 +158,17 @@ pub(super) fn register<'scope, 'r: 'scope>(
                         max: number("max", u32::MAX)?,
                     }
                 }
-                Value::String(default) => Declared::Choice {
-                    default: default.to_str()?.to_owned(),
-                    words: spec.get::<Option<Vec<String>>>("choices")?.ok_or_else(|| {
-                        mlua::Error::runtime("an option with words needs choices")
-                    })?,
-                },
+                // Words to choose from, or any text without them.
+                Value::String(default) => {
+                    let default = default.to_str()?.to_owned();
+                    match spec.get::<Option<Vec<String>>>("choices")? {
+                        Some(words) => Declared::Choice { default, words },
+                        None => Declared::Text(default),
+                    }
+                }
                 _ => {
                     return Err(mlua::Error::runtime(
-                        "an option's default is a boolean, an integer or one of its choices",
+                        "an option's default is a boolean, an integer or a string",
                     ));
                 }
             };

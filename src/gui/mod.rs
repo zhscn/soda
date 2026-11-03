@@ -62,6 +62,12 @@ impl Glide {
             h: mix(from.h, to.h),
         })
     }
+    /// Moves the caret's way by `dy`, as the text under it scrolls.
+    fn shift(&mut self, dy: f32) {
+        for rect in [&mut self.from, &mut self.to].into_iter().flatten() {
+            rect.y += dy;
+        }
+    }
     /// Where the caret shows now on its way to `target`, and whether it is
     /// still moving. A new target starts from where the caret shows; a
     /// change of shape, or no gliding, puts it there at once.
@@ -90,6 +96,90 @@ impl Glide {
             self.start = Some(now);
         }
         (self.at(now), self.progress(now) < 1.0)
+    }
+}
+
+/// How long a scroll takes to settle.
+const SCROLL: Duration = Duration::from_millis(150);
+/// How long a scroll bar stays after scrolling, then how long it fades.
+const BAR: Duration = Duration::from_millis(800);
+const FADE: Duration = Duration::from_millis(300);
+
+/// A window's scrolling as the frontend shows it: the viewport anchor it
+/// saw last, and how far the text is shifted past the anchor's row, easing
+/// from `from` to the resting `to`. The rest is a part of a row a touchpad
+/// scrolled; it stays until the anchor moves otherwise.
+struct Scrolling {
+    anchor: usize,
+    from: f32,
+    to: f32,
+    start: Option<std::time::Instant>,
+    /// The shift at the last frame, in terms of the current anchor: the
+    /// text moved on screen by the difference since.
+    last: f32,
+    /// When it last moved, for the scroll bar.
+    moved: Option<std::time::Instant>,
+}
+impl Scrolling {
+    fn new(anchor: usize) -> Self {
+        Self {
+            anchor,
+            from: 0.0,
+            to: 0.0,
+            start: None,
+            last: 0.0,
+            moved: None,
+        }
+    }
+    fn progress(&self, now: std::time::Instant) -> f32 {
+        let t = self.start.map_or(1.0, |start| {
+            ((now - start).as_secs_f32() / SCROLL.as_secs_f32()).clamp(0.0, 1.0)
+        });
+        1.0 - (1.0 - t).powi(3)
+    }
+    /// The shift now.
+    fn at(&self, now: std::time::Instant) -> f32 {
+        self.from + (self.to - self.from) * self.progress(now)
+    }
+    fn moving(&self, now: std::time::Instant) -> bool {
+        self.progress(now) < 1.0
+    }
+    /// How much the scroll bar shows: fully for a while after moving, then
+    /// fading.
+    fn bar(&self, now: std::time::Instant) -> f32 {
+        let Some(moved) = self.moved else {
+            return 0.0;
+        };
+        let since = now - moved;
+        if since <= BAR {
+            1.0
+        } else {
+            1.0 - ((since - BAR).as_secs_f32() / FADE.as_secs_f32()).min(1.0)
+        }
+    }
+    /// The anchor moved `rows` rows down: the shift takes them, so the
+    /// text stays where it was, and eases to `rest` when `smooth`.
+    fn moved_by(
+        &mut self,
+        anchor: usize,
+        rows: f32,
+        line: f32,
+        rest: f32,
+        smooth: bool,
+        now: std::time::Instant,
+    ) {
+        let current = self.at(now) - rows * line;
+        self.last -= rows * line;
+        self.anchor = anchor;
+        self.to = rest;
+        if smooth {
+            self.from = current;
+            self.start = Some(now);
+        } else {
+            self.from = rest;
+            self.start = None;
+        }
+        self.moved = Some(now);
     }
 }
 
@@ -138,19 +228,27 @@ pub fn snapshot(
         }
     };
     settle(&mut runtime, &mut gui);
-    let keys =
-        KeyStroke::parse_sequence(keys).map_err(|error| io::Error::other(format!("{error:?}")))?;
+    // A frame before the keys, as a window shows one, so that what they
+    // scroll scrolls from there.
+    gui.draw(&mut runtime).map_err(io::Error::other)?;
+    let keys = match keys {
+        "" => vec![],
+        keys => KeyStroke::parse_sequence(keys)
+            .map_err(|error| io::Error::other(format!("{error:?}")))?,
+    };
     for key in keys {
         runtime.input(UserInput::Key(key));
         gui.measure(&mut runtime);
     }
     settle(&mut runtime, &mut gui);
-    // Highlighting and the glyph atlas may take a few frames to settle.
-    for _ in 0..10 {
+    // Highlighting, the glyph atlas, scrolling and the caret may take a
+    // while to settle; the frame shows where they come to rest.
+    for _ in 0..100 {
         gui.draw(&mut runtime).map_err(io::Error::other)?;
-        if !gui.pending {
+        if gui.settled {
             break;
         }
+        std::thread::sleep(Duration::from_millis(20));
     }
     let pixels = gui
         .renderer
@@ -187,8 +285,12 @@ struct Gui {
     pointer: (f32, f32),
     /// Where the left button went down in the text, while it is held.
     press: Option<usize>,
-    /// Pixels scrolled that do not make a row yet.
+    /// The window whose scroll bar is being dragged.
+    thumb: Option<ViewId>,
+    /// Pixels scrolled that do not make a row yet, without smooth
+    /// scrolling.
     scrolled: f32,
+    scrolls: std::collections::BTreeMap<ViewId, Scrolling>,
     /// What an input method is composing.
     preedit: String,
     /// Whether the input method is on: where text is typed.
@@ -197,6 +299,8 @@ struct Gui {
     /// Draw again soon: highlighting or the atlas is catching up, or the
     /// caret is gliding.
     pending: bool,
+    /// Nothing moves but scroll bars fading.
+    settled: bool,
     caret: Glide,
 }
 
@@ -215,18 +319,26 @@ impl Gui {
         Self {
             renderer,
             scale,
-            fonts: Fonts::new(14.0),
+            fonts: Fonts::new(text::Settings {
+                size: (14.0 * scale).round(),
+                line_height: 135,
+                text: String::new(),
+                ui: String::new(),
+            }),
             highlighter: Highlighter::with_budget(Duration::from_millis(12)),
             theme: Theme::build("auto", &Default::default(), false),
             theme_key: None,
             modifiers: ModifiersState::default(),
             pointer: (0.0, 0.0),
             press: None,
+            thumb: None,
             scrolled: 0.0,
+            scrolls: std::collections::BTreeMap::new(),
             preedit: String::new(),
             ime: false,
             geometry: None,
             pending: false,
+            settled: true,
             caret: Glide::default(),
         }
     }
@@ -235,14 +347,20 @@ impl Gui {
             window.request_redraw();
         }
     }
-    /// The text size the options ask for, in pixels.
-    fn font_size(&self, runtime: &Runtime) -> f32 {
-        let points = runtime.app().options().int(None, "font-size") as f32;
-        (points * self.scale).round()
+    /// The fonts the options ask for.
+    fn settings(&self, runtime: &Runtime) -> text::Settings {
+        let options = runtime.app().options();
+        let points = options.int(None, "font-size") as f32;
+        text::Settings {
+            size: (points * self.scale).round(),
+            line_height: options.int(None, "line-height"),
+            text: options.text(None, "font").to_owned(),
+            ui: options.text(None, "ui-font").to_owned(),
+        }
     }
     fn areas(&mut self, runtime: &Runtime) -> Areas {
-        let size = self.font_size(runtime);
-        self.fonts.resize(size);
+        let settings = self.settings(runtime);
+        self.fonts.configure(settings);
         let (width, height) = self.renderer.size();
         Areas::new(runtime, &self.fonts, width as f32, height as f32)
     }
@@ -278,6 +396,9 @@ impl Gui {
         }
         // The gutter widens with the line count, so measure again.
         let areas = self.areas(runtime);
+        let now = std::time::Instant::now();
+        let shift = self.settle(runtime, &areas, now);
+        self.caret.shift(shift);
         self.highlighter.retain(runtime.app());
         let app = runtime.app();
         let key = (
@@ -289,6 +410,15 @@ impl Gui {
             self.theme = Theme::build(&key.0, app.faces(), false);
             self.theme_key = Some(key);
         }
+        let scrolls = &self.scrolls;
+        let motion = |view: ViewId| {
+            scrolls
+                .get(&view)
+                .map_or(paint::Motion::default(), |s| paint::Motion {
+                    scroll: s.at(now),
+                    bar: s.bar(now),
+                })
+        };
         let mut painter = Painter::new(&mut self.fonts, &mut self.renderer.atlas, &self.theme);
         let caret = paint::screen(
             &mut painter,
@@ -296,11 +426,12 @@ impl Gui {
             &areas,
             &mut self.highlighter,
             &self.preedit,
+            &motion,
         )
         .map_err(|e| e.to_string())?;
         // Text being composed stays put while the caret glides.
         let smooth = runtime.app().options().bool(None, "smooth-caret") && self.preedit.is_empty();
-        let (shown, gliding) = self.caret.place(caret, smooth, std::time::Instant::now());
+        let (shown, gliding) = self.caret.place(caret, smooth, now);
         if let (Some(at), Some((target, bar))) = (shown, caret) {
             // The caret line's band goes along, so the two never part.
             let shift = at.y - target.y;
@@ -325,7 +456,12 @@ impl Gui {
         let (background, instances) = (painter.bg, std::mem::take(&mut painter.out));
         self.renderer.draw(background, &instances);
         runtime.take_redraw();
-        self.pending = self.highlighter.take_pending() || self.renderer.atlas.cleared || gliding;
+        // Scrolls easing and scroll bars fading draw again too.
+        let moving = self.scrolls.values().any(|s| s.moving(now));
+        let fading = self.scrolls.values().any(|s| s.bar(now) > 0.0);
+        self.settled =
+            !(self.highlighter.take_pending() || self.renderer.atlas.cleared || gliding || moving);
+        self.pending = !self.settled || fading;
         self.renderer.atlas.cleared = false;
         // The input method's candidates open by the caret.
         if let (Some((rect, true)), Some(window)) = (caret, self.renderer.window()) {
@@ -336,11 +472,63 @@ impl Gui {
         }
         Ok(())
     }
+    /// Brings each window's scrolling up to its viewport: a viewport that
+    /// moved a few rows scrolls there smoothly; one that jumped further is
+    /// just there. Returns how far the active window's text moved down on
+    /// screen since the last frame, for the caret to go along.
+    fn settle(&mut self, runtime: &Runtime, areas: &Areas, now: std::time::Instant) -> f32 {
+        let smooth = runtime.app().options().bool(None, "smooth-scroll");
+        let line = self.fonts.line;
+        let active = runtime.app().active_view();
+        let mut shift = 0.0;
+        self.scrolls
+            .retain(|view, _| areas.windows.iter().any(|window| window.view == *view));
+        for window in &areas.windows {
+            let Some(view) = runtime.app().view(window.view) else {
+                continue;
+            };
+            let anchor = view.viewport.anchor.offset.0;
+            let scrolling = self
+                .scrolls
+                .entry(window.view)
+                .or_insert_with(|| Scrolling::new(anchor));
+            if scrolling.anchor != anchor {
+                let reach = usize::from(window.rows) * 3 + 8;
+                let measure = Measured::new(&mut self.fonts);
+                let rows = screen::rows_between(
+                    runtime,
+                    window.view,
+                    &measure,
+                    window.width(),
+                    (scrolling.anchor, anchor),
+                    reach,
+                );
+                match rows {
+                    Some(rows) => {
+                        scrolling.moved_by(anchor, rows as f32, line, 0.0, smooth, now);
+                    }
+                    // Too far to scroll through: the text is just there.
+                    None => {
+                        *scrolling = Scrolling::new(anchor);
+                        scrolling.moved = Some(now);
+                    }
+                }
+            }
+            let at = scrolling.at(now);
+            if Some(window.view) == active {
+                shift = scrolling.last - at;
+            }
+            scrolling.last = at;
+        }
+        shift
+    }
     /// The byte offset under the pointer in the active window's text.
     fn offset(&mut self, runtime: &Runtime, areas: &Areas) -> Option<usize> {
         let window = areas.active(runtime)?;
         let (x, y) = self.pointer;
-        let row = ((y - window.text.y) / self.fonts.line).floor() as isize;
+        let now = std::time::Instant::now();
+        let scroll = self.scrolls.get(&window.view).map_or(0.0, |s| s.at(now));
+        let row = ((y - window.text.y + scroll) / self.fonts.line).floor() as isize;
         let across = ((x - window.text.x).max(0.0) * UNIT) as usize;
         let width = window.width();
         let measure = Measured::new(&mut self.fonts);
@@ -354,7 +542,7 @@ impl Gui {
             return;
         }
         if areas.tabs.is_some_and(|tabs| tabs.contains(x, y)) {
-            let tab = paint::tab_items(runtime, &self.fonts, areas.editor.w)
+            let tab = paint::tab_items(runtime, &mut self.fonts, areas.editor.w)
                 .into_iter()
                 .find(|(_, rect, _)| x >= rect.x && x < rect.x + rect.w);
             if let Some((document, _, _)) = tab {
@@ -366,6 +554,14 @@ impl Gui {
             return;
         };
         let (view, header) = (window.view, window.header);
+        // A press on a showing scroll bar takes the thumb there.
+        let now = std::time::Instant::now();
+        let bar = self.scrolls.get(&view).map_or(0.0, |s| s.bar(now));
+        if bar > 0.0 && window.scroll_bar().contains(x, y) {
+            self.thumb = Some(view);
+            self.drag_thumb(runtime);
+            return;
+        }
         if runtime.app().active_view() != Some(view) {
             runtime.input(UserInput::Pointer(Pointer::Window(view)));
         }
@@ -378,7 +574,46 @@ impl Gui {
             runtime.input(UserInput::Pointer(Pointer::Click(offset)));
         }
     }
+    /// Scrolls the window whose scroll bar is held so that the thumb's
+    /// middle is under the pointer.
+    fn drag_thumb(&mut self, runtime: &mut Runtime) {
+        let Some(view) = self.thumb else {
+            return;
+        };
+        let areas = self.areas(runtime);
+        let Some(window) = areas.windows.iter().find(|w| w.view == view) else {
+            return;
+        };
+        let Some(line) = paint::line_at(runtime, window, self.pointer.1, self.fonts.line) else {
+            return;
+        };
+        let app = runtime.app();
+        let Some(document) = app.view(view) else {
+            return;
+        };
+        let horizontal = document.viewport.horizontal_scroll;
+        let Some(editor) = app.workspace().editor(document.document_id) else {
+            return;
+        };
+        let Some(start) = editor.model().document().snapshot().line_start(line) else {
+            return;
+        };
+        runtime.update_viewport(view, crate::core::ByteOffset(start), horizontal);
+        // The thumb follows the pointer at once.
+        let scrolling = self
+            .scrolls
+            .entry(view)
+            .or_insert_with(|| Scrolling::new(start));
+        *scrolling = Scrolling {
+            moved: Some(std::time::Instant::now()),
+            ..Scrolling::new(start)
+        };
+        self.redraw();
+    }
     fn drag(&mut self, runtime: &mut Runtime) {
+        if self.thumb.is_some() {
+            return self.drag_thumb(runtime);
+        }
         let Some(anchor) = self.press else {
             return;
         };
@@ -389,13 +624,19 @@ impl Gui {
             runtime.input(UserInput::Pointer(Pointer::Drag { anchor, head }));
         }
     }
-    /// Scrolls the popup, else the window under the pointer, by rows.
-    fn scroll(&mut self, runtime: &mut Runtime, rows: isize) {
-        if rows == 0 || runtime.layer().is_some() {
+    /// Scrolls the popup, else the window under the pointer, by `pixels`;
+    /// down when positive. A wheel's notches scroll whole rows, smoothly; a
+    /// touchpad scrolls by pixels, leaving part of a row scrolled.
+    fn scroll(&mut self, runtime: &mut Runtime, pixels: f32, precise: bool) {
+        if pixels == 0.0 || runtime.layer().is_some() {
             return;
         }
+        let line = self.fonts.line;
         if runtime.popup().is_some() {
-            runtime.scroll_popup(rows);
+            self.scrolled += pixels;
+            let rows = (self.scrolled / line).trunc();
+            self.scrolled -= rows * line;
+            runtime.scroll_popup(rows as isize);
             return;
         }
         let areas = self.areas(runtime);
@@ -404,18 +645,58 @@ impl Gui {
             return;
         };
         let (view, width, height) = (window.view, window.width(), window.rows);
-        let active = runtime.app().active_view() == Some(view);
-        let measure = Measured::new(&mut self.fonts);
-        let Some((viewport, reveal)) =
-            screen::scroll(runtime.app(), view, &measure, rows, width, height)
-        else {
+        let smooth = runtime.app().options().bool(None, "smooth-scroll");
+        let now = std::time::Instant::now();
+        let Some(before) = runtime.app().view(view).map(|v| v.viewport.anchor.offset.0) else {
             return;
         };
-        runtime.update_viewport(viewport.view, viewport.anchor, viewport.horizontal_scroll);
+        let scrolling = self
+            .scrolls
+            .entry(view)
+            .or_insert_with(|| Scrolling::new(before));
+        // Without smooth scrolling, or with a wheel, whole rows; a touchpad
+        // keeps the part of a row it scrolled as the rest.
+        let rest = if precise && smooth {
+            scrolling.to
+        } else {
+            self.scrolled
+        };
+        let total = rest + pixels;
+        let rows = (total / line).floor();
+        let rest = total - rows * line;
+        if !(precise && smooth) {
+            self.scrolled = if precise { rest } else { 0.0 };
+        }
+        let active = runtime.app().active_view() == Some(view);
+        let mut after = before;
+        let mut reveal = None;
+        if rows != 0.0 {
+            let measure = Measured::new(&mut self.fonts);
+            if let Some((viewport, back)) =
+                screen::scroll(runtime.app(), view, &measure, rows as isize, width, height)
+            {
+                runtime.update_viewport(viewport.view, viewport.anchor, viewport.horizontal_scroll);
+                after = viewport.anchor.0;
+                reveal = back;
+            }
+        }
+        let measure = Measured::new(&mut self.fonts);
+        let moved = screen::rows_between(runtime, view, &measure, width, (before, after), 1 << 20)
+            .unwrap_or(0) as f32;
+        let scrolling = self.scrolls.get_mut(&view).unwrap();
+        if precise && smooth {
+            // At either end the rest cannot go further.
+            let rest = if moved != rows { 0.0 } else { rest.max(0.0) };
+            let rest = if after == 0 && total < 0.0 { 0.0 } else { rest };
+            scrolling.moved_by(after, moved, line, rest, false, now);
+        } else if moved != 0.0 {
+            scrolling.moved_by(after, moved, line, 0.0, smooth, now);
+        }
         // Other windows keep their carets; focusing one later scrolls back.
         if let Some(offset) = reveal.filter(|_| active) {
             runtime.input(UserInput::Pointer(Pointer::Reveal(offset)));
         }
+        self.redraw();
     }
 }
 
@@ -491,18 +772,18 @@ impl ApplicationHandler for App {
                 ..
             } => match state {
                 ElementState::Pressed => gui.press(runtime),
-                ElementState::Released => gui.press = None,
+                ElementState::Released => {
+                    gui.press = None;
+                    gui.thumb = None;
+                }
             },
             WindowEvent::MouseWheel { delta, .. } => {
                 let step = runtime.app().options().int(None, "scroll-lines") as f32;
-                let pixels = match delta {
-                    MouseScrollDelta::LineDelta(_, lines) => lines * step * gui.fonts.line,
-                    MouseScrollDelta::PixelDelta(position) => position.y as f32,
+                let (pixels, precise) = match delta {
+                    MouseScrollDelta::LineDelta(_, lines) => (lines * step * gui.fonts.line, false),
+                    MouseScrollDelta::PixelDelta(position) => (position.y as f32, true),
                 };
-                gui.scrolled -= pixels;
-                let rows = (gui.scrolled / gui.fonts.line).trunc();
-                gui.scrolled -= rows * gui.fonts.line;
-                gui.scroll(runtime, rows as isize);
+                gui.scroll(runtime, -pixels, precise);
             }
             WindowEvent::RedrawRequested => {
                 if let Err(error) = gui.draw(runtime) {
@@ -547,7 +828,7 @@ impl ApplicationHandler for App {
 
 #[cfg(test)]
 mod tests {
-    use super::{GLIDE, Glide, paint::Rect};
+    use super::{BAR, FADE, GLIDE, Glide, SCROLL, Scrolling, paint::Rect};
     use std::time::{Duration, Instant};
 
     fn rect(x: f32) -> Rect {
@@ -595,5 +876,28 @@ mod tests {
             (Some(rect(50.0)), false)
         );
         assert_eq!(glide.place(None, true, now), (None, false));
+    }
+    #[test]
+    fn a_moved_viewport_keeps_the_text_in_place_then_eases_to_rest() {
+        let start = Instant::now();
+        let mut scrolling = Scrolling::new(0);
+        assert_eq!(scrolling.at(start), 0.0);
+        assert_eq!(scrolling.bar(start), 0.0);
+        // Two rows down: at first the text is where it was, two rows
+        // further down than the new anchor puts it; then it settles.
+        scrolling.moved_by(10, 2.0, 20.0, 0.0, true, start);
+        assert_eq!(scrolling.at(start), -40.0);
+        assert_eq!(scrolling.last, -40.0);
+        let half = scrolling.at(start + SCROLL / 2);
+        assert!(half > -20.0 && half < 0.0, "{half}");
+        assert_eq!(scrolling.at(start + SCROLL), 0.0);
+        assert!(scrolling.moving(start) && !scrolling.moving(start + SCROLL));
+        // The scroll bar shows, then fades.
+        assert_eq!(scrolling.bar(start + BAR), 1.0);
+        assert_eq!(scrolling.bar(start + BAR + FADE), 0.0);
+        // A touchpad's part of a row rests without easing.
+        scrolling.moved_by(20, 1.0, 20.0, 7.0, false, start);
+        assert_eq!(scrolling.at(start), 7.0);
+        assert!(!scrolling.moving(start));
     }
 }

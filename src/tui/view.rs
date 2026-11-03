@@ -245,7 +245,7 @@ pub(super) fn frames(
         .iter()
         .map(|window| {
             let (width, rows) = (window.text.width.into(), window.text.height);
-            screen::text(runtime, window.view, highlighter, &Cells, width, rows)
+            screen::text(runtime, window.view, highlighter, &Cells, width, 0, rows)
         })
         .collect()
 }

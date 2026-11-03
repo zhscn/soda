@@ -61,6 +61,10 @@ pub const UI_FACES: &[(&str, &str)] = &[
     ("detail", "Candidate details"),
     ("whitespace", "Tab and trailing space marks"),
     ("ruler", "The ruler column"),
+    (
+        "scrollbar",
+        "The scroll bar of the graphical frontend; its background colors the thumb",
+    ),
     ("key", "Keys in hints"),
     ("label", "Jump labels"),
     ("todo", "The todo highlight"),

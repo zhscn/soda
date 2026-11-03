@@ -36,6 +36,7 @@ pub(crate) fn text(
     highlighter: &mut Highlighter,
     measure: &dyn Measure,
     width: usize,
+    first: isize,
     rows: u16,
 ) -> Result<Option<TextFrame>, crate::application::Error> {
     let overlay = if runtime.app().active_view() == Some(view) {
@@ -59,9 +60,23 @@ pub(crate) fn text(
         highlighter,
         measure,
         width,
+        first,
         rows,
         &overlay,
     )
+}
+/// Rows from the viewport anchor `from` to `to` of a view, negative when
+/// `to` is above; none when more than `limit` rows apart.
+#[cfg(feature = "gui")]
+pub(crate) fn rows_between(
+    runtime: &Runtime,
+    view: ViewId,
+    measure: &dyn Measure,
+    width: usize,
+    (from, to): (usize, usize),
+    limit: usize,
+) -> Option<isize> {
+    layout::rows_between(runtime.app(), view, measure, width, from, to, limit)
 }
 /// Scrolls a view so that its caret shows in an area `width` across and
 /// `rows` down.

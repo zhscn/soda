@@ -12,7 +12,11 @@ pub struct Instance {
     pub color: [f32; 4],
     /// Kind, corner radius, line thickness.
     pub params: [f32; 4],
+    /// Left, top, right and bottom of where it may show.
+    pub clip: [f32; 4],
 }
+/// No clipping.
+pub const UNCLIPPED: [f32; 4] = [f32::MIN, f32::MIN, f32::MAX, f32::MAX];
 pub const RECT: f32 = 0.0;
 pub const MASK: f32 = 1.0;
 pub const COLOR: f32 = 2.0;
@@ -261,7 +265,7 @@ impl Renderer {
             immediate_size: 0,
         });
         let attributes = wgpu::vertex_attr_array![
-            0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4
+            0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4, 4 => Float32x4
         ];
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("soda"),

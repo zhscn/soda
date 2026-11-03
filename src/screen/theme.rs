@@ -51,6 +51,8 @@ pub(crate) struct Theme {
     /// Tab and trailing space marks.
     pub whitespace: Style,
     pub ruler: Style,
+    /// The thumb of a window's scroll bar, where one is drawn.
+    pub scrollbar: Style,
     syntax: [Style; CATEGORIES],
     pub key: Style,
     /// Jump labels over the text.
@@ -218,6 +220,7 @@ impl Theme {
             "detail" => &mut self.detail,
             "whitespace" => &mut self.whitespace,
             "ruler" => &mut self.ruler,
+            "scrollbar" => &mut self.scrollbar,
             "key" => &mut self.key,
             "label" => &mut self.label,
             "todo" => &mut self.todo,
@@ -272,6 +275,7 @@ impl Theme {
             whitespace: Style::new().fg(c(p.gutter)),
             // Darker than the text and the caret line, so it shows on both.
             ruler: Style::new().bg(c(p.bg_dark)),
+            scrollbar: Style::new().bg(c(p.comment)),
             syntax: {
                 let fg = |rgb: u32| Style::new().fg(c(rgb));
                 let italic = Modifier::ITALIC;
