@@ -1,10 +1,12 @@
 # Soda
 
-Soda 是用 Rust 实现的终端编辑器，核心体验是 CLion 式的 C++ 即时缩进：回车时根据增量维护的语法结构和项目的 `.clang-format` 计算新行缩进，并正确处理 tab 与 space 混排。编辑采用 meow 式的选择优先模型，Insert 和输入框支持 readline 键。
+Soda 是用 Rust 实现的编辑器，有终端和图形两个前端，核心体验是 CLion 式的 C++ 即时缩进：回车时根据增量维护的语法结构和项目的 `.clang-format` 计算新行缩进，并正确处理 tab 与 space 混排。编辑采用 meow 式的选择优先模型，Insert 和输入框支持 readline 键。
 
 ```sh
 cargo run --release -- [--no-config] [FILE]
 cargo run -- --help        # 默认键位与命令
+# 图形前端（winit + wgpu），单独的程序 soda-gui
+cargo run --release --features gui --bin soda-gui -- [--no-config] [FILE]
 ```
 
 编辑区按 `F1` 查看当前键位与命令，`<space>:` 打开命令面板，`:` 打开命令行。启动时运行 `~/.config/soda/init.lua`（或 `$XDG_CONFIG_HOME/soda/init.lua`）：
@@ -23,7 +25,7 @@ soda.set("line-numbers", "relative")
 - [编辑命令](docs/commands.md)、[文件服务](docs/files.md)
 - [交互缩进设计与契约](docs/indentation.md)、[clang-format 配置](docs/clang-format.md)
 - [交互层：键位、命令与配置](docs/interaction.md)、[扩展模型：选项、展开与钩子](docs/extension.md)
-- [终端界面](docs/ui.md)
+- [终端界面](docs/ui.md)、[图形界面](docs/gui.md)
 - [语法高亮与导航](docs/syntax.md)
 
 ## 构建与验证

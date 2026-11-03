@@ -16,6 +16,9 @@ pub mod files;
 
 pub mod application;
 
+pub(crate) mod clipboard;
+#[cfg(feature = "gui")]
+pub mod gui;
 pub mod host;
 pub mod screen;
 pub mod tui;

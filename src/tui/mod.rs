@@ -1,9 +1,8 @@
 //! Terminal frontend: owns the terminal, turns its events into input, and
 //! draws the screen in cells, with the text laid out by `screen`. Runtime
 //! owns command execution, interaction state and task scheduling.
-mod clipboard;
 mod color;
-mod input;
+pub(crate) mod input;
 mod mouse;
 mod view;
 use crate::{host, interaction::EditMode, runtime::Runtime};
@@ -211,7 +210,11 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
     let mut screen = Terminal::enter()?;
     let mut terminal =
         ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(io::stdout()))?;
-    let mut runtime = host::start(path, config, Box::new(clipboard::Clipboard::detect()))?;
+    let mut runtime = host::start(
+        path,
+        config,
+        Box::new(crate::clipboard::Clipboard::terminal()),
+    )?;
     let mut presenter = Presenter::new(color::light_background());
     let truecolor = color::truecolor();
     let outcome = host::guard(|| {

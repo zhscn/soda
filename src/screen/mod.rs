@@ -16,6 +16,8 @@ mod results;
 mod theme;
 
 pub(crate) use highlight::Highlighter;
+#[cfg(feature = "gui")]
+pub(crate) use layout::text_width;
 pub use layout::{Cells, Font, Measure};
 pub(crate) use layout::{
     Frame as TextFrame, Overlay, Span, candidate_row, offset_at, padded, plain, position_of,

@@ -198,6 +198,18 @@ pub const OPTIONS: &[OptionInfo] = &[
         doc: "Colors: dark, light, or auto to follow the terminal's background",
     },
     OptionInfo {
+        name: "font-size",
+        kind: Kind::Int { min: 6, max: 72 },
+        default: Value::Int(14),
+        doc: "Size of the text in the graphical frontend, in points",
+    },
+    OptionInfo {
+        name: "smooth-caret",
+        kind: Kind::Bool,
+        default: Value::Bool(true),
+        doc: "Glide the caret to where it moves in the graphical frontend",
+    },
+    OptionInfo {
         name: "mouse",
         kind: Kind::Bool,
         default: Value::Bool(true),

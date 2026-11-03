@@ -4,7 +4,7 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 /// The character Shift gives on a US keyboard. With Control or Alt the
 /// kitty protocol reports the unshifted key: `,` and Shift for `<`.
-fn shifted(ch: char) -> char {
+pub(crate) fn shifted(ch: char) -> char {
     const PAIRS: [(char, char); 21] = [
         ('1', '!'),
         ('2', '@'),

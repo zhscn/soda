@@ -7,6 +7,47 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// What a frontend was started with: `[--no-config] [FILE | DIRECTORY]`.
+pub struct Args {
+    pub path: Option<PathBuf>,
+    /// Whether to run `init.lua`.
+    pub config: bool,
+}
+impl Args {
+    /// Reads the process's arguments. `--help` and `--version` print and
+    /// end the process, as do arguments it does not take.
+    pub fn parse(program: &str) -> Self {
+        let mut args: Vec<_> = std::env::args_os().skip(1).collect();
+        let config = match args.iter().position(|arg| arg == "--no-config") {
+            Some(index) => {
+                args.remove(index);
+                false
+            }
+            None => true,
+        };
+        let path = match args.as_slice() {
+            [] => None,
+            [arg] if arg == "--version" => {
+                println!("{program} {}", env!("CARGO_PKG_VERSION"));
+                std::process::exit(0);
+            }
+            [arg] if arg == "--help" || arg == "-h" => {
+                println!(
+                    "Usage: {program} [--no-config] [FILE | DIRECTORY]\n\n{}",
+                    crate::interaction::help::default_text()
+                );
+                std::process::exit(0);
+            }
+            [arg] if !arg.to_string_lossy().starts_with('-') => Some(PathBuf::from(arg)),
+            _ => {
+                eprintln!("Unsupported arguments. Run {program} --help.");
+                std::process::exit(2);
+            }
+        };
+        Self { path, config }
+    }
+}
+
 /// `$XDG_CONFIG_HOME/soda/init.lua`, falling back to
 /// `~/.config/soda/init.lua`.
 pub fn config_path() -> Option<PathBuf> {

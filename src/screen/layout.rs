@@ -137,6 +137,9 @@ pub(crate) struct Span {
     pub face: Option<crate::application::Face>,
     /// An inlay hint, which is not in the text.
     pub inlay: bool,
+    /// The font it was measured in; a terminal has only one.
+    #[cfg_attr(not(feature = "gui"), allow(dead_code))]
+    pub font: Font,
 }
 /// One screen row: the zero-based line it shows and its clipped text.
 pub(crate) struct Row {
@@ -328,6 +331,7 @@ fn styled_row(
                 whitespace: false,
                 face: inlay.face,
                 inlay: inlay.face.is_none(),
+                font: inlay.font,
             });
             *at += used;
             *filled = false;
@@ -414,6 +418,7 @@ fn styled_row(
                     whitespace: marked,
                     face,
                     inlay: false,
+                    font: Font::Text,
                 });
                 filled = fills;
             }

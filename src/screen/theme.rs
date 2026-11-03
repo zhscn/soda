@@ -142,6 +142,32 @@ impl Theme {
             .collect();
         theme
     }
+    /// The style of a span of laid out text over `base`.
+    pub fn span(&self, span: &super::Span, base: Style) -> Style {
+        let mut style = base;
+        if span.selected {
+            style = style.patch(self.selection);
+        }
+        if let Some(category) = span.category {
+            style = style.patch(self.category(category));
+        }
+        if span.detail {
+            style = style.patch(self.detail);
+        }
+        if span.matched {
+            style = style.patch(self.matched);
+        }
+        if span.whitespace {
+            style = style.patch(self.whitespace);
+        }
+        if let Some(face) = span.face {
+            style = style.patch(self.face(face));
+        }
+        if span.inlay {
+            style = style.patch(self.inlay);
+        }
+        style
+    }
     /// The style a face name stands for.
     fn slot(&mut self, name: &str) -> Option<&mut Style> {
         if let Some(category) = name.strip_prefix("syntax.") {

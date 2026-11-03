@@ -3,6 +3,15 @@ name = "soda"
 version = "0.1.0"
 edition = "2024"
 publish = false
+default-run = "soda"
+
+[[bin]]
+name = "soda-gui"
+required-features = ["gui"]
+
+[[example]]
+name = "gui_snapshot"
+required-features = ["gui"]
 
 [dependencies]
 crossterm = { version = "0.29", default-features = false, features = ["events", "bracketed-paste"] }
@@ -20,3 +29,12 @@ signal-hook = { version = "0.3", default-features = false }
 tempfile = "3"
 unicode-segmentation = "1"
 unicode-width = "0.2"
+bytemuck = { version = "1", features = ["derive"], optional = true }
+cosmic-text = { version = "0.19", optional = true }
+pollster = { version = "0.4", optional = true }
+wgpu = { version = "30", optional = true }
+winit = { version = "0.30.13", optional = true }
+
+[features]
+# The graphical frontend, the `soda-gui` program.
+gui = ["dep:bytemuck", "dep:cosmic-text", "dep:pollster", "dep:wgpu", "dep:winit"]

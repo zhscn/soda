@@ -560,28 +560,7 @@ fn labels(
 fn spans(buf: &mut Buffer, x: u16, y: u16, width: u16, spans: &[Span], base: Style, theme: &Theme) {
     let right = x.saturating_add(width);
     for span in spans {
-        let mut style = base;
-        if span.selected {
-            style = style.patch(theme.selection);
-        }
-        if let Some(category) = span.category {
-            style = style.patch(theme.category(category));
-        }
-        if span.detail {
-            style = style.patch(theme.detail);
-        }
-        if span.matched {
-            style = style.patch(theme.matched);
-        }
-        if span.whitespace {
-            style = style.patch(theme.whitespace);
-        }
-        if let Some(face) = span.face {
-            style = style.patch(theme.face(face));
-        }
-        if span.inlay {
-            style = style.patch(theme.inlay);
-        }
+        let style = theme.span(span, base);
         let start = u16::try_from(span.x).map_or(right, |at| x.saturating_add(at));
         if start >= right {
             break;

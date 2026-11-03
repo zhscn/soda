@@ -1,6 +1,7 @@
 //! System clipboard access. A local graphical session uses its clipboard
-//! tools, which can also be read; otherwise, and over SSH, copies go to the
-//! terminal as OSC 52, which most terminals accept but few let programs read.
+//! tools, which can also be read; otherwise, and over SSH, copies from a
+//! terminal go to it as OSC 52, which most terminals accept but few let
+//! programs read. A window without the tools keeps copies inside.
 use crate::runtime::SystemClipboard;
 use std::{
     io::{Read, Write},
@@ -9,15 +10,25 @@ use std::{
     time::Duration,
 };
 
-pub(super) enum Clipboard {
+pub(crate) enum Clipboard {
     Tools {
         copy: &'static [&'static str],
         paste: &'static [&'static str],
     },
     Osc52,
+    /// Nothing to reach the system clipboard with.
+    Internal,
 }
 impl Clipboard {
-    pub fn detect() -> Self {
+    /// The clipboard of a terminal frontend: the tools, or OSC 52.
+    pub fn terminal() -> Self {
+        match Self::local() {
+            Self::Internal => Self::Osc52,
+            tools => tools,
+        }
+    }
+    /// The clipboard tools of the graphical session the process runs in.
+    pub fn local() -> Self {
         let set = |name| std::env::var_os(name).is_some_and(|value| !value.is_empty());
         let tools: &[(bool, &[&str], &[&str])] = &[
             (
@@ -41,7 +52,7 @@ impl Clipboard {
                 }
             }
         }
-        Self::Osc52
+        Self::Internal
     }
 }
 impl SystemClipboard for Clipboard {
@@ -74,6 +85,7 @@ impl SystemClipboard for Clipboard {
                 let _ = write!(out, "\x1b]52;c;{}\x07", base64(text.as_bytes()));
                 let _ = out.flush();
             }
+            Self::Internal => {}
         }
     }
     fn load(&mut self) -> Option<String> {
