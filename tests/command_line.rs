@@ -430,3 +430,14 @@ fn a_typed_decision_leaves_room_for_its_path_and_a_question_takes_one_key() {
     keys(&mut r, "d");
     assert!(r.quit_requested(), "{}", r.message());
 }
+#[test]
+fn every_key_context_is_offered_for_map() {
+    let root = tempfile::tempdir().unwrap();
+    let mut r = runtime(root.path());
+    r.command(Command::Ex("map tr".into()));
+    let rows = rows(&r);
+    assert_eq!(rows.len(), 1);
+    assert!(rows[0].starts_with("tree "), "{rows:?}");
+    keys(&mut r, "<tab>");
+    assert_eq!(text(&r), "map tree ");
+}

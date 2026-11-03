@@ -63,7 +63,7 @@ pub struct Choice {
     pub key: Option<char>,
     pub doc: &'static str,
 }
-const fn word(word: &'static str, doc: &'static str) -> Choice {
+pub(super) const fn word(word: &'static str, doc: &'static str) -> Choice {
     Choice {
         word,
         key: None,
@@ -90,19 +90,7 @@ const OPTIONAL_PATH: Slot = Slot {
     required: false,
     ..PATH
 };
-const MODE: Slot = slot(
-    "MODE",
-    SlotKind::Choice(&[
-        word("global", "Keys of every mode, and of the keypad"),
-        word("normal", "Normal mode keys"),
-        word("beacon", "Beacon keys, over Normal's"),
-        word("insert", "Insert mode keys"),
-        word("completion", "Keys while the completion list shows"),
-        word("snippet", "Keys while a snippet has places left"),
-        word("mark", "Keys with the caret on a marked symbol"),
-        word("prompt", "Command line and prompt keys"),
-    ]),
-);
+const MODE: Slot = slot("MODE", SlotKind::Choice(&super::Context::CHOICES));
 /// How to leave a document with unsaved changes: `save [PATH]` or `discard`.
 const DEPARTURE: &[Slot] = &[
     Slot {

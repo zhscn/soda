@@ -2,7 +2,7 @@
 //! registry; user bindings shadow them and unbinding restores the default.
 use super::{
     Command, EditMode, Input, InputKey, InputMotion, Key, KeyStroke, picker::ListMotion,
-    registry::Registry,
+    registry::{Choice, Registry, word},
 };
 use crate::{
     application::ClipboardAction,
@@ -39,21 +39,30 @@ impl Context {
         Self::Tree,
         Self::Prompt,
     ];
+    /// Each context's name and what its keys are for, in the order of
+    /// `ALL`; `map` offers them.
+    pub(super) const CHOICES: [Choice; 9] = [
+        word("global", "Keys of every mode, and of the keypad"),
+        word("normal", "Normal mode keys"),
+        word("beacon", "Beacon keys, over Normal's"),
+        word("insert", "Insert mode keys"),
+        word("completion", "Keys while the completion list shows"),
+        word("snippet", "Keys while a snippet has places left"),
+        word("mark", "Keys with the caret on a marked symbol"),
+        word("tree", "Keys in a document that shows a tree"),
+        word("prompt", "Command line and prompt keys"),
+    ];
     pub fn name(self) -> &'static str {
-        match self {
-            Self::Global => "global",
-            Self::Normal => "normal",
-            Self::Beacon => "beacon",
-            Self::Insert => "insert",
-            Self::Completion => "completion",
-            Self::Snippet => "snippet",
-            Self::Mark => "mark",
-            Self::Tree => "tree",
-            Self::Prompt => "prompt",
-        }
+        Self::CHOICES[self as usize].word
     }
     pub fn parse(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|context| context.name() == name)
+    }
+}
+#[test]
+fn every_context_has_its_choice_in_order() {
+    for (index, context) in Context::ALL.into_iter().enumerate() {
+        assert_eq!(context as usize, index);
     }
 }
 impl From<EditMode> for Context {
