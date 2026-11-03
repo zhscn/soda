@@ -27,6 +27,7 @@ rust-analyzer 默认不开，因为它会运行项目的构建脚本，打开一
 | --- | --- | --- |
 | `<a-.>` | `lsp-definition` | 到定义，有多处时列出；`<a-,>` 回来 |
 | | `lsp-declaration` / `lsp-type-definition` | 到声明 / 到类型的定义 |
+| `SPC .` | `lsp-implementation` | 到实现：虚函数的覆盖、抽象类的派生类等，有多处时列出 |
 | `<a-?>` | `lsp-references` | 列出引用 |
 | `SPC h` | `lsp-switch` | 在头文件和源文件之间切换，clangd 的扩展 |
 | `SPC s` | `lsp-symbols` | 从当前文档的符号大纲里选一个跳过去 |

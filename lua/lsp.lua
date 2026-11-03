@@ -10,7 +10,7 @@
 -- back. Under the leader (SPC, which is <c-c>): k shows what the caret is on
 -- in a box until the next key; c and C list the callers and the callees; R
 -- renames and a offers code actions; s and S find symbols; h switches header
--- and source.
+-- and source; . goes to the implementations.
 -- Completion follows from the server being there.
 
 soda.lsp.server("cpp", { "clangd", "--function-arg-placeholders=1" })
@@ -98,6 +98,7 @@ local providers = {
   ["textDocument/definition"] = "definitionProvider",
   ["textDocument/declaration"] = "declarationProvider",
   ["textDocument/typeDefinition"] = "typeDefinitionProvider",
+  ["textDocument/implementation"] = "implementationProvider",
   ["textDocument/references"] = "referencesProvider",
   ["textDocument/hover"] = "hoverProvider",
   ["textDocument/rename"] = "renameProvider",
@@ -233,6 +234,7 @@ end
 go_to("lsp-definition", "textDocument/definition", "definition")
 go_to("lsp-declaration", "textDocument/declaration", "declaration")
 go_to("lsp-type-definition", "textDocument/typeDefinition", "type definition")
+go_to("lsp-implementation", "textDocument/implementation", "implementation")
 
 soda.define_command("lsp-references", "List references to the symbol", function()
   ask("textDocument/references", { context = { includeDeclaration = true } }, function(result)
@@ -1326,6 +1328,7 @@ soda.completion.register({
 
 soda.map("normal", "<a-.>", "lsp-definition")
 soda.map("normal", "<a-?>", "lsp-references")
+soda.map("global", "<c-c>.", "lsp-implementation")
 soda.map("global", "<c-c>k", "lsp-hover")
 soda.map("global", "<c-c>c", "lsp-callers")
 soda.map("global", "<c-c>C", "lsp-callees")

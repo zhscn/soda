@@ -861,3 +861,10 @@ fn ccls_hierarchies_open_level_by_level_and_skipped_branches_are_dim() {
         std::fs::read_to_string(&log).is_ok_and(|l| l.contains("reload"))
     });
 }
+#[test]
+fn implementations_are_listed_when_there_are_several() {
+    let Some(mut f) = open("one\ntwo\n") else { return };
+    keys(&mut f.r, "<c-c>.");
+    wait(&mut f.r, |r| text(r).contains("a.cpp"));
+    assert_eq!(text(&f.r), "a.cpp\n  1:2  one\n  2:1  two\n");
+}
