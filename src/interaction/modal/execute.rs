@@ -330,7 +330,6 @@ impl Layers {
                 response.events.push(at.caret());
                 response.events.push(at.clipboard(ClipboardAction::Paste));
             }
-            Action::Replace => response.events.push(at.clipboard(ClipboardAction::Paste)),
             Action::Join => return self.join(&at, response),
             Action::Search => return self.search(&at, negative, count, response),
             Action::PopSearch => {

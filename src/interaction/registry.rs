@@ -741,11 +741,6 @@ pub static BUILTINS: &[Builtin] = &[
     ),
     builtin!("normal-mode", "Leave Insert", modal(Action::Leave)),
     builtin!(
-        "insert-mode",
-        "Insert before the cursor",
-        modal(Action::Insert(InsertAt::Before))
-    ),
-    builtin!(
         "left",
         "Move left, keeping a character selection",
         modal(step(Step::Left, false))
@@ -915,11 +910,6 @@ pub static BUILTINS: &[Builtin] = &[
         "put",
         "Paste at the caret, leaving the selection in place",
         modal(Action::Yank)
-    ),
-    builtin!(
-        "replace-selection",
-        "Paste over the selection",
-        modal(Action::Replace)
     ),
     builtin!(
         "join",

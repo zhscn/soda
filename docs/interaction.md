@@ -83,7 +83,7 @@
 | `y` | `save` | 报告 No selection | 复制，然后取消选区，光标留在原处（同 Emacs 的 `kill-ring-save`） |
 | `p` | `put` | 粘贴 | 收起选区后粘贴，不替换 |
 
-`replace-selection` 用剪贴板替换选区，没有默认键。查找失败时选区不变并报告。`u` 撤销后恢复修改前的选区。每次选择都把旧选区记入历史，供 `z`、`Z` 退回。`;` 交换两端后，`e`、数字、`n` 都跟随新方向。
+查找失败时选区不变并报告。`u` 撤销后恢复修改前的选区。每次选择都把旧选区记入历史，供 `z`、`Z` 退回。`;` 交换两端后，`e`、数字、`n` 都跟随新方向。
 
 `n` 取下一个匹配：选区不是当前搜索的匹配时，先把选中文本设为新的搜索。选区反向时反向走，到头绕回。`N` 丢弃当前搜索，退回上一个。`v`（`visit SYMBOL`）在命令行中补全当前文档的符号，按模糊匹配排序，同分时离光标近的在前；确认后从光标往后选中下一处并设为当前搜索。选的是文档中的符号时按整个符号找（`add` 不匹配 `add_x`），否则按字面文字找。`C-s`、`C-r` 打开带实时预览的搜索（见[搜索与替换](#搜索与替换)）。跳转后行尾显示 `[i/N]`，下一个键清除。
 
@@ -327,7 +327,7 @@ end)
 | `echo [TEXT]` | 在消息行显示文字，常与 `%val{}` 合用 |
 | `commands`、`help`、`suspend`、`nop` | 命令面板、帮助、挂起、什么也不做（屏蔽默认键） |
 | `undo` / `redo`、`copy` / `cut` / `paste` / `yank-pop` | 历史与剪贴板 |
-| `move-up` / `move-down`、`document-start` / `document-end`、`select-all`、`normal-mode` / `insert-mode` | 移动、全选、切换模式；`extend-` 前缀扩展选区 |
+| `move-up` / `move-down`、`document-start` / `document-end`、`select-all`、`normal-mode` | 移动、全选、切换模式；`extend-` 前缀扩展选区 |
 | `indent` / `outdent`、`insert-tab` / `insert-literal-tab`、`newline` | 缩进、Tab、语言感知换行 |
 
 Normal 的模态命令（`left`、`next-word`、`block`、`kill`、`put`、`grab`、`expand N`、`keypad START` 等）对应 [Normal 键](#normal-键)。相对路径以当前文档的目录解析，支持 `~/`。

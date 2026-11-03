@@ -105,8 +105,6 @@ pub enum Action {
     Delete,
     Save,
     Yank,
-    /// Puts the clipboard in place of the selection.
-    Replace,
     Join,
     /// `n`: the next match of the search, or of the selection.
     Search,
