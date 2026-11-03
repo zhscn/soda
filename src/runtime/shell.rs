@@ -87,6 +87,7 @@ impl ShellRunner {
             .name("soda-shell".into())
             .spawn(move || {
                 let _ = send.send(execute(child, input));
+                crate::wake::wake();
             })
             .map_err(|_| "cannot start a shell thread")?;
         self.running = Some(Running {

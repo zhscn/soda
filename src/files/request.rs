@@ -49,7 +49,9 @@ impl FileRoute {
             .filter(|owner| owner.load(Ordering::Acquire))
     }
     fn send(&self, event: FileEvent) -> Result<(), SendError<FileEvent>> {
-        self.sender.send(event)
+        let sent = self.sender.send(event);
+        crate::wake::wake();
+        sent
     }
 }
 pub(super) enum FileEvent {

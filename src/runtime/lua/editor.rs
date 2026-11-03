@@ -370,6 +370,7 @@ pub(super) fn register<'scope, 'r: 'scope>(
                 std::thread::spawn(move || {
                     let job = super::spawn(id, spawn, &sender, view, &children);
                     let _ = sender.send((super::Message::Done(job), view));
+                    crate::wake::wake();
                 });
                 Ok(id)
             },

@@ -500,8 +500,10 @@ impl Lsp {
                 {
                     return;
                 }
+                crate::wake::wake();
             }
             let _ = incoming.send(Incoming::Closed(name));
+            crate::wake::wake();
         });
         let _ = writer.send(Outgoing::Message(initialize(root, &server.init)));
         self.clients.insert(
@@ -522,6 +524,15 @@ impl Lsp {
     }
     /// Starts servers and tells them about documents. With `now`, sends
     /// edits that are still settling. Returns an error to show, if any.
+    /// When an edited document is next due to go to its server.
+    pub fn next_change(&self) -> Option<Instant> {
+        self.clients
+            .values()
+            .flat_map(|client| client.opened.values())
+            .filter_map(|opened| opened.edited)
+            .map(|edited| edited + SETTLE)
+            .min()
+    }
     pub fn sync(&mut self, app: &Application, now: bool) -> Option<String> {
         if !self.enabled {
             return None;

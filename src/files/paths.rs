@@ -108,7 +108,10 @@ impl PathRunner {
                             break;
                         }
                         match sender.try_send(completion) {
-                            Ok(()) => break,
+                            Ok(()) => {
+                                crate::wake::wake();
+                                break;
+                            }
                             Err(mpsc::TrySendError::Full(value)) => {
                                 completion = value;
                                 thread::park_timeout(std::time::Duration::from_millis(2));

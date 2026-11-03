@@ -27,3 +27,4 @@ pub mod interaction;
 
 pub mod runtime;
 pub mod syntax;
+pub(crate) mod wake;

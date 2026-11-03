@@ -314,6 +314,10 @@ pub(super) struct Host {
 /// instruction count check fails, so a `pcall` cannot keep it going.
 const LUA_LIMIT: std::time::Duration = std::time::Duration::from_secs(3);
 impl Host {
+    /// When the next `soda.defer` timer is due.
+    pub(super) fn next_timer(&self) -> Option<std::time::Instant> {
+        self.timers.borrow().iter().map(|(at, ..)| *at).min()
+    }
     fn new() -> mlua::Result<Self> {
         let lua = Lua::new();
         let deadline = std::rc::Rc::new(Cell::new(None::<std::time::Instant>));
@@ -394,6 +398,7 @@ impl Host {
             lua.create_function(move |_, (_, items): (Table, Vec<Table>)| {
                 let items = items.iter().map(item).collect::<mlua::Result<_>>()?;
                 let _ = sender.send(answer(items, false));
+                crate::wake::wake();
                 Ok(())
             })?,
         )?;
@@ -405,6 +410,7 @@ impl Host {
                     o.get::<Option<bool>>("incomplete").ok().flatten() == Some(true)
                 });
                 let _ = sender.send(answer(vec![], incomplete));
+                crate::wake::wake();
                 Ok(())
             })?,
         )?;
@@ -427,6 +433,7 @@ impl Host {
                 detail: field("detail")?,
                 doc: field("doc")?,
             });
+            crate::wake::wake();
             Ok(())
         })?;
         self.callbacks()?
@@ -751,6 +758,7 @@ fn spawn(
                         let text = String::from_utf8_lossy(&line);
                         let text = text.trim_end_matches(['\n', '\r']).to_owned();
                         let _ = sender.send((Message::Line { function, text }, view));
+                        crate::wake::wake();
                         line.clear();
                     }
                 }
@@ -950,6 +958,12 @@ impl Runtime {
     pub(super) fn poll_lsp(&mut self) {
         let failure = self.lsp.sync(&self.app, false);
         let (deliveries, closed) = self.lsp.poll();
+        // A server that went away starts again at the next sync; nothing
+        // else may come to make one.
+        let failure = match closed.is_some() {
+            true => failure.or(self.lsp.sync(&self.app, false)),
+            false => failure,
+        };
         if let Some(error) = failure.or(closed) {
             self.report(error);
         }

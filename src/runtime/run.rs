@@ -65,10 +65,12 @@ impl RunRunner {
                         let text = String::from_utf8_lossy(&line);
                         let text = text.trim_end_matches(['\n', '\r']).to_owned();
                         let _ = send.send(Message::Line(text));
+                        crate::wake::wake();
                     } else if count == LINE_LIMIT + 1 {
                         let _ = send.send(Message::Line(format!(
                             "[output after {LINE_LIMIT} lines dropped]"
                         )));
+                        crate::wake::wake();
                     }
                     line.clear();
                 }
@@ -77,6 +79,7 @@ impl RunRunner {
                     Err(error) => error.to_string(),
                 };
                 let _ = send.send(Message::Exit(exit));
+                crate::wake::wake();
             })
             .map_err(|_| "cannot start a run thread")?;
         self.running = Some(Running {

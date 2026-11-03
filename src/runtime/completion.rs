@@ -27,6 +27,7 @@ impl Completions {
             let mut items = files(&request);
             items.extend(words(&request));
             let _ = sender.send(items);
+            crate::wake::wake();
         });
     }
     pub fn poll(&mut self) -> Option<(u64, Vec<Item>)> {

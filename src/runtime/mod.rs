@@ -102,6 +102,8 @@ pub struct Runtime {
     dirty: bool,
     /// When the digits that extend a selection go away.
     hints_until: Option<Duration>,
+    /// `poll` left results waiting, to take in a moment.
+    busy: bool,
     /// Text in a box by the caret, until the next input.
     /// Words for the message row while it has no message, until replaced.
     hint: Option<String>,
@@ -171,6 +173,7 @@ impl Runtime {
             lua_running: false,
             dirty: true,
             hints_until: None,
+            busy: false,
             hint: None,
             status: vec![],
             popup: None,
@@ -1002,7 +1005,27 @@ impl Runtime {
         self.dirty = true;
     }
     /// Bounded completion reduction prevents workers from monopolizing input.
+    /// When `poll` next has work that nothing will wake it for: results
+    /// it left waiting, the idle hook, a Lua timer, an edit due to go to
+    /// a language server, key hints to take down. None: only input or a
+    /// wake (see `crate::wake`) brings work.
+    pub fn deadline(&self) -> Option<Instant> {
+        if self.busy {
+            return Some(Instant::now());
+        }
+        let wait = Duration::from_millis(self.app.options().int(None, "idle-time") as u64);
+        let idle = self.idle.map(|since| since + wait);
+        let lua = self.lua.as_ref().and_then(lua::Host::next_timer);
+        [self.hints_until, idle]
+            .into_iter()
+            .flatten()
+            .map(|at| self.epoch + at)
+            .chain(lua)
+            .chain(self.lsp.next_change())
+            .min()
+    }
     pub fn poll(&mut self) {
+        self.busy = false;
         if self
             .hints_until
             .is_some_and(|until| self.epoch.elapsed() >= until)
@@ -1022,7 +1045,12 @@ impl Runtime {
                 self.run_hooks(now);
             }
         }
-        for _ in 0..8 {
+        for round in 0..=8 {
+            // The rest next time, soon: `deadline` says so.
+            if round == 8 {
+                self.busy = true;
+                break;
+            }
             match self.files.poll() {
                 Ok(Some(FileCompletion::Open(completion))) => {
                     self.dispatch(Event::OpenFinished(completion));
@@ -1046,7 +1074,12 @@ impl Runtime {
                 }
             }
         }
-        for _ in 0..8 {
+        for round in 0..=8 {
+            // The rest next time, soon: `deadline` says so.
+            if round == 8 {
+                self.busy = true;
+                break;
+            }
             match self.picker.poll() {
                 Ok(Some(completion)) => {
                     let response = self.layers.picker_finished(completion);
@@ -1060,7 +1093,12 @@ impl Runtime {
                 }
             }
         }
-        for _ in 0..8 {
+        for round in 0..=8 {
+            // The rest next time, soon: `deadline` says so.
+            if round == 8 {
+                self.busy = true;
+                break;
+            }
             let Some(completion) = self.paths.poll() else {
                 break;
             };

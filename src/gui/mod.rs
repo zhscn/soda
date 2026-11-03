@@ -29,8 +29,6 @@ use winit::{
     window::{Window, WindowId},
 };
 
-/// How often the loop looks for background results while nothing happens.
-const POLL: Duration = Duration::from_millis(30);
 /// How long the caret takes to glide to a new place.
 const GLIDE: Duration = Duration::from_millis(80);
 
@@ -205,6 +203,15 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
     #[cfg(target_os = "macos")]
     winit::platform::macos::EventLoopBuilderExtMacOS::with_default_menu(&mut builder, false);
     let event_loop = builder.build().map_err(io::Error::other)?;
+    // Work done elsewhere wakes the loop, which otherwise waits for input,
+    // a redraw or the runtime's next deadline.
+    let proxy = std::sync::Mutex::new(event_loop.create_proxy());
+    crate::wake::set(move || {
+        let _ = proxy
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .send_event(());
+    });
     let runtime = host::start(path, config, Box::new(crate::clipboard::Clipboard::local()))?;
     // Declared after the event loop, so dropped before it: the runtime's
     // Wayland clipboard uses the loop's connection.
@@ -872,7 +879,10 @@ impl ApplicationHandler for App {
                 gui.redraw();
             }
         }
-        event_loop.set_control_flow(ControlFlow::WaitUntil(std::time::Instant::now() + POLL));
+        event_loop.set_control_flow(match self.runtime.deadline() {
+            Some(at) => ControlFlow::WaitUntil(at),
+            None => ControlFlow::Wait,
+        });
     }
 }
 

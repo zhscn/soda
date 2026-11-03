@@ -23,7 +23,12 @@ use crossterm::{
 use std::{
     io::{self, IsTerminal},
     path::PathBuf,
-    time::Duration,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
+    time::{Duration, Instant},
 };
 use view::Presenter;
 /// Restores the terminal when dropped, also while a panic unwinds.
@@ -104,6 +109,73 @@ impl Terminal {
 const HANGUP_CHECK: Duration = Duration::from_millis(100);
 /// The longest input goes on being read before a frame shows its effect.
 const INPUT_BURST: Duration = Duration::from_millis(30);
+/// The longest the loop waits with nothing to do, so that a termination
+/// signal, which only sets a flag, ends it soon enough.
+const LONGEST_WAIT: Duration = Duration::from_secs(1);
+/// How long the reader waits for the terminal before it lets the loop
+/// have the terminal, as suspending needs.
+const READ_TURN: Duration = Duration::from_millis(250);
+
+/// What the loop waits for: the terminal's events, a wake from work done
+/// elsewhere (`crate::wake`), or the reader failing.
+enum Arrival {
+    Event(event::Event),
+    Wake,
+    Failed(io::Error),
+}
+/// Reads the terminal on a thread of its own, so that the loop can wait for
+/// its events and wakes together. crossterm's reader cannot be woken, and
+/// reading takes it; the loop takes `gate`, after setting `paused`, to talk
+/// to the terminal itself, as entering again after a suspend does.
+struct Reader {
+    gate: Arc<Mutex<()>>,
+    paused: Arc<AtomicBool>,
+}
+impl Reader {
+    fn start(arrivals: mpsc::Sender<Arrival>) -> io::Result<Self> {
+        let gate = Arc::new(Mutex::new(()));
+        let paused = Arc::new(AtomicBool::new(false));
+        let reader = Self {
+            gate: gate.clone(),
+            paused: paused.clone(),
+        };
+        std::thread::Builder::new()
+            .name("soda-input".into())
+            .spawn(move || {
+                loop {
+                    if paused.load(Ordering::Acquire) {
+                        std::thread::sleep(Duration::from_millis(10));
+                        continue;
+                    }
+                    let _turn = gate.lock().unwrap_or_else(|e| e.into_inner());
+                    let arrival = match event::poll(READ_TURN) {
+                        Ok(false) => continue,
+                        Ok(true) => event::read().map_or_else(Arrival::Failed, Arrival::Event),
+                        Err(error) => Arrival::Failed(error),
+                    };
+                    let failed = matches!(arrival, Arrival::Failed(_));
+                    if arrivals.send(arrival).is_err() || failed {
+                        return;
+                    }
+                }
+            })?;
+        Ok(reader)
+    }
+    /// Stops reading for good, once the reader is past its turn.
+    fn stop(&self) {
+        self.paused.store(true, Ordering::Release);
+        drop(self.gate.lock().unwrap_or_else(|e| e.into_inner()));
+    }
+    /// Stops reading while `f` has the terminal.
+    fn pause<T>(&self, f: impl FnOnce() -> T) -> T {
+        self.paused.store(true, Ordering::Release);
+        let turn = self.gate.lock().unwrap_or_else(|e| e.into_inner());
+        let result = f();
+        drop(turn);
+        self.paused.store(false, Ordering::Release);
+        result
+    }
+}
 /// Ends the event loop when the terminal goes away, as a hangup signal
 /// would. It has to come from outside the loop: reading a hung-up terminal
 /// returns nothing instead of failing, and crossterm reads again forever,
@@ -120,6 +192,7 @@ fn watch_terminal(ended: std::sync::Arc<std::sync::atomic::AtomicBool>) -> io::R
             }
             ended.store(true, std::sync::atomic::Ordering::Relaxed);
             release_input(stdin);
+            crate::wake::wake();
         })?;
     Ok(())
 }
@@ -217,6 +290,12 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
     )?;
     let mut presenter = Presenter::new(color::light_background());
     let truecolor = color::truecolor();
+    // From here the reader has the terminal's input.
+    let (send, arrivals) = mpsc::channel();
+    let reader = Reader::start(send.clone())?;
+    crate::wake::set(move || {
+        let _ = send.send(Arrival::Wake);
+    });
     let outcome = host::guard(|| {
         let mut capturing = true;
         let mut mouse = mouse::Mouse::default();
@@ -244,34 +323,45 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
                 runtime.take_redraw();
                 catching_up = presenter.take_pending();
             }
-            // While highlighting catches up, check for input without waiting.
-            let wait = Duration::from_millis(if catching_up { 0 } else { 30 });
+            // Wait for input, a wake or the runtime's next deadline; while
+            // highlighting catches up, not at all.
+            let wait = if catching_up {
+                Duration::ZERO
+            } else {
+                runtime
+                    .deadline()
+                    .map_or(LONGEST_WAIT, |at| {
+                        at.saturating_duration_since(Instant::now())
+                    })
+                    .min(LONGEST_WAIT)
+            };
             let mut suspend = false;
-            if !runtime.quit_requested() && event::poll(wait)? {
-                // Everything that has arrived goes in before the next frame,
-                // so keys typed or repeated faster than frames draw do not
-                // queue up behind them; a long burst still shows progress.
-                let started = std::time::Instant::now();
-                loop {
-                    match event::read()? {
-                        event::Event::Mouse(event) => {
-                            let areas = view::Areas::new(&runtime, width, height);
-                            mouse.handle(event, &mut runtime, &areas);
-                        }
-                        event => runtime.input(input::normalize(event)),
+            let mut next = match arrivals.recv_timeout(wait) {
+                Ok(arrival) if !runtime.quit_requested() => Some(arrival),
+                _ => None,
+            };
+            // Everything that has arrived goes in before the next frame, so
+            // keys typed or repeated faster than frames draw do not queue
+            // up behind them; a long burst still shows progress.
+            let started = Instant::now();
+            while let Some(arrival) = next.take() {
+                match arrival {
+                    Arrival::Event(event::Event::Mouse(event)) => {
+                        let areas = view::Areas::new(&runtime, width, height);
+                        mouse.handle(event, &mut runtime, &areas);
                     }
-                    suspend = runtime.take_suspend();
-                    if suspend
-                        || runtime.quit_requested()
-                        || started.elapsed() >= INPUT_BURST
-                        || !event::poll(Duration::ZERO)?
-                    {
-                        break;
-                    }
+                    Arrival::Event(event) => runtime.input(input::normalize(event)),
+                    Arrival::Wake => {}
+                    Arrival::Failed(error) => return Err(error),
                 }
+                suspend = runtime.take_suspend();
+                if suspend || runtime.quit_requested() || started.elapsed() >= INPUT_BURST {
+                    break;
+                }
+                next = arrivals.try_recv().ok();
             }
             if suspend || runtime.take_suspend() {
-                screen.suspend()?;
+                reader.pause(|| screen.suspend())?;
                 // The shell drew over the screen; paint all of it again.
                 terminal.clear()?;
                 resumed = true;
@@ -279,6 +369,8 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
         }
         Ok(())
     });
+    // The terminal goes back to the shell, not to the reader.
+    reader.stop();
     drop(screen);
     host::finish(&mut runtime, outcome)
 }

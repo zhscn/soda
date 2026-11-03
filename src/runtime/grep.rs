@@ -57,6 +57,7 @@ impl GrepRunner {
         let root = request.root.clone();
         std::thread::spawn(move || {
             let _ = sender.send(search(&request.root, &searched, &stop));
+            crate::wake::wake();
         });
         self.running = Some(Running {
             pattern: request.pattern,

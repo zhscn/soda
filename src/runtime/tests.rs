@@ -382,3 +382,45 @@ fn an_internal_clipboard_leaves_the_system_one_alone() {
     assert!(system.0.borrow().0.is_empty());
     assert_eq!(document_text(&host), "oneone");
 }
+#[test]
+fn work_done_elsewhere_wakes_the_loop_and_deadlines_say_when_to_look() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
+    let mut host = Runtime::new(PathBuf::from("/")).unwrap();
+    host.start(None);
+    // Nothing typed, nothing running: nothing to look for.
+    assert_eq!(host.deadline(), None);
+    // A Lua timer is a deadline.
+    let before = Instant::now();
+    host.source_lua("test", "soda.defer(50, function() end)")
+        .unwrap();
+    let at = host.deadline().unwrap();
+    assert!(at > before && at <= Instant::now() + Duration::from_millis(50));
+    std::thread::sleep(Duration::from_millis(60));
+    host.poll();
+    assert_eq!(host.deadline(), None);
+    // A key: the idle hook is due after `idle-time`, before the key hints
+    // come down.
+    let before = Instant::now();
+    host.input(key(KeyCode::Esc));
+    let at = host.deadline().unwrap();
+    assert!(at >= before + Duration::from_millis(500));
+    assert!(at <= Instant::now() + Duration::from_millis(500));
+    // A command run in the background wakes the loop when it ends.
+    let woken = Arc::new(AtomicUsize::new(0));
+    let count = woken.clone();
+    crate::wake::set(move || {
+        count.fetch_add(1, Ordering::Relaxed);
+    });
+    host.command(Action::Named("shell true".into()));
+    assert!(host.shell_running());
+    let started = Instant::now();
+    while woken.load(Ordering::Relaxed) == 0 {
+        assert!(started.elapsed() < Duration::from_secs(5), "never woken");
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    host.poll();
+    assert!(!host.shell_running());
+}

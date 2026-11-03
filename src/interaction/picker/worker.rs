@@ -146,7 +146,8 @@ fn publish(
 ) {
     while !task.obsolete() {
         match sender.try_send(completion) {
-            Ok(()) | Err(TrySendError::Disconnected(_)) => return,
+            Ok(()) => return crate::wake::wake(),
+            Err(TrySendError::Disconnected(_)) => return,
             Err(TrySendError::Full(value)) => {
                 completion = value;
                 thread::sleep(Duration::from_millis(2));
