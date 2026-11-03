@@ -46,7 +46,7 @@ fn labels(r: &Runtime) -> Vec<(String, Option<usize>)> {
 #[test]
 fn two_characters_then_a_label_move_the_caret() {
     let mut r = runtime("foo bar\nbaz Foo\nfoo");
-    keys(&mut r, "<space>jfo");
+    keys(&mut r, "SPC jfo");
     // Lowercase finds any case.
     assert_eq!(
         labels(&r),
@@ -60,13 +60,13 @@ fn two_characters_then_a_label_move_the_caret() {
     assert!(r.layer().is_none());
     assert_eq!(caret(&r), 12);
     // Capitals match exactly; a single place is taken at once.
-    keys(&mut r, "<space>jFo");
+    keys(&mut r, "SPC jFo");
     assert_eq!(caret(&r), 12);
-    keys(&mut r, "<space>jz ");
+    keys(&mut r, "SPC jz SPC");
     assert_eq!(caret(&r), 10);
-    keys(&mut r, "<space>jqq");
+    keys(&mut r, "SPC jqq");
     assert_eq!(r.message(), "No qq on screen");
-    keys(&mut r, "<space>jfo<esc>");
+    keys(&mut r, "SPC jfo ESC");
     assert!(r.layer().is_none());
     assert_eq!(caret(&r), 10);
 }
@@ -74,14 +74,14 @@ fn two_characters_then_a_label_move_the_caret() {
 fn windows_are_picked_by_label() {
     let mut r = runtime("x");
     let first = r.app().active_view().unwrap();
-    keys(&mut r, "<a-x>vsplit<ret>");
+    keys(&mut r, "M-x vsplit RET");
     let second = r.app().active_view().unwrap();
     // With two windows, the other one is taken at once.
-    keys(&mut r, "<space>w");
+    keys(&mut r, "SPC w");
     assert_eq!(r.app().active_view(), Some(first));
-    keys(&mut r, "<a-x>split<ret>");
+    keys(&mut r, "M-x split RET");
     let third = r.app().active_view().unwrap();
-    keys(&mut r, "<space>w");
+    keys(&mut r, "SPC w");
     let shown = labels(&r);
     assert_eq!(shown.len(), 3);
     let label = r

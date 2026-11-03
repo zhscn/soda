@@ -9,12 +9,12 @@ cargo run -- --help        # 默认键位与命令
 cargo run --release --features gui --bin soda-gui -- [--no-config] [FILE]
 ```
 
-编辑区按 `F1` 查看当前键位与命令，`<space>:` 打开命令面板，`:` 打开命令行。启动时运行 `~/.config/soda/init.lua`（或 `$XDG_CONFIG_HOME/soda/init.lua`）：
+编辑区按 `F1` 查看当前键位与命令，`SPC :` 打开命令面板，`:` 打开命令行。启动时运行 `~/.config/soda/init.lua`（或 `$XDG_CONFIG_HOME/soda/init.lua`）：
 
 ```lua
-soda.map("normal", "<space>w", "write")
+soda.map("normal", "SPC w", "write")
 soda.command([[define-command fmt pipe clang-format --assume-filename="$SODA_FILE"]])
-soda.map("normal", "<space>=", "fmt")
+soda.map("normal", "SPC =", "fmt")
 soda.set("line-numbers", "relative")
 ```
 

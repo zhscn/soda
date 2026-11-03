@@ -65,7 +65,7 @@ soda 取了够用的部分（`Layers::stack`），先查到的算数：
 
 所以绑定只在 `global` 表里存一份真实按键；keypad 读键时每个键先试加 Ctrl 再试原样，Space 让下一个键不加修饰。翻译只发生在 keypad 读键时，不是独立的层。
 
-keypad 只查 `global`，不查 Normal 表，否则 `x` 之后的键会被当成移动；meow 同样排除自己的状态表。leader（`SPC`）就是 `<c-c>`，模块把键绑在 `<c-c>` 下，就同时得到 `SPC` 入口和所有模式下的 `C-c` 入口。代价是 `C-c` 必须是前缀：stop 在 `C-c C-c`（与 Emacs comint 的中断键一致），Insert 也不能用 `C-c` 离开。
+keypad 只查 `global`，不查 Normal 表，否则 `x` 之后的键会被当成移动；meow 同样排除自己的状态表。leader（`SPC`）就是 `C-c`，模块把键绑在 `C-c` 下，就同时得到 `SPC` 入口和所有模式下的 `C-c` 入口。代价是 `C-c` 必须是前缀：stop 在 `C-c C-c`（与 Emacs comint 的中断键一致），Insert 也不能用 `C-c` 离开。
 
 ### 3.4 多选区只存在于 Beacon
 

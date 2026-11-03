@@ -22,8 +22,8 @@ require("meow").setup({
     q = "jump-to", Q = "goto", R = "replace", ["/"] = "open",
     ["`"] = "repeat",
     G = "grab", S = "swap-grab", E = "macro-lines", V = "macro-matches",
-    x = "keypad <c-x>", c = "keypad <c-c>", m = "keypad meta", g = "keypad ctrl-meta",
-    ["<space>"] = "keypad leader",
+    x = "keypad C-x", c = "keypad C-c", m = "keypad meta", g = "keypad ctrl-meta",
+    ["SPC"] = "keypad leader",
   },
   things = { a = "angle" },
 })
@@ -43,9 +43,9 @@ for key, command in pairs({
   ["["] = "macro-start",
   ["]"] = "macro-end",
 }) do
-  soda.map_default("global", "<c-c>" .. key, command)
+  soda.map_default("global", "C-c " .. key, command)
 end
 for digit = 0, 9 do
-  soda.map_default("global", "<c-c>" .. digit, "digit-argument " .. digit)
+  soda.map_default("global", "C-c " .. digit, "digit-argument " .. digit)
 end
-soda.map_default("global", "<c-x><c-o>", "window-pick")
+soda.map_default("global", "C-x C-o", "window-pick")

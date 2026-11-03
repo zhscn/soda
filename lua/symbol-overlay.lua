@@ -16,7 +16,7 @@
 -- symbol. As in Emacs they have no keys; bind them yourself:
 --
 --   require("symbol-overlay").setup()
---   soda.map("global", "<c-c>i", "symbol-toggle")
+--   soda.map("global", "C-c i", "symbol-toggle")
 --
 -- setup binds the keys above on a mark, in the `mark` context of `map`;
 -- `keys = false` binds none. The `mark-keys` option turns them off, as
@@ -31,6 +31,10 @@ local before = {}
 local function marks(buf)
   marked[buf.id] = marked[buf.id] or {}
   return marked[buf.id]
+end
+-- Text as keys apart, so that a symbol called RET is typed, not pressed.
+local function as_keys(text)
+  return (text:gsub(utf8.charpattern, "%0 "))
 end
 local function pattern_of(word)
   return "\\b" .. word .. "\\b"
@@ -214,7 +218,7 @@ soda.define_command("symbol-search", "Search for the symbol", function()
   local word = require_word()
   if word then
     soda.command("search")
-    soda.keys(word)
+    soda.keys(as_keys(word))
   end
 end)
 
@@ -222,7 +226,7 @@ soda.define_command("symbol-query-replace", "Query replace the symbol", function
   local word = require_word()
   if word then
     soda.command("replace")
-    soda.keys(word .. "<ret>")
+    soda.keys(as_keys(word) .. "RET")
   end
 end)
 
@@ -283,8 +287,8 @@ function M.setup(options)
     h = "symbol-help",
     n = "symbol-jump-next",
     p = "symbol-jump-prev",
-    ["<lt>"] = "symbol-jump-first",
-    ["<gt>"] = "symbol-jump-last",
+    ["<"] = "symbol-jump-first",
+    [">"] = "symbol-jump-last",
     w = "symbol-save",
     e = "symbol-echo-mark",
     d = "lsp-definition",

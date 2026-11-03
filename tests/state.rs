@@ -44,13 +44,13 @@ fn carets_and_histories_outlive_the_session() {
     r.start(None);
     open(&mut r, &a);
     keys(&mut r, "2jll");
-    keys(&mut r, "<a-x>close<ret>");
+    keys(&mut r, "M-x close RET");
     // Within the session, a closed file opens where it was left.
     open(&mut r, &a);
     wait(&mut r, |r| caret(r).unwrap().1 == 10);
     open(&mut r, &b);
     // The search selects the match; the caret is its head.
-    keys(&mut r, "j<c-s>y<ret>");
+    keys(&mut r, "j C-s y RET");
     let text = r.persist();
     let mut next = Runtime::new(dir.path().to_owned()).unwrap();
     next.restore(&text);

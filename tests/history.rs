@@ -25,34 +25,37 @@ fn runtime() -> Runtime {
 #[test]
 fn the_command_line_recalls_what_was_entered() {
     let mut r = runtime();
-    keys(&mut r, "<a-x>set tab-width 3<ret><a-x>set tab-width 5<ret>");
-    keys(&mut r, "<a-x>set tab-width 3<ret>");
+    keys(
+        &mut r,
+        "M-x set SPC tab-width SPC 3 RET M-x set SPC tab-width SPC 5 RET",
+    );
+    keys(&mut r, "M-x set SPC tab-width SPC 3 RET");
     assert_eq!(r.command_history(), ["set tab-width 5", "set tab-width 3"]);
-    keys(&mut r, "<a-x><a-p>");
+    keys(&mut r, "M-x M-p");
     assert_eq!(prompt(&r), ":set tab-width 3");
-    keys(&mut r, "<a-p><a-p>");
+    keys(&mut r, "M-p M-p");
     assert_eq!(prompt(&r), ":set tab-width 5");
-    keys(&mut r, "<a-n><a-n>");
+    keys(&mut r, "M-n M-n");
     assert_eq!(prompt(&r), ":");
     // Up and Down move through candidates, never the history.
-    keys(&mut r, "<up><c-p><down><c-n>");
+    keys(&mut r, "<up> C-p <down> C-n");
     assert_eq!(prompt(&r), ":");
     // A typed line goes back after recalling.
-    keys(&mut r, "se<a-p>");
+    keys(&mut r, "se M-p");
     assert_eq!(prompt(&r), ":set tab-width 3");
-    keys(&mut r, "<a-n>");
+    keys(&mut r, "M-n");
     assert_eq!(prompt(&r), ":se");
-    keys(&mut r, "<esc><a-x><a-p><a-p><ret>");
+    keys(&mut r, "ESC M-x M-p M-p RET");
     assert_eq!(r.app().options().int(None, "tab-width"), 5);
     assert_eq!(r.command_history(), ["set tab-width 3", "set tab-width 5"]);
 }
 #[test]
 fn search_recalls_earlier_searches() {
     let mut r = runtime();
-    keys(&mut r, "<c-s>foo<ret><c-s>bar<ret>");
+    keys(&mut r, "C-s foo RET C-s bar RET");
     assert_eq!(r.search_history(), ["foo", "bar"]);
-    keys(&mut r, "<c-s><up>");
+    keys(&mut r, "C-s <up>");
     assert_eq!(prompt(&r), "Find [1]: bar");
-    keys(&mut r, "<up><ret>");
+    keys(&mut r, "<up> RET");
     assert_eq!(r.search_history(), ["bar", "foo"]);
 }

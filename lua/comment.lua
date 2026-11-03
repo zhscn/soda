@@ -1,6 +1,6 @@
 -- Toggles line comments on the caret's line, or on the selected lines: if every line with text is a comment they stop being comments,
 -- otherwise all become comments at the shallowest indentation among them.
--- Built in: <a-;>.
+-- Built in: M-;.
 
 local function selected_lines(buf)
   local anchor, head = buf:selection()
@@ -55,5 +55,5 @@ end)
 
 
 for _, mode in ipairs({ "normal", "insert" }) do
-  soda.map_default(mode, "<a-;>", "comment")
+  soda.map_default(mode, "M-;", "comment")
 end

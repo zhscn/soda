@@ -7,11 +7,11 @@
 -- or a module does, as ccls's setup does.
 --
 -- Keys, in the `lsp` keymap, which holds in documents a server serves:
--- <a-.> goes to the definition, <a-?> lists references, <a-,> comes back,
+-- M-. goes to the definition, M-? lists references, M-, comes back,
 -- as xref's. The other commands (lsp-hover, lsp-rename, lsp-code-action,
 -- lsp-callers and so on) have no keys; bind them in that keymap:
 --
---   soda.map("lsp", "<c-c>k", "lsp-hover")
+--   soda.map("lsp", "C-c k", "lsp-hover")
 --
 -- Completion follows from the server being there.
 
@@ -1686,8 +1686,8 @@ soda.completion.register({
 })
 
 soda.keymap("lsp", { server = "*", doc = "Documents a language server serves" })
-soda.map_default("lsp", "<a-.>", "lsp-definition")
-soda.map_default("lsp", "<a-?>", "lsp-references")
+soda.map_default("lsp", "M-.", "lsp-definition")
+soda.map_default("lsp", "M-?", "lsp-references")
 
 -- What modules for one server's extensions, such as `ccls`, build on.
 for name, value in pairs({

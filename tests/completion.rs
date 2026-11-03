@@ -81,7 +81,7 @@ fn one_letter_is_not_enough_but_the_key_asks_anyway() {
         std::thread::sleep(Duration::from_millis(1));
     }
     assert!(labels(&r).is_empty());
-    keys(&mut r, "<a-/>");
+    keys(&mut r, "M-/");
     assert_eq!(listed(&mut r), ["wonder"]);
 }
 #[test]
@@ -89,9 +89,9 @@ fn the_text_stays_as_typed_until_a_candidate_is_taken() {
     let (_dir, mut r) = open("wonder\n|\n");
     keys(&mut r, "wo");
     listed(&mut r);
-    keys(&mut r, "<c-n>");
+    keys(&mut r, "C-n");
     assert_eq!(text(&r), "wonder\nwo\n");
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     assert_eq!(shown(&r), "wonder\nwonder|\n");
 }
 #[test]
@@ -99,7 +99,7 @@ fn enter_breaks_the_line_until_something_is_chosen() {
     let (_dir, mut r) = open("wonder\n|\n");
     keys(&mut r, "wo");
     listed(&mut r);
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     assert_eq!(shown(&r), "wonder\nwo\n|\n");
     assert!(labels(&r).is_empty());
 }
@@ -108,7 +108,7 @@ fn tab_takes_the_first_and_replaces_the_word() {
     let (_dir, mut r) = open("wonder\n|der\n");
     keys(&mut r, "wo");
     listed(&mut r);
-    keys(&mut r, "<tab>");
+    keys(&mut r, "TAB");
     assert_eq!(shown(&r), "wonder\nwonder|\n");
 }
 #[test]
@@ -116,7 +116,7 @@ fn enter_keeps_the_rest_of_the_word() {
     let (_dir, mut r) = open("wonder\n|er\n");
     keys(&mut r, "wo");
     listed(&mut r);
-    keys(&mut r, "<c-n><ret>");
+    keys(&mut r, "C-n RET");
     assert_eq!(shown(&r), "wonder\nwonder|er\n");
 }
 #[test]
@@ -124,11 +124,11 @@ fn moving_inside_the_word_refilters_and_leaving_it_closes() {
     let (_dir, mut r) = open("wonder walrus\n|\n");
     keys(&mut r, "won");
     assert_eq!(listed(&mut r), ["wonder"]);
-    keys(&mut r, "<left><left>");
+    keys(&mut r, "<left> <left>");
     assert_eq!(labels(&r), ["walrus", "wonder"]);
     keys(&mut r, "<right>");
     assert_eq!(labels(&r), ["wonder"]);
-    keys(&mut r, "<left><left>");
+    keys(&mut r, "<left> <left>");
     assert!(!labels(&r).is_empty());
     keys(&mut r, "<left>");
     assert!(labels(&r).is_empty());
@@ -147,7 +147,7 @@ fn dismissing_lasts_until_the_word_ends() {
     let (_dir, mut r) = open("wonder wool\n|\n");
     keys(&mut r, "wo");
     listed(&mut r);
-    keys(&mut r, "<c-g>");
+    keys(&mut r, "C-g");
     assert!(labels(&r).is_empty());
     assert_eq!(r.edit_mode(), EditMode::Insert);
     keys(&mut r, "n");
@@ -156,7 +156,7 @@ fn dismissing_lasts_until_the_word_ends() {
         std::thread::sleep(Duration::from_millis(1));
     }
     assert!(labels(&r).is_empty());
-    keys(&mut r, " wo");
+    keys(&mut r, "SPC wo");
     listed(&mut r);
 }
 #[test]
@@ -164,7 +164,7 @@ fn esc_closes_and_leaves_insert() {
     let (_dir, mut r) = open("wonder\n|\n");
     keys(&mut r, "wo");
     listed(&mut r);
-    keys(&mut r, "<esc>");
+    keys(&mut r, "ESC");
     assert!(labels(&r).is_empty());
     assert_eq!(r.edit_mode(), EditMode::Normal);
 }
@@ -178,7 +178,7 @@ fn an_option_turns_the_list_off_and_asking_still_works() {
         std::thread::sleep(Duration::from_millis(1));
     }
     assert!(labels(&r).is_empty());
-    keys(&mut r, "<a-/>");
+    keys(&mut r, "M-/");
     listed(&mut r);
 }
 #[test]
@@ -190,7 +190,7 @@ fn file_names_replace_more_than_the_word() {
     assert_eq!(listed(&mut r), ["nested/", "a.txt", "notes.md"]);
     keys(&mut r, "no");
     assert_eq!(labels(&r), ["notes.md"]);
-    keys(&mut r, "<tab>");
+    keys(&mut r, "TAB");
     assert_eq!(shown(&r), "./notes.md|\n");
 }
 #[test]
@@ -198,7 +198,7 @@ fn undoing_takes_back_the_candidate_then_the_typing() {
     let (_dir, mut r) = open("wonder\n|\n");
     keys(&mut r, "wo");
     listed(&mut r);
-    keys(&mut r, "<tab><esc>");
+    keys(&mut r, "TAB ESC");
     assert_eq!(text(&r), "wonder\nwonder\n");
     keys(&mut r, "u");
     assert_eq!(text(&r), "wonder\nwo\n");
@@ -209,9 +209,9 @@ fn undoing_takes_back_the_candidate_then_the_typing() {
 fn repeating_types_what_was_taken() {
     let (_dir, mut r) = open("wonder\n|\n");
     r.command(Command::SetMode(EditMode::Normal));
-    keys(&mut r, "<f3>Awo");
+    keys(&mut r, "<f3> Awo");
     listed(&mut r);
-    keys(&mut r, "<tab><esc><f4>");
+    keys(&mut r, "TAB ESC <f4>");
     assert_eq!(text(&r).matches("wonder").count(), 2, "{}", text(&r));
     keys(&mut r, "<f4>");
     let deadline = Instant::now() + Duration::from_secs(1);
@@ -279,7 +279,7 @@ fn a_trigger_character_asks_only_its_sources() {
     keys(&mut r, "x.");
     assert_eq!(listed(&mut r), ["field"]);
     assert_eq!(r.completion_popup().unwrap().rows[0].detail, ".");
-    keys(&mut r, "<tab>");
+    keys(&mut r, "TAB");
     assert_eq!(shown(&r), "member\nx.field|\n");
 }
 #[test]
@@ -315,7 +315,7 @@ fn a_late_answer_for_an_old_list_is_dropped() {
           end,
         })"#,
     );
-    keys(&mut r, "ab ");
+    keys(&mut r, "ab SPC");
     keys(&mut r, "cd");
     lua(&mut r, r#"saved[1]:add({ { label = "cde" } })"#);
     r.poll();
@@ -366,16 +366,16 @@ fn a_snippet_goes_through_its_places_with_tab() {
     snippet_source(&mut r, "for (${1:i}; ${2:n}) $0;");
     keys(&mut r, "fo");
     assert_eq!(listed(&mut r), ["fori"]);
-    keys(&mut r, "<tab>");
+    keys(&mut r, "TAB");
     assert_eq!(text(&r), "for (i; n) ;\n");
     keys(&mut r, "x");
     assert_eq!(shown(&r), "for (x|; n) ;\n");
-    keys(&mut r, "y<tab>");
+    keys(&mut r, "y TAB");
     keys(&mut r, "k");
     assert_eq!(shown(&r), "for (xy; k|) ;\n");
-    keys(&mut r, "<backtab>z<tab><tab>");
+    keys(&mut r, "<backtab> z TAB TAB");
     assert_eq!(shown(&r), "for (z; k) |;\n");
-    keys(&mut r, "<tab>");
+    keys(&mut r, "TAB");
     assert_eq!(text(&r), "for (z; k)  ;\n");
 }
 #[test]
@@ -391,18 +391,18 @@ fn edits_of_a_candidate_move_its_snippet() {
     );
     keys(&mut r, "fo");
     listed(&mut r);
-    keys(&mut r, "<tab>");
+    keys(&mut r, "TAB");
     assert_eq!(text(&r), "#a\n#b\ntop\nfor (i) {\n    \n}\n");
     keys(&mut r, "k");
     assert_eq!(shown(&r), "#a\n#b\ntop\nfor (k|) {\n    \n}\n");
-    keys(&mut r, "<esc>uu");
+    keys(&mut r, "ESC uu");
     assert_eq!(text(&r), "top\nfo\n");
 }
 #[test]
 fn leaving_a_snippet_ends_it() {
     let (_dir, mut r) = bundled("|\nnext\n");
     r.command(Command::Named("snippet a${1:b} ${2:c}".into()));
-    keys(&mut r, "<down><tab>");
+    keys(&mut r, "<down> TAB");
     // Tab no longer belongs to the snippet: it goes in where the caret is.
     assert_eq!(text(&r).lines().next().unwrap(), "ab c");
     assert_ne!(text(&r).lines().nth(1).unwrap(), "next");
@@ -411,7 +411,7 @@ fn leaving_a_snippet_ends_it() {
 fn going_to_normal_ends_a_snippet() {
     let (_dir, mut r) = bundled("|\n");
     r.command(Command::Named("snippet ${1:a} ${2:b}".into()));
-    keys(&mut r, "<esc>i<tab>");
+    keys(&mut r, "ESC i TAB");
     assert!(text(&r).contains("    "), "{}", text(&r));
 }
 #[test]
@@ -419,7 +419,7 @@ fn a_snippet_is_one_undo_step_and_takes_the_line_indentation() {
     let (_dir, mut r) = bundled("  |\n");
     r.command(Command::Named("snippet if {\n\t${1:x}\n}".into()));
     assert_eq!(text(&r), "  if {\n      x\n  }\n");
-    keys(&mut r, "<esc>u");
+    keys(&mut r, "ESC u");
     assert_eq!(text(&r), "  \n");
 }
 #[test]
@@ -428,9 +428,9 @@ fn the_list_takes_tab_before_the_snippet() {
     r.command(Command::Named("snippet ${1:a} ${2:b}".into()));
     keys(&mut r, "wo");
     listed(&mut r);
-    keys(&mut r, "<tab>");
+    keys(&mut r, "TAB");
     assert_eq!(shown(&r), "wonder\nwonder| b\n");
-    keys(&mut r, "<tab>");
+    keys(&mut r, "TAB");
     keys(&mut r, "c");
     assert_eq!(shown(&r), "wonder\nwonder c|\n");
 }
@@ -453,24 +453,24 @@ fn copies_of_a_place_follow_it_as_it_is_typed() {
     assert_eq!(text(&r), "for (i = 0; i < n; ++i) I\n");
     keys(&mut r, "idx");
     assert_eq!(shown(&r), "for (idx| = 0; idx < n; ++idx) IDX\n");
-    keys(&mut r, "<bs>");
+    keys(&mut r, "DEL");
     assert_eq!(text(&r), "for (id = 0; id < n; ++id) ID\n");
-    keys(&mut r, "<tab>k<tab>");
+    keys(&mut r, "TAB k TAB");
     assert_eq!(shown(&r), "for (id = 0; id < k; ++id) ID|\n");
     // From Normal, the snippet, typing and copies are one step.
-    keys(&mut r, "<esc>u");
+    keys(&mut r, "ESC u");
     assert_eq!(text(&r), "\n");
 }
 #[test]
 fn typing_at_the_edge_of_a_place_stays_in_it() {
     let (_dir, mut r) = bundled("|\n");
     r.command(Command::Named("snippet ${1:a}${2:b}$3".into()));
-    keys(&mut r, "<right>x");
+    keys(&mut r, "<right> x");
     assert_eq!(shown(&r), "ax|b\n");
-    keys(&mut r, "<tab>");
+    keys(&mut r, "TAB");
     keys(&mut r, "y");
     assert_eq!(shown(&r), "axy|\n");
-    keys(&mut r, "<tab>z");
+    keys(&mut r, "TAB z");
     assert_eq!(shown(&r), "axyz|\n");
 }
 #[test]
@@ -478,9 +478,9 @@ fn places_left_to_fill_and_copies_are_painted_until_the_end() {
     let (_dir, mut r) = bundled("|\n");
     r.command(Command::Named("snippet ${1:a} ${2:b} $1".into()));
     assert_eq!(painted(&r), ["b", "a"]);
-    keys(&mut r, "<tab>");
+    keys(&mut r, "TAB");
     assert_eq!(painted(&r), ["a", "a"]);
-    keys(&mut r, "<tab>");
+    keys(&mut r, "TAB");
     assert!(painted(&r).is_empty());
 }
 #[test]
@@ -489,13 +489,13 @@ fn a_place_with_choices_lists_them() {
     r.command(Command::Named("snippet ${1|yes,no,maybe|}; ${2:x}".into()));
     assert_eq!(text(&r), "yes; x\n");
     assert_eq!(listed(&mut r), ["yes", "no", "maybe"]);
-    keys(&mut r, "<down><ret>");
+    keys(&mut r, "<down> RET");
     assert_eq!(text(&r), "no; x\n");
     // Typing narrows them; Tab goes on to the next place.
-    keys(&mut r, "<s-tab>");
+    keys(&mut r, "S-TAB");
     keys(&mut r, "m");
     assert_eq!(labels(&r), ["maybe"]);
-    keys(&mut r, "<tab>");
+    keys(&mut r, "TAB");
     keys(&mut r, "y");
     assert_eq!(shown(&r), "m; y|\n");
 }
@@ -505,9 +505,9 @@ fn a_snippet_in_a_place_goes_back_to_the_outer_one() {
     r.command(Command::Named("snippet f(${1:a}, ${2:b})".into()));
     r.command(Command::Named("snippet g(${1:x}, ${2:y})".into()));
     assert_eq!(text(&r), "f(g(x, y), b)\n");
-    keys(&mut r, "<tab>z<tab>");
+    keys(&mut r, "TAB z TAB");
     assert_eq!(shown(&r), "f(g(x, z)|, b)\n");
-    keys(&mut r, "<tab>c");
+    keys(&mut r, "TAB c");
     assert_eq!(shown(&r), "f(g(x, z), c|)\n");
 }
 #[test]
@@ -530,10 +530,10 @@ fn variables_take_the_file_and_the_selection() {
 fn a_macro_replays_a_snippet_with_what_filled_it() {
     let (_dir, mut r) = bundled("|\n");
     snippet_source(&mut r, "f(${1:a}, $1) $0;");
-    keys(&mut r, "<esc><f3>i");
+    keys(&mut r, "ESC <f3> i");
     keys(&mut r, "fo");
     listed(&mut r);
-    keys(&mut r, "<tab>k<tab><esc><f4>");
+    keys(&mut r, "TAB k TAB ESC <f4>");
     assert_eq!(text(&r), "f(k, k) ;\n");
     r.command(Command::Edit(Edit::SetSelection(Selection::caret(
         text(&r).len(),
@@ -579,9 +579,9 @@ fn snippets_load_from_files_in_the_vscode_format() {
     assert_eq!(r.message(), "");
     keys(&mut r, "lo");
     assert_eq!(listed(&mut r), ["loop"]);
-    keys(&mut r, "<tab>k");
+    keys(&mut r, "TAB k");
     assert_eq!(text(&r), "for k {\n    \n}\n");
-    keys(&mut r, "<esc>o");
+    keys(&mut r, "ESC o");
     r.command(Command::SetMode(EditMode::Insert));
     keys(&mut r, "xy");
     assert_eq!(listed(&mut r), ["xyz"]);

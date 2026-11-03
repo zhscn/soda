@@ -1,7 +1,7 @@
 //! Read-only help. The interactive page lists the current bindings; `--help`
 //! lists the defaults from the same tables.
 use super::{
-    Context, Input, InputKey, InputMotion, Keymap, Registry, key_notation, picker::ListMotion,
+    Context, Input, InputKey, InputMotion, Keymap, Registry, emacs_notation, picker::ListMotion,
     session::Transition,
 };
 
@@ -43,7 +43,7 @@ pub fn text(keymap: &Keymap, registry: &Registry, modal: bool) -> String {
         // One row per target, listing every key bound to it.
         let mut rows: Vec<(String, String)> = vec![];
         for (keys, label) in bindings {
-            let keys = key_notation(&keys);
+            let keys = emacs_notation(&keys);
             match rows.iter_mut().find(|(_, existing)| *existing == label) {
                 Some(row) => row.0 = format!("{} {keys}", row.0),
                 None => rows.push((keys, label)),

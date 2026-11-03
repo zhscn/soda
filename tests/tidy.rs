@@ -28,7 +28,7 @@ fn text(r: &Runtime) -> String {
     editor.model().document().snapshot().text().to_owned()
 }
 fn save(r: &mut Runtime, path: &Path, expected: &str) {
-    keys(r, "<a-x>w<ret>");
+    keys(r, "M-x w RET");
     let deadline = Instant::now() + Duration::from_secs(2);
     while std::fs::read_to_string(path).unwrap() != expected {
         assert!(
@@ -54,16 +54,19 @@ fn saving_trims_edited_lines_and_ends_with_a_line_break() {
         .unwrap();
     r.start(Some(path.clone()));
     wait(&mut r, |r| text(r) == "keep  \nedit\nlast");
-    keys(&mut r, "j<c-e>a \t<esc>");
+    // A tab character, which TAB would indent instead of typing.
+    keys(&mut r, "j C-e a SPC");
+    r.input(UserInput::Paste("\t".into()));
+    keys(&mut r, "ESC");
     save(&mut r, &path, "keep  \nedit\nlast\n");
     assert_eq!(text(&r), "keep  \nedit\nlast\n");
     // Tidying is its own undo step.
     keys(&mut r, "u");
     assert_eq!(text(&r), "keep  \nedit \t\nlast");
     // A caret at the end keeps to its line after the break is added.
-    keys(&mut r, "<a-gt><c-e>a!<esc>");
+    keys(&mut r, "M-> C-e a! ESC");
     save(&mut r, &path, "keep  \nedit\nlast!\n");
-    keys(&mut r, "a?<esc>");
+    keys(&mut r, "a? ESC");
     assert_eq!(text(&r), "keep  \nedit\nlast!?\n");
     // Options turn either part off; lines already saved are left alone.
     r.command(Command::Named("set-local final-newline false".into()));
@@ -73,7 +76,7 @@ fn saving_trims_edited_lines_and_ends_with_a_line_break() {
     keys(&mut r, "i");
     r.command(Command::Edit(soda::editor::Command::SelectAll));
     r.input(UserInput::Paste("keep \nend".into()));
-    keys(&mut r, "<esc>");
+    keys(&mut r, "ESC");
     save(&mut r, &path, "keep \nend");
     assert_eq!(text(&r), "keep \nend");
 }

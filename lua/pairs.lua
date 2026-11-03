@@ -5,9 +5,9 @@
 -- Where they have no answer, as with an unfinished expression, the commands
 -- do what the built-in ones do.
 --
--- Built in, with Emacs's own keys, in Insert and Normal: <c-a-f> <c-a-b>
--- <c-a-u> move, <c-a-space> selects the expression, <c-a-k> and
--- <c-a-bs> kill one. The rest, puni's keys among them, come with the puni
+-- Built in, with Emacs's own keys, in Insert and Normal: C-M-f C-M-b
+-- C-M-u move, C-M-SPC selects the expression, C-M-k and C-M-DEL kill
+-- one. The rest, puni's keys among them, come with the puni
 -- plugin: require("puni").setup().
 
 local function before(a, b)
@@ -299,10 +299,10 @@ soda.define_command("sexp-kill-backward", "Kill the previous expression", functi
 end)
 
 for _, mode in ipairs({ "normal", "insert" }) do
-  soda.map_default(mode, "<c-a-f>", "sexp-forward")
-  soda.map_default(mode, "<c-a-b>", "sexp-backward")
-  soda.map_default(mode, "<c-a-u>", "sexp-up")
-  soda.map_default(mode, "<c-a-space>", "sexp-expand")
-  soda.map_default(mode, "<c-a-k>", "sexp-kill-forward")
-  soda.map_default(mode, "<c-a-bs>", "sexp-kill-backward")
+  soda.map_default(mode, "C-M-f", "sexp-forward")
+  soda.map_default(mode, "C-M-b", "sexp-backward")
+  soda.map_default(mode, "C-M-u", "sexp-up")
+  soda.map_default(mode, "C-M-SPC", "sexp-expand")
+  soda.map_default(mode, "C-M-k", "sexp-kill-forward")
+  soda.map_default(mode, "C-M-DEL", "sexp-kill-backward")
 end

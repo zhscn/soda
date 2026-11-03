@@ -28,7 +28,7 @@ pub mod path;
 mod pointer;
 pub use pointer::Pointer;
 mod routing;
-pub use routing::{Key, KeyStroke, UserInput, emacs_notation, key_notation};
+pub use routing::{Key, KeyStroke, UserInput, emacs_notation};
 mod search;
 pub use search::{SearchResults, SearchSession};
 mod jumps;

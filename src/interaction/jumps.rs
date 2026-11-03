@@ -1,4 +1,4 @@
-//! Jump history for `<c-o>` and `<c-i>`, one list for the session, as a
+//! Jump history for `C-o` and `C-i`, one list for the session, as a
 //! browser's: going back and then jumping elsewhere drops what lay ahead, so
 //! the list follows the path taken through searches and definitions.
 //!

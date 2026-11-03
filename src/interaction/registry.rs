@@ -349,6 +349,17 @@ fn split(args: &str) -> (&str, &str) {
     args.split_once(char::is_whitespace)
         .map_or((args, ""), |(head, tail)| (head, tail.trim_start()))
 }
+/// Splits off a KEYS argument: a word, or keys apart by spaces in double
+/// quotes, as Emacs's `(kbd "C-c v c")`.
+fn split_keys(args: &str) -> (&str, &str) {
+    if let Some(quoted) = args.strip_prefix('"') {
+        return match quoted.split_once('"') {
+            Some((keys, rest)) => (keys, rest.trim_start()),
+            None => (quoted, ""),
+        };
+    }
+    split(args)
+}
 fn keys(text: &str) -> Result<Vec<super::KeyStroke>, String> {
     super::KeyStroke::parse_sequence(text)
 }
@@ -994,7 +1005,7 @@ pub static BUILTINS: &[Builtin] = &[
         "Bind keys in a context, a document keymap or a language's keymap",
         |a| {
             let (keymap, rest) = split(a);
-            let (sequence, target) = split(rest);
+            let (sequence, target) = split_keys(rest);
             Ok(Command::Map {
                 keymap: required(keymap)?,
                 keys: keys(sequence)?,
@@ -1005,7 +1016,8 @@ pub static BUILTINS: &[Builtin] = &[
         }
     ),
     builtin!("unmap", [KEYMAP, KEYS], "Remove a user binding", |a| {
-        let (keymap, sequence) = split(a);
+        let (keymap, rest) = split(a);
+        let (sequence, _) = split_keys(rest);
         Ok(Command::Unmap {
             keymap: required(keymap)?,
             keys: keys(&required(sequence)?)?,

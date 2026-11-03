@@ -114,7 +114,7 @@ fn a_request_sends_pending_edits_first() {
     keys(&mut f.r, "y");
     f.r.command(Command::SetMode(EditMode::Normal));
     f.r.command(Command::Edit(Edit::SetSelection(Selection::caret(3))));
-    keys(&mut f.r, "<a-.>");
+    keys(&mut f.r, "M-.");
     let log = f.log.clone();
     wait(&mut f.r, move |_| {
         std::fs::read_to_string(&log)
@@ -132,7 +132,7 @@ fn going_to_a_definition_moves_and_comes_back() {
     let Some(mut f) = open("use\n  target\n") else {
         return;
     };
-    keys(&mut f.r, "<a-.>");
+    keys(&mut f.r, "M-.");
     wait(&mut f.r, |r| {
         let view = r.app().view(r.app().active_view().unwrap()).unwrap();
         let editor = r.app().workspace().editor(view.document_id).unwrap();
@@ -144,7 +144,7 @@ fn going_to_a_definition_moves_and_comes_back() {
             .head
             == 6
     });
-    keys(&mut f.r, "<a-,>");
+    keys(&mut f.r, "M-,");
     let view = f.r.app().view(f.r.app().active_view().unwrap()).unwrap();
     let editor = f.r.app().workspace().editor(view.document_id).unwrap();
     assert_eq!(
@@ -162,7 +162,7 @@ fn references_and_callers_are_results() {
     let Some(mut f) = open("one\n  two\n") else {
         return;
     };
-    keys(&mut f.r, "<a-?>");
+    keys(&mut f.r, "M-?");
     wait(&mut f.r, |r| text(r).contains("a.cpp"));
     assert_eq!(text(&f.r), "a.cpp\n  1:1  one\n  2:3  two\n");
     let path = f.dir.path().join("a.cpp");
@@ -172,12 +172,12 @@ fn references_and_callers_are_results() {
     wait(&mut f.r, |r| text(r).contains("caller"));
     assert_eq!(text(&f.r), "▾ target  a.cpp:1\n  ▸ caller  a.cpp:2\n");
     // A level at a time; nothing calls the caller, so it has no children.
-    keys(&mut f.r, "j<tab>");
+    keys(&mut f.r, "j TAB");
     wait(&mut f.r, |r| {
         text(r) == "▾ target  a.cpp:1\n    caller  a.cpp:2\n"
     });
     // Enter goes to where the call is made.
-    keys(&mut f.r, "<ret>");
+    keys(&mut f.r, "RET");
     wait(&mut f.r, |r| text(r).starts_with("one"));
     let view = f.r.app().view(f.r.app().active_view().unwrap()).unwrap();
     let editor = f.r.app().workspace().editor(view.document_id).unwrap();
@@ -196,15 +196,15 @@ fn types_open_level_by_level_from_the_type_at_the_caret() {
     let Some(mut f) = open("base\n  derived\n") else {
         return;
     };
-    keys(&mut f.r, "<c-c>T");
+    keys(&mut f.r, "C-c T");
     wait(&mut f.r, |r| text(r).starts_with("▾ Base"));
     assert_eq!(text(&f.r), "▾ Base  a.cpp:1\n  ▸ Derived  a.cpp:2\n");
-    keys(&mut f.r, "j<tab>");
+    keys(&mut f.r, "j TAB");
     wait(&mut f.r, |r| {
         text(r) == "▾ Base  a.cpp:1\n    Derived  a.cpp:2\n"
     });
     assert!(f.log().contains("subtypes Derived"), "{}", f.log());
-    keys(&mut f.r, "<ret>");
+    keys(&mut f.r, "RET");
     wait(&mut f.r, |r| text(r).starts_with("base"));
     let view = f.r.app().view(f.r.app().active_view().unwrap()).unwrap();
     let editor = f.r.app().workspace().editor(view.document_id).unwrap();
@@ -261,7 +261,7 @@ fn a_call_shows_its_signature_until_it_closes() {
     wait(&mut f.r, |r| r.hint().is_none());
     keys(&mut f.r, "x(");
     wait(&mut f.r, |r| r.hint().is_some());
-    keys(&mut f.r, "<esc>");
+    keys(&mut f.r, "ESC");
     wait(&mut f.r, |r| r.hint().is_none());
 }
 #[test]
@@ -277,9 +277,9 @@ fn symbols_are_offered_with_their_outline_and_go_where_they_stand() {
             .collect::<Vec<_>>(),
         _ => vec![],
     };
-    keys(&mut f.r, "<space>s");
+    keys(&mut f.r, "SPC s");
     wait(&mut f.r, |r| rows(r) == ["Outer  class", "  inner  method"]);
-    keys(&mut f.r, "<down><ret>");
+    keys(&mut f.r, "<down> RET");
     wait(&mut f.r, |r| {
         r.app().active_view().is_some_and(|v| {
             let view = r.app().view(v).unwrap();
@@ -295,7 +295,7 @@ fn symbols_are_offered_with_their_outline_and_go_where_they_stand() {
 fn a_header_and_its_source_switch() {
     let Some(mut f) = open("a\n") else { return };
     std::fs::write(f.dir.path().join("b.cpp"), "other\n").unwrap();
-    keys(&mut f.r, "<space>h");
+    keys(&mut f.r, "SPC h");
     wait(&mut f.r, |r| text(r) == "other\n");
 }
 #[test]
@@ -356,13 +356,13 @@ fn rename_without_a_name_asks_with_the_name_and_a_changed_document_refuses() {
     };
     std::fs::write(f.dir.path().join("b.cpp"), "x\n  one\n").unwrap();
     // The server says what is renamed: here the range it gives.
-    keys(&mut f.r, "<space>R");
+    keys(&mut f.r, "SPC R");
     let line = |r: &Runtime| match r.layer() {
         Some(soda::interaction::Layer::CommandLine(line)) => Some(line.input().text().to_owned()),
         _ => None,
     };
     wait(&mut f.r, |r| line(r).as_deref() == Some("lsp-rename ne"));
-    keys(&mut f.r, "<esc>j<space>R");
+    keys(&mut f.r, "ESC j SPC R");
     wait(&mut f.r, |r| r.message() == "Nothing to rename here");
     assert_eq!(line(&f.r), None);
     keys(&mut f.r, "k");
@@ -387,17 +387,17 @@ fn code_actions_offer_titles_and_apply_edits_and_commands() {
             .collect::<Vec<_>>(),
         _ => vec![],
     };
-    keys(&mut f.r, "<space>a");
+    keys(&mut f.r, "SPC a");
     wait(&mut f.r, |r| rows(r) == ["Fix it", "Tweak", "Lazy"]);
-    keys(&mut f.r, "<ret>");
+    keys(&mut f.r, "RET");
     wait(&mut f.r, |r| text(r) == "fixed\ntwo\n");
 
     // A command makes the server send its edit, which is answered.
-    keys(&mut f.r, "<space>a");
+    keys(&mut f.r, "SPC a");
     wait(&mut f.r, |r| !rows(r).is_empty());
     f.r.input(UserInput::Paste("twe".into()));
     wait(&mut f.r, |r| rows(r) == ["Tweak"]);
-    keys(&mut f.r, "<ret>");
+    keys(&mut f.r, "RET");
     wait(&mut f.r, |r| text(r) == "tweakeded\ntwo\n");
     let log = f.log.clone();
     wait(&mut f.r, move |_| {
@@ -406,9 +406,9 @@ fn code_actions_offer_titles_and_apply_edits_and_commands() {
     assert!(f.log().contains("execute tweak"));
 
     // The server is given the diagnostics of the line for its fixes.
-    keys(&mut f.r, "j<space>a");
+    keys(&mut f.r, "j SPC a");
     wait(&mut f.r, |r| !rows(r).is_empty());
-    keys(&mut f.r, "<esc>");
+    keys(&mut f.r, "ESC");
     let asked = f.log();
     let last = asked.lines().rfind(|l| l.starts_with("codeAction"));
     assert_eq!(last, Some("codeAction 1"));
@@ -420,7 +420,7 @@ fn code_actions_offer_titles_and_apply_edits_and_commands() {
 #[test]
 fn hover_shows_in_a_box_until_the_next_key() {
     let Some(mut f) = open("x\n") else { return };
-    keys(&mut f.r, "<c-c>k");
+    keys(&mut f.r, "C-c k");
     wait(&mut f.r, |r| r.popup() == Some("first\n  second"));
     keys(&mut f.r, "l");
     assert_eq!(f.r.popup(), None);
@@ -440,7 +440,7 @@ fn diagnostics_become_notes_with_their_words_and_join_the_hover() {
     assert_eq!(notes[0].text, "bad line\nmore");
     assert_eq!(notes[0].severity, soda::application::Severity::Error);
     assert_eq!(notes[0].range, 4..5, "an empty range marks one cell");
-    keys(&mut f.r, "j<c-c>k");
+    keys(&mut f.r, "j C-c k");
     wait(&mut f.r, |r| {
         r.popup() == Some("bad line\nmore\n\nfirst\n  second")
     });
@@ -456,7 +456,7 @@ fn the_server_completes_with_snippets() {
     });
     let popup = f.r.completion_popup().unwrap();
     assert_eq!(popup.rows[0].label, "server_call(int a)");
-    keys(&mut f.r, "<tab>");
+    keys(&mut f.r, "TAB");
     assert_eq!(text(&f.r), "server_call(int a)\n");
     keys(&mut f.r, "1");
     assert_eq!(text(&f.r), "server_call(1)\n");
@@ -467,15 +467,15 @@ fn a_candidate_brings_its_include_in_the_same_step() {
         return;
     };
     f.r.command(Command::SetMode(EditMode::Insert));
-    keys(&mut f.r, "<down>server_v");
+    keys(&mut f.r, "<down> server_v");
     wait(&mut f.r, |r| {
         r.completion_popup()
             .is_some_and(|popup| popup.rows.len() == 1)
     });
-    keys(&mut f.r, "<tab>x");
+    keys(&mut f.r, "TAB x");
     assert_eq!(text(&f.r), "#include <vector>\n// top\nserver_vectorx\n");
     // The `x` typed after it is a step of its own.
-    keys(&mut f.r, "<esc>uu");
+    keys(&mut f.r, "ESC uu");
     assert_eq!(text(&f.r), "// top\nserver_v\n");
 }
 #[test]
@@ -512,7 +512,7 @@ fn a_missing_server_is_said_once() {
     }
     assert_eq!(r.message(), "quiet");
     // Its keys hold only where a server serves the document.
-    keys(&mut r, "<c-c>k");
+    keys(&mut r, "C-c k");
     assert_eq!(r.message(), "C-c k is undefined");
     r.command(Command::Named("lsp-hover".into()));
     assert_eq!(r.message(), "No language server for this document");
@@ -523,19 +523,19 @@ fn keymaps_of_servers_hold_where_the_server_serves_the_later_first() {
         "int a;\n",
         r#"{ name = "fake" }"#,
         r#"soda.keymap("fake", { server = "fake" })
-        soda.map("fake", "<c-c>k", "echo from fake")
-        soda.map("fake", "<c-c>y", "echo only fake")"#,
+        soda.map("fake", "C-c k", "echo from fake")
+        soda.map("fake", "C-c y", "echo only fake")"#,
     ) else {
         return;
     };
     // `fake` was defined after `lsp`, so its key wins.
-    keys(&mut f.r, "<c-c>k");
+    keys(&mut f.r, "C-c k");
     assert_eq!(f.r.message(), "from fake");
-    keys(&mut f.r, "<space>y");
+    keys(&mut f.r, "SPC y");
     assert_eq!(f.r.message(), "only fake");
     // Not where no server serves the document.
     f.r.command(Command::Named("new".into()));
-    keys(&mut f.r, "<c-c>y");
+    keys(&mut f.r, "C-c y");
     assert_eq!(f.r.message(), "C-c y is undefined");
     let defined =
         f.r.source_lua("bad", r#"soda.keymap("normal", { server = "x" })"#);
@@ -664,16 +664,16 @@ fn completion_ranges_say_how_far_enter_and_tab_replace() {
             .is_some_and(|popup| popup.rows.len() == 2)
     });
     // Enter takes the insert range, which ends at the caret.
-    keys(&mut f.r, "<down><ret>");
+    keys(&mut f.r, "<down> RET");
     assert_eq!(text(&f.r), "qq_replacetail\n");
-    keys(&mut f.r, "<esc>u");
+    keys(&mut f.r, "ESC u");
     assert_eq!(text(&f.r), "qqtail\n");
     // Tab takes the replace range: two bytes past the caret, not the word.
     f.r.command(Command::Edit(Edit::SetSelection(Selection::caret(2))));
     f.r.command(Command::SetMode(EditMode::Insert));
-    keys(&mut f.r, "<bs>q");
+    keys(&mut f.r, "DEL q");
     wait(&mut f.r, |r| r.completion_popup().is_some());
-    keys(&mut f.r, "<tab>");
+    keys(&mut f.r, "TAB");
     assert_eq!(text(&f.r), "qq_replaceil\n");
 }
 #[test]
@@ -685,7 +685,7 @@ fn a_selected_candidate_is_resolved_and_a_commit_character_accepts_it() {
         r.completion_popup()
             .is_some_and(|popup| popup.rows.len() == 2)
     });
-    keys(&mut f.r, "<down><down>");
+    keys(&mut f.r, "<down> <down>");
     wait(&mut f.r, |r| {
         r.completion_popup().is_some_and(|popup| {
             popup
@@ -862,7 +862,7 @@ fn what_the_server_does_not_offer_is_said_and_not_asked() {
            end"#,
     )
     .unwrap();
-    keys(&mut f.r, "<c-c>k");
+    keys(&mut f.r, "C-c k");
     assert_eq!(
         f.r.message(),
         "The language server does not offer textDocument/hover"
@@ -876,9 +876,9 @@ fn ccls_hierarchies_open_level_by_level_and_skipped_branches_are_dim() {
         // documents.
         r#"{ name = "ccls" }"#,
         r#"require("ccls").setup({ command = { "unused" } })
-        soda.map("ccls", "<c-c>c", "ccls-callers")
-        soda.map("ccls", "<c-c>T", "ccls-derived")
-        soda.map("ccls", "<c-c>M", "ccls-members functions")"#,
+        soda.map("ccls", "C-c c", "ccls-callers")
+        soda.map("ccls", "C-c T", "ccls-derived")
+        soda.map("ccls", "C-c M", "ccls-members functions")"#,
     ) else {
         return;
     };
@@ -893,7 +893,7 @@ fn ccls_hierarchies_open_level_by_level_and_skipped_branches_are_dim() {
     // From "two" to the third character of "three".
     assert_eq!(f.r.app().paints(document), [(4..11, dim.unwrap())]);
 
-    keys(&mut f.r, "<c-c>c");
+    keys(&mut f.r, "C-c c");
     wait(&mut f.r, |r| text(r).starts_with("▾ root"));
     assert_eq!(
         text(&f.r),
@@ -906,7 +906,7 @@ fn ccls_hierarchies_open_level_by_level_and_skipped_branches_are_dim() {
         "{}",
         f.log()
     );
-    keys(&mut f.r, "j<tab>");
+    keys(&mut f.r, "j TAB");
     wait(&mut f.r, |r| text(r).contains("deeper"));
     assert_eq!(
         text(&f.r),
@@ -914,19 +914,19 @@ fn ccls_hierarchies_open_level_by_level_and_skipped_branches_are_dim() {
     );
     assert!(f.log().contains(r#""id": "2""#), "{}", f.log());
     // Enter goes there.
-    keys(&mut f.r, "j<ret>");
+    keys(&mut f.r, "j RET");
     wait(&mut f.r, |r| text(r).starts_with("one"));
 
     // Inheritance asks again with the node's kind; members show field names.
-    keys(&mut f.r, "<c-c>T");
+    keys(&mut f.r, "C-c T");
     wait(&mut f.r, |r| text(r).starts_with("▾ root"));
-    keys(&mut f.r, "j<tab>");
+    keys(&mut f.r, "j TAB");
     wait(&mut f.r, |r| text(r).contains("deeper"));
     assert!(f.log().contains(r#"$ccls/inheritance {"derived": true, "hierarchy": true, "id": "2", "kind": 2, "levels": 1}"#), "{}", f.log());
     let source = format!("buffer {}", f.dir.path().join("a.cpp").display());
     f.r.command(Command::Named(source));
     wait(&mut f.r, |r| text(r).starts_with("one"));
-    keys(&mut f.r, "<c-c>M");
+    keys(&mut f.r, "C-c M");
     wait(&mut f.r, |r| text(r).starts_with("▾ root_field"));
     assert!(f.log().contains(r#""kind": 3"#), "{}", f.log());
 
@@ -961,7 +961,7 @@ fn implementations_are_listed_when_there_are_several() {
     let Some(mut f) = open("one\ntwo\n") else {
         return;
     };
-    keys(&mut f.r, "<c-c>.");
+    keys(&mut f.r, "C-c .");
     wait(&mut f.r, |r| text(r).contains("a.cpp"));
     assert_eq!(text(&f.r), "a.cpp\n  1:2  one\n  2:1  two\n");
 }
@@ -1036,7 +1036,7 @@ fn diagnostics_carry_related_places_and_tags_and_can_be_pulled() {
     // Pulled when typing pauses, and again with the last result's id.
     f.r.command(Command::Named("set idle-time 10".into()));
     f.r.command(Command::SetMode(EditMode::Insert));
-    keys(&mut f.r, "pulled ");
+    keys(&mut f.r, "pulled SPC");
     wait(&mut f.r, |r| {
         r.app()
             .notes(document)
@@ -1134,7 +1134,7 @@ fn token_modifiers_make_read_only_variables_constants_and_strike_deprecated_ones
     )
     .unwrap();
     f.r.command(Command::SetMode(EditMode::Insert));
-    keys(&mut f.r, " ");
+    keys(&mut f.r, "SPC");
     wait(&mut f.r, |r| {
         let tokens = r.app().tokens(document, 0..99);
         tokens.len() == 1 && tokens[0].1 == Category::Keyword
@@ -1143,12 +1143,12 @@ fn token_modifiers_make_read_only_variables_constants_and_strike_deprecated_ones
 #[test]
 fn a_code_action_without_its_edit_is_resolved_when_chosen() {
     let Some(mut f) = open("one\n") else { return };
-    keys(&mut f.r, "<space>a");
+    keys(&mut f.r, "SPC a");
     wait(&mut f.r, |r| {
         matches!(r.layer(), Some(soda::interaction::Layer::CommandLine(_)))
     });
     f.r.input(UserInput::Paste("lazy".into()));
-    keys(&mut f.r, "<ret>");
+    keys(&mut f.r, "RET");
     wait(&mut f.r, |r| text(r) == "lazy\n");
     assert!(f.log().contains("resolve action Lazy"), "{}", f.log());
 }

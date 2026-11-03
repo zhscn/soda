@@ -96,15 +96,15 @@ thing 键（`,`、`.` 之后）开始是 meow 的 `meow-char-thing-table`：`r s
 
 ### Keypad
 
-keypad 的入口是普通命令：`keypad leader`（meow 布局里是 Space）、`keypad <c-x>`、`keypad <c-c>`、`keypad meta`、`keypad ctrl-meta`，绑在布局的哪个键上由布局决定；下表假设 `x`、`c`、`m` 绑了后三个。绑定只有一份：`<c-x><c-s>` 写在 `global` 表里，keypad 读键时每个键先试加 Ctrl，再试原样，只查 `global` 表；`m`、`g` 给下一个键加 Meta / Ctrl-Meta，按当前键位栈查找。
+keypad 的入口是普通命令：`keypad leader`（meow 布局里是 Space）、`keypad C-x`、`keypad C-c`、`keypad meta`、`keypad ctrl-meta`，绑在布局的哪个键上由布局决定；下表假设 `x`、`c`、`m` 绑了后三个。绑定只有一份：`C-x C-s` 写在 `global` 表里，keypad 读键时每个键先试加 Ctrl，再试原样，只查 `global` 表；`m`、`g` 给下一个键加 Meta / Ctrl-Meta，按当前键位栈查找。
 
 | 键 | 序列 | 说明 |
 | --- | --- | --- |
-| `x s` | `<c-x><c-s>` | Ctrl 优先 |
-| `x k` | `<c-x>k` | 没有 Ctrl 绑定，退回原样 |
-| `x <space> o` | `<c-x>o` | Space 强制下一个键不加修饰，与 `<c-x><c-o>` 区分 |
-| `<space> f` | `<c-c>f` | leader 的第一个键不加修饰 |
-| `m x` | `<a-x>` | 只作用于下一个键 |
+| `x s` | `C-x C-s` | Ctrl 优先 |
+| `x k` | `C-x k` | 没有 Ctrl 绑定，退回原样 |
+| `x SPC o` | `C-x o` | Space 强制下一个键不加修饰，与 `C-x C-o` 区分 |
+| `SPC f` | `C-c f` | leader 的第一个键不加修饰 |
+| `m x` | `M-x` | 只作用于下一个键 |
 
 Backspace 退掉上一个键，Esc 取消，计数跨过 keypad 保留。与 meow 的差别见[模态编辑的设计](modal.md)。
 
@@ -163,7 +163,7 @@ Backspace 退掉上一个键，Esc 取消，计数跨过 keypad 保留。与 meo
 | Normal | `mark`（光标在标记的符号上时）、`tree`（在树文档中时）或 `results`（在结果文档中时，Enter 是 `jump`）、`normal`、文档键位表、`global` |
 | Beacon | `beacon`、`normal`、文档键位表、`global` |
 
-文档键位表中，服务器的表在前，后声明的先查（`ccls` 在 `lsp` 之后声明，所以同一个键以 `ccls` 的为准），语言的表在最后。它们和 `global` 一样不分模式，在模式表之下，所以遮不住 Normal 的单键，适合 `C-c` 开头的键。`global` 是所有模式共有的键，`C-x`、`C-c` 下的键都在这里。keypad 读不加修饰的键时查文档键位表和 `global`，所以绑到 `<c-c>` 下的键同时有 `SPC` 入口。
+文档键位表中，服务器的表在前，后声明的先查（`ccls` 在 `lsp` 之后声明，所以同一个键以 `ccls` 的为准），语言的表在最后。它们和 `global` 一样不分模式，在模式表之下，所以遮不住 Normal 的单键，适合 `C-c` 开头的键。`global` 是所有模式共有的键，`C-x`、`C-c` 下的键都在这里。keypad 读不加修饰的键时查文档键位表和 `global`，所以绑到 `C-c` 下的键同时有 `SPC` 入口。
 
 每张表依次查找：
 
@@ -171,7 +171,7 @@ Backspace 退掉上一个键，Esc 取消，计数跨过 keypad 保留。与 meo
 2. 默认层：`interaction::keymap` 中的静态表，引用命令名并在启动时解析，测试保证每个默认条目都能解析；内置模块和插件用 `soda.map_default` 绑的键也在这一层，后绑的替换相同或互为前缀的默认键。
 3. 都没有时：Normal 和 Beacon 忽略这个键；insert 和 prompt 的可打印字符直接输入。
 
-用户层的完整绑定不能同时是另一个用户绑定的前缀；用户层前缀会遮住默认层中相同开头的单键。序列最多四个按键。Esc、`C-[`、`C-g`、`C-c` 取消待完成序列；前三个不能作为序列的第二个及以后的按键，`C-c` 可以（`<c-x><c-c>`）。要关闭某个默认键，绑定到 `nop`。
+用户层的完整绑定不能同时是另一个用户绑定的前缀；用户层前缀会遮住默认层中相同开头的单键。序列最多四个按键。Esc、`C-[`、`C-g`、`C-c` 取消待完成序列；前三个不能作为序列的第二个及以后的按键，`C-c` 可以（`C-x C-c`）。要关闭某个默认键，绑定到 `nop`。
 
 `prompt` 的目标是输入动作而不是应用命令：`confirm`、`cancel`、`complete`、`complete-backward`、`candidate-next`、`candidate-previous`、`candidate-first`、`candidate-last`、`page-next`、`page-previous`、`history-next`、`history-previous`、`match-next`、`match-previous`、`replace-all`、`help`、`select-all`、`nop`，以及[行编辑键](#行编辑键)。prompt 绑定只接受单个按键，所以输入组件不会执行文档命令或切换模式。
 
@@ -195,18 +195,18 @@ Insert 中按选项 `auto-pairs`（默认关）成对输入括号，与 Emacs �
 
 | 键 | 来源 | 命令 | 作用 |
 | --- | --- | --- | --- |
-| `<c-a-f>` / `<c-a-b>` | 内置 | `sexp-forward` / `sexp-backward` | 越过一个表达式，停在分组边界 |
-| `<c-a-u>` | 内置 | `sexp-up` | 到包围它的分组开头 |
-| `<c-a-space>` | 内置 | `sexp-expand` | 选中光标处或包围它的分组，再按扩大一层 |
-| `<c-a-k>` / `<c-a-bs>` | 内置 | `sexp-kill-forward` / `sexp-kill-backward` | 剪切下一个 / 上一个表达式 |
-| `<c-a-a>` / `<c-a-e>` | puni | `sexp-beginning` / `sexp-end` | 到所在分组内部的开头 / 结尾 |
-| `<c-k>` | puni | `sexp-kill` | 剪切到行尾；有表达式越过行尾时剪到它结束，遇到所在分组的闭括号时停在它之前 |
-| Insert `<bs>` | puni | `soft-backspace` | 删除会破坏配对时只移动光标；空的一对整个删除 |
-| Insert `<c-bs>`、`<a-bs>` | puni | `soft-kill-word` | 向前剪一个词进 kill ring；标点剪到最近的括号为止，紧邻括号时同 `soft-backspace` |
-| Insert `<c-w>` | puni | `kill-region-or-word` | 有选区时剪切选区，否则同 `soft-kill-word` |
+| `C-M-f` / `C-M-b` | 内置 | `sexp-forward` / `sexp-backward` | 越过一个表达式，停在分组边界 |
+| `C-M-u` | 内置 | `sexp-up` | 到包围它的分组开头 |
+| `C-M-SPC` | 内置 | `sexp-expand` | 选中光标处或包围它的分组，再按扩大一层 |
+| `C-M-k` / `C-M-DEL` | 内置 | `sexp-kill-forward` / `sexp-kill-backward` | 剪切下一个 / 上一个表达式 |
+| `C-M-a` / `C-M-e` | puni | `sexp-beginning` / `sexp-end` | 到所在分组内部的开头 / 结尾 |
+| `C-k` | puni | `sexp-kill` | 剪切到行尾；有表达式越过行尾时剪到它结束，遇到所在分组的闭括号时停在它之前 |
+| Insert `DEL` | puni | `soft-backspace` | 删除会破坏配对时只移动光标；空的一对整个删除 |
+| Insert `C-DEL`、`M-DEL` | puni | `soft-kill-word` | 向前剪一个词进 kill ring；标点剪到最近的括号为止，紧邻括号时同 `soft-backspace` |
+| Insert `C-w` | puni | `kill-region-or-word` | 有选区时剪切选区，否则同 `soft-kill-word` |
 | 无 | | `sexp-slurp` / `sexp-barf` | 把闭括号移到下一个表达式之后 / 最后一个表达式之前 |
 
-没有写模式的键在 Normal 和 Insert 中都有效。`foo(a,⏎ b);` 行首的 `<c-k>` 留下 `;`，`if (x) {⏎} else {⏎}` 行首的留下 `else {⏎}`，与 puni 相同。插件的键是默认绑定，用户绑定遮住它，`unmap` 后恢复插件的键。
+没有写模式的键在 Normal 和 Insert 中都有效。`foo(a,⏎ b);` 行首的 `C-k` 留下 `;`，`if (x) {⏎} else {⏎}` 行首的留下 `else {⏎}`，与 puni 相同。插件的键是默认绑定，用户绑定遮住它，`unmap` 后恢复插件的键。
 
 ### Emacs 键位
 
@@ -233,7 +233,7 @@ Insert 中按选项 `auto-pairs`（默认关）成对输入括号，与 Emacs �
 
 `C-c` 是前缀，不离开 Insert；模态编辑时离开 Insert 用 Esc、`C-[` 或 `C-g`。
 
-`C-c` 加字母留给用户，内置键和插件都不占用（[插件](extension.md#插件)）。模态编辑时 Normal 的 `SPC` 读作 `<c-c>`，所以用户绑在 `<c-c>` 下的键同时是 leader 键。`project`、`recent`、`jump-to`、`window-pick`、`window-left` 等命令要用户自己绑，或用 `M-x`。
+`C-c` 加字母留给用户，内置键和插件都不占用（[插件](extension.md#插件)）。模态编辑时 Normal 的 `SPC` 读作 `C-c`，所以用户绑在 `C-c` 下的键同时是 leader 键。`project`、`recent`、`jump-to`、`window-pick`、`window-left` 等命令要用户自己绑，或用 `M-x`。
 
 Normal、Insert 都有效（`lua/emacs.lua`、`lua/comment.lua`）：
 
@@ -250,7 +250,14 @@ Alt 加 Shift 的符号键在 kitty 协议下按美式键盘换算。
 
 ### 按键记法
 
-单个字符直接书写；带修饰键或特殊键写在尖括号中，大小写不敏感：`<c-x>`、`<a-f>`（`<m-f>` 同义）、`<s-tab>`、`<c-s-left>`。特殊键名为 `esc`、`ret`（`cr`、`enter`）、`tab`、`backtab`、`bs`（`backspace`）、`del`、`space`、`lt`、`gt`、`left`、`right`、`up`、`down`、`home`、`end`、`pageup`、`pagedown` 和 `f1` 到 `f12`。序列直接拼接，如 `<space>f`、`<c-x><c-s>`。帮助使用这种记法；状态栏、按键提示和消息用 Emacs 记法（`C-x C-s`），见[界面](ui.md)。
+按键用 Emacs 的 `kbd` 记法，配置、帮助、状态栏和消息都是同一种：
+
+- **键之间用空格隔开**：`C-x C-s`、`C-c v c`、`SPC f`。
+- **修饰键**写在键前：`C-` Ctrl，`M-` Meta（Alt），`S-` Shift，可以叠加：`C-M-f`、`C-S-<left>`、`C--`。区分大小写；Emacs 的 `s-`（super）、`H-`、`A-` 不支持。
+- **特殊键**：`RET`、`SPC`、`TAB`、`ESC`、`DEL`（Backspace）；其他功能键写在尖括号里：`<left>`、`<right>`、`<up>`、`<down>`、`<home>`、`<end>`、`<prior>`、`<next>`（PageUp、PageDown）、`<delete>`、`<backtab>`、`<f1>` 到 `<f12>`，以及别名 `<return>`、`<tab>`、`<escape>`、`<backspace>`、`<deletechar>`。
+- **没有修饰键也不是特殊键的词**按字符逐个算键，与 `(kbd "abc")` 相同：`each-line i; ESC` 是 `i`、`;`、Escape。要输入空格写 `SPC`；字面的制表符没有写法。
+
+命令行的 `map`、`unmap` 里 KEYS 是一个参数，有多个键时加双引号：`map global "C-c v c" ccls-callers`；Lua 的 `soda.map("global", "C-c v c", ...)` 本来就是字符串。
 
 ### 行编辑键
 
@@ -280,11 +287,11 @@ Insert 中 Tab 是 `insert-tab`：有选区时缩进所选行（选区终点恰�
 
 ```lua
 -- ~/.config/soda/init.lua
-soda.map("global", "<c-c>f", "project")
-soda.map("insert", "<c-s>", "write")
+soda.map("global", "C-c f", "project")
+soda.map("insert", "C-s", "write")
 soda.command([[define-command fmt pipe clang-format --assume-filename="$SODA_FILE"]])
-soda.map("global", "<c-c>=", "fmt")
-soda.map("normal", "<c-c>y", function()
+soda.map("global", "C-c =", "fmt")
+soda.map("normal", "C-c y", function()
   soda.message(soda.buffer():name())
 end, "Show the buffer name")
 soda.set("line-numbers", "relative")
@@ -567,7 +574,7 @@ Application 拥有一个跨文档共享的剪贴板，它是 Emacs 式的 kill r
 `each-line KEYS` 和 `each-match PATTERN KEYS` 对应 meow 的 `meow-kmacro-lines` / `meow-kmacro-matches`，在很多场合可以代替多光标。
 
 - **范围**：选区覆盖的行；没有选区时，`each-line` 只作用于光标所在行，`each-match` 作用于整个文档。
-- **执行**：KEYS 用按键记法书写，如 `each-line i#<esc>`、`each-match foo wsbar<esc>`。每个目标先回到 Normal，光标放在行首或匹配开头，再像键入一样回放 KEYS。目标从下往上处理，修改不会移动上方的目标。
+- **执行**：KEYS 用按键记法书写，如 `each-line i# ESC`、`each-match foo wsbar ESC`。每个目标先回到 Normal，光标放在行首或匹配开头，再像键入一样回放 KEYS。目标从下往上处理，修改不会移动上方的目标。
 - **撤销**：全部修改合并为一步。
 - **失败**：某个目标上的按键失败时只放弃这个目标剩下的按键。最多处理 10,000 个目标。
 

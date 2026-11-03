@@ -38,7 +38,7 @@ function M.setup(options)
     return
   end
   for _, key in ipairs({ "(", "[", "{", '"', "'", "`" }) do
-    soda.map_default("global", "<c-c>" .. key, "surround " .. key)
+    soda.map_default("global", "C-c " .. key, "surround " .. key)
   end
 end
 

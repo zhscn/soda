@@ -19,7 +19,7 @@
 -- keys; bind them in the `ccls` keymap, which setup defines and which
 -- holds in documents ccls serves, over the `lsp` one:
 --
---   soda.map("ccls", "<c-c>vc", "ccls-callers")
+--   soda.map("ccls", "C-c v c", "ccls-callers")
 
 local lsp = require("lsp")
 

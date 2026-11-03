@@ -2,20 +2,20 @@
 -- had built in before they became plugins.
 require("puni").setup()
 for _, mode in ipairs({ "normal", "insert" }) do
-  soda.map_default(mode, "<c-s-right>", "sexp-slurp")
-  soda.map_default(mode, "<c-s-left>", "sexp-barf")
+  soda.map_default(mode, "C-S-<right>", "sexp-slurp")
+  soda.map_default(mode, "C-S-<left>", "sexp-barf")
 end
-soda.map_default("insert", "<c-h>", "soft-backspace")
-soda.map_default("normal", "<a-o>", "sexp-expand")
+soda.map_default("insert", "C-h", "soft-backspace")
+soda.map_default("normal", "M-o", "sexp-expand")
 
 require("symbol-overlay").setup()
-soda.map_default("global", "<c-c>i", "symbol-toggle")
-soda.map_default("global", "<c-c>I", "symbol-clear")
-soda.map_default("normal", "<a-n>", "symbol-switch-forward")
-soda.map_default("normal", "<a-p>", "symbol-switch-backward")
+soda.map_default("global", "C-c i", "symbol-toggle")
+soda.map_default("global", "C-c I", "symbol-clear")
+soda.map_default("normal", "M-n", "symbol-switch-forward")
+soda.map_default("normal", "M-p", "symbol-switch-backward")
 
 require("surround").setup()
-soda.map_default("global", "<c-c>g", "git-changes")
+soda.map_default("global", "C-c g", "git-changes")
 
 for key, command in pairs({
   ["."] = "lsp-implementation",
@@ -30,5 +30,5 @@ for key, command in pairs({
   S = "lsp-workspace-symbols",
   h = "lsp-switch",
 }) do
-  soda.map_default("lsp", "<c-c>" .. key, command)
+  soda.map_default("lsp", "C-c " .. key, command)
 end

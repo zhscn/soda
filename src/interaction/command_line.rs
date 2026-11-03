@@ -133,6 +133,12 @@ fn mark(
     row
 }
 fn word_end(text: &str, from: usize) -> usize {
+    // Keys in quotes are one argument: `map global "C-c v c" …`.
+    if text[from..].starts_with('"') {
+        return text[from + 1..]
+            .find('"')
+            .map_or(text.len(), |i| from + i + 2);
+    }
     text[from..]
         .find(char::is_whitespace)
         .map_or(text.len(), |i| from + i)

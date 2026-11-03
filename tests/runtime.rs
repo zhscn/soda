@@ -184,7 +184,7 @@ fn suspend_is_handed_to_the_frontend_once() {
     runtime.start(None);
     assert!(!runtime.take_suspend());
     runtime.input(soda::interaction::UserInput::Key(
-        soda::interaction::KeyStroke::parse_sequence("<c-z>").unwrap()[0],
+        soda::interaction::KeyStroke::parse_sequence("C-z").unwrap()[0],
     ));
     assert!(runtime.take_suspend());
     assert!(!runtime.take_suspend());

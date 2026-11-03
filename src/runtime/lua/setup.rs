@@ -1,7 +1,7 @@
 //! `soda` functions that extend the editor: key bindings, hooks, commands
 //! and completion sources.
 use super::{Host, Runtime};
-use crate::interaction::{Command, KeyStroke, key_notation};
+use crate::interaction::{Command, KeyStroke, emacs_notation};
 use mlua::{Function, Scope, Table, Value};
 use std::cell::RefCell;
 
@@ -156,7 +156,7 @@ pub(super) fn register<'scope, 'r: 'scope>(
             let out = lua.create_table()?;
             for (keys, label) in bindings {
                 let binding = lua.create_table()?;
-                binding.set("keys", key_notation(&keys))?;
+                binding.set("keys", emacs_notation(&keys))?;
                 binding.set("command", label)?;
                 out.push(binding)?;
             }

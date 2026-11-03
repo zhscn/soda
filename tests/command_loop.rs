@@ -314,10 +314,10 @@ fn configured_layers() -> Layers {
         .unwrap();
     for (keys, target) in [
         // A prompt that opens empty, so Enter has an argument missing.
-        ("<c-x><c-f>", "goto"),
-        ("<c-x><c-s>", "write"),
-        ("<c-x>n", "new"),
-        ("<c-_>", "undo"),
+        ("C-x C-f", "goto"),
+        ("C-x C-s", "write"),
+        ("C-x n", "new"),
+        ("C-_", "undo"),
     ] {
         layers
             .configure(Command::Map {

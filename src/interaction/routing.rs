@@ -52,118 +52,106 @@ impl KeyStroke {
     }
 }
 
-const NAMED_KEYS: &[(&str, Key)] = &[
-    ("esc", Key::Esc),
-    ("ret", Key::Enter),
-    ("cr", Key::Enter),
-    ("enter", Key::Enter),
+/// Keys Emacs names in capitals.
+const SPECIAL_KEYS: &[(&str, Key)] = &[
+    ("RET", Key::Enter),
+    ("SPC", Key::Char(' ')),
+    ("TAB", Key::Tab),
+    ("ESC", Key::Esc),
+    ("DEL", Key::Backspace),
+];
+/// Function keys, written in angle brackets: `<left>`, `<f1>`.
+const FUNCTION_KEYS: &[(&str, Key)] = &[
+    ("return", Key::Enter),
     ("tab", Key::Tab),
     ("backtab", Key::BackTab),
-    ("bs", Key::Backspace),
+    ("escape", Key::Esc),
     ("backspace", Key::Backspace),
-    ("del", Key::Delete),
-    ("space", Key::Char(' ')),
-    ("lt", Key::Char('<')),
-    ("gt", Key::Char('>')),
+    ("delete", Key::Delete),
+    ("deletechar", Key::Delete),
     ("left", Key::Left),
     ("right", Key::Right),
     ("up", Key::Up),
     ("down", Key::Down),
     ("home", Key::Home),
     ("end", Key::End),
-    ("pageup", Key::PageUp),
-    ("pagedown", Key::PageDown),
+    ("prior", Key::PageUp),
+    ("next", Key::PageDown),
 ];
 impl KeyStroke {
-    /// Parses key notation such as `x`, `<c-x>`, `<a-f>`, `<s-tab>` or
-    /// `<space>f`; modifier and key names are case-insensitive.
+    /// Parses keys as Emacs's `kbd` does: keys apart by spaces, each with
+    /// `C-`, `M-` and `S-` before it, as in `C-x C-s`, `M-<`, `C-M-SPC`,
+    /// `S-<left>`, `<f1>`, `RET`. A word with no modifier and no name is
+    /// its characters, one key each: `abc` is three keys.
     pub fn parse_sequence(text: &str) -> Result<Vec<Self>, String> {
         let mut keys = Vec::new();
-        let mut rest = text;
-        while let Some(ch) = rest.chars().next() {
-            if ch == '<'
-                && let Some(end) = rest.find('>').filter(|&end| end > 1)
-            {
-                keys.push(Self::parse_named(&rest[1..end])?);
-                rest = &rest[end + 1..];
-            } else {
-                keys.push(Self::plain(Key::Char(ch)));
-                rest = &rest[ch.len_utf8()..];
-            }
+        for word in text.split_whitespace() {
+            Self::parse_word(word, &mut keys)?;
         }
         if keys.is_empty() {
             return Err("empty key sequence".into());
         }
         Ok(keys)
     }
-    fn parse_named(spec: &str) -> Result<Self, String> {
+    fn parse_word(word: &str, keys: &mut Vec<Self>) -> Result<(), String> {
         let mut key = Self::plain(Key::Unrecognized);
-        let mut name = spec;
-        while let Some((modifier, tail)) = name.split_once('-').filter(|(_, tail)| !tail.is_empty())
-        {
-            match modifier.to_ascii_lowercase().as_str() {
-                "c" => key.control = true,
-                "a" | "m" => key.alt = true,
-                "s" => key.shift = true,
-                _ => return Err(format!("unknown modifier in <{spec}>")),
+        let mut name = word;
+        let mut modified = false;
+        // `C--` is Ctrl and `-`; a lone `C-` is two characters.
+        while name.len() > 2 && name.as_bytes()[0].is_ascii() && name.as_bytes()[1] == b'-' {
+            match &name[..1] {
+                "C" => key.control = true,
+                "M" => key.alt = true,
+                "S" => key.shift = true,
+                "s" | "H" | "A" => {
+                    return Err(format!("{word}: only C-, M- and S- are modifiers"));
+                }
+                _ => break,
             }
-            name = tail;
+            modified = true;
+            name = &name[2..];
         }
-        let lower = name.to_ascii_lowercase();
-        key.code = if let Some((_, code)) = NAMED_KEYS.iter().find(|(n, _)| *n == lower) {
+        let function = name
+            .strip_prefix('<')
+            .and_then(|name| name.strip_suffix('>'))
+            .filter(|name| !name.is_empty());
+        key.code = if let Some(function) = function {
+            if let Some((_, code)) = FUNCTION_KEYS.iter().find(|(n, _)| *n == function) {
+                *code
+            } else if let Some(number) = function.strip_prefix('f').and_then(|n| n.parse().ok())
+                && (1..=12).contains(&number)
+            {
+                Key::F(number)
+            } else {
+                return Err(format!("unknown key {name}"));
+            }
+        } else if let Some((_, code)) = SPECIAL_KEYS.iter().find(|(n, _)| *n == name) {
             *code
-        } else if let Some(number) = lower.strip_prefix('f').and_then(|n| n.parse().ok())
-            && (1..=12).contains(&number)
-        {
-            Key::F(number)
         } else {
             let mut chars = name.chars();
             match (chars.next(), chars.next()) {
                 (Some(ch), None) => Key::Char(ch),
-                _ => return Err(format!("unknown key <{spec}>")),
+                // A word of characters, as `kbd` reads `abc`.
+                _ if !modified => {
+                    keys.extend(name.chars().map(|ch| Self::plain(Key::Char(ch))));
+                    return Ok(());
+                }
+                _ => return Err(format!("{word}: a modifier takes one key")),
             }
         };
-        Ok(key)
+        keys.push(key);
+        Ok(())
     }
 }
 impl std::fmt::Display for KeyStroke {
+    /// The key as Emacs writes it, which `parse_sequence` reads.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = match self.code {
-            Key::Char(' ') => "space".into(),
-            Key::Char('<') => "lt".into(),
-            // `<a->>` would end at its first `>`.
-            Key::Char('>') if self.control || self.alt || self.shift => "gt".into(),
-            Key::Char(ch) => ch.to_string(),
-            Key::F(number) => format!("f{number}"),
-            Key::Unrecognized => "?".into(),
-            code => NAMED_KEYS
-                .iter()
-                .find(|(_, named)| *named == code)
-                .unwrap()
-                .0
-                .into(),
-        };
-        let modifiers = [(self.control, "c-"), (self.alt, "a-"), (self.shift, "s-")];
-        if name.chars().count() == 1 && modifiers.iter().all(|(on, _)| !on) {
-            return f.write_str(&name);
-        }
-        f.write_str("<")?;
-        for (on, prefix) in modifiers {
-            if on {
-                f.write_str(prefix)?;
-            }
-        }
-        write!(f, "{name}>")
+        f.write_str(&self.emacs())
     }
-}
-/// Formats a key sequence in the notation accepted by `parse_sequence`.
-pub fn key_notation(keys: &[KeyStroke]) -> String {
-    keys.iter().map(ToString::to_string).collect()
 }
 impl KeyStroke {
     /// The key as Emacs describes it: `C-x`, `M-f`, `C-M-S-<left>`, `SPC`,
-    /// `RET`; for what the editor shows, while `Display` writes what
-    /// `map` reads.
+    /// `RET`.
     pub fn emacs(&self) -> String {
         let name = match self.code {
             Key::Char(' ') => "SPC".into(),

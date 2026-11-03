@@ -34,7 +34,7 @@ soda.lsp.server("rust", { "rust-analyzer" }, {
 
 ## 命令
 
-`M-.`、`M-?` 是 xref 的键，绑在 `lsp` 键位表里，只在有服务器服务的文档中生效（见[键位上下文](interaction.md#键位上下文)）；其他文档里按下它们是未定义的键，命令本身照样可以执行。其余命令和 Emacs 的 eglot 一样没有键（`C-c` 加字母留给用户），绑到同一张表里：`soda.map("lsp", "<c-c>k", "lsp-hover")`。下表标着“建议”的键是作者配置里的，供参考。
+`M-.`、`M-?` 是 xref 的键，绑在 `lsp` 键位表里，只在有服务器服务的文档中生效（见[键位上下文](interaction.md#键位上下文)）；其他文档里按下它们是未定义的键，命令本身照样可以执行。其余命令和 Emacs 的 eglot 一样没有键（`C-c` 加字母留给用户），绑到同一张表里：`soda.map("lsp", "C-c k", "lsp-hover")`。下表标着“建议”的键是作者配置里的，供参考。
 
 | 键 | 命令 | 作用 |
 | --- | --- | --- |
@@ -154,7 +154,7 @@ require("ccls").setup({
 })
 ```
 
-`setup` 让 C++ 使用 ccls：`command` 换程序，`languages` 默认 `{ "cpp" }`，`init`、`settings` 原样传给 `soda.lsp.server`，`roots` 默认 `.ccls-root`、`.ccls`、`compile_commands.json`，`auto` 默认 `"marked"`（ccls 会给整个根目录建索引）。标准功能走 `lsp` 模块；ccls 没有的（如 `lsp-switch`）直接说明。`setup` 声明 `ccls` 键位表，只在 ccls 服务的文档中生效，同一个键优先于 `lsp` 表。下表的命令没有键，绑到这张表（在 `setup` 之后）：`soda.map("ccls", "<c-c>vc", "ccls-callers")`。
+`setup` 让 C++ 使用 ccls：`command` 换程序，`languages` 默认 `{ "cpp" }`，`init`、`settings` 原样传给 `soda.lsp.server`，`roots` 默认 `.ccls-root`、`.ccls`、`compile_commands.json`，`auto` 默认 `"marked"`（ccls 会给整个根目录建索引）。标准功能走 `lsp` 模块；ccls 没有的（如 `lsp-switch`）直接说明。`setup` 声明 `ccls` 键位表，只在 ccls 服务的文档中生效，同一个键优先于 `lsp` 表。下表的命令没有键，绑到这张表（在 `setup` 之后）：`soda.map("ccls", "C-c v c", "ccls-callers")`。
 
 | 键 | 命令 | 作用 |
 | --- | --- | --- |

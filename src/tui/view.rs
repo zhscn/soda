@@ -672,7 +672,7 @@ fn editor(
 fn splash(buf: &mut Buffer, area: Rect, theme: &Theme) {
     let lines: [(&str, &str); 5] = [
         (":open", "Open a file"),
-        ("<space>f", "Find a project file"),
+        ("SPC f", "Find a project file"),
         (":enew", "New document"),
         (":", "Run any command"),
         ("F1", "Help"),
@@ -1130,9 +1130,9 @@ mod tests {
             "",
             "the message row is empty without a message"
         );
-        keys(&mut r, "<space>");
+        keys(&mut r, "SPC");
         assert!(screen(&mut r, 120, 14).contains("f  Open a project file"));
-        keys(&mut r, "<esc>");
+        keys(&mut r, "ESC");
         r.command(Command::Close(None));
         let text = screen(&mut r, 60, 14);
         let rows: Vec<_> = text.lines().collect();
@@ -1144,7 +1144,7 @@ mod tests {
         assert!(rows[4].contains("unsaved [untitled ") && rows[4].trim_end().ends_with("· 1/2"));
         assert!(rows[5].starts_with("▌ save         [s]"));
         assert!(rows[6].starts_with("  discard      [d]"));
-        keys(&mut r, "<esc><a-x>");
+        keys(&mut r, "ESC M-x");
         r.input(UserInput::Paste("map normal ".into()));
         let text = screen(&mut r, 60, 14);
         let rows: Vec<_> = text.lines().collect();
@@ -1153,7 +1153,7 @@ mod tests {
         assert!(rows[12].starts_with(" COMMAND "), "{text}");
         assert!(rows[13].starts_with(":map normal "));
         assert!(rows[13].trim_end().ends_with("map KEYMAP KEYS COMMAND"));
-        keys(&mut r, "<esc>");
+        keys(&mut r, "ESC");
         r.command(Command::Help);
         let text = screen(&mut r, 60, 14);
         assert!(
@@ -1488,15 +1488,15 @@ mod tests {
         // Paging keeps it open and moves by what is in view; others close.
         r.scroll_popup(-1000);
         screen(&mut r, 40, 14);
-        keys(&mut r, "<pagedown>");
+        keys(&mut r, "<next>");
         let paged = screen(&mut r, 40, 14);
         assert!(
             !paged.contains("line1 ") && !paged.contains(" 1-"),
             "{paged}"
         );
-        keys(&mut r, "<a-v>");
+        keys(&mut r, "M-v");
         assert!(screen(&mut r, 40, 14).contains("line1 "));
-        keys(&mut r, "<c-v>");
+        keys(&mut r, "C-v");
         assert!(r.popup().is_some());
         keys(&mut r, "l");
         assert!(r.popup().is_none());
@@ -1560,13 +1560,13 @@ mod tests {
         // As at the end of an Emacs buffer, the empty line after the final
         // newline is a line: shown wherever the caret is, and reached by
         // moving down, in Normal and in Insert.
-        keys(&mut r, "<a-lt>");
+        keys(&mut r, "M-<");
         let shown = rows(&mut r);
         assert!(shown[3].starts_with("   3 │"), "{shown:?}");
         assert!(!shown[4].contains('4'));
         keys(&mut r, "jjj");
         assert!(rows(&mut r)[6].trim_end().ends_with("3:1  100%"));
-        keys(&mut r, "<a-lt>i<down><down><down>");
+        keys(&mut r, "M-< i <down> <down> <down>");
         assert!(rows(&mut r)[6].contains("3:1"));
     }
     #[test]
@@ -1591,7 +1591,7 @@ mod tests {
         assert!(rows[2].contains("cd ef gh1"), "{shown}");
         assert!(rows[3].contains("ij2"), "{shown}");
         // A word selection's next end within the line covers the space there.
-        keys(&mut r, "<esc><c-n><c-a>w");
+        keys(&mut r, "ESC C-n C-a w");
         let shown = screen(&mut r, 30, 6);
         assert!(
             shown.lines().nth(2).unwrap().contains("cd ef1gh2"),
@@ -1640,7 +1640,7 @@ mod tests {
             "a\nb\nc\nd".into(),
         )));
         r.command(Command::SetMode(EditMode::Normal));
-        keys(&mut r, "<a-lt>");
+        keys(&mut r, "M-<");
         keys(&mut r, "j");
         r.command(Command::Named("set line-numbers relative".into()));
         let text = screen(&mut r, 40, 10);

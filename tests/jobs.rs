@@ -74,10 +74,10 @@ fn run_streams_output_and_steps_through_its_locations() {
     assert!(r.message().ends_with(": exited 3"), "{}", r.message());
     // The view kept to the end while output arrived.
     assert_eq!(caret_line(&r), text.lines().count() - 1);
-    keys(&mut r, "<a-lt><a-g>n");
+    keys(&mut r, "M-< M-g n");
     wait(&mut r, |r| active_name(r).ends_with("a.txt"));
     let first = caret_line(&r);
-    keys(&mut r, "<a-g>n");
+    keys(&mut r, "M-g n");
     wait(&mut r, |r| caret_line(r) != first);
     assert_eq!((first, caret_line(&r)), (2, 1));
 }
@@ -100,7 +100,7 @@ fn stop_ends_runs_and_shell_commands() {
     assert_eq!(r.message(), "Stopped");
     line(&mut r, "shell sleep 30");
     assert!(r.shell_running());
-    keys(&mut r, "<c-c><c-c>");
+    keys(&mut r, "C-c C-c");
     wait(&mut r, |r| !r.shell_running());
     assert_eq!(r.message(), "sleep 30: was stopped");
     assert!(started.elapsed() < Duration::from_secs(10));
@@ -113,13 +113,13 @@ fn stepping_starts_at_the_first_result() {
     r.start(None);
     line(&mut r, "grep needle");
     wait(&mut r, |r| r.message().starts_with("2 matches"));
-    keys(&mut r, "<a-g>n");
+    keys(&mut r, "M-g n");
     wait(&mut r, |r| active_name(r).ends_with("a.txt"));
     assert_eq!(caret_line(&r), 0);
-    keys(&mut r, "<a-g>n");
+    keys(&mut r, "M-g n");
     wait(&mut r, |r| caret_line(r) != 0);
     assert_eq!(caret_line(&r), 2);
-    keys(&mut r, "<a-g>p");
+    keys(&mut r, "M-g p");
     wait(&mut r, |r| caret_line(r) == 0);
 }
 #[test]
@@ -138,11 +138,11 @@ fn grep_groups_results_under_file_names_and_enter_reaches_them() {
     let document = r.app().workspace().scratch("*grep*");
     assert_eq!(r.app().options().choice(document, "line-numbers"), "off");
     // Enter on a file's name opens its first result; a path may hold spaces.
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     wait(&mut r, |r| active_name(r).ends_with("a b.txt"));
     assert_eq!(caret_line(&r), 1);
-    keys(&mut r, "<a-g>n");
+    keys(&mut r, "M-g n");
     wait(&mut r, |r| active_name(r).ends_with("c.txt"));
-    keys(&mut r, "<a-g>n");
+    keys(&mut r, "M-g n");
     assert_eq!(r.message(), "At the last result");
 }

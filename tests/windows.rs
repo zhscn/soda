@@ -40,7 +40,7 @@ fn caret(r: &Runtime) -> usize {
 fn splits_copy_the_view_and_focus_moves_between_windows() {
     let mut r = runtime("one\ntwo");
     let first = r.app().active_view().unwrap();
-    keys(&mut r, "<c-x>3");
+    keys(&mut r, "C-x 3");
     let second = r.app().active_view().unwrap();
     assert_ne!(first, second);
     assert_eq!(r.app().windows().views(), [first, second]);
@@ -48,10 +48,10 @@ fn splits_copy_the_view_and_focus_moves_between_windows() {
     // selection of its own.
     assert_eq!(caret(&r), 2);
     keys(&mut r, "j");
-    keys(&mut r, "<c-c>H");
+    keys(&mut r, "C-c H");
     assert_eq!(r.app().active_view(), Some(first));
     assert_eq!(caret(&r), 2);
-    keys(&mut r, "<c-x>2");
+    keys(&mut r, "C-x 2");
     let third = r.app().active_view().unwrap();
     assert_eq!(
         r.app().windows().root(),
@@ -68,19 +68,19 @@ fn splits_copy_the_view_and_focus_moves_between_windows() {
             weights: vec![1; 2],
         })
     );
-    keys(&mut r, "<c-c>K");
+    keys(&mut r, "C-c K");
     assert_eq!(r.app().active_view(), Some(first));
-    keys(&mut r, "<c-c>L");
+    keys(&mut r, "C-c L");
     assert_eq!(r.app().active_view(), Some(second));
-    keys(&mut r, "<c-x>o");
+    keys(&mut r, "C-x o");
     assert_eq!(r.app().active_view(), Some(first));
     // Closing a window keeps its view, hidden.
-    keys(&mut r, "<c-x>0");
+    keys(&mut r, "C-x 0");
     assert_eq!(r.app().windows().views(), [third, second]);
     assert!(r.app().view(first).is_some());
-    keys(&mut r, "<c-x>1");
+    keys(&mut r, "C-x 1");
     assert_eq!(r.app().windows().views().len(), 1);
-    keys(&mut r, "<c-x>0");
+    keys(&mut r, "C-x 0");
     assert!(r.message().contains("last window"), "{}", r.message());
 }
 #[test]
@@ -123,7 +123,7 @@ fn page_rows_follow_the_active_window() {
     let mut r = runtime(&lines.join("\n"));
     r.resize(20, 5);
     r.set_page_rows(8);
-    keys(&mut r, "<a-lt><c-v>");
+    keys(&mut r, "M-< C-v");
     let view = r.app().view(r.app().active_view().unwrap()).unwrap();
     let text = r
         .app()
@@ -176,16 +176,16 @@ fn grep_results_show_below_and_open_locations_in_the_other_window() {
     assert_eq!(r.app().windows().side(results), Some(Side::Bottom));
     assert_eq!(r.app().windows().views(), [main, results]);
     // Enter on the first result opens it in the split window, not here.
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     settle(&mut r, |r| active_name(r) == "a.txt");
     let file = r.app().active_view().unwrap();
     assert_eq!(r.app().windows().views(), [file, results]);
     assert_eq!(caret(&r), "one\n  ".len());
     // Stepping moves the results caret and opens the next file in place.
-    keys(&mut r, "<a-g>n");
+    keys(&mut r, "M-g n");
     settle(&mut r, |r| active_name(r) == "b.txt");
     assert_eq!(r.app().windows().views().len(), 2);
-    keys(&mut r, "<a-g>n");
+    keys(&mut r, "M-g n");
     assert_eq!(r.message(), "At the last result");
     // A new search reuses the document and its side window.
     r.command(Command::Grep("ONE".into()));
@@ -197,9 +197,9 @@ fn grep_results_show_below_and_open_locations_in_the_other_window() {
     settle(&mut r, |r| active_name(r) == "*grep*");
     assert_eq!(r.app().active_view(), Some(results));
     // Side windows close like others and cannot be split.
-    keys(&mut r, "<c-x>2");
+    keys(&mut r, "C-x 2");
     assert!(r.message().contains("side windows"), "{}", r.message());
-    keys(&mut r, "<c-x>0");
+    keys(&mut r, "C-x 0");
     assert_eq!(r.app().windows().views().len(), 1);
     // Rules move a kind elsewhere; a hidden results view comes back there.
     r.command(Command::Named("display grep right 30".into()));
@@ -209,12 +209,12 @@ fn grep_results_show_below_and_open_locations_in_the_other_window() {
 /// Two windows on different documents; the second is active.
 fn two_documents(first: &str, second: &str) -> (Runtime, Vec<soda::application::ViewId>) {
     let mut r = runtime(first);
-    keys(&mut r, "<c-x>2");
+    keys(&mut r, "C-x 2");
     r.command(Command::New);
     r.command(Command::SetMode(soda::interaction::EditMode::Insert));
     r.input(UserInput::Paste(second.into()));
     r.command(Command::SetMode(soda::interaction::EditMode::Normal));
-    keys(&mut r, "<a-lt>");
+    keys(&mut r, "M-<");
     let windows = r.app().windows().views();
     assert_eq!(windows.len(), 2);
     let rows = windows.iter().map(|view| (*view, 10)).collect();
@@ -226,7 +226,7 @@ fn jump_labels_cover_every_window_with_the_active_one_first() {
     let (mut r, windows) = two_documents("xy one\n", "  xy two\n");
     let active = r.app().active_view().unwrap();
     let other = *windows.iter().find(|view| **view != active).unwrap();
-    keys(&mut r, "<space>jxy");
+    keys(&mut r, "SPC jxy");
     let Some(soda::interaction::Layer::Labels(session)) = r.layer() else {
         panic!("no labels: {}", r.message());
     };
@@ -244,7 +244,7 @@ fn jump_takes_a_single_match_in_another_window() {
     let (mut r, windows) = two_documents("  only here\n", "nothing\n");
     let active = r.app().active_view().unwrap();
     let other = *windows.iter().find(|view| **view != active).unwrap();
-    keys(&mut r, "<space>jon");
+    keys(&mut r, "SPC jon");
     assert_eq!(r.app().active_view(), Some(other));
     assert_eq!(caret(&r), 2);
 }
@@ -253,7 +253,7 @@ fn jump_respects_the_rows_of_each_window() {
     let (mut r, windows) = two_documents("a\nb\nzz\n", "nothing\n");
     let rows = windows.iter().map(|view| (*view, 2)).collect();
     r.set_window_rows(rows);
-    keys(&mut r, "<space>jzz");
+    keys(&mut r, "SPC jzz");
     assert_eq!(r.message(), "No zz on screen");
 }
 
@@ -262,14 +262,14 @@ fn resize_mode_moves_the_edge_until_escape_and_reset_evens_it() {
     let mut r = runtime("one\ntwo");
     r.set_editing_area(81, 20);
     let first = r.app().active_view().unwrap();
-    keys(&mut r, "<c-x>3");
+    keys(&mut r, "C-x 3");
     let second = r.app().active_view().unwrap();
     let width = |r: &Runtime, view| r.app().window_area(view).unwrap().width;
     assert_eq!((width(&r, first), width(&r, second)), (40, 40));
-    keys(&mut r, "<c-x>^");
+    keys(&mut r, "C-x ^");
     assert!(r.layer().is_some());
     // Two columns a step, four with Ctrl; the window to the left gives them.
-    keys(&mut r, "w<c-w>");
+    keys(&mut r, "w C-w");
     assert_eq!((width(&r, first), width(&r, second)), (34, 46));
     keys(&mut r, "n");
     assert_eq!(width(&r, second), 44);
@@ -281,7 +281,7 @@ fn resize_mode_moves_the_edge_until_escape_and_reset_evens_it() {
     // Nothing is above or below: the size stays and the mode goes on.
     keys(&mut r, "t");
     assert!(r.layer().is_some());
-    keys(&mut r, "<esc>");
+    keys(&mut r, "ESC");
     assert!(r.layer().is_none());
     // Sizes are kept as weights, so a smaller terminal scales both.
     r.set_editing_area(41, 20);

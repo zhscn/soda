@@ -77,5 +77,5 @@ macOS 的 Command 键按系统习惯处理，不经过键位表：
 
 ```sh
 cargo run --features gui --example gui_snapshot -- \
-    --size 1400x900 --scale 1.5 --keys '<c-x>3<a-x>o' --out shot.ppm src/main.rs
+    --size 1400x900 --scale 1.5 --keys 'C-x 3 M-x o' --out shot.ppm src/main.rs
 ```

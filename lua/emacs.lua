@@ -1,8 +1,8 @@
 -- Emacs editing commands: word case, transposing
 -- and whitespace. Moves and the C-x keys are built into the key tables.
 --
--- Built in: <a-u> <a-l> <a-c> <a-t> <a-\> <a-space> <a-^> and <c-t> in Normal
--- and Insert; <c-o> and <a-m> in Insert.
+-- Built in: M-u M-l M-c M-t M-\ M-SPC M-^ and C-t in Normal and Insert;
+-- C-o and M-m in Insert.
 
 local WORD = "[%w_\128-\255]+"
 local CHAR = "[%z\1-\127\194-\244][\128-\191]*"
@@ -143,14 +143,14 @@ soda.define_command("back-to-indentation", "Go to the first non-blank of the lin
 end)
 
 for _, mode in ipairs({ "normal", "insert" }) do
-  soda.map_default(mode, "<a-u>", "upcase-word")
-  soda.map_default(mode, "<a-l>", "downcase-word")
-  soda.map_default(mode, "<a-c>", "capitalize-word")
-  soda.map_default(mode, "<a-t>", "transpose-words")
-  soda.map_default(mode, "<c-t>", "transpose-chars")
-  soda.map_default(mode, "<a-\\>", "delete-horizontal-space")
-  soda.map_default(mode, "<a-space>", "just-one-space")
-  soda.map_default(mode, "<a-^>", "join-line")
+  soda.map_default(mode, "M-u", "upcase-word")
+  soda.map_default(mode, "M-l", "downcase-word")
+  soda.map_default(mode, "M-c", "capitalize-word")
+  soda.map_default(mode, "M-t", "transpose-words")
+  soda.map_default(mode, "C-t", "transpose-chars")
+  soda.map_default(mode, "M-\\", "delete-horizontal-space")
+  soda.map_default(mode, "M-SPC", "just-one-space")
+  soda.map_default(mode, "M-^", "join-line")
 end
-soda.map_default("insert", "<c-o>", "open-line")
-soda.map_default("insert", "<a-m>", "back-to-indentation")
+soda.map_default("insert", "C-o", "open-line")
+soda.map_default("insert", "M-m", "back-to-indentation")

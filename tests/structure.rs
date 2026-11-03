@@ -69,21 +69,21 @@ fn moves_step_over_whole_expressions() {
         "a.cpp",
         N,
         &[
-            ("|foo(a, b).bar", "<c-a-f>", "foo|(a, b).bar"),
-            ("foo|(a, b).bar", "<c-a-f>", "foo(a, b)|.bar"),
-            ("foo(a, b)|.bar;", "<c-a-f>", "foo(a, b).bar|;"),
-            ("foo(a, b)|.bar;", "<c-a-b>", "foo|(a, b).bar;"),
+            ("|foo(a, b).bar", "C-M-f", "foo|(a, b).bar"),
+            ("foo|(a, b).bar", "C-M-f", "foo(a, b)|.bar"),
+            ("foo(a, b)|.bar;", "C-M-f", "foo(a, b).bar|;"),
+            ("foo(a, b)|.bar;", "C-M-b", "foo|(a, b).bar;"),
             // The ends of a group stop a move.
-            ("f(a|)", "<c-a-f>", "f(a|)"),
-            ("f(|a)", "<c-a-b>", "f(|a)"),
-            ("f(a, g(|b))", "<c-a-u>", "f(a, g|(b))"),
-            ("f(a, g|(b))", "<c-a-u>", "f|(a, g(b))"),
+            ("f(a|)", "C-M-f", "f(a|)"),
+            ("f(|a)", "C-M-b", "f(|a)"),
+            ("f(a, g(|b))", "C-M-u", "f(a, g|(b))"),
+            ("f(a, g|(b))", "C-M-u", "f|(a, g(b))"),
             // Comments are passed over.
-            ("|/* x */ a;", "<c-a-f>", "/* x */ a|;"),
+            ("|/* x */ a;", "C-M-f", "/* x */ a|;"),
             // Brackets in a literal or a comment are text.
-            ("|\"a)\" b", "<c-a-f>", "\"a)\"| b"),
-            ("(a /* ) */ |b)", "<c-a-u>", "|(a /* ) */ b)"),
-            ("void f() { |g(); }", "<c-a-u>", "void f() |{ g(); }"),
+            ("|\"a)\" b", "C-M-f", "\"a)\"| b"),
+            ("(a /* ) */ |b)", "C-M-u", "|(a /* ) */ b)"),
+            ("void f() { |g(); }", "C-M-u", "void f() |{ g(); }"),
         ],
     );
 }
@@ -94,19 +94,19 @@ fn templates_are_groups_and_comparisons_are_not() {
         "a.cpp",
         N,
         &[
-            ("vector|<map<a, b>> x;", "<c-a-f>", "vector<map<a, b>>| x;"),
-            ("vector<map|<a, b>> x;", "<c-a-f>", "vector<map<a, b>|> x;"),
-            ("vector<map<a, b>>| x;", "<c-a-b>", "vector|<map<a, b>> x;"),
-            ("vector<map<a, |b>> x;", "<c-a-u>", "vector<map|<a, b>> x;"),
-            ("int x = |a < b;", "<c-a-f>", "int x = a| < b;"),
+            ("vector|<map<a, b>> x;", "C-M-f", "vector<map<a, b>>| x;"),
+            ("vector<map|<a, b>> x;", "C-M-f", "vector<map<a, b>|> x;"),
+            ("vector<map<a, b>>| x;", "C-M-b", "vector|<map<a, b>> x;"),
+            ("vector<map<a, |b>> x;", "C-M-u", "vector<map|<a, b>> x;"),
+            ("int x = |a < b;", "C-M-f", "int x = a| < b;"),
             (
                 "bool f() { return |x < y && y > z; }",
-                "<c-a-f><c-a-f>",
+                "C-M-f C-M-f",
                 "bool f() { return x < y| && y > z; }",
             ),
             (
                 "bool b = x < y && |y > z;",
-                "<c-a-u>",
+                "C-M-u",
                 "bool b = x < y && |y > z;",
             ),
         ],
@@ -119,34 +119,34 @@ fn kill_takes_the_expression_that_crosses_the_line() {
         "a.cpp",
         I,
         &[
-            ("|foo(a,\n    b);\nnext", "<c-k>", "|;\nnext"),
+            ("|foo(a,\n    b);\nnext", "C-k", "|;\nnext"),
             (
                 "|if (x) {\n    a();\n} else {\n    b();\n}\n",
-                "<c-k>",
+                "C-k",
                 "| else {\n    b();\n}\n",
             ),
             // Inside a group the kill stops before its end.
-            ("f(a|, b);\nc", "<c-k>", "f(a|);\nc"),
-            ("f(a, |b\n);\nc", "<c-k>", "f(a, |\n);\nc"),
+            ("f(a|, b);\nc", "C-k", "f(a|);\nc"),
+            ("f(a, |b\n);\nc", "C-k", "f(a, |\n);\nc"),
             // A line that closes nothing goes as usual.
-            ("a| = 1; // note\nb", "<c-k>", "a|\nb"),
-            ("a|\nb", "<c-k>", "a|b"),
-            ("// a| b\nc", "<c-k>", "// a|\nc"),
-            ("\"a| b\";\nc", "<c-k>", "\"a|\nc"),
+            ("a| = 1; // note\nb", "C-k", "a|\nb"),
+            ("a|\nb", "C-k", "a|b"),
+            ("// a| b\nc", "C-k", "// a|\nc"),
+            ("\"a| b\";\nc", "C-k", "\"a|\nc"),
             // No partner, no structure.
-            ("|foo(a,\nb", "<c-k>", "|\nb"),
+            ("|foo(a,\nb", "C-k", "|\nb"),
         ],
     );
 }
 #[test]
 fn kill_puts_the_text_on_the_clipboard() {
     let (_dir, mut r) = open("a.cpp", "|foo(a,\n    b);\n", EditMode::Insert);
-    keys(&mut r, "<c-k><esc>");
+    keys(&mut r, "C-k ESC");
     assert_eq!(text(&r), ";\n");
     keys(&mut r, "u");
     assert_eq!(text(&r), "foo(a,\n    b);\n", "one undo step");
     let (_dir, mut r) = open("a.cpp", "|f(a,\nb);\n", EditMode::Normal);
-    keys(&mut r, "<c-k><c-e>p");
+    keys(&mut r, "C-k C-e p");
     assert_eq!(text(&r), ";f(a,\nb)\n");
 }
 #[test]
@@ -154,24 +154,24 @@ fn kills_go_to_the_kill_ring_and_join_one_after_another() {
     let (_dir, mut r) = open("a.cpp", "|f(a,\n  b);\nint x;\n", EditMode::Insert);
     // The expression past the line end, then what is left of the line:
     // one entry.
-    keys(&mut r, "<c-k><c-k><c-k>");
+    keys(&mut r, "C-k C-k C-k");
     assert_eq!(shown(&r), "|int x;\n");
     assert_eq!(r.app().clipboard(), "f(a,\n  b);\n");
     // Words, forward and backward, join too.
-    keys(&mut r, "<a-f><a-d><a-bs>");
+    keys(&mut r, "M-f M-d M-DEL");
     assert_eq!(shown(&r), "|;\n");
     assert_eq!(r.app().clipboard(), "int x");
     assert_eq!(r.app().kill_ring().count(), 2);
-    keys(&mut r, "<c-y>");
+    keys(&mut r, "C-y");
     assert_eq!(shown(&r), "int x|;\n");
-    keys(&mut r, "<a-y>");
+    keys(&mut r, "M-y");
     assert_eq!(shown(&r), "f(a,\n  b);\n|;\n");
     // `C-w` cuts the selection, else a word backward.
     let (_dir, mut r) = open("a.cpp", "int |value = 1;\n", EditMode::Insert);
-    keys(&mut r, "<s-right><s-right><c-w>");
+    keys(&mut r, "S-<right> S-<right> C-w");
     assert_eq!(shown(&r), "int |lue = 1;\n");
     assert_eq!(r.app().clipboard(), "va");
-    keys(&mut r, "<c-w>");
+    keys(&mut r, "C-w");
     assert_eq!(shown(&r), "|lue = 1;\n");
     assert_eq!(r.app().clipboard(), "int va");
 }
@@ -182,37 +182,37 @@ fn backspace_keeps_pairs() {
         "a.cpp",
         I,
         &[
-            ("f(a)|;", "<bs>", "f(a|);"),
-            ("f(|a);", "<bs>", "f|(a);"),
-            ("f(|);", "<bs>", "f|;"),
-            ("f(a|);", "<bs>", "f(|);"),
-            ("{ a; }|", "<bs>", "{ a; |}"),
-            ("x = \"ab\"|;", "<bs>", "x = \"ab|\";"),
-            ("x = \"|ab\";", "<bs>", "x = |\"ab\";"),
-            ("x = \"\"|;", "<bs>", "x = |;"),
+            ("f(a)|;", "DEL", "f(a|);"),
+            ("f(|a);", "DEL", "f|(a);"),
+            ("f(|);", "DEL", "f|;"),
+            ("f(a|);", "DEL", "f(|);"),
+            ("{ a; }|", "DEL", "{ a; |}"),
+            ("x = \"ab\"|;", "DEL", "x = \"ab|\";"),
+            ("x = \"|ab\";", "DEL", "x = |\"ab\";"),
+            ("x = \"\"|;", "DEL", "x = |;"),
             // Text and strays go as usual.
-            ("x = \"a(|b\";", "<bs>", "x = \"a|b\";"),
-            ("// (|a", "<bs>", "// |a"),
-            ("a)|", "<bs>", "a|"),
-            ("f(|a", "<bs>", "f|a"),
+            ("x = \"a(|b\";", "DEL", "x = \"a|b\";"),
+            ("// (|a", "DEL", "// |a"),
+            ("a)|", "DEL", "a|"),
+            ("f(|a", "DEL", "f|a"),
         ],
     );
     check(
         "a.cpp",
         I,
         &[
-            ("foo bar|", "<c-w>", "foo |"),
+            ("foo bar|", "C-w", "foo |"),
             // Word deletion takes Emacs words: punctuation goes with the word before.
-            ("f(a, |b)", "<c-w>", "f(|b)"),
-            ("f(a)  |", "<c-w>", "f(a)|"),
-            ("f(a)|", "<c-w>", "f(a|)"),
+            ("f(a, |b)", "C-w", "f(|b)"),
+            ("f(a)  |", "C-w", "f(a)|"),
+            ("f(a)|", "C-w", "f(a|)"),
         ],
     );
 }
 #[test]
 fn soft_backspace_merges_like_the_built_in_one() {
     let (_dir, mut r) = open("a.cpp", "|", EditMode::Insert);
-    keys(&mut r, "abc<bs><bs><esc>");
+    keys(&mut r, "abc DEL DEL ESC");
     assert_eq!(text(&r), "a");
     keys(&mut r, "u");
     assert_eq!(text(&r), "abc", "deletions in a row are one step");
@@ -224,9 +224,9 @@ fn closing_brackets_move_over_their_neighbours() {
         "a.cpp",
         N,
         &[
-            ("foo(|a), b;", "<c-s-right>", "foo(|a, b);"),
-            ("foo(|a, b);", "<c-s-left>", "foo(|a), b;"),
-            ("foo(|a);", "<c-s-left>", "foo()|a;"),
+            ("foo(|a), b;", "C-S-<right>", "foo(|a, b);"),
+            ("foo(|a, b);", "C-S-<left>", "foo(|a), b;"),
+            ("foo(|a);", "C-S-<left>", "foo()|a;"),
         ],
     );
 }
@@ -237,11 +237,11 @@ fn expansion_selects_group_after_group() {
         let s = selection(r);
         text(r)[s.anchor.min(s.head)..s.anchor.max(s.head)].to_owned()
     };
-    keys(&mut r, "<a-o>");
+    keys(&mut r, "M-o");
     assert_eq!(selected(&r), "(b)", "{}", r.message());
-    keys(&mut r, "<a-o>");
+    keys(&mut r, "M-o");
     assert_eq!(selected(&r), "(a, g(b), c)");
-    keys(&mut r, "<a-o>");
+    keys(&mut r, "M-o");
     assert_eq!(selected(&r), "(a, g(b), c)", "nothing around it");
 }
 #[test]
@@ -251,21 +251,21 @@ fn other_languages_use_brackets_and_literals() {
         "a.rs",
         N,
         &[
-            ("|f(a, \")\").g", "<c-a-f><c-a-f>", "f(a, \")\")|.g"),
-            ("(a /* ) */ |b)", "<c-a-u>", "|(a /* ) */ b)"),
-            ("|\"a b\" c", "<c-a-f>", "\"a b\"| c"),
+            ("|f(a, \")\").g", "C-M-f C-M-f", "f(a, \")\")|.g"),
+            ("(a /* ) */ |b)", "C-M-u", "|(a /* ) */ b)"),
+            ("|\"a b\" c", "C-M-f", "\"a b\"| c"),
         ],
     );
-    check("a.rs", I, &[("|foo(a,\n  b);\nc", "<c-k>", "|;\nc")]);
+    check("a.rs", I, &[("|foo(a,\n  b);\nc", "C-k", "|;\nc")]);
     check(
         "a.txt",
         N,
         &[
-            ("|f(a, b) c", "<c-a-f><c-a-f>", "f(a, b)| c"),
-            ("(a| b", "<c-a-u>", "(a| b"),
+            ("|f(a, b) c", "C-M-f C-M-f", "f(a, b)| c"),
+            ("(a| b", "C-M-u", "(a| b"),
         ],
     );
-    check("a.txt", I, &[("f(a)|", "<bs>", "f(a|)")]);
+    check("a.txt", I, &[("f(a)|", "DEL", "f(a|)")]);
 }
 #[test]
 fn rust_generics_and_closures_are_groups() {
@@ -276,67 +276,63 @@ fn rust_generics_and_closures_are_groups() {
         &[
             (
                 "let v: Vec|<HashMap<K, V>> = a;",
-                "<c-a-f>",
+                "C-M-f",
                 "let v: Vec<HashMap<K, V>>| = a;",
             ),
             (
                 "let v: Vec<HashMap<K, V>>| = a;",
-                "<c-a-b>",
+                "C-M-b",
                 "let v: Vec|<HashMap<K, V>> = a;",
             ),
-            (
-                "x.collect::<Vec<|_>>()",
-                "<c-a-u>",
-                "x.collect::<Vec|<_>>()",
-            ),
+            ("x.collect::<Vec<|_>>()", "C-M-u", "x.collect::<Vec|<_>>()"),
             (
                 "let b = |a < b && c > d;",
-                "<c-a-f><c-a-f>",
+                "C-M-f C-M-f",
                 "let b = a < b| && c > d;",
             ),
             // The caret is the first `|`; closure parameters are a group.
             (
                 "let g = |move |a, b| a;",
-                "<c-a-f><c-a-f>",
+                "C-M-f C-M-f",
                 "let g = move |a, b|| a;",
             ),
-            ("f(|a, |x| x)", "<c-a-f><c-a-f>", "f(a, |x|| x)"),
+            ("f(|a, |x| x)", "C-M-f C-M-f", "f(a, |x|| x)"),
             // Lifetimes are words, and a quoted brace is a literal.
             (
                 "fn f<'a>(x: &|'a str) {}",
-                "<c-a-f>",
+                "C-M-f",
                 "fn f<'a>(x: &'a| str) {}",
             ),
-            ("(a, '(' |b)", "<c-a-u>", "|(a, '(' b)"),
-            ("(r#\")\"# |b)", "<c-a-u>", "|(r#\")\"# b)"),
+            ("(a, '(' |b)", "C-M-u", "|(a, '(' b)"),
+            ("(r#\")\"# |b)", "C-M-u", "|(r#\")\"# b)"),
         ],
     );
 }
 #[test]
 fn a_group_split_by_conditional_compilation_is_not_a_group() {
     let source = "#if X\nvoid f() {\n#else\nvoid g() {\n#endif\n    |h();\n}\nz;\n";
-    check("a.cpp", EditMode::Normal, &[(source, "<c-a-u>", source)]);
+    check("a.cpp", EditMode::Normal, &[(source, "C-M-u", source)]);
     let kill = "#if X\nvoid f() {\n#else\nvoid g() |{\n#endif\n    h();\n}\nz;\n";
     let killed = "#if X\nvoid f() {\n#else\nvoid g() |\n#endif\n    h();\n}\nz;\n";
-    check("a.cpp", EditMode::Insert, &[(kill, "<c-k>", killed)]);
+    check("a.cpp", EditMode::Insert, &[(kill, "C-k", killed)]);
 }
 #[test]
 fn a_user_binding_shadows_a_plugin_key_until_unmapped() {
     let (_dir, mut r) = open("a.cpp", "f(a)|;", EditMode::Insert);
-    r.command(Command::Named("map insert <bs> delete-backward".into()));
-    keys(&mut r, "<bs>");
+    r.command(Command::Named("map insert DEL delete-backward".into()));
+    keys(&mut r, "DEL");
     assert_eq!(shown(&r), "f(a|;");
     // puni's soft Backspace again, which leaves the pair whole.
-    r.command(Command::Named("unmap insert <bs>".into()));
-    keys(&mut r, ")<bs>");
+    r.command(Command::Named("unmap insert DEL".into()));
+    keys(&mut r, ") DEL");
     assert_eq!(shown(&r), "f(a|);");
 }
 #[test]
 fn built_in_keys_reach_their_commands() {
     let (_dir, mut r) = open("a.cpp", "|ab;\n", EditMode::Normal);
-    keys(&mut r, "<a-;>");
+    keys(&mut r, "M-;");
     assert_eq!(text(&r), "// ab;\n");
     keys(&mut r, "u");
-    keys(&mut r, "LL<c-c>\"");
+    keys(&mut r, "LL C-c \"");
     assert_eq!(text(&r), "\"ab\";\n", "{}", r.message());
 }

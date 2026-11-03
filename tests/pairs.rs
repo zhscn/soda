@@ -61,13 +61,13 @@ fn brackets_pair_step_over_and_delete_together() {
     assert_eq!(shown(&r), "(|)");
     keys(&mut r, "a)");
     assert_eq!(shown(&r), "(a)|");
-    keys(&mut r, " [<bs>");
+    keys(&mut r, "SPC [ DEL");
     assert_eq!(shown(&r), "(a) |");
     // Before a word, an opener comes alone.
-    keys(&mut r, "x<left>[");
+    keys(&mut r, "x <left> [");
     assert_eq!(shown(&r), "(a) [|x");
     // Plain text keeps quotes single.
-    keys(&mut r, "<esc><c-e>a \"");
+    keys(&mut r, "ESC C-e a SPC \"");
     assert_eq!(shown(&r), "(a) [x \"|");
     r.command(Command::Named("set auto-pairs false".into()));
     keys(&mut r, "(");
@@ -88,19 +88,19 @@ fn selections_are_wrapped() {
 #[test]
 fn cpp_pairs_quotes_outside_literals_and_opens_blocks() {
     let (_dir, mut r) = cpp();
-    keys(&mut r, "iif (x) {<ret>");
+    keys(&mut r, "iif SPC (x) SPC { RET");
     assert_eq!(shown(&r), "if (x) {\n  |\n}");
-    keys(&mut r, "s = \"");
+    keys(&mut r, "s SPC = SPC \"");
     assert_eq!(shown(&r), "if (x) {\n  s = \"|\"\n}");
     // Inside the string, brackets are text; the closing quote steps over.
     keys(&mut r, "(\"");
     assert_eq!(shown(&r), "if (x) {\n  s = \"(\"|\n}");
-    keys(&mut r, "; // don't (");
+    keys(&mut r, "; SPC // SPC don't SPC (");
     assert_eq!(shown(&r), "if (x) {\n  s = \"(\"; // don't (|\n}");
-    keys(&mut r, "<esc><a-lt>Ic = x'");
+    keys(&mut r, "ESC M-< Ic SPC = SPC x'");
     assert_eq!(shown(&r), "c = x'|\nif (x) {\n  s = \"(\"; // don't (\n}");
-    keys(&mut r, "<bs> '");
+    keys(&mut r, "DEL SPC '");
     assert_eq!(shown(&r), "c = x '|'\nif (x) {\n  s = \"(\"; // don't (\n}");
-    keys(&mut r, "<bs>");
+    keys(&mut r, "DEL");
     assert_eq!(shown(&r), "c = x |\nif (x) {\n  s = \"(\"; // don't (\n}");
 }

@@ -53,9 +53,9 @@ fn patterns_highlight_globally_or_in_one_document() {
         "define-command mark-here highlight-local mark \\b%val{word}\\b",
     );
     line(&mut r, "mark-here");
-    keys(&mut r, "<a-f><c-f>");
+    keys(&mut r, "M-f C-f");
     line(&mut r, "mark-here");
-    keys(&mut r, "<a-f><c-f>");
+    keys(&mut r, "M-f C-f");
     line(&mut r, "mark-here");
     assert_eq!(
         shown(&r)[1..],
@@ -88,9 +88,9 @@ fn symbols_are_marked_in_turn_and_taken_off_without_touching_the_rest() {
     r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
         .unwrap();
     line(&mut r, "highlight todo TODO");
-    keys(&mut r, "<space>i");
+    keys(&mut r, "SPC i");
     line(&mut r, "goto 1:7");
-    keys(&mut r, "<space>i");
+    keys(&mut r, "SPC i");
     let marks = |r: &Runtime| {
         let mut words: Vec<_> = shown(r)
             .into_iter()
@@ -107,9 +107,9 @@ fn symbols_are_marked_in_turn_and_taken_off_without_touching_the_rest() {
         ]
     );
     // The same key takes one off.
-    keys(&mut r, "<space>i");
+    keys(&mut r, "SPC i");
     assert_eq!(marks(&r), [(r"\balpha\b".to_owned(), Face::Mark(0))]);
-    keys(&mut r, "<space>I");
+    keys(&mut r, "SPC I");
     assert!(marks(&r).is_empty());
     assert_eq!(shown(&r).len(), 1, "other highlights stay: {:?}", shown(&r));
 }
@@ -144,7 +144,7 @@ fn keys_on_a_mark_jump_between_its_occurrences_and_show_the_place() {
     r.load_startup_lua();
     r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
         .unwrap();
-    keys(&mut r, "<space>i");
+    keys(&mut r, "SPC i");
     assert_eq!(indicator(&r), ["[1/3]"]);
     keys(&mut r, "n");
     assert_eq!(head(&r), 8);
@@ -156,12 +156,12 @@ fn keys_on_a_mark_jump_between_its_occurrences_and_show_the_place() {
     keys(&mut r, "p");
     assert_eq!(head(&r), 19, "both ways");
     assert_eq!(indicator(&r), ["[3/3]"]);
-    keys(&mut r, "<lt>");
+    keys(&mut r, "<");
     assert_eq!(head(&r), 0);
-    keys(&mut r, "<gt>");
+    keys(&mut r, ">");
     assert_eq!(head(&r), 19);
     // The caret keeps its place in the symbol, and e goes back.
-    keys(&mut r, "<lt>l");
+    keys(&mut r, "<l");
     assert_eq!(head(&r), 1);
     keys(&mut r, "n");
     assert_eq!(head(&r), 9);
@@ -186,7 +186,7 @@ fn keys_mean_what_they_always_do_off_a_mark_and_in_a_count() {
     r.load_startup_lua();
     r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
         .unwrap();
-    keys(&mut r, "<space>i");
+    keys(&mut r, "SPC i");
     // w on the mark copies; h shows the keys and any key closes them.
     keys(&mut r, "h");
     assert!(r.popup().unwrap().contains("rename"));
@@ -202,7 +202,7 @@ fn keys_mean_what_they_always_do_off_a_mark_and_in_a_count() {
     keys(&mut r, "wd");
     assert_eq!(text(&r), "foo  foo\n");
     // Part way through a count, n is the search and does not jump.
-    keys(&mut r, "<a-lt>");
+    keys(&mut r, "M-<");
     keys(&mut r, "2n");
     assert_eq!(head(&r), 0);
     // The space after a symbol is not on it.
@@ -218,15 +218,15 @@ fn an_option_keeps_the_keys_of_normal_on_a_mark() {
     r.load_startup_lua();
     r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
         .unwrap();
-    keys(&mut r, "<space>i");
+    keys(&mut r, "SPC i");
     line(&mut r, "set mark-keys false");
     // On the mark, i is Insert, as with symbol-overlay-inhibit-map.
     keys(&mut r, "i");
     assert_eq!(r.edit_mode(), EditMode::Insert);
     assert!(!shown(&r).is_empty(), "the mark stays");
-    keys(&mut r, "<esc>");
+    keys(&mut r, "ESC");
     line(&mut r, "set mark-keys true");
-    keys(&mut r, "<a-lt>i");
+    keys(&mut r, "M-< i");
     assert!(shown(&r).is_empty(), "i takes the mark off again");
 }
 
@@ -236,7 +236,7 @@ fn renaming_changes_every_occurrence_in_one_step_and_keeps_the_colour() {
     r.load_startup_lua();
     r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
         .unwrap();
-    keys(&mut r, "<space>i");
+    keys(&mut r, "SPC i");
     keys(&mut r, "r");
     match r.layer() {
         Some(soda::interaction::Layer::CommandLine(line)) => {
@@ -244,13 +244,13 @@ fn renaming_changes_every_occurrence_in_one_step_and_keeps_the_colour() {
         }
         _ => panic!("no prompt"),
     }
-    keys(&mut r, "<esc>");
+    keys(&mut r, "ESC");
     line(&mut r, "symbol-rename baz");
     assert_eq!(text(&r), "baz bar foobar baz\n");
     assert_eq!(shown(&r), [(r"\bbaz\b".to_owned(), Face::Mark(0))]);
     keys(&mut r, "n");
     assert_eq!(head(&r), 15, "the mark goes on working under its new name");
-    keys(&mut r, "<esc>u");
+    keys(&mut r, "ESC u");
     assert_eq!(text(&r), "foo bar foobar foo\n", "one undo");
 }
 
@@ -260,17 +260,17 @@ fn switching_goes_to_the_nearest_other_marked_symbol() {
     r.load_startup_lua();
     r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
         .unwrap();
-    keys(&mut r, "<space>i");
+    keys(&mut r, "SPC i");
     line(&mut r, "goto 1:5");
-    keys(&mut r, "<space>i");
+    keys(&mut r, "SPC i");
     assert_eq!(head(&r), 4);
-    keys(&mut r, "<a-n>");
+    keys(&mut r, "M-n");
     assert_eq!(head(&r), 8);
-    keys(&mut r, "<a-n>");
+    keys(&mut r, "M-n");
     assert_eq!(head(&r), 18);
-    keys(&mut r, "<a-n>");
+    keys(&mut r, "M-n");
     assert_eq!(r.message(), "No more forward symbols");
-    keys(&mut r, "<a-p>");
+    keys(&mut r, "M-p");
     assert_eq!(head(&r), 8);
 }
 
@@ -280,13 +280,13 @@ fn each_mark_takes_a_colour_nobody_is_using() {
     r.load_startup_lua();
     r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
         .unwrap();
-    keys(&mut r, "<space>i");
+    keys(&mut r, "SPC i");
     line(&mut r, "goto 1:4");
-    keys(&mut r, "<space>i");
+    keys(&mut r, "SPC i");
     line(&mut r, "goto 1:1");
     keys(&mut r, "i");
     line(&mut r, "goto 1:7");
-    keys(&mut r, "<space>i");
+    keys(&mut r, "SPC i");
     let colours: Vec<_> = shown(&r).into_iter().map(|(_, face)| face).collect();
     assert_eq!(colours.len(), 2);
     assert!(colours.contains(&Face::Mark(0)) && colours.contains(&Face::Mark(1)));
@@ -298,7 +298,7 @@ fn no_symbol_here_says_so() {
     r.load_startup_lua();
     r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
         .unwrap();
-    keys(&mut r, "<space>i");
+    keys(&mut r, "SPC i");
     assert_eq!(r.message(), "No symbol here");
 }
 
@@ -309,13 +309,13 @@ fn a_mark_opens_search_and_replace_with_its_symbol() {
     r.load_startup_lua();
     r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
         .unwrap();
-    keys(&mut r, "<space>i");
+    keys(&mut r, "SPC i");
     keys(&mut r, "s");
     match r.layer() {
         Some(Layer::Search(session)) => assert_eq!(session.input().text(), "foo"),
         _ => panic!("no search: {}", r.message()),
     }
-    keys(&mut r, "<esc>");
+    keys(&mut r, "ESC");
     keys(&mut r, "q");
     assert!(
         matches!(r.layer(), Some(Layer::Search(session)) if session.is_replacing() && session.query().text() == "foo"),
@@ -323,6 +323,6 @@ fn a_mark_opens_search_and_replace_with_its_symbol() {
         r.message()
     );
     r.input(UserInput::Paste("baz".into()));
-    keys(&mut r, "<ret><f4>");
+    keys(&mut r, "RET <f4>");
     assert_eq!(text(&r), "baz bar baz\n");
 }

@@ -57,7 +57,7 @@ fn hooks_and_commands_call_lua_functions() {
     );
     keys(&mut r, "i");
     assert_eq!(r.message(), "now insert");
-    keys(&mut r, "<esc>");
+    keys(&mut r, "ESC");
     r.command(Command::Named("greet two words".into()));
     assert_eq!(r.message(), "hello two words");
     // Lua that Lua starts runs after it returns.
@@ -85,14 +85,14 @@ fn key_hints_show_what_lua_commands_say_they_do() {
         r#"
         soda.define_command("wrap", "Wrap the selection", function() end)
         soda.define_command("bare", function() end)
-        soda.command("map global <c-c>( wrap (")
-        soda.command("map global <c-c>b bare")
+        soda.command('map global "C-c (" wrap (')
+        soda.command('map global "C-c b" bare')
         soda.command("define-command both wrap (; bare")
-        soda.command("map global <c-c>B both")
+        soda.command('map global "C-c B" both')
         assert(not pcall(soda.define_command, "odd", "no function"))
         "#,
     );
-    keys(&mut r, "<c-c>");
+    keys(&mut r, "C-c");
     let hints = r.key_continuations();
     let hint = |key: &str| {
         hints
@@ -308,7 +308,7 @@ fn buffer_selection_reads_and_moves() {
 #[test]
 fn buffer_selection_reads_what_is_selected() {
     let mut r = runtime();
-    keys(&mut r, "<a-lt>LL");
+    keys(&mut r, "M-< LL");
     lua(
         &mut r,
         r#"
@@ -330,7 +330,7 @@ fn buffer_edits_in_a_hook_undo_apart_from_what_insert_mode_types() {
         end)
         "#,
     );
-    keys(&mut r, "<a-lt>iab<esc>");
+    keys(&mut r, "M-< iab ESC");
     lua(
         &mut r,
         r#"assert(soda.buffer():text() == "abone\ntwo\nthree!", soda.buffer():text())"#,
@@ -409,7 +409,7 @@ fn clang_format_extension_replaces_only_changed_lines() {
     ));
     r.command(Command::SetMode(EditMode::Normal));
     lua(&mut r, include_str!("../lua/clang-format.lua"));
-    keys(&mut r, "<a-lt>jjjl");
+    keys(&mut r, "M-< jjjl");
     let formatted = "int a;\nint b;\nint c;\nint d;\n";
     format_buffer(&mut r, formatted);
     assert_eq!(text(&r), formatted, "{}", r.message());
@@ -440,7 +440,7 @@ fn clang_format_extension_formats_only_the_selected_lines() {
     r.input(UserInput::Paste("int  a;\nint  b;\nint  c;\n".into()));
     r.command(Command::SetMode(EditMode::Normal));
     lua(&mut r, include_str!("../lua/clang-format.lua"));
-    keys(&mut r, "<a-lt>je");
+    keys(&mut r, "M-< je");
     let formatted = "int  a;\nint b;\nint  c;\n";
     format_buffer(&mut r, formatted);
     assert_eq!(text(&r), formatted, "{}", r.message());
@@ -463,7 +463,7 @@ fn clang_format_extension_drops_output_when_the_buffer_changed() {
     r.command(Command::SetMode(EditMode::Normal));
     lua(&mut r, include_str!("../lua/clang-format.lua"));
     r.command(Command::Named("clang-format".into()));
-    keys(&mut r, "<a-lt>ix<esc>");
+    keys(&mut r, "M-< ix ESC");
     for _ in 0..400 {
         r.poll();
         if r.message().starts_with("clang-format") {
@@ -501,12 +501,12 @@ fn surround_extension_wraps_the_selection_from_a_key() {
         include_str!("../lua/surround.lua")
     );
     let mut r = extension("one two\n", &surround);
-    keys(&mut r, "<a-lt>llll,w<c-c>(");
+    keys(&mut r, "M-< llll,w C-c (");
     assert_eq!(text(&r), "one (two)\n", "{}", r.message());
     assert_eq!(r.edit_mode(), EditMode::Normal);
     keys(&mut r, "u");
     assert_eq!(text(&r), "one two\n");
-    keys(&mut r, "<a-lt>w<c-c>\"");
+    keys(&mut r, "M-< w C-c \"");
     assert_eq!(text(&r), "\"one\" two\n", "{}", r.message());
 }
 #[test]
@@ -515,7 +515,7 @@ fn surround_extension_takes_any_pair_and_needs_a_selection() {
     let mut r = extension("word\n", surround);
     r.command(Command::Named("surround (".into()));
     assert!(r.message().contains("select text"), "{}", r.message());
-    keys(&mut r, "<a-lt>w");
+    keys(&mut r, "M-< w");
     r.command(Command::Named("surround <b> </b>".into()));
     assert_eq!(text(&r), "<b>word</b>\n", "{}", r.message());
 }
@@ -553,20 +553,20 @@ fn comment_extension_aligns_markers_and_skips_blank_lines() {
     let dir = tempfile::tempdir().unwrap();
     let source = "int f() {\n    int a;\n\n        int b;\n}\n";
     let mut r = commented(&dir, "a.cpp", source);
-    keys(&mut r, "<a-lt>jeee<a-;>");
+    keys(&mut r, "M-< jeee M-;");
     let on = "int f() {\n    // int a;\n\n    //     int b;\n}\n";
     assert_eq!(text(&r), on, "{}", r.message());
     keys(&mut r, "u");
     assert_eq!(text(&r), source, "one undo step");
-    keys(&mut r, "<a-lt>jeee<a-;>");
-    keys(&mut r, "<a-lt>jeee<a-;>");
+    keys(&mut r, "M-< jeee M-;");
+    keys(&mut r, "M-< jeee M-;");
     assert_eq!(text(&r), source, "{}", r.message());
 }
 #[test]
 fn comment_extension_leaves_out_the_line_a_selection_ends_before() {
     let dir = tempfile::tempdir().unwrap();
     let mut r = commented(&dir, "a.lua", "a()\nb()\nc()\n");
-    keys(&mut r, "<a-lt>jJ<a-;>");
+    keys(&mut r, "M-< jJ M-;");
     assert_eq!(text(&r), "a()\n-- b()\nc()\n", "{}", r.message());
 }
 fn active_name(r: &Runtime) -> String {
@@ -615,13 +615,13 @@ fn lua_results_step_with_the_built_in_keys() {
     assert_eq!(active_name(&r), "*lint*");
     let list = r.app().active_view().unwrap();
     assert_eq!(r.app().windows().side(list), Some(Side::Bottom));
-    keys(&mut r, "<a-g>n");
+    keys(&mut r, "M-g n");
     wait(&mut r, |r| active_name(r).ends_with("a.txt"));
     assert_eq!(caret(&r), 5);
-    keys(&mut r, "<a-g>n");
+    keys(&mut r, "M-g n");
     wait(&mut r, |r| active_name(r).ends_with("b.txt"));
     assert_eq!(caret(&r), 5);
-    keys(&mut r, "<a-g>n");
+    keys(&mut r, "M-g n");
     assert_eq!(r.message(), "At the last result");
 }
 #[test]
@@ -750,7 +750,7 @@ fn git_changes_extension_lists_each_hunk() {
         "{}",
         r.message()
     );
-    keys(&mut r, "<a-g>n");
+    keys(&mut r, "M-g n");
     wait(&mut r, |r| active_name(r).ends_with("a.txt"));
     assert_eq!(caret(&r), 2);
 }
@@ -827,29 +827,29 @@ fn lua_binds_keys_to_functions_and_reads_bindings() {
     lua(
         &mut r,
         r#"
-        soda.map("normal", "<c-c>y", function() soda.message("yes") end, "Say yes")
-        soda.map("normal", "<c-c>Y", "echo why")
+        soda.map("normal", "C-c y", function() soda.message("yes") end, "Say yes")
+        soda.map("normal", "C-c Y", "echo why")
         local found = {}
         for _, binding in ipairs(soda.bindings("normal")) do
           found[binding.keys] = binding.command
         end
-        assert(found["<c-c>y"] == "Say yes", found["<c-c>y"])
-        assert(found["<c-c>Y"] == "echo why")
+        assert(found["C-c y"] == "Say yes", found["C-c y"])
+        assert(found["C-c Y"] == "echo why")
         assert(found["h"] == "left")
         assert(not pcall(soda.map, "nowhere", "a", "left"))
-        assert(not pcall(soda.map, "prompt", "<c-a>", function() end))
+        assert(not pcall(soda.map, "prompt", "C-a", function() end))
         "#,
     );
-    keys(&mut r, "<c-c>y");
+    keys(&mut r, "C-c y");
     assert_eq!(r.message(), "yes");
-    keys(&mut r, "<c-c>Y");
+    keys(&mut r, "C-c Y");
     assert_eq!(r.message(), "why");
-    lua(&mut r, r#"soda.unmap("normal", "<c-c>y")"#);
+    lua(&mut r, r#"soda.unmap("normal", "C-c y")"#);
     lua(
         &mut r,
         r#"
         for _, binding in ipairs(soda.bindings("normal")) do
-          assert(binding.keys ~= "<c-c>y")
+          assert(binding.keys ~= "C-c y")
         end
         "#,
     );
@@ -893,7 +893,7 @@ fn hooks_see_changes_moves_and_idleness_and_timers_fire_once() {
     );
     // The caret starts at the end of the text.
     keys(&mut r, "h");
-    keys(&mut r, "ix<esc>");
+    keys(&mut r, "ix ESC");
     lua(&mut r, "soda.message(table.concat(seen, ' '))");
     let shown = r.message().to_owned();
     assert!(shown.starts_with("move"), "{shown}");
@@ -931,10 +931,10 @@ fn an_idle_hook_leaves_the_keys_of_a_binding_being_typed() {
           soda.command("set tab-width 5")
         end)
         soda.command("set idle-time 10")
-        soda.map("global", "<c-c>qw", "set tab-width 7", "A long binding")
+        soda.map("global", "C-c qw", "set tab-width 7", "A long binding")
         "#,
     );
-    keys(&mut r, "<c-c>q");
+    keys(&mut r, "C-c q");
     std::thread::sleep(Duration::from_millis(20));
     r.poll();
     lua(&mut r, "assert(idle == 1, idle)");
@@ -1002,7 +1002,7 @@ fn text_options_take_any_words_from_lua_and_the_command_line() {
 #[test]
 fn lua_lists_buffers_and_windows() {
     let mut r = runtime();
-    keys(&mut r, "<c-x>3");
+    keys(&mut r, "C-x 3");
     r.set_editing_area(81, 20);
     lua(
         &mut r,
@@ -1034,7 +1034,7 @@ fn lua_hooks_come_off_by_their_number() {
         assert(not soda.unhook(mine))
         "#,
     );
-    keys(&mut r, "i<esc>");
+    keys(&mut r, "i ESC");
     lua(&mut r, "assert(count == 200, count)");
 }
 #[test]
@@ -1072,11 +1072,11 @@ fn lua_commands_complete_their_arguments() {
           { args = { { name = "SIDE", choices = { { "left", "The left one" }, "right" } } } })
         "#,
     );
-    keys(&mut r, "<a-x>");
+    keys(&mut r, "M-x");
     r.input(UserInput::Paste("pick-side r".into()));
-    keys(&mut r, "<tab>");
+    keys(&mut r, "TAB");
     let shown = r.layer().map(|l| l.presentation().text);
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     assert_eq!(r.message(), "took right", "{shown:?}");
 }
 #[test]
@@ -1091,9 +1091,9 @@ fn lua_reads_the_clipboard_and_asks_for_text() {
         "#,
     );
     assert!(r.layer().is_some());
-    keys(&mut r, "<bs><bs><bs>");
+    keys(&mut r, "DEL DEL DEL");
     r.input(UserInput::Paste("new".into()));
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     assert_eq!(r.message(), "got new");
 }
 #[test]
@@ -1265,9 +1265,9 @@ fn trees_open_and_close_load_children_when_asked_and_hand_back_nodes() {
         "#,
     );
     assert_eq!(text(&r), "▸ main  a.cpp:1\n  done\n");
-    keys(&mut r, "<tab>");
+    keys(&mut r, "TAB");
     assert_eq!(text(&r), "▾ main  a.cpp:1\n  ▸ helper\n  done\n");
-    keys(&mut r, "j<tab>");
+    keys(&mut r, "j TAB");
     assert_eq!(text(&r), "▾ main  a.cpp:1\n  ▾ helper …\n  done\n");
     r.command(Command::Named("deliver".into()));
     assert_eq!(
@@ -1275,12 +1275,12 @@ fn trees_open_and_close_load_children_when_asked_and_hand_back_nodes() {
         "▾ main  a.cpp:1\n  ▾ helper\n      helper child\n  done\n"
     );
     assert_eq!(caret_line(&r), 1, "the caret stays on its node");
-    keys(&mut r, "j<ret>");
+    keys(&mut r, "j RET");
     assert_eq!(r.message(), "open 3");
     // Backspace goes to the parent, then closes it.
-    keys(&mut r, "<bs>");
+    keys(&mut r, "DEL");
     assert_eq!(caret_line(&r), 1);
-    keys(&mut r, "<bs>");
+    keys(&mut r, "DEL");
     assert_eq!(text(&r), "▾ main  a.cpp:1\n  ▸ helper\n  done\n");
     assert_eq!(caret_line(&r), 1);
     // The bindings are a context of their own.
@@ -1339,7 +1339,7 @@ fn a_replaced_tree_lets_its_functions_go_and_a_redraw_keeps_the_view() {
     };
     let before = top(&r);
     assert!(before > 100, "{before}");
-    keys(&mut r, "<tab>");
+    keys(&mut r, "TAB");
     assert_eq!(top(&r), before);
 }
 #[test]
@@ -1428,13 +1428,13 @@ fn a_question_put_aside_is_not_answered_later() {
         soda.choose("pick", {"alpha", "beta"}, function(i) soda.message("chose " .. i) end)
         "#,
     );
-    keys(&mut r, "bet<ret>");
+    keys(&mut r, "bet RET");
     assert_eq!(r.message(), "chose 2");
     lua(
         &mut r,
         r#"soda.choose("pick", {"alpha", "beta"}, function(i) soda.message("late " .. i) end)"#,
     );
-    keys(&mut r, "<esc>");
+    keys(&mut r, "ESC");
     // A command line of its own neither offers the items nor calls the function.
     r.command(Command::Named("choose 1".into()));
     assert_eq!(r.message(), "Nothing to choose");
@@ -1442,7 +1442,7 @@ fn a_question_put_aside_is_not_answered_later() {
         &mut r,
         r#"soda.input("name", "", function(text) soda.message("got " .. text) end)"#,
     );
-    keys(&mut r, "<esc>");
+    keys(&mut r, "ESC");
     r.command(Command::Named("answer x".into()));
     assert_eq!(r.message(), "Nothing to answer");
 }

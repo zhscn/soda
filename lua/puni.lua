@@ -13,15 +13,15 @@
 local M = {}
 
 local INSERT = {
-  ["<bs>"] = "soft-backspace",
-  ["<a-bs>"] = "soft-kill-word",
-  ["<c-bs>"] = "soft-kill-word",
-  ["<c-w>"] = "kill-region-or-word",
+  ["DEL"] = "soft-backspace",
+  ["M-DEL"] = "soft-kill-word",
+  ["C-DEL"] = "soft-kill-word",
+  ["C-w"] = "kill-region-or-word",
 }
 local EVERY_MODE = {
-  ["<c-k>"] = "sexp-kill",
-  ["<c-a-a>"] = "sexp-beginning",
-  ["<c-a-e>"] = "sexp-end",
+  ["C-k"] = "sexp-kill",
+  ["C-M-a"] = "sexp-beginning",
+  ["C-M-e"] = "sexp-end",
 }
 
 function M.setup(options)

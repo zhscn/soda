@@ -82,14 +82,14 @@ fn hooks_follow_modes_focus_saves_and_closes() {
     line(&mut r, "hook mode normal set scroll-lines 5");
     keys(&mut r, "i");
     assert_eq!(r.app().options().int(None, "scroll-lines"), 9);
-    keys(&mut r, "<esc>");
+    keys(&mut r, "ESC");
     assert_eq!(r.app().options().int(None, "scroll-lines"), 5);
     line(&mut r, "hook focus .*f\\.txt set tab-width 3");
     line(&mut r, "hook save .* set tab-width 7");
     line(&mut r, "hook close .*f\\.txt set tab-width 1");
     line(&mut r, &format!("edit {}", path.display()));
     wait(&mut r, |r| r.app().options().int(None, "tab-width") == 3);
-    keys(&mut r, "ihi<esc>");
+    keys(&mut r, "ihi ESC");
     line(&mut r, "write");
     wait(&mut r, |r| r.app().options().int(None, "tab-width") == 7);
     assert!(r.message().starts_with("Saved "), "{}", r.message());
@@ -99,7 +99,7 @@ fn hooks_follow_modes_focus_saves_and_closes() {
     line(&mut r, "unhook mode insert");
     assert_eq!(r.message(), "");
     line(&mut r, "unhook mode");
-    keys(&mut r, "i<esc>");
+    keys(&mut r, "i ESC");
     assert_eq!(r.app().options().int(None, "scroll-lines"), 5);
     line(&mut r, "unhook mode");
     assert_eq!(r.message(), "no mode hook to remove");

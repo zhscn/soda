@@ -163,11 +163,11 @@ fn a_list_keeps_the_directory_its_paths_mean() {
     // Focus stays on the list, whose directory is the project and not the
     // file it was started from.
     assert_eq!(r.app().directory(), repo);
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     let wanted = repo.join("linked/d.txt");
     wait(&mut r, |r| path(r).as_deref() == Some(&wanted));
     // In another project, the next result still means the first.
-    keys(&mut r, "<a-g>n");
+    keys(&mut r, "M-g n");
     let wanted = repo.join("module/c.txt");
     wait(&mut r, |r| path(r).as_deref() == Some(&wanted));
 }

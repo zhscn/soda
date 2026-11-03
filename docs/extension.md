@@ -110,11 +110,11 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 | `soda.option(name)` | 选项在当前文档的值，按类型返回布尔、整数或字符串 |
 | `soda.set(name, value, [local])` | 设置选项，`local` 为真时只对当前文档；不合法时报错 |
 | `soda.declare_option(name, spec)` | 声明模块自己的选项，见下文 |
-| `soda.map(keymap, keys, target, [doc])` | 绑定按键：`keymap` 是上下文、文档键位表或语言 id（见[键位上下文](interaction.md#键位上下文)）；`target` 是命令行，或 Lua 函数（prompt 除外）；`doc` 显示在按键提示和帮助里 |
+| `soda.map(keymap, keys, target, [doc])` | 绑定按键：`keys` 用 Emacs 记法，如 `"C-c v c"`（见[按键记法](interaction.md#按键记法)）；`keymap` 是上下文、文档键位表或语言 id（见[键位上下文](interaction.md#键位上下文)）；`target` 是命令行，或 Lua 函数（prompt 除外）；`doc` 显示在按键提示和帮助里 |
 | `soda.map_default(keymap, keys, target, [doc])` | 插件绑定按键：参数同 `soda.map`，但作为默认绑定，见[插件](#插件) |
 | `soda.unmap(keymap, keys)` | 去掉用户绑定，恢复默认（内置的或插件的） |
 | `soda.keymap(name, { server = NAME, doc = ... })` | 声明服务器的键位表：在名为 `NAME` 的语言服务器服务的文档里生效，`"*"` 表示任一服务器；再次调用更新说明和范围 |
-| `soda.bindings(keymap)` | 当前生效的绑定：`{ {keys = "<c-x>o", command = "window-next"}, ... }` |
+| `soda.bindings(keymap)` | 当前生效的绑定：`{ {keys = "C-x o", command = "window-next"}, ... }` |
 | `soda.face(name, spec)` | 设置界面或语法分类的颜色，见[终端界面](ui.md#主题) |
 | `soda.language(name, language)` | 同 `language-map` |
 | `soda.thing(key, kind)` | 让 `,`、`.` 之后的 `key` 选中一种 thing：`round`、`square`、`curly`、`angle`、`string`、`symbol`、`word`、`paragraph`、`line`、`buffer`；`kind` 为 nil 时去掉。初始是 meow 的 `r s c g e w p l b` |
@@ -130,7 +130,7 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 | `soda.popup(text)` | 在光标旁的浮窗里显示文字，下一个按键关闭 |
 | `soda.paint(group, items)` | 给当前文档的一组范围上色：`{from, to, face}`；同组再调用时替换，空表去掉。范围随编辑移动 |
 | `soda.note(group, items)` | 给当前文档的一组范围加注（诊断）：`{from, to, severity, text}` |
-| `soda.keys(notation)` | 按记法输入按键，如 `soda.keys("foo<ret>")`，走与键盘相同的路径 |
+| `soda.keys(notation)` | 按 Emacs 记法输入按键，如 `soda.keys("foo RET")`，走与键盘相同的路径；要原样输入一段文字时把字符用空格隔开，免得 `RET` 这样的词被读成键 |
 | `soda.prompt(text)` | 打开命令行并预填 `text` |
 | `soda.input(title, [initial], fn)` | 在命令行里要一行文字，回车后以它调用 `fn`；取消时不调用 |
 | `soda.choose(title, items, fn)` | 从 `items` 中选一项，输入过滤，以从 1 起的序号调用 `fn`；取消时不调用 |
@@ -177,8 +177,8 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 
 1. **加载无副作用**。`require(name)` 只定义命令，不绑键、不加钩子、不设选项、不启动进程、不改显示。所以启动可以全部加载，不用的插件只多几个命令名。
 2. **`setup(options)` 打开插件**。键、钩子、选项、键位表声明都在这里。重复调用不重复加钩子。能关的插件另有 `disable()`。
-3. **键是默认绑定**。插件用 `soda.map_default` 绑键：它们和 Rust 里的默认键同一层，用户的 `soda.map` 遮住它们，`unmap` 去掉用户绑定后插件的键回来；后绑的默认键替换相同或互为前缀的默认键，如 puni 的 `<c-k>` 替换内置的 `kill-line-end`。要整个不要插件的键，传 `keys = false`；要关掉其中一个，把它绑到 `nop`。
-4. **`C-c` 加字母留给用户**。这是 Emacs 的约定，内置模块和插件都不在默认键里占用；leader（Normal 的 `SPC`，读作 `<c-c>`）下的键由用户自己绑。插件可以绑在自己的键位表里（`mark`、`lsp`、`ccls`），也可以绑 Emacs 的标准键。
+3. **键是默认绑定**。插件用 `soda.map_default` 绑键：它们和 Rust 里的默认键同一层，用户的 `soda.map` 遮住它们，`unmap` 去掉用户绑定后插件的键回来；后绑的默认键替换相同或互为前缀的默认键，如 puni 的 `C-k` 替换内置的 `kill-line-end`。要整个不要插件的键，传 `keys = false`；要关掉其中一个，把它绑到 `nop`。
+4. **`C-c` 加字母留给用户**。这是 Emacs 的约定，内置模块和插件都不在默认键里占用；leader（Normal 的 `SPC`，读作 `C-c`）下的键由用户自己绑。插件可以绑在自己的键位表里（`mark`、`lsp`、`ccls`），也可以绑 Emacs 的标准键。
 5. **插件之间**只通过命令名和键位表协作，不互相 `require` 内部函数；`lsp` 例外，它把服务器接口交给 `ccls` 这样的扩展。
 6. **模态编辑本身也是插件**。选区种类、Beacon、keypad 这套机制在 Rust 里，`modal` 选项决定用不用它；`meow` 插件设这个选项，再给出 Normal 中能打出字符的键（布局）。打不出字符的键（`C-f`、方向键、Esc、Enter）是内置的默认键。
 
@@ -212,9 +212,9 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 require("meow").setup()
 require("puni").setup()
 require("symbol-overlay").setup()
-soda.map("global", "<c-c>i", "symbol-toggle")
+soda.map("global", "C-c i", "symbol-toggle")
 require("ccls").setup()
-soda.map("ccls", "<c-c>vc", "ccls-callers")   -- ccls 表在 setup 之后才有
+soda.map("ccls", "C-c v c", "ccls-callers")   -- ccls 表在 setup 之后才有
 ```
 
 ### 文档

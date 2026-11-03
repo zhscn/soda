@@ -1,7 +1,7 @@
 //! Command registry, key notation, readline keys, configuration and external
 //! commands, exercised through the Runtime like a frontend would.
 use soda::{
-    interaction::{Command, EditMode, KeyStroke, Layer, UserInput, key_notation},
+    interaction::{Command, EditMode, KeyStroke, Layer, UserInput, emacs_notation},
     runtime::Runtime,
 };
 use std::{path::PathBuf, time::Duration};
@@ -45,58 +45,60 @@ fn wait_for_shell(r: &mut Runtime) {
 }
 
 #[test]
-fn key_notation_round_trips_and_rejects_unknown_names() {
-    let parsed = KeyStroke::parse_sequence("<C-x><c-s>a<space><A-f><s-tab><F12><lt>").unwrap();
+fn key_notation_is_emacss_kbd() {
+    let parsed =
+        KeyStroke::parse_sequence("C-x C-s a SPC M-f S-TAB <f12> < C-M-<left> <prior>").unwrap();
     assert_eq!(
-        key_notation(&parsed),
-        "<c-x><c-s>a<space><a-f><s-tab><f12><lt>"
+        emacs_notation(&parsed),
+        "C-x C-s a SPC M-f S-TAB <f12> < C-M-<left> <prior>"
+    );
+    // A word of characters is a key each, as `(kbd "abc")`.
+    assert_eq!(
+        KeyStroke::parse_sequence("C-c abc").unwrap(),
+        KeyStroke::parse_sequence("C-c a b c").unwrap()
     );
     assert_eq!(
-        KeyStroke::parse_sequence("<m-b>").unwrap(),
-        KeyStroke::parse_sequence("<a-b>").unwrap()
+        emacs_notation(&KeyStroke::parse_sequence("C-- M--").unwrap()),
+        "C-- M--"
     );
-    assert!(KeyStroke::parse_sequence("<hyper-x>").is_err());
     assert!(KeyStroke::parse_sequence("<nosuchkey>").is_err());
+    assert!(KeyStroke::parse_sequence("s-x").is_err());
+    assert!(KeyStroke::parse_sequence("C-xy").is_err());
     assert!(KeyStroke::parse_sequence("").is_err());
-    // A lone `<` without a closing bracket is a literal character.
-    assert_eq!(
-        key_notation(&KeyStroke::parse_sequence("<").unwrap()),
-        "<lt>"
-    );
 }
 
 #[test]
 fn insert_mode_uses_readline_keys() {
     let mut r = runtime("alpha beta");
-    keys(&mut r, "<c-a>");
+    keys(&mut r, "C-a");
     assert_eq!(state(&r).1, 0);
-    keys(&mut r, "<a-f><a-f>");
+    keys(&mut r, "M-f M-f");
     assert_eq!(state(&r).1, 10);
-    keys(&mut r, "<a-b><c-b>");
+    keys(&mut r, "M-b C-b");
     assert_eq!(state(&r).1, 5);
-    keys(&mut r, "<c-k>");
+    keys(&mut r, "C-k");
     assert_eq!(state(&r).0, "alpha");
-    keys(&mut r, "<c-a><c-y>");
+    keys(&mut r, "C-a C-y");
     assert_eq!(state(&r).0, " betaalpha");
-    keys(&mut r, "<c-e><c-h><c-a><c-d>");
+    keys(&mut r, "C-e C-h C-a C-d");
     assert_eq!(state(&r).0, "betaalph");
     // Ctrl-K at line end cuts the line break.
-    keys(&mut r, "<c-e>");
+    keys(&mut r, "C-e");
     r.input(UserInput::Paste("\nnext".into()));
-    keys(&mut r, "<up><c-e><c-k>");
+    keys(&mut r, "<up> C-e C-k");
     assert_eq!(state(&r).0, "betaalphnext");
 }
 
 #[test]
 fn prompts_share_readline_keys() {
     let mut r = runtime("");
-    keys(&mut r, "<esc><a-x>");
+    keys(&mut r, "ESC M-x");
     r.input(UserInput::Paste("abc def".into()));
-    keys(&mut r, "<c-a><c-f><c-k>");
+    keys(&mut r, "C-a C-f C-k");
     let Some(Layer::CommandLine(_)) = r.layer() else {
         panic!("command line closed");
     };
-    keys(&mut r, "<c-y><c-y>");
+    keys(&mut r, "C-y C-y");
     let presentation = r.layer().unwrap().presentation();
     assert_eq!(presentation.text, ":abc defbc def");
 }
@@ -104,22 +106,22 @@ fn prompts_share_readline_keys() {
 #[test]
 fn command_line_resolves_names_aliases_and_line_numbers() {
     let mut r = runtime("one\ntwo\nthree");
-    keys(&mut r, "<esc><a-x>");
+    keys(&mut r, "ESC M-x");
     r.input(UserInput::Paste("2".into()));
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     assert_eq!(state(&r).1, 4);
-    keys(&mut r, "<a-x>");
+    keys(&mut r, "M-x");
     r.input(UserInput::Paste("no-such-command".into()));
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     let text = r.layer().unwrap().presentation().text;
     assert!(text.contains("unknown command"), "{text}");
-    keys(&mut r, "<esc><a-x>");
+    keys(&mut r, "ESC M-x");
     r.input(UserInput::Paste("buffer".into()));
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     assert!(matches!(r.layer(), Some(Layer::CommandLine(_))));
-    keys(&mut r, "<esc><a-x>");
+    keys(&mut r, "ESC M-x");
     r.input(UserInput::Paste("open".into()));
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     assert!(matches!(r.layer(), Some(Layer::CommandLine(_))));
 }
 
@@ -131,9 +133,9 @@ fn open_accepts_a_path_argument() {
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
     r.start(None);
-    keys(&mut r, "<a-x>");
+    keys(&mut r, "M-x");
     r.input(UserInput::Paste("open a b.txt".into()));
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     for _ in 0..500 {
         r.poll();
         if state(&r).0 == "content" {
@@ -151,36 +153,36 @@ fn configuration_maps_defines_and_reports_line_numbers() {
         "init.lua",
         r#"
         assert(soda.command("define-command shout pipe tr a-z A-Z"))
-        soda.map("normal", "<space>u", "shout")
-        soda.map("insert", "<c-l>", "line-end")
-        soda.map("prompt", "<c-j>", "confirm")
+        soda.map("normal", "SPC u", "shout")
+        soda.map("insert", "C-l", "line-end")
+        soda.map("prompt", "C-j", "confirm")
         assert(not pcall(soda.map, "normal", "x", "no-such-command"))
-        assert(not pcall(soda.map, "normal", "<c-x><esc>", "nop"))
+        assert(not pcall(soda.map, "normal", "C-x ESC", "nop"))
         "#,
     )
     .unwrap();
-    keys(&mut r, "<c-a><c-l>");
+    keys(&mut r, "C-a C-l");
     assert_eq!(state(&r).1, 11);
-    keys(&mut r, "<esc><space>u");
+    keys(&mut r, "ESC SPC u");
     wait_for_shell(&mut r);
     assert_eq!(state(&r).0, "HELLO WORLD");
     // The prompt binding confirms the command line.
-    keys(&mut r, "<a-x>");
+    keys(&mut r, "M-x");
     r.input(UserInput::Paste("buffer".into()));
-    keys(&mut r, "<c-j>");
+    keys(&mut r, "C-j");
     assert!(matches!(r.layer(), Some(Layer::CommandLine(_))));
-    keys(&mut r, "<esc>");
+    keys(&mut r, "ESC");
     // unmap restores the default interpretation; nop hides a default.
     r.source_lua(
         "init.lua",
-        r#"soda.unmap("insert", "<c-l>") soda.map("insert", "<c-a>", "nop")"#,
+        r#"soda.unmap("insert", "C-l") soda.map("insert", "C-a", "nop")"#,
     )
     .unwrap();
     keys(&mut r, "i");
     let before = state(&r);
-    keys(&mut r, "<c-a><c-l>");
+    keys(&mut r, "C-a C-l");
     assert_eq!(state(&r), before);
-    keys(&mut r, "<c-e>");
+    keys(&mut r, "C-e");
     assert_eq!(state(&r).1, 11);
 }
 
@@ -200,22 +202,22 @@ fn defined_commands_take_arguments_and_bound_their_expansion() {
     r.command(Command::Named("loop".into()));
     assert!(r.message().contains("recursively"), "{}", r.message());
     r.command(Command::Named("twice copy".into()));
-    keys(&mut r, "<c-y><c-y>");
+    keys(&mut r, "C-y C-y");
     assert_eq!(state(&r).0, "xxx");
 }
 
 #[test]
 fn palette_runs_commands_and_prefills_required_arguments() {
     let mut r = runtime("");
-    keys(&mut r, "<esc><space>:");
+    keys(&mut r, "ESC SPC :");
     assert!(matches!(r.layer(), Some(Layer::CommandLine(_))));
     r.input(UserInput::Paste("new".into()));
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     assert!(r.layer().is_none());
     assert_eq!(r.app().workspace().documents().count(), 2);
-    keys(&mut r, "<space>:");
+    keys(&mut r, "SPC :");
     r.input(UserInput::Paste("pipe".into()));
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     assert_eq!(r.layer().unwrap().presentation().text, ":pipe ");
 }
 
@@ -224,18 +226,18 @@ fn help_lists_user_bindings_and_commands() {
     let mut r = runtime("");
     r.source_lua(
         "init.lua",
-        r#"soda.command("define-command greet nop") soda.map("normal", "<space>g", "greet")"#,
+        r#"soda.command("define-command greet nop") soda.map("normal", "SPC g", "greet")"#,
     )
     .unwrap();
     r.resize(10_000, 10);
-    keys(&mut r, "<esc><f1>");
+    keys(&mut r, "ESC <f1>");
     let Some(Layer::Help(session)) = r.layer() else {
         panic!("help did not open");
     };
     let text = session.lines().collect::<Vec<_>>().join("\n");
-    assert!(text.contains("<space>g"), "{text}");
+    assert!(text.contains("SPC g"), "{text}");
     assert!(text.contains("greet"));
-    assert!(text.contains("<c-k>"));
+    assert!(text.contains("C-k"));
     assert!(text.contains("define-command NAME BODY"));
 }
 
@@ -245,7 +247,7 @@ fn pipe_replaces_the_selection_once_and_rejects_stale_output() {
     r.command(Command::Pipe("sort".into()));
     wait_for_shell(&mut r);
     assert_eq!(state(&r).0, "a\nb\n");
-    keys(&mut r, "<esc>u");
+    keys(&mut r, "ESC u");
     assert_eq!(state(&r).0, "b\na\n");
     r.command(Command::Pipe("sleep 0.2; tr a-z A-Z".into()));
     keys(&mut r, "ix");

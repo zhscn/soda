@@ -69,41 +69,41 @@ fn motions_in_normal_are_emacs_motions() {
     check(
         EditMode::Normal,
         &[
-            ("|ab\n", "<c-f>", "a|b\n"),
-            ("a|b\n", "<c-b>", "|ab\n"),
-            ("|a\nb\nc\n", "<c-n>", "a\n|b\nc\n"),
-            ("a\nb\n|c\n", "<c-p>", "a\n|b\nc\n"),
-            ("  a|b\n", "<c-a>", "|  ab\n"),
-            ("|ab\n", "<c-e>", "ab|\n"),
-            ("|ab cd\n", "<a-f>", "ab| cd\n"),
-            ("ab| cd\n", "<a-b>", "|ab cd\n"),
-            ("a\n|b\nc\n", "<a-gt>", "a\nb\nc\n|"),
-            ("a\nb\n|c\n", "<a-lt>", "|a\nb\nc\n"),
+            ("|ab\n", "C-f", "a|b\n"),
+            ("a|b\n", "C-b", "|ab\n"),
+            ("|a\nb\nc\n", "C-n", "a\n|b\nc\n"),
+            ("a\nb\n|c\n", "C-p", "a\n|b\nc\n"),
+            ("  a|b\n", "C-a", "|  ab\n"),
+            ("|ab\n", "C-e", "ab|\n"),
+            ("|ab cd\n", "M-f", "ab| cd\n"),
+            ("ab| cd\n", "M-b", "|ab cd\n"),
+            ("a\n|b\nc\n", "M->", "a\nb\nc\n|"),
+            ("a\nb\n|c\n", "M-<", "|a\nb\nc\n"),
             // A count works as with arrows, and a selection stays under them.
-            ("|a\nb\nc\n", "2<c-n>", "a\nb\n|c\n"),
-            ("|ab cd\n", "<c-space><a-f>d", "| cd\n"),
-            ("a|b\n", "<c-space><c-e>d", "a|\n"),
+            ("|a\nb\nc\n", "2 C-n", "a\nb\n|c\n"),
+            ("|ab cd\n", "C-SPC M-f d", "| cd\n"),
+            ("a|b\n", "C-SPC C-e d", "a|\n"),
         ],
     );
-    check(EditMode::Insert, &[("  a|b\n", "<a-m>", "  |ab\n")]);
+    check(EditMode::Insert, &[("  a|b\n", "M-m", "  |ab\n")]);
 }
 #[test]
 fn edits_in_normal() {
     check(
         EditMode::Insert,
         &[
-            ("|ab cd\n", "<a-d>", "| cd\n"),
-            ("ab |cd\n", "<a-bs>", "|cd\n"),
+            ("|ab cd\n", "M-d", "| cd\n"),
+            ("ab |cd\n", "M-DEL", "|cd\n"),
         ],
     );
     check(
         EditMode::Normal,
         &[
-            ("|ab cd\n", "<a-u>", "AB| cd\n"),
-            ("|aB cd\n", "<a-c>", "Ab| cd\n"),
-            ("|AB\n", "<a-l>", "ab|\n"),
-            ("ab|  cd\n", "<a-\\>", "ab|cd\n"),
-            ("a\n  |b\n", "<a-^>", "a| b\n"),
+            ("|ab cd\n", "M-u", "AB| cd\n"),
+            ("|aB cd\n", "M-c", "Ab| cd\n"),
+            ("|AB\n", "M-l", "ab|\n"),
+            ("ab|  cd\n", "M-\\", "ab|cd\n"),
+            ("a\n  |b\n", "M-^", "a| b\n"),
         ],
     );
 }
@@ -112,12 +112,12 @@ fn the_mark_selects_with_emacs_keys() {
     check(
         EditMode::Normal,
         &[
-            ("|ab cd\n", "<c-space><a-f><c-w>", "| cd\n"),
-            ("|ab cd\n", "<c-space>l<a-w>", "a|b cd\n"),
+            ("|ab cd\n", "C-SPC M-f C-w", "| cd\n"),
+            ("|ab cd\n", "C-SPC l M-w", "a|b cd\n"),
         ],
     );
     let (_dir, mut r) = open("|ab cd\n", EditMode::Normal);
-    keys(&mut r, "<c-space>l<a-w><esc><c-e><c-y>");
+    keys(&mut r, "C-SPC l M-w ESC C-e C-y");
     assert_eq!(text(&r), "ab cda\n");
 }
 #[test]
@@ -125,25 +125,25 @@ fn insert_keeps_editing() {
     check(
         EditMode::Insert,
         &[
-            ("a\n|b\n", "<c-p>", "|a\nb\n"),
-            ("|a\nb\n", "<c-n>", "a\n|b\n"),
-            ("a\n|b\n", "<a-lt>", "|a\nb\n"),
-            ("a|b\n", "<c-o>", "a|\nb\n"),
-            ("  a|b\n", "<a-m>", "  |ab\n"),
-            ("a|b\n", "<c-t>", "ba|\n"),
-            ("ab|\n", "<c-t>", "ba|\n"),
-            ("é|a\n", "<c-t>", "aé|\n"),
-            ("ab |cd ef\n", "<a-t>", "cd ab| ef\n"),
-            ("ab cd|\n", "<a-t>", "cd ab|\n"),
-            ("ab  |  cd\n", "<a-space>", "ab |cd\n"),
-            ("a|b cd\n", "<a-c>", "aB| cd\n"),
+            ("a\n|b\n", "C-p", "|a\nb\n"),
+            ("|a\nb\n", "C-n", "a\n|b\n"),
+            ("a\n|b\n", "M-<", "|a\nb\n"),
+            ("a|b\n", "C-o", "a|\nb\n"),
+            ("  a|b\n", "M-m", "  |ab\n"),
+            ("a|b\n", "C-t", "ba|\n"),
+            ("ab|\n", "C-t", "ba|\n"),
+            ("é|a\n", "C-t", "aé|\n"),
+            ("ab |cd ef\n", "M-t", "cd ab| ef\n"),
+            ("ab cd|\n", "M-t", "cd ab|\n"),
+            ("ab  |  cd\n", "M-SPC", "ab |cd\n"),
+            ("a|b cd\n", "M-c", "aB| cd\n"),
         ],
     );
 }
 #[test]
 fn prefixes_reach_the_commands() {
     let (dir, mut r) = open("|a\n", EditMode::Insert);
-    keys(&mut r, "x<c-x><c-s>");
+    keys(&mut r, "x C-x C-s");
     let deadline = Instant::now() + Duration::from_secs(5);
     while std::fs::read_to_string(dir.path().join("a.txt")).unwrap() != "xa\n" {
         assert!(Instant::now() < deadline);
@@ -151,10 +151,10 @@ fn prefixes_reach_the_commands() {
         std::thread::sleep(Duration::from_millis(2));
     }
     assert_eq!(r.edit_mode(), EditMode::Insert);
-    keys(&mut r, "<c-x>2");
+    keys(&mut r, "C-x 2");
     assert_eq!(r.app().windows().len(), 2);
-    keys(&mut r, "<c-x>0");
-    keys(&mut r, "<c-x><c-g>");
+    keys(&mut r, "C-x 0");
+    keys(&mut r, "C-x C-g");
     assert_eq!(r.edit_mode(), EditMode::Insert);
     assert_eq!(text(&r), "xa\n");
 }
@@ -163,22 +163,22 @@ fn undo_keys() {
     let (_dir, mut r) = open("|a\n", EditMode::Normal);
     keys(&mut r, "d");
     assert_eq!(text(&r), "\n");
-    keys(&mut r, "<c-/>");
+    keys(&mut r, "C-/");
     assert_eq!(text(&r), "a\n");
-    keys(&mut r, "<c-a-/>");
+    keys(&mut r, "C-M-/");
     assert_eq!(text(&r), "\n");
 }
 #[test]
 fn search_from_insert_returns_to_insert() {
     let (_dir, mut r) = open("|a b a\n", EditMode::Insert);
-    keys(&mut r, "<c-s>b<ret>");
+    keys(&mut r, "C-s b RET");
     assert_eq!(caret(&r), 3);
     assert_eq!(r.edit_mode(), EditMode::Insert);
-    keys(&mut r, "<c-r>a<ret>");
+    keys(&mut r, "C-r a RET");
     assert_eq!(caret(&r), 1);
 }
 #[test]
 fn angle_keys_print_as_they_parse() {
-    let keys = KeyStroke::parse_sequence("<a-lt><a-gt>>").unwrap();
-    assert_eq!(soda::interaction::key_notation(&keys), "<a-lt><a-gt>>");
+    let keys = KeyStroke::parse_sequence("M-< M-> >").unwrap();
+    assert_eq!(soda::interaction::emacs_notation(&keys), "M-< M-> >");
 }

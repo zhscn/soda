@@ -55,11 +55,11 @@ fn recent_files_come_newest_first_and_survive_the_session() {
     for name in names {
         open(&mut r, &dir.path().join(name));
     }
-    keys(&mut r, "<space>r");
+    keys(&mut r, "SPC r");
     assert_eq!(rows(&r), ["gamma.txt", "src/beta.rs", "src/alpha.rs"]);
     r.input(UserInput::Paste("alp".into()));
     assert_eq!(rows(&r), ["src/alpha.rs"]);
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     wait(&mut r, |r| active(r).ends_with("alpha.rs"));
     // Another session starts from what this one left.
     let text = r.persist();
@@ -68,6 +68,6 @@ fn recent_files_come_newest_first_and_survive_the_session() {
         .unwrap();
     next.restore(&text);
     next.start(None);
-    keys(&mut next, "<space>r");
+    keys(&mut next, "SPC r");
     assert_eq!(rows(&next), ["src/alpha.rs", "gamma.txt", "src/beta.rs"]);
 }

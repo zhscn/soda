@@ -57,27 +57,27 @@ fn tree() -> tempfile::TempDir {
 fn choosing_a_command_continues_with_its_arguments() {
     let root = tree();
     let mut r = runtime(root.path());
-    keys(&mut r, "<space>:");
+    keys(&mut r, "SPC :");
     assert!(rows(&r).len() > 20, "the empty command line lists commands");
     r.input(UserInput::Paste("op".into()));
     assert!(rows(&r)[0].starts_with("open PATH"));
     // Tab writes the space a command with arguments needs; one without
     // gets none.
-    keys(&mut r, "<tab>");
+    keys(&mut r, "TAB");
     assert_eq!(text(&r), "open ");
-    keys(&mut r, "<c-u>");
+    keys(&mut r, "C-u");
     r.input(UserInput::Paste("messag".into()));
-    keys(&mut r, "<tab>");
+    keys(&mut r, "TAB");
     assert_eq!(text(&r), "messages");
-    keys(&mut r, "<c-u>");
+    keys(&mut r, "C-u");
     r.input(UserInput::Paste("op".into()));
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     assert_eq!(text(&r), "open ");
     wait(&mut r, |r| rows(r).contains(&"src/".to_owned()));
     // Unknown names and missing arguments keep the line open with an error.
-    keys(&mut r, "<c-u>");
+    keys(&mut r, "C-u");
     r.input(UserInput::Paste("zzz".into()));
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     assert!(
         r.layer()
             .unwrap()
@@ -95,7 +95,7 @@ fn a_row_chosen_by_hand_wins_over_an_exact_name() {
     r.command(Command::Ex("project".into()));
     assert!(rows(&r)[0].starts_with("project "), "{:?}", rows(&r));
     assert!(rows(&r)[1].starts_with("project-root "), "{:?}", rows(&r));
-    keys(&mut r, "<down><ret>");
+    keys(&mut r, "<down> RET");
     assert!(r.layer().is_none());
 
     // The current buffer ranks last, so stand in a third one.
@@ -116,7 +116,7 @@ fn a_row_chosen_by_hand_wins_over_an_exact_name() {
     // Buffers are named by their paths; the exact name is that of `a`.
     r.command(Command::Ex(format!("buffer {}", a.display())));
     assert_eq!(rows(&r).len(), 2, "{:?}", rows(&r));
-    keys(&mut r, "<down><ret>");
+    keys(&mut r, "<down> RET");
     wait(&mut r, |r| {
         let view = r.app().view(r.app().active_view().unwrap()).unwrap();
         r.app().workspace().file(view.document_id).unwrap().path() == Some(ab.as_path())
@@ -135,7 +135,7 @@ fn enter_selects_the_row_only_once_a_path_row_is_chosen() {
         r.command(Command::Ex("buffer ".into()));
         selects(&r)
     });
-    keys(&mut r, "<esc>");
+    keys(&mut r, "ESC");
     r.command(Command::Ex("open ".into()));
     r.input(UserInput::Paste("s".into()));
     wait(&mut r, |r| rows(r) == ["src/"]);
@@ -163,7 +163,7 @@ fn a_typed_parent_lists_and_opens_though_it_is_no_candidate() {
     r.input(UserInput::Paste("../".into()));
     wait(&mut r, |r| rows(r) == ["sub/", "main.cpp"]);
     r.input(UserInput::Paste("main.cpp".into()));
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     wait(&mut r, |r| {
         let view = r.app().view(r.app().active_view().unwrap()).unwrap();
         r.app().workspace().file(view.document_id).unwrap().path() == Some(path.as_path())
@@ -183,15 +183,15 @@ fn rows_stay_in_view_until_the_worker_answers_and_cannot_be_chosen() {
     r.input(UserInput::Paste("a.h".into()));
     assert_eq!(rows(&r), before, "the list stays while the worker runs");
     assert!(!shown(&r), "and it does not say loading");
-    keys(&mut r, "<ret>");
-    keys(&mut r, "<tab>");
+    keys(&mut r, "RET");
+    keys(&mut r, "TAB");
     assert_eq!(
         text(&r),
         "project a.h",
         "neither key takes a row of the last query"
     );
     wait(&mut r, |r| rows(r) == ["src/sub/a.h"]);
-    keys(&mut r, "<esc>");
+    keys(&mut r, "ESC");
 
     // A new directory: the rows of the last one stay, and a typed name goes.
     r.command(Command::Ex("open ".into()));
@@ -199,7 +199,7 @@ fn rows_stay_in_view_until_the_worker_answers_and_cannot_be_chosen() {
     wait(&mut r, |r| rows(r) == ["sub/", "main.cpp"]);
     r.input(UserInput::Paste("sub/".into()));
     assert_eq!(rows(&r), ["sub/", "main.cpp"]);
-    keys(&mut r, "<down><ret>");
+    keys(&mut r, "<down> RET");
     assert_eq!(
         text(&r),
         "open src/sub/",
@@ -221,19 +221,19 @@ fn a_path_matches_anywhere_in_the_name_and_beginnings_come_first() {
         rows(r) == ["ccache.txt", "Notes.cc", "main.cc", "version.cc.in"]
     });
     // Words in any order; capitals make case count.
-    keys(&mut r, "<esc>");
+    keys(&mut r, "ESC");
     r.command(Command::Ex("open ".into()));
     r.input(UserInput::Paste("in cc".into()));
     wait(&mut r, |r| rows(r) == ["main.cc", "version.cc.in"]);
-    keys(&mut r, "<esc>");
+    keys(&mut r, "ESC");
     r.command(Command::Ex("open ".into()));
     r.input(UserInput::Paste("N".into()));
     wait(&mut r, |r| rows(r) == ["Notes.cc"]);
     // The typed text still names a new file.
-    keys(&mut r, "<esc>");
+    keys(&mut r, "ESC");
     r.command(Command::Ex("open ".into()));
     r.input(UserInput::Paste("cc".into()));
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     wait(&mut r, |r| {
         r.app().views().any(|v| {
             r.app().workspace().file(v.document_id).unwrap().path()
@@ -264,18 +264,18 @@ fn path_slots_browse_directories_and_backspace_removes_one() {
     r.command(Command::Ex("open ".into()));
     r.input(UserInput::Paste("s".into()));
     wait(&mut r, |r| rows(r) == ["src/"]);
-    keys(&mut r, "<tab>");
+    keys(&mut r, "TAB");
     assert_eq!(text(&r), "open src/");
     wait(&mut r, |r| rows(r) == ["sub/", "main.cpp"]);
     // Enter on an explicitly selected directory descends instead of opening.
-    keys(&mut r, "<down><up><ret>");
+    keys(&mut r, "<down> <up> RET");
     assert_eq!(text(&r), "open src/sub/");
     wait(&mut r, |r| rows(r).contains(&"a.h".to_owned()));
-    keys(&mut r, "<bs>");
+    keys(&mut r, "DEL");
     assert_eq!(text(&r), "open src/");
     // Enter without navigation uses the typed text, so new names work.
     r.input(UserInput::Paste("new.cpp".into()));
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     assert!(r.layer().is_none());
     wait(&mut r, |r| {
         r.app().views().any(|v| {
@@ -289,34 +289,34 @@ fn path_slots_browse_directories_and_backspace_removes_one() {
 fn matching_slots_complete_by_cursor_position_and_require_a_candidate() {
     let root = tree();
     let mut r = runtime(root.path());
-    keys(&mut r, "<a-x>");
+    keys(&mut r, "M-x");
     r.input(UserInput::Paste("map ".into()));
     // Choices without keys take typed text.
     keys(&mut r, "no");
     assert_eq!(rows(&r).len(), 1);
     assert!(rows(&r)[0].starts_with("normal "));
-    keys(&mut r, "<tab>");
+    keys(&mut r, "TAB");
     assert_eq!(text(&r), "map normal ");
     assert!(rows(&r).is_empty(), "KEYS has no candidates");
     // Moving the cursor back to the name completes command names again.
-    keys(&mut r, "<home><c-f>");
+    keys(&mut r, "<home> C-f");
     assert!(
         rows(&r)
             .iter()
             .any(|row| row.starts_with("map KEYMAP KEYS COMMAND"))
     );
-    keys(&mut r, "<esc>");
+    keys(&mut r, "ESC");
     // Buffer names require a match: Enter takes the selected candidate.
     r.command(Command::New);
     r.command(Command::Named("buffer".into()));
     r.input(UserInput::Paste("untitled".into()));
     let target = r.app().active_view();
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     assert!(r.layer().is_none());
     assert_ne!(r.app().active_view(), target);
     r.command(Command::Named("buffer".into()));
     r.input(UserInput::Paste("nothing".into()));
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     assert!(
         r.layer()
             .unwrap()
@@ -330,13 +330,13 @@ fn matching_slots_complete_by_cursor_position_and_require_a_candidate() {
 fn project_slot_searches_files_and_opens_the_choice() {
     let root = tree();
     let mut r = runtime(root.path());
-    keys(&mut r, "<space>f");
+    keys(&mut r, "SPC f");
     assert_eq!(text(&r), "project ");
     r.input(UserInput::Paste("ah".into()));
     wait(&mut r, |r| {
         rows(r).first().is_some_and(|row| row == "src/sub/a.h")
     });
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     assert!(r.layer().is_none());
     wait(&mut r, |r| {
         r.app().views().any(|v| {
@@ -383,21 +383,21 @@ fn candidates_carry_matched_ranges_and_description_offsets() {
         _ => panic!("command line is not open"),
     };
     // Fuzzy name match: letters in order, not necessarily adjacent.
-    keys(&mut r, "<a-x>");
+    keys(&mut r, "M-x");
     r.input(UserInput::Paste("svas".into()));
     let (label, marked, detail) = first(&r);
     assert!(label.starts_with("saveas PATH"));
     assert_eq!(marked, "svas");
     assert_eq!(&label[detail.unwrap()..], "Save to another path");
     // Descriptions match as substrings when no name does.
-    keys(&mut r, "<c-u>");
+    keys(&mut r, "C-u");
     r.input(UserInput::Paste("logical".into()));
     let (label, marked, detail) = first(&r);
     assert!(label.starts_with("goto "));
     assert_eq!(marked, "logical");
     assert!(label.find("logical").unwrap() >= detail.unwrap());
     // Directory entries mark the typed prefix.
-    keys(&mut r, "<esc>");
+    keys(&mut r, "ESC");
     r.command(Command::Named("open".into()));
     r.input(UserInput::Paste("sr".into()));
     wait(&mut r, |r| rows(r) == ["src/"]);
@@ -411,12 +411,12 @@ fn a_typed_decision_leaves_room_for_its_path_and_a_question_takes_one_key() {
     let mut r = runtime(root.path());
     r.command(Command::Named(format!("edit {}", file.display())));
     wait(&mut r, |r| r.app().workspace().documents().count() == 2);
-    keys(&mut r, "ix<esc>");
+    keys(&mut r, "ix ESC");
     // Typed, `s` is text: the line can go on to name another path.
-    keys(&mut r, "<a-x>quit s");
+    keys(&mut r, "M-x quit SPC s");
     assert_eq!(text(&r), "quit s");
     r.input(UserInput::Paste("ave copy.txt".into()));
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     wait(&mut r, |r| {
         root.path().join("copy.txt").exists() && r.quit_requested()
     });
@@ -427,7 +427,7 @@ fn a_typed_decision_leaves_room_for_its_path_and_a_question_takes_one_key() {
     assert_eq!(std::fs::read_to_string(&file).unwrap(), "a");
     // Asked about an unsaved document, one key answers.
     let mut r = runtime(root.path());
-    keys(&mut r, "iy<esc><a-x>quit<ret>");
+    keys(&mut r, "iy ESC M-x quit RET");
     assert!(text(&r).starts_with("quit"));
     keys(&mut r, "d");
     assert!(r.quit_requested(), "{}", r.message());
@@ -440,6 +440,6 @@ fn every_key_context_is_offered_for_map() {
     let rows = rows(&r);
     assert_eq!(rows.len(), 1);
     assert!(rows[0].starts_with("tree "), "{rows:?}");
-    keys(&mut r, "<tab>");
+    keys(&mut r, "TAB");
     assert_eq!(text(&r), "map tree ");
 }

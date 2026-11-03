@@ -27,7 +27,7 @@ fn shown(r: &Runtime) -> String {
     text
 }
 fn check(name: &str, cases: &[(&str, &str)]) {
-    press(name, "<ret>", cases);
+    press(name, "RET", cases);
 }
 #[track_caller]
 fn press(name: &str, keys: &str, cases: &[(&str, &str)]) {

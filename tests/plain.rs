@@ -46,7 +46,7 @@ fn without_configuration_there_is_insert_alone() {
     let mut r = runtime("|one two\n");
     assert_eq!(r.edit_mode(), EditMode::Insert);
     // Esc is C-g: nothing to leave for.
-    keys(&mut r, "<esc>hj");
+    keys(&mut r, "ESC hj");
     assert_eq!(r.edit_mode(), EditMode::Insert);
     assert_eq!(text(&r), "hjone two\n");
     // Nor does asking for Normal reach it.
@@ -57,20 +57,20 @@ fn without_configuration_there_is_insert_alone() {
 #[test]
 fn the_mark_extends_moves_and_the_region_keys_act_on_it() {
     let mut r = runtime("|one two\n");
-    keys(&mut r, "<c-space><a-f>");
+    keys(&mut r, "C-SPC M-f");
     assert_eq!(selection(&r), 0..3);
-    keys(&mut r, "<c-f>");
+    keys(&mut r, "C-f");
     assert_eq!(selection(&r), 0..4);
-    keys(&mut r, "<a-w>");
+    keys(&mut r, "M-w");
     assert_eq!(selection(&r), 4..4);
     // A plain move after the copy drops nothing more: the mark went with it.
-    keys(&mut r, "<c-f>");
+    keys(&mut r, "C-f");
     assert_eq!(selection(&r), 5..5);
-    keys(&mut r, "<c-a><c-space><c-e><c-w>");
+    keys(&mut r, "C-a C-SPC C-e C-w");
     assert_eq!(text(&r), "\n");
-    keys(&mut r, "<c-y>");
+    keys(&mut r, "C-y");
     assert_eq!(text(&r), "one two\n");
-    keys(&mut r, "<c-a><c-space><c-f><c-g>");
+    keys(&mut r, "C-a C-SPC C-f C-g");
     assert_eq!(selection(&r), 1..1);
 }
 
@@ -80,7 +80,7 @@ fn plugins_bind_nothing_until_their_setup() {
     for keymap in ["mark", "normal"] {
         let empty = format!(
             "for _, b in ipairs(soda.bindings({keymap:?})) do \
-             assert(b.keys:match('^<'), b.keys) end"
+             assert(not b.keys:match('^%S$'), b.keys) end"
         );
         lua(&mut r, &empty);
     }
@@ -99,7 +99,7 @@ fn meow_turns_modal_editing_on_and_off() {
     // meow's QWERTY layout: w marks the word, i inserts before it.
     keys(&mut r, "w");
     assert_eq!(selection(&r), 0..3);
-    keys(&mut r, "i<esc>");
+    keys(&mut r, "i ESC");
     assert_eq!(r.edit_mode(), EditMode::Normal);
     lua(&mut r, r#"require("meow").disable()"#);
     assert_eq!(r.edit_mode(), EditMode::Insert);
@@ -128,39 +128,39 @@ fn a_users_key_shadows_a_plugins_and_unmap_brings_it_back() {
     lua(
         &mut r,
         r#"require("meow").setup()
-        -- Under the plugin's <space>, which a user binding replaces.
-        soda.map("normal", "<space>u", "insert")"#,
+        -- Under the plugin's SPC, which a user binding replaces.
+        soda.map("normal", "SPC u", "insert")"#,
     );
-    keys(&mut r, "<space>u");
+    keys(&mut r, "SPC u");
     assert_eq!(r.edit_mode(), EditMode::Insert);
-    keys(&mut r, "<esc>");
-    r.command(Command::Named("unmap normal <space>u".into()));
+    keys(&mut r, "ESC");
+    r.command(Command::Named(r#"unmap normal "SPC u""#.into()));
     lua(
         &mut r,
         r#"for _, b in ipairs(soda.bindings("normal")) do
-          if b.keys == "<space>" then return end
+          if b.keys == "SPC" then return end
         end
-        error("the layout's <space> is back")"#,
+        error("the layout's SPC is back")"#,
     );
 }
 
 #[test]
 fn typing_and_yanking_go_in_at_the_caret_and_drop_the_selection() {
     let mut r = runtime("|one two\n");
-    keys(&mut r, "<c-space><a-f>x");
+    keys(&mut r, "C-SPC M-f x");
     assert_eq!(text(&r), "onex two\n");
     assert_eq!(selection(&r), 4..4);
-    keys(&mut r, "<c-a><c-space><c-f><a-w><c-e><c-space><c-b><c-y>");
+    keys(&mut r, "C-a C-SPC C-f M-w C-e C-SPC C-b C-y");
     assert_eq!(text(&r), "onex twoo\n");
     // Backspace takes the region, as delete-active-region.
-    keys(&mut r, "<c-a><c-space><c-f><c-f><bs>");
+    keys(&mut r, "C-a C-SPC C-f C-f DEL");
     assert_eq!(text(&r), "ex twoo\n");
 }
 
 #[test]
 fn region_keys_without_a_region_say_so_and_change_nothing() {
     let mut r = runtime("one |two\n");
-    for key in ["<c-w>", "<a-w>"] {
+    for key in ["C-w", "M-w"] {
         keys(&mut r, key);
         assert_eq!(
             r.message(),
@@ -169,12 +169,12 @@ fn region_keys_without_a_region_say_so_and_change_nothing() {
         assert_eq!(text(&r), "one two\n");
     }
     // C-x C-x swaps the ends; C-x h takes the whole document.
-    keys(&mut r, "<c-space><c-e><c-x><c-x>");
+    keys(&mut r, "C-SPC C-e C-x C-x");
     let view = r.app().view(r.app().active_view().unwrap()).unwrap();
     let editor = r.app().workspace().editor(view.document_id).unwrap();
     let swapped = editor.model().session(view.session_id).unwrap().selection();
     assert_eq!((swapped.anchor, swapped.head), (7, 4));
-    keys(&mut r, "<c-x>h");
+    keys(&mut r, "C-x h");
     assert_eq!(selection(&r), 0..8);
 }
 
@@ -193,10 +193,10 @@ fn results_are_read_only() {
     let mut r = runtime("|x\n");
     lua(&mut r, r#"soda.results("refs", { "a.txt:1:1: hit" })"#);
     let before = text(&r);
-    keys(&mut r, "q<bs><c-k>");
+    keys(&mut r, "q DEL C-k");
     assert_eq!(text(&r), before);
     assert_eq!(r.message(), "Buffer is read-only: *refs*");
     // Moving and copying still work.
-    keys(&mut r, "<c-space><c-e><a-w>");
+    keys(&mut r, "C-SPC C-e M-w");
     assert_eq!(text(&r), before);
 }

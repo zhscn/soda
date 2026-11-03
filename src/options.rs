@@ -130,7 +130,7 @@ pub const OPTIONS: &[OptionInfo] = &[
         name: "completion",
         kind: Kind::Bool,
         default: Value::Bool(true),
-        doc: "Show candidates while typing in Insert; <a-/> asks for them regardless",
+        doc: "Show candidates while typing in Insert; M-/ asks for them regardless",
     },
     OptionInfo {
         name: "completion-preview",

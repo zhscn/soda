@@ -136,7 +136,7 @@ fn finding_crosses_lines_and_digits_repeat_it() {
 #[test]
 fn cancel_drops_the_selection_and_pop_goes_back() {
     cases(&[
-        ("|ab cd\n", "w<esc>", "ab| cd\n"),
+        ("|ab cd\n", "w ESC", "ab| cd\n"),
         ("|ab cd ef\n", "wwz", "[ab]| cd ef\n"),
         ("|ab cd ef\n", "wwZ", "[ab]| cd ef\n"),
     ]);
@@ -144,30 +144,30 @@ fn cancel_drops_the_selection_and_pop_goes_back() {
 #[test]
 fn inserting_starts_at_either_end_and_leaving_keeps_the_place() {
     cases(&[
-        ("|ab cd\n", "wiX<esc>", "X|ab cd\n"),
-        ("|ab cd\n", "waX<esc>", "abX| cd\n"),
-        ("ab|\n", "iX<esc>", "abX|\n"),
-        ("  a|b\n", "Ax<esc>", "  ab\n  x|\n"),
-        ("  a|b\n", "Ix<esc>", "  x|\n  ab\n"),
+        ("|ab cd\n", "wiX ESC", "X|ab cd\n"),
+        ("|ab cd\n", "waX ESC", "abX| cd\n"),
+        ("ab|\n", "iX ESC", "abX|\n"),
+        ("  a|b\n", "Ax ESC", "  ab\n  x|\n"),
+        ("  a|b\n", "Ix ESC", "  x|\n  ab\n"),
     ]);
 }
 #[test]
 fn kill_change_delete_and_save_act_on_the_selection() {
     cases(&[
         ("|ab cd\n", "wr", "| cd\n"),
-        ("|ab cd\n", "wsX<esc>", "X| cd\n"),
+        ("|ab cd\n", "wsX ESC", "X| cd\n"),
         ("|ab cd\n", "wd", "| cd\n"),
-        ("|ab cd\n", "sX<esc>", "X|b cd\n"),
+        ("|ab cd\n", "sX ESC", "X|b cd\n"),
         ("|ab cd\n", "d", "|b cd\n"),
         ("|ab cd\n", "r", "|\n"),
         // Delete and change leave the clipboard alone.
-        ("|ab cd\n", "wylwd<c-e>p", "ab ab|\n"),
+        ("|ab cd\n", "wylwd C-e p", "ab ab|\n"),
     ]);
 }
 #[test]
 fn undo_takes_back_a_change_as_one_step() {
     cases(&[
-        ("|ab\n", "wsxyz<esc>u", "[ab]|\n"),
+        ("|ab\n", "wsxyz ESC u", "[ab]|\n"),
         ("|ab\n", "wd", "|\n"),
         ("|ab\n", "wduU", "|\n"),
     ]);
@@ -270,23 +270,23 @@ fn a_failed_find_keeps_the_selection_and_says_so() {
 #[test]
 fn a_count_comes_from_the_leader_and_goes_on_with_digits() {
     cases(&[
-        ("|a b c d\n", "<space>2w", "a[ b]| c d\n"),
-        ("|abcdefghijkl\n", "<space>12l", "abcdefghijkl|\n"),
+        ("|a b c d\n", "SPC 2w", "a[ b]| c d\n"),
+        ("|abcdefghijkl\n", "SPC 12l", "abcdefghijkl|\n"),
         ("|abcd\n", "3l", "abc|d\n"),
     ]);
 }
 #[test]
 fn macros_record_keys_and_play_them_again() {
     cases(&[
-        ("|a\nb\nc\n", "<f3>iX<esc>j<c-a><f4><f4>", "Xa\nXb\n|c\n"),
+        ("|a\nb\nc\n", "<f3> iX ESC j C-a <f4> <f4>", "Xa\nXb\n|c\n"),
         (
             "|a\nb\nc\n",
-            "<c-x>(iX<esc>j<c-a><c-x>)<c-x>e",
+            "C-x (iX ESC j C-a C-x ) C-x e",
             "Xa\nXb\n|c\n",
         ),
         (
             "|a\nb\nc\n",
-            "<space>[iX<esc>j<c-a><space>]<space>]",
+            "SPC [iX ESC j C-a SPC ] SPC ]",
             "Xa\nXb\n|c\n",
         ),
     ]);
@@ -294,8 +294,8 @@ fn macros_record_keys_and_play_them_again() {
 #[test]
 fn macro_lines_runs_on_each_selected_line_and_undoes_together() {
     let mut r = runtime("|a\nb\nc\nd\n");
-    keys(&mut r, "<f3>aX<esc><f4>u");
-    keys(&mut r, "j<c-a>e1E");
+    keys(&mut r, "<f3> aX ESC <f4> u");
+    keys(&mut r, "j C-a e1E");
     assert_eq!(shown(&r).replace(['|', '[', ']'], ""), "a\nXb\nXc\nd\n");
     keys(&mut r, "u");
     assert_eq!(shown(&r).replace(['|', '[', ']'], ""), "a\nb\nc\nd\n");
@@ -303,7 +303,7 @@ fn macro_lines_runs_on_each_selected_line_and_undoes_together() {
 #[test]
 fn macro_matches_runs_on_each_match_of_the_search() {
     let mut r = runtime("|ab x ab\n");
-    keys(&mut r, "<f3>iY<esc><f4>u[V");
+    keys(&mut r, "<f3> iY ESC <f4> u[V");
     assert_eq!(
         shown(&r).replace('|', "").replace(['[', ']'], ""),
         "Yab x Yab\n"
@@ -321,20 +321,20 @@ fn grabbing_enters_beacon_and_typing_edits_every_line() {
     keys(&mut r, "G");
     assert_eq!(r.edit_mode(), EditMode::Beacon);
     // The caret goes to the top line; each line below gets one in its column.
-    keys(&mut r, "<c-a>");
-    keys(&mut r, "iX<esc>");
+    keys(&mut r, "C-a");
+    keys(&mut r, "iX ESC");
     assert_eq!(r.edit_mode(), EditMode::Beacon);
     assert_eq!(shown(&r).replace('|', ""), "Xone\nXtwo\nXthree\n");
-    keys(&mut r, "<esc><esc>");
+    keys(&mut r, "ESC ESC");
     assert_eq!(r.edit_mode(), EditMode::Normal);
     assert!(r.beacons().is_empty());
 }
 #[test]
 fn beacon_typing_is_one_undo_step_and_enter_does_not_indent() {
     let mut r = runtime("|one\n  two\n");
-    keys(&mut r, "eeG<c-a>i");
-    keys(&mut r, "<ret>");
-    keys(&mut r, "<esc>u");
+    keys(&mut r, "eeG C-a i");
+    keys(&mut r, "RET");
+    keys(&mut r, "ESC u");
     assert_eq!(shown(&r).replace('|', ""), "one\n  two\n");
 }
 #[test]
@@ -343,13 +343,13 @@ fn beacon_derives_every_match_of_a_marked_word() {
     keys(&mut r, "eeeG");
     keys(&mut r, "[");
     assert_eq!(r.beacons().len(), 2);
-    keys(&mut r, "sZ<esc>");
+    keys(&mut r, "sZ ESC");
     assert_eq!(shown(&r).replace('|', ""), "Z x\ncd Z\nZ\n",);
 }
 #[test]
 fn a_macro_recorded_in_beacon_runs_at_every_selection_as_one_step() {
     let mut r = runtime("|ab x\nab y\n");
-    keys(&mut r, "eeG<a-lt>[<f3>aQ<esc><f4>");
+    keys(&mut r, "eeG M-< [ <f3> aQ ESC <f4>");
     assert_eq!(shown(&r).replace(['|', '[', ']'], ""), "abQ x\nabQ y\n");
     keys(&mut r, "u");
     assert_eq!(shown(&r).replace(['|', '[', ']'], ""), "ab x\nab y\n");
@@ -357,8 +357,8 @@ fn a_macro_recorded_in_beacon_runs_at_every_selection_as_one_step() {
 #[test]
 fn swap_grab_exchanges_two_ranges() {
     cases(&[
-        ("|ab cd\n", "wG<c-e>bS", "cd ab|\n"),
-        ("ab |cd\n", "wG<c-a>wS", "cd| ab\n"),
+        ("|ab cd\n", "wG C-e bS", "cd ab|\n"),
+        ("ab |cd\n", "wG C-a wS", "cd| ab\n"),
     ]);
 }
 #[test]
@@ -374,17 +374,17 @@ fn the_keypad_reaches_chords_with_or_without_ctrl() {
     assert_eq!(r.app().windows().views().len(), 2);
     keys(&mut r, "x0");
     assert_eq!(r.app().windows().views().len(), 1);
-    keys(&mut r, "<c-x>2");
+    keys(&mut r, "C-x 2");
     assert_eq!(r.app().windows().views().len(), 2);
-    keys(&mut r, "<c-x>0");
+    keys(&mut r, "C-x 0");
     assert_eq!(r.app().windows().views().len(), 1);
 }
 #[test]
 fn the_keypad_tries_ctrl_first_and_space_asks_for_the_plain_key() {
     let mut r = runtime("|a\n");
-    keys(&mut r, "x2x<space>o");
+    keys(&mut r, "x2x SPC o");
     let first = r.app().active_view();
-    keys(&mut r, "x<space>o");
+    keys(&mut r, "x SPC o");
     assert_ne!(first, r.app().active_view());
     // `x k` has no Ctrl binding, so the plain one answers.
     keys(&mut r, "x0");
@@ -397,23 +397,23 @@ fn keypad_sequences_are_said_and_cancelled_and_step_back() {
     keys(&mut r, "x");
     assert_eq!(r.pending_keys().as_deref(), Some("C-x"));
     assert!(r.key_continuations().iter().any(|(key, _)| key == "s"));
-    keys(&mut r, "<space>");
+    keys(&mut r, "SPC");
     assert_eq!(r.pending_keys().as_deref(), Some("C-x"));
-    keys(&mut r, "<esc><space>");
+    keys(&mut r, "ESC SPC");
     assert_eq!(r.pending_keys().as_deref(), Some("C-c"));
-    keys(&mut r, "<esc>m");
+    keys(&mut r, "ESC m");
     assert_eq!(r.pending_keys().as_deref(), Some("M-"));
     keys(&mut r, "g");
     assert_eq!(r.pending_keys().as_deref(), Some("M-g"));
     assert!(r.key_continuations().iter().any(|(key, _)| key == "p"));
-    keys(&mut r, "<esc>i<c-x>");
+    keys(&mut r, "ESC i C-x");
     assert_eq!(r.pending_keys().as_deref(), Some("C-x"));
     assert!(r.key_continuations().iter().any(|(key, _)| key == "C-s"));
-    keys(&mut r, "<esc><esc>");
+    keys(&mut r, "ESC ESC");
     assert_eq!(r.pending_keys(), None);
     keys(&mut r, "xz");
     assert_eq!(r.message(), "C-x z is undefined");
-    keys(&mut r, "x<bs>");
+    keys(&mut r, "x DEL");
     assert_eq!(r.pending_keys(), None);
     keys(&mut r, "l");
     assert_eq!(shown(&r), "a|\n");
@@ -423,19 +423,19 @@ fn the_leader_is_ctrl_c_and_reaches_bindings_of_any_module() {
     let mut r = runtime("|a\n");
     r.command(Command::Map {
         keymap: "global".into(),
-        keys: KeyStroke::parse_sequence("<c-c>y").unwrap(),
+        keys: KeyStroke::parse_sequence("C-c y").unwrap(),
         target: "append".into(),
         label: None,
         default: false,
     });
-    keys(&mut r, "<space>y");
+    keys(&mut r, "SPC y");
     assert_eq!(r.edit_mode(), EditMode::Insert);
 }
 #[test]
 fn meta_and_ctrl_meta_start_the_keypad_with_the_next_key() {
-    cases(&[("a|b\n", "<esc>m<lt>", "|ab\n")]);
+    cases(&[("a|b\n", "ESC m<", "|ab\n")]);
     let mut r = runtime("|a\n");
-    keys(&mut r, "m<gt>");
+    keys(&mut r, "m>");
     assert_eq!(shown(&r), "a\n|");
 }
 #[test]
@@ -453,13 +453,13 @@ fn a_searched_selection_is_literal() {
 #[test]
 fn macro_matches_keeps_whole_words() {
     let mut r = runtime("|ab abc ab\n");
-    keys(&mut r, "<f3>iY<esc><f4>u[V");
+    keys(&mut r, "<f3> iY ESC <f4> u[V");
     assert_eq!(shown(&r).replace(['|', '[', ']'], ""), "Yab abc Yab\n");
 }
 #[test]
 fn pop_after_an_edit_does_not_restore_a_stale_range() {
     let mut r = runtime("ab |cdefgh\n");
-    keys(&mut r, "wh<c-a>dddddd");
+    keys(&mut r, "wh C-a dddddd");
     keys(&mut r, "z");
     assert_eq!(r.message(), "No previous selection");
 }
@@ -467,7 +467,7 @@ fn pop_after_an_edit_does_not_restore_a_stale_range() {
 fn repeat_runs_what_the_key_ran() {
     let mut r = runtime("|a\nb\nc\n");
     // `E` hands its work to other commands; `` ` `` still means `E`.
-    keys(&mut r, "<f3><c-e>iX<esc><f4>j<c-a>eE`");
+    keys(&mut r, "<f3> C-e iX ESC <f4> j C-a eE`");
     assert_eq!(shown(&r).replace(['|', '[', ']'], ""), "aX\nbXX\nc\n");
 }
 #[test]
@@ -477,16 +477,16 @@ fn block_after_inner_takes_the_brackets() {
 #[test]
 fn beacon_words_are_ranges_like_the_main_one() {
     let mut r = runtime("|ab cd\nef gh\n");
-    keys(&mut r, "eeG<a-lt>wiX<esc>");
+    keys(&mut r, "eeG M-< wiX ESC");
     assert_eq!(shown(&r).replace('|', ""), "Xab Xcd\nXef Xgh\n");
 }
 #[test]
 fn beacon_delete_and_change_reach_every_selection() {
     let mut r = runtime("|ab x\nab y\n");
-    keys(&mut r, "eeG<a-lt>[d");
+    keys(&mut r, "eeG M-< [d");
     assert_eq!(shown(&r).replace('|', ""), " x\n y\n");
     let mut r = runtime("|abc\ndef\n");
-    keys(&mut r, "eeG<c-a>sX<esc>");
+    keys(&mut r, "eeG C-a sX ESC");
     assert_eq!(shown(&r).replace('|', ""), "Xbc\nXef\n");
 }
 #[test]
@@ -512,7 +512,7 @@ fn keypad_hints_list_what_m_and_g_reach() {
         after_mg.iter().all(|key| !key.contains('-')),
         "{after_mg:?}"
     );
-    keys(&mut r, "<esc>");
+    keys(&mut r, "ESC");
     // `g` alone is Ctrl and Meta together: `C-M-,`, not `M-g`.
     keys(&mut r, "g");
     let after_g = hints(&r);
@@ -535,7 +535,7 @@ fn visit_offers_the_symbols_of_the_document_and_selects_the_next_place() {
     assert_eq!(rows(&r)[..3], ["add", "addend", "add_x"]);
     r.input(UserInput::Paste("add".into()));
     assert_eq!(rows(&r)[0], "add");
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     // The symbol, not the start of a longer one.
     assert_eq!(shown(&r), "add_x(add);\n[add]| + addend;\nadd;\n");
     keys(&mut r, "n");
@@ -543,7 +543,7 @@ fn visit_offers_the_symbols_of_the_document_and_selects_the_next_place() {
     // Text that is not a symbol is sought as it is written.
     keys(&mut r, "v");
     r.input(UserInput::Paste("d + a".into()));
-    keys(&mut r, "<ret>");
+    keys(&mut r, "RET");
     assert_eq!(shown(&r), "add_x(add);\nad[d + a]|ddend;\nadd;\n");
 }
 #[test]
@@ -553,10 +553,10 @@ fn moving_up_and_down_keeps_a_column_until_something_else_moves_the_caret() {
         ("abcd|ef\nab\nabcdef\n", "jj", "abcdef\nab\nabcd|ef\n"),
         // Going to the line start forgets the column; so does any other
         // move of the caret between vertical ones.
-        ("abcd|ef\nabcdef\n", "<c-a>j", "abcdef\n|abcdef\n"),
+        ("abcd|ef\nabcdef\n", "C-a j", "abcdef\n|abcdef\n"),
         (
             "abcd|ef\nabcdef\nabcdef\n",
-            "j<c-a>j",
+            "j C-a j",
             "abcdef\nabcdef\n|abcdef\n",
         ),
         ("abcd|ef\nab\nabcdef\n", "jhj", "abcdef\nab\na|bcdef\n"),
@@ -564,68 +564,68 @@ fn moving_up_and_down_keeps_a_column_until_something_else_moves_the_caret() {
     // In Insert, moving the caret between vertical moves forgets it too.
     let mut r = runtime("abcd|ef\nabcdef\nabcdef\n");
     r.command(Command::SetMode(EditMode::Insert));
-    keys(&mut r, "<c-n><c-a><c-n>");
+    keys(&mut r, "C-n C-a C-n");
     assert_eq!(shown(&r), "abcdef\nabcdef\n|abcdef\n");
 }
 #[test]
 fn kills_one_after_another_join_and_yank_pop_goes_back_through_the_ring() {
     let mut r = runtime("|one\ntwo\nthree\n");
-    keys(&mut r, "i<c-k><c-k><c-k>");
+    keys(&mut r, "i C-k C-k C-k");
     // Line, line break, line: one entry.
     assert_eq!(shown(&r), "|\nthree\n");
     assert_eq!(r.app().clipboard(), "one\ntwo");
     // A kill elsewhere starts a new entry.
-    keys(&mut r, "<c-n><c-e><c-u>");
+    keys(&mut r, "C-n C-e C-u");
     assert_eq!(shown(&r), "\n|\n");
     assert_eq!(r.app().clipboard(), "three");
     // Typing in between does too; killing backward puts the text in
     // front of the forward kill.
-    keys(&mut r, "xyz<c-b><c-k><c-u>");
+    keys(&mut r, "xyz C-b C-k C-u");
     assert_eq!(shown(&r), "\n|\n");
     assert_eq!(r.app().clipboard(), "xyz");
     assert_eq!(r.app().kill_ring().count(), 3);
     // Yank, then go back through the older entries, round to the newest.
-    keys(&mut r, "<c-y>");
+    keys(&mut r, "C-y");
     assert_eq!(shown(&r), "\nxyz|\n");
-    keys(&mut r, "<a-y>");
+    keys(&mut r, "M-y");
     assert_eq!(shown(&r), "\nthree|\n");
-    keys(&mut r, "<a-y>");
+    keys(&mut r, "M-y");
     assert_eq!(shown(&r), "\none\ntwo|\n");
-    keys(&mut r, "<a-y>");
+    keys(&mut r, "M-y");
     assert_eq!(shown(&r), "\nxyz|\n");
     // Anything else in between, and M-y has nothing to replace.
-    keys(&mut r, "<c-b><a-y>");
+    keys(&mut r, "C-b M-y");
     assert_eq!(shown(&r), "\nxy|z\n");
     assert!(r.message().contains("not a yank"), "{}", r.message());
 }
 #[test]
 fn yank_pop_follows_a_put_in_normal_and_stops_after_a_copy() {
     let mut r = runtime("|one two\n");
-    keys(&mut r, "i<c-k><esc>ixy<c-a><c-k><esc>");
-    keys(&mut r, "<c-y>");
+    keys(&mut r, "i C-k ESC ixy C-a C-k ESC");
+    keys(&mut r, "C-y");
     assert_eq!(shown(&r), "xy|\n");
-    keys(&mut r, "<a-y>");
+    keys(&mut r, "M-y");
     assert_eq!(shown(&r), "one two|\n");
-    keys(&mut r, "<a-y>");
+    keys(&mut r, "M-y");
     assert_eq!(shown(&r), "xy|\n");
     // A copy changes the ring under the yank: nothing to replace.
     r.command(Command::Named("copy".into()));
     assert_eq!(r.app().clipboard(), "xy\n");
-    keys(&mut r, "<a-y>");
+    keys(&mut r, "M-y");
     assert_eq!(shown(&r), "xy|\n");
     assert!(r.message().contains("not a yank"), "{}", r.message());
 }
 #[test]
 fn saving_copies_the_selection_and_drops_it() {
     let mut r = runtime("|one two\n");
-    keys(&mut r, "<c-space><a-f><a-w>");
+    keys(&mut r, "C-SPC M-f M-w");
     assert_eq!(r.app().clipboard(), "one");
     assert_eq!(shown(&r), "one| two\n");
     // The mark goes too: moving does not select again.
-    keys(&mut r, "<a-f>");
+    keys(&mut r, "M-f");
     assert_eq!(shown(&r), "one two|\n");
     // In Insert, a selection made with Shift goes the same way.
-    keys(&mut r, "i<s-left><s-left><s-left>");
+    keys(&mut r, "i S-<left> S-<left> S-<left>");
     r.command(Command::Named("save".into()));
     assert_eq!(r.app().clipboard(), "two");
     assert_eq!(shown(&r), "one |two\n");

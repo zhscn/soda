@@ -205,7 +205,7 @@ mod tests {
     fn dragging_a_separator_or_a_title_moves_that_edge() {
         let mut runtime = Runtime::new(std::path::PathBuf::from("/")).unwrap();
         runtime.start(None);
-        for key in KeyStroke::parse_sequence("<c-x>3<c-x>2").unwrap() {
+        for key in KeyStroke::parse_sequence("C-x 3 C-x 2").unwrap() {
             runtime.input(UserInput::Key(key));
         }
         let views = runtime.app().windows().views();

@@ -76,7 +76,7 @@ M.layouts = {
     y = "save",
     z = "pop-selection",
     ["'"] = "repeat",
-    ["<space>"] = "keypad leader",
+    ["SPC"] = "keypad leader",
   },
 }
 

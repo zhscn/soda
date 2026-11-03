@@ -61,7 +61,7 @@ fn regaining_focus_reloads_clean_files_and_reports_the_rest() {
         std::fs::write(path, "new\n").unwrap();
     }
     std::fs::remove_file(&gone).unwrap();
-    keys(&mut r, "ix<esc>");
+    keys(&mut r, "ix ESC");
     r.input(UserInput::FocusGained);
     assert_eq!(text_of(&r, &clean).unwrap(), "new\n");
     assert_eq!(text_of(&r, &edited).unwrap(), "xold\n");

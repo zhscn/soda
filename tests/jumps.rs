@@ -11,7 +11,7 @@ fn keys(r: &mut Runtime, notation: &str) {
     }
 }
 fn goto(r: &mut Runtime, line: usize) {
-    keys(r, &format!("Q{line}<ret>"));
+    keys(r, &format!("Q{line} RET"));
 }
 fn wait(r: &mut Runtime, done: impl Fn(&Runtime) -> bool) {
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -66,27 +66,27 @@ fn back_and_forward_within_a_file() {
     goto(&mut r, 5);
     goto(&mut r, 20);
     assert_eq!(at(&r), here("a.txt", 20));
-    keys(&mut r, "<c-o>");
+    keys(&mut r, "C-o");
     assert_eq!(at(&r), here("a.txt", 5));
-    keys(&mut r, "<c-o>");
+    keys(&mut r, "C-o");
     assert_eq!(at(&r), here("a.txt", 1));
-    keys(&mut r, "<c-o>");
+    keys(&mut r, "C-o");
     assert_eq!(r.message(), "At the oldest jump");
     assert_eq!(at(&r), here("a.txt", 1));
-    keys(&mut r, "<c-i>");
+    keys(&mut r, "C-i");
     assert_eq!(at(&r), here("a.txt", 5));
-    keys(&mut r, "<c-i>");
+    keys(&mut r, "C-i");
     assert_eq!(at(&r), here("a.txt", 20));
-    keys(&mut r, "<c-i>");
+    keys(&mut r, "C-i");
     assert_eq!(r.message(), "At the newest jump");
 }
 #[test]
 fn tab_goes_forward_where_terminals_cannot_tell_it_from_ctrl_i() {
     let Project { mut r, _dir } = project();
     goto(&mut r, 5);
-    keys(&mut r, "<c-o>");
+    keys(&mut r, "C-o");
     assert_eq!(at(&r), here("a.txt", 1));
-    keys(&mut r, "<tab>");
+    keys(&mut r, "TAB");
     assert_eq!(at(&r), here("a.txt", 5));
 }
 #[test]
@@ -94,9 +94,9 @@ fn small_moves_are_not_jumps() {
     let Project { mut r, _dir } = project();
     goto(&mut r, 10);
     keys(&mut r, "jjjlw");
-    keys(&mut r, "<c-o>");
+    keys(&mut r, "C-o");
     assert_eq!(at(&r), here("a.txt", 1));
-    keys(&mut r, "<c-i>");
+    keys(&mut r, "C-i");
     assert_eq!(at(&r), here("a.txt", 13), "forward returns where back left");
 }
 #[test]
@@ -104,28 +104,28 @@ fn jumping_after_going_back_drops_what_lay_ahead() {
     let Project { mut r, _dir } = project();
     goto(&mut r, 10);
     goto(&mut r, 20);
-    keys(&mut r, "<c-o>");
+    keys(&mut r, "C-o");
     goto(&mut r, 25);
-    keys(&mut r, "<c-i>");
+    keys(&mut r, "C-i");
     assert_eq!(r.message(), "At the newest jump");
     assert_eq!(at(&r), here("a.txt", 25));
-    keys(&mut r, "<c-o>");
+    keys(&mut r, "C-o");
     assert_eq!(at(&r), here("a.txt", 10));
-    keys(&mut r, "<c-o>");
+    keys(&mut r, "C-o");
     assert_eq!(at(&r), here("a.txt", 1));
 }
 #[test]
 fn a_search_counts_once_from_where_it_started() {
     let Project { mut r, _dir } = project();
     goto(&mut r, 5);
-    keys(&mut r, "<c-s>line 20<ret>");
+    keys(&mut r, "C-s line SPC 20 RET");
     assert_eq!(at(&r), here("a.txt", 20));
-    keys(&mut r, "<c-o>");
+    keys(&mut r, "C-o");
     assert_eq!(at(&r), here("a.txt", 5));
     // A cancelled search went nowhere.
-    keys(&mut r, "<c-s>line 25<esc>");
+    keys(&mut r, "C-s line SPC 25 ESC");
     assert_eq!(at(&r), here("a.txt", 5));
-    keys(&mut r, "<c-i>");
+    keys(&mut r, "C-i");
     assert_eq!(at(&r), here("a.txt", 20));
 }
 #[test]
@@ -135,16 +135,16 @@ fn opening_results_returns_to_where_the_search_started() {
     r.command(Command::Grep("needle".into()));
     wait(&mut r, |r| r.message().starts_with("3 matches"));
     assert_eq!(name(&r), "*grep*");
-    keys(&mut r, "<a-g>n");
+    keys(&mut r, "M-g n");
     wait(&mut r, |r| name(r) == "b.txt");
-    keys(&mut r, "<a-g>n");
+    keys(&mut r, "M-g n");
     wait(&mut r, |r| at(r) == here("b.txt", 4));
-    keys(&mut r, "<a-g>n");
+    keys(&mut r, "M-g n");
     wait(&mut r, |r| name(r) == "c.txt");
     // One step leaves the results, whatever was walked through.
-    keys(&mut r, "<c-o>");
+    keys(&mut r, "C-o");
     assert_eq!(at(&r), here("a.txt", 5));
-    keys(&mut r, "<c-i>");
+    keys(&mut r, "C-i");
     assert_eq!(at(&r), here("c.txt", 1));
 }
 #[test]
@@ -153,27 +153,27 @@ fn branches_of_results_unwind_one_at_a_time() {
     goto(&mut r, 5);
     r.command(Command::Grep("needle".into()));
     wait(&mut r, |r| r.message().starts_with("3 matches"));
-    keys(&mut r, "<a-g>n");
+    keys(&mut r, "M-g n");
     wait(&mut r, |r| name(r) == "b.txt");
     assert_eq!(at(&r), here("b.txt", 2));
     // A second search, from the first one's result.
     r.command(Command::Grep("line 7$".into()));
     wait(&mut r, |r| r.message().starts_with("1 matches"));
-    keys(&mut r, "<a-g>n");
+    keys(&mut r, "M-g n");
     wait(&mut r, |r| name(r) == "a.txt");
     assert_eq!(at(&r), here("a.txt", 7));
-    keys(&mut r, "<c-o>");
+    keys(&mut r, "C-o");
     assert_eq!(at(&r), here("b.txt", 2));
-    keys(&mut r, "<c-o>");
+    keys(&mut r, "C-o");
     assert_eq!(at(&r), here("a.txt", 5));
 }
 #[test]
 fn enter_only_counts_on_a_location() {
     let Project { mut r, _dir } = project();
     goto(&mut r, 5);
-    keys(&mut r, "<ret><ret>");
+    keys(&mut r, "RET RET");
     assert_eq!(at(&r), here("a.txt", 7));
-    keys(&mut r, "<c-o>");
+    keys(&mut r, "C-o");
     assert_eq!(at(&r), here("a.txt", 1));
 }
 #[test]
@@ -181,10 +181,10 @@ fn places_follow_edits() {
     let Project { mut r, _dir } = project();
     goto(&mut r, 5);
     goto(&mut r, 20);
-    keys(&mut r, "<a-lt>Inew<esc>");
-    keys(&mut r, "<c-o>");
+    keys(&mut r, "M-< Inew ESC");
+    keys(&mut r, "C-o");
     assert_eq!(at(&r), here("a.txt", 21));
-    keys(&mut r, "<c-o>");
+    keys(&mut r, "C-o");
     assert_eq!(at(&r), here("a.txt", 6));
 }
 #[test]
@@ -200,7 +200,7 @@ fn closed_documents_leave_the_list() {
     r.command(Command::Named("close".into()));
     assert_ne!(name(&r), "b.txt", "{}", r.message());
     for _ in 0..4 {
-        keys(&mut r, "<c-o>");
+        keys(&mut r, "C-o");
         assert_ne!(name(&r), "b.txt");
     }
 }
@@ -217,11 +217,11 @@ fn going_back_focuses_the_window_that_holds_the_place() {
     let Project { mut r, _dir } = project();
     goto(&mut r, 5);
     let first = r.app().active_view().unwrap();
-    keys(&mut r, "<c-x>2");
+    keys(&mut r, "C-x 2");
     r.command(Command::OpenPath(_dir.path().join("b.txt")));
     wait(&mut r, |r| name(r) == "b.txt");
     assert_eq!(r.app().windows().len(), 2);
-    keys(&mut r, "<c-o>");
+    keys(&mut r, "C-o");
     assert_eq!(at(&r), here("a.txt", 5));
     assert_eq!(r.app().windows().len(), 2);
     assert_eq!(r.app().active_view(), Some(first));
@@ -231,9 +231,9 @@ fn jump_to_counts_and_typing_does_not() {
     let Project { mut r, _dir } = project();
     r.set_page_rows(25);
     goto(&mut r, 5);
-    keys(&mut r, "<space>j20");
+    keys(&mut r, "SPC j20");
     assert_eq!(r.edit_mode(), EditMode::Normal);
     assert_eq!(at(&r).1, 20, "{}", r.message());
-    keys(&mut r, "<c-o>");
+    keys(&mut r, "C-o");
     assert_eq!(at(&r), here("a.txt", 5));
 }

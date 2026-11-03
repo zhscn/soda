@@ -74,10 +74,10 @@ fn typed(case: &Case) -> String {
             break;
         };
         if next.trim_start().starts_with('}') && closer_below(&r) {
-            press(&mut r, "<down><end>");
+            press(&mut r, "<down> <end>");
             skip = 1;
         } else {
-            press(&mut r, "<ret>");
+            press(&mut r, "RET");
         }
     }
     caret(&r).0

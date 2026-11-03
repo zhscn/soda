@@ -41,7 +41,7 @@ fn text(r: &Runtime) -> &str {
 #[test]
 fn overrides_can_use_literal_sequences_without_affecting_insert_or_defaults() {
     let mut r = runtime();
-    map(&mut r, "normal <space>f open");
+    map(&mut r, "normal \"SPC f\" open");
     send(&mut r, key(' '));
     assert!(r.layer().is_none());
     send(&mut r, key('f'));
@@ -59,12 +59,12 @@ fn overrides_can_use_literal_sequences_without_affecting_insert_or_defaults() {
 #[test]
 fn prefix_conflicts_and_reserved_cancellation_are_rejected_without_replacing_bindings() {
     let mut r = runtime();
-    map(&mut r, "normal <c-x>f open");
-    map(&mut r, "normal <c-x> new");
+    map(&mut r, "normal \"C-x f\" open");
+    map(&mut r, "normal C-x new");
     assert!(r.message().contains("conflicts"), "{}", r.message());
-    map(&mut r, "normal <c-x><esc> new");
+    map(&mut r, "normal \"C-x ESC\" new");
     assert!(r.message().contains("cannot be bound"), "{}", r.message());
-    map(&mut r, "normal <c-x>f buffer");
+    map(&mut r, "normal \"C-x f\" buffer");
     send(&mut r, ctrl('x'));
     send(&mut r, key('f'));
     assert!(matches!(r.layer(), Some(Layer::CommandLine(_))));
@@ -73,7 +73,7 @@ fn prefix_conflicts_and_reserved_cancellation_are_rejected_without_replacing_bin
 fn prefixes_consume_invalid_input_and_reset_on_focus_loss_release_and_commands() {
     let mut r = runtime();
     r.command(Command::SetMode(EditMode::Insert));
-    map(&mut r, "insert <c-x>f open");
+    map(&mut r, "insert \"C-x f\" open");
     send(&mut r, ctrl('x'));
     let mut release = key('f');
     release.release = true;
@@ -99,7 +99,7 @@ fn defined_commands_and_prompt_keys_take_effect() {
     r.command(Command::Named("define-command recursive recursive".into()));
     r.command(Command::Named("recursive".into()));
     assert!(r.message().contains("recursively"), "{}", r.message());
-    map(&mut r, "prompt <c-f> char-right");
+    map(&mut r, "prompt C-f char-right");
     r.command(Command::Ex("open ".into()));
     r.input(UserInput::Paste("path".into()));
     send(&mut r, KeyStroke::plain(Key::Home));
@@ -147,7 +147,7 @@ fn a_language_keymap_holds_in_its_documents_only() {
         }
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
-    map(&mut r, "rust <c-c>z echo rust keys");
+    map(&mut r, "rust \"C-c z\" echo rust keys");
     // The leader reads it too, as it reads `global`.
     send(&mut r, key(' '));
     send(&mut r, key('z'));
@@ -167,6 +167,6 @@ fn a_language_keymap_holds_in_its_documents_only() {
     send(&mut r, key('z'));
     assert_eq!(r.message(), "C-c z is undefined");
     // A name that is neither a context, a keymap nor a language.
-    map(&mut r, "nowhere <c-c>z nop");
+    map(&mut r, "nowhere \"C-c z\" nop");
     assert_eq!(r.message(), "unknown keymap: nowhere");
 }
