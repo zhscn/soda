@@ -426,6 +426,12 @@ fn work_done_elsewhere_wakes_the_loop_and_deadlines_say_when_to_look() {
         assert!(started.elapsed() < Duration::from_secs(5), "never woken");
         std::thread::sleep(Duration::from_millis(1));
     }
+    // The waker is global, so another test running at the same time may
+    // have woken it first: look until the command has ended.
     host.poll();
-    assert!(!host.shell_running());
+    while host.shell_running() {
+        assert!(started.elapsed() < Duration::from_secs(5), "never ended");
+        std::thread::sleep(Duration::from_millis(1));
+        host.poll();
+    }
 }
