@@ -292,13 +292,13 @@ fn a_mark_opens_search_and_replace_with_its_symbol() {
     keys(&mut r, "<space>i");
     keys(&mut r, "s");
     match r.layer() {
-        Some(Layer::Search { input, .. }) => assert_eq!(input.text(), "foo"),
+        Some(Layer::Search(session)) => assert_eq!(session.input().text(), "foo"),
         _ => panic!("no search: {}", r.message()),
     }
     keys(&mut r, "<esc>");
     keys(&mut r, "q");
     assert!(
-        matches!(r.layer(), Some(Layer::Replace(session)) if session.search().query().text() == "foo"),
+        matches!(r.layer(), Some(Layer::Search(session)) if session.is_replacing() && session.query().text() == "foo"),
         "{}",
         r.message()
     );

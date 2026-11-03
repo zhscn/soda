@@ -27,8 +27,6 @@ use picker::{ListMotion, PickerCompletion, PickerEffect};
 pub mod path;
 mod pointer;
 pub use pointer::Pointer;
-mod replace;
-pub use replace::ReplaceSession;
 mod routing;
 pub use routing::{Key, KeyStroke, UserInput, emacs_notation, key_notation};
 mod search;
@@ -403,7 +401,8 @@ impl Layers {
         time: Duration,
     ) -> Result<InputResult, EditError> {
         if matches!(input, Input::Confirm)
-            && let Some(Layer::Search { session, .. }) = &self.active
+            && let Some(Layer::Search(session)) = &self.active
+            && !session.is_replacing()
             && session.query().is_valid()
         {
             {
@@ -448,7 +447,7 @@ impl Layers {
         }
         let confirm = matches!(input, Input::Confirm);
         let asks = layer.asks();
-        let searching = matches!(layer, Layer::Search { .. });
+        let searching = matches!(layer, Layer::Search(session) if !session.is_replacing());
         let labels = matches!(layer, Layer::Labels(_));
         let transition = layer.handle(input, app, time)?;
         if confirm
@@ -504,7 +503,8 @@ impl Layers {
         self.completion.observe(update);
         // Mirrors follow their places in the same undo step.
         let mirrored = self.snippet.observe(app, update, time);
-        let searching = matches!(self.active, Some(Layer::Search { .. }));
+        let searching =
+            matches!(&self.active, Some(Layer::Search(session)) if !session.is_replacing());
         self.jumps.observe(app, update, searching);
         let mut group_end: Vec<Event> = mirrored.into_iter().collect();
         if update.active_changed {

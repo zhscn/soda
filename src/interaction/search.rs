@@ -1,5 +1,11 @@
-//! A document-bound preview session. Retained anchors follow document updates;
-//! matching ranges are recomputed from the current snapshot rather than mapped.
+//! Search and replace: a document-bound preview session. Retained anchors
+//! follow document updates; matching ranges are recomputed from the current
+//! snapshot rather than mapped. Replacing is search with two more steps:
+//! the replacement, then a review; edits run only after confirmation.
+use super::{
+    Input, Presentation, Response, TextInput,
+    session::{Transition, edit_field, field_presentation},
+};
 use crate::{
     application::{Application, Event, Update, ViewId, Viewport},
     core::{Association, ByteOffset, EditError, Selection},
@@ -15,6 +21,21 @@ pub struct SearchSession {
     query: SearchQuery,
     backward: bool,
     results: SearchResults,
+    input: TextInput,
+    /// Present while replacing.
+    replace: Option<Replace>,
+}
+/// Where a replacement stands: the query is being typed, then the
+/// replacement, then the matches are reviewed.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Step {
+    Query,
+    Replacement,
+    Review,
+}
+struct Replace {
+    step: Step,
+    replacement: String,
 }
 #[derive(Default)]
 pub struct SearchResults {
@@ -23,8 +44,28 @@ pub struct SearchResults {
     pub current: Option<Range<usize>>,
 }
 impl SearchSession {
-    pub(super) fn set_direction(&mut self, backward: bool) {
-        self.backward = backward;
+    /// Searches backward from the selection.
+    pub fn backward(mut self) -> Self {
+        self.backward = true;
+        self
+    }
+    /// Replaces matches once a query and a replacement are given.
+    pub fn replacing(mut self) -> Self {
+        self.replace = Some(Replace {
+            step: Step::Query,
+            replacement: String::new(),
+        });
+        self
+    }
+    pub fn is_replacing(&self) -> bool {
+        self.replace.is_some()
+    }
+    /// The field being typed: the query, or the replacement.
+    pub fn input(&self) -> &TextInput {
+        &self.input
+    }
+    fn step(&self) -> Option<Step> {
+        self.replace.as_ref().map(|replace| replace.step)
     }
     pub fn view(&self) -> ViewId {
         self.view
@@ -69,6 +110,8 @@ impl SearchSession {
             query: SearchQuery::new(""),
             backward: false,
             results: SearchResults::default(),
+            input: TextInput::default(),
+            replace: None,
         })
     }
     /// Returns false when the owning view closes. Missing revisions return an error.
@@ -184,61 +227,83 @@ impl SearchSession {
 }
 
 impl SearchSession {
-    pub(super) fn presentation(&self, field: &super::TextInput) -> super::Presentation {
-        let label = format!("Find [{}]: ", self.results().count);
-        let mut presentation = super::session::field_presentation(label, field);
-        if let Some(error) = self.query.error() {
+    pub(super) fn presentation(&self) -> Presentation {
+        let label = match &self.replace {
+            None => format!("Find [{}]: ", self.results.count),
+            Some(Replace {
+                step: Step::Query, ..
+            }) => format!("Replace query [{}]: ", self.results.count),
+            Some(Replace {
+                step: Step::Replacement,
+                ..
+            }) => "Replacement: ".to_owned(),
+            Some(Replace {
+                step: Step::Review,
+                replacement,
+            }) => {
+                return Presentation {
+                    text: format!(
+                        "Replace {:?} with {:?} [{} matches]: Enter current, F4 all, F3 next, Esc cancel",
+                        self.query.text(),
+                        replacement,
+                        self.results.count
+                    ),
+                    cursor: None,
+                    selection: 0..0,
+                };
+            }
+        };
+        let mut presentation = field_presentation(label, &self.input);
+        if let Some(error) = self.query.error()
+            && self.step() != Some(Step::Replacement)
+        {
             presentation.text.push_str(&format!("  ({error})"));
         }
         presentation
     }
-    pub(super) fn cancel_response(
-        &self,
-        app: &Application,
-        time: Duration,
-    ) -> Result<super::Response, EditError> {
-        Ok(super::Response {
-            events: if app.view(self.view()).is_some() {
+    fn cancel_response(&self, app: &Application, time: Duration) -> Result<Response, EditError> {
+        Ok(Response {
+            events: if app.view(self.view).is_some() {
                 self.cancel(app, time)?
             } else {
                 vec![]
             },
             redraw: true,
-            ..super::Response::default()
+            ..Response::default()
         })
     }
-    pub(super) fn preview_response(
+    fn preview_response(
         &mut self,
         app: &Application,
         backward: bool,
         advance: bool,
         time: Duration,
-    ) -> Result<super::Response, EditError> {
+    ) -> Result<Response, EditError> {
         let command = self.preview(app, backward, advance)?;
-        if self.results().current.is_none() {
+        if self.results.current.is_none() {
             return self.cancel_response(app, time);
         }
-        Ok(super::Response {
+        Ok(Response {
             events: vec![Event::Edit {
-                view: self.view(),
+                view: self.view,
                 command,
                 time,
             }],
             redraw: true,
-            ..super::Response::default()
+            ..Response::default()
         })
     }
+    /// Replaces the query with a line from the history.
     pub(super) fn recall(
         &mut self,
-        field: &mut super::TextInput,
         text: &str,
         app: &Application,
         time: Duration,
-    ) -> Result<super::session::Transition, EditError> {
-        let end = field.text().len();
-        field.replace_range(0..end, text);
+    ) -> Result<Transition, EditError> {
+        let end = self.input.text().len();
+        self.input.replace_range(0..end, text);
         self.set_query(text);
-        Ok(super::session::Transition::Active(self.preview_response(
+        Ok(Transition::Active(self.preview_response(
             app,
             self.backward,
             false,
@@ -247,54 +312,90 @@ impl SearchSession {
     }
     pub(super) fn handle(
         &mut self,
-        field: &mut super::TextInput,
-        input: super::Input,
+        input: Input,
         app: &Application,
         time: Duration,
-    ) -> Result<super::session::Transition, EditError> {
-        use super::{
-            Input, Response,
-            session::{Transition, edit_field},
+    ) -> Result<Transition, EditError> {
+        let set_query = |query: SearchQuery| Event::Edit {
+            view: self.view,
+            command: Command::SetSearchQuery(query),
+            time,
         };
-        Ok(match input {
-            Input::Cancel => Transition::Closed(self.cancel_response(app, time)?),
-            Input::Confirm => Transition::Closed(Response {
-                events: vec![Event::Edit {
-                    view: self.view(),
-                    command: Command::SetSearchQuery(self.query().clone()),
-                    time,
-                }],
+        Ok(match (self.step(), input) {
+            (_, Input::Cancel) => Transition::Closed(self.cancel_response(app, time)?),
+            (None, Input::Confirm) => Transition::Closed(Response {
+                events: vec![set_query(self.query.clone())],
                 redraw: true,
                 ..Response::default()
             }),
-            Input::Navigate { backward } => {
+            (Some(Step::Query), Input::Confirm) => {
+                if !self.query.is_valid() {
+                    return Ok(Transition::Active(Response::default()));
+                }
+                self.replace.as_mut().unwrap().step = Step::Replacement;
+                self.input = TextInput::default();
+                Transition::redraw()
+            }
+            (Some(Step::Replacement), Input::Confirm) => {
+                let replace = self.replace.as_mut().unwrap();
+                replace.replacement = self.input.text().to_owned();
+                replace.step = Step::Review;
+                Transition::redraw()
+            }
+            (Some(Step::Review), input @ (Input::Confirm | Input::ReplaceAll)) => {
+                let replacement = self.replace.as_ref().unwrap().replacement.clone();
+                let command = if matches!(input, Input::ReplaceAll) {
+                    Command::ReplaceAll(replacement)
+                } else {
+                    Command::ReplaceCurrent(replacement)
+                };
+                Transition::Closed(Response {
+                    events: vec![
+                        set_query(self.query.clone()),
+                        Event::Edit {
+                            view: self.view,
+                            command,
+                            time,
+                        },
+                    ],
+                    redraw: true,
+                    ..Response::default()
+                })
+            }
+            (Some(Step::Replacement), Input::Navigate { .. }) => Transition::Blocked,
+            (_, Input::Navigate { backward }) => {
                 Transition::Active(self.preview_response(app, backward, true, time)?)
             }
-            input => match edit_field(field, input) {
-                Some(update) if update.text_changed => {
-                    self.set_query(field.text());
+            (Some(Step::Review), _) => Transition::Blocked,
+            (step, input) => match edit_field(&mut self.input, input) {
+                Some(update) if update.text_changed && step != Some(Step::Replacement) => {
+                    let text = self.input.text().to_owned();
+                    self.set_query(&text);
                     Transition::Active(self.preview_response(app, self.backward, false, time)?)
                 }
-                Some(update) if update.selection_changed => Transition::redraw(),
+                Some(update) if update.text_changed || update.selection_changed => {
+                    Transition::redraw()
+                }
                 _ => Transition::Blocked,
             },
         })
     }
-    pub(super) fn observe_transition(
+    /// Follows a document update: closes with the view, gives up when
+    /// another view takes focus, and searches again when the text changed.
+    pub(super) fn follow(
         &mut self,
         app: &Application,
         update: &Update,
         time: Duration,
-    ) -> Result<super::session::Transition, EditError> {
-        use super::{Response, session::Transition};
+    ) -> Result<Transition, EditError> {
         if !self.observe(app, update)? {
             return Ok(Transition::close());
         }
-        if app.active_view() != Some(self.view()) {
+        if app.active_view() != Some(self.view) {
             return Ok(Transition::Closed(self.cancel_response(app, time)?));
         }
         if update.edit.as_ref().is_some_and(|edit| {
-            edit.text_changed && edit.document_id == app.view(self.view()).unwrap().document_id
+            edit.text_changed && edit.document_id == app.view(self.view).unwrap().document_id
         }) {
             return Ok(Transition::Active(self.preview_response(
                 app,

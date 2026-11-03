@@ -375,7 +375,7 @@ fn f4_replaces_all_only_in_replacement_review() {
     editor.input(UserInput::Key(KeyStroke::plain(Key::F(4))));
     assert!(matches!(
         editor.layers.active(),
-        Some(soda::interaction::Layer::Search { .. })
+        Some(soda::interaction::Layer::Search(_))
     ));
     editor.input(UserInput::Key(KeyStroke::plain(Key::Esc)));
     replace_dialog(&mut editor, "foo", "bar");

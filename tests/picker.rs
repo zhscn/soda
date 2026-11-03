@@ -487,7 +487,7 @@ fn replacing_search_with_another_layer_restores_search_origin() {
     use soda::{
         core::Selection,
         editor::{Command, Language},
-        interaction::{SearchSession, TextInput},
+        interaction::SearchSession,
     };
     let mut app = Application::default();
     app.dispatch(Event::NewDocument(Language::PlainText))
@@ -509,10 +509,7 @@ fn replacing_search_with_another_layer_restores_search_origin() {
         let mut layers = insert_layers();
         layers
             .enter(
-                Layer::Search {
-                    input: TextInput::default(),
-                    session: SearchSession::new(&app, view).unwrap(),
-                },
+                Layer::Search(Box::new(SearchSession::new(&app, view).unwrap())),
                 &app,
                 Duration::ZERO,
             )

@@ -81,7 +81,7 @@ fn headless_runtime_replaces_and_cancels_search_without_frontend_dependencies() 
     );
     runtime.command(Command::Search);
     runtime.input(UserInput::Paste("bar".into()));
-    assert!(matches!(runtime.layer(), Some(Layer::Search { .. })));
+    assert!(matches!(runtime.layer(), Some(Layer::Search(_))));
     runtime.input(UserInput::Key(KeyStroke::plain(Key::Esc)));
     assert!(runtime.layer().is_none());
 }

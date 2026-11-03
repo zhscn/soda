@@ -1,8 +1,8 @@
 //! Application command reduction. Commands resolve their targets on the owner
 //! thread and return ordered application events and platform effects.
 use super::{
-    CommandLine, HelpSession, Layer, Layers, Message, ReplaceSession, Response, SaveWait,
-    SearchSession, TextInput, expand, registry::holds_commands,
+    CommandLine, HelpSession, Layer, Layers, Message, Response, SaveWait, SearchSession,
+    expand, registry::holds_commands,
 };
 use crate::{
     application::{Application, Axis, ClipboardAction, Direction, Event},
@@ -687,24 +687,15 @@ impl Layers {
                     });
                 }
             }
-            Command::Replace => {
+            Command::Search | Command::SearchBackward | Command::Replace => {
                 if let Some(view) = app.active_view() {
-                    response =
-                        self.enter(Layer::Replace(ReplaceSession::new(app, view)?), app, time)?;
-                }
-            }
-            Command::SearchBackward | Command::Search => {
-                if let Some(view) = app.active_view() {
-                    let mut session = SearchSession::new(app, view)?;
-                    session.set_direction(matches!(command, Command::SearchBackward));
-                    response = self.enter(
-                        Layer::Search {
-                            input: TextInput::default(),
-                            session,
-                        },
-                        app,
-                        time,
-                    )?;
+                    let session = SearchSession::new(app, view)?;
+                    let session = match command {
+                        Command::SearchBackward => session.backward(),
+                        Command::Replace => session.replacing(),
+                        _ => session,
+                    };
+                    response = self.enter(Layer::Search(Box::new(session)), app, time)?;
                 }
             }
             Command::Clipboard(action) => {

@@ -3,7 +3,7 @@ use soda::{
     core::{ByteOffset, Change, Selection, Transaction},
     editor::{Command, Language, search::SearchQuery},
     interaction::{
-        Input, InputKey, InputMotion, InputResult, Layer, Layers, SearchSession, TextInput,
+        Input, InputKey, InputMotion, InputResult, Layer, Layers, SearchSession,
     },
 };
 use std::time::Duration;
@@ -40,10 +40,7 @@ fn search(app: &Application, view: ViewId) -> Layers {
         let mut layers = insert_layers();
         layers
             .enter(
-                Layer::Search {
-                    input: TextInput::default(),
-                    session: SearchSession::new(app, view).unwrap(),
-                },
+                Layer::Search(Box::new(SearchSession::new(app, view).unwrap())),
                 app,
                 Duration::ZERO,
             )
@@ -68,7 +65,7 @@ fn preview_wrap_confirm_and_repeat_preserve_document_history() {
     let mut layers = search(&app, view);
     input(&mut layers, &mut app, Input::Paste("中".into()));
     assert_eq!(selection(&app, view), Selection { anchor: 0, head: 3 });
-    let Some(Layer::Search { session, .. }) = layers.active() else {
+    let Some(Layer::Search(session)) = layers.active() else {
         panic!()
     };
     assert_eq!(session.results().count, 2);
@@ -199,7 +196,7 @@ fn empty_or_missing_query_restores_origin_and_viewport() {
         );
     }
     assert_eq!(selection(&app, view), Selection::caret(0));
-    let Some(Layer::Search { session, .. }) = layers.active() else {
+    let Some(Layer::Search(session)) = layers.active() else {
         panic!()
     };
     assert_eq!(session.results().count, 0);
@@ -378,7 +375,7 @@ fn selection_only_input_repaints_without_restarting_preview() {
     // Replace a query with an equal-length query; length alone cannot identify changes.
     input(&mut layers, &mut app, Input::Text(InputKey::SelectAll));
     input(&mut layers, &mut app, Input::Paste("bar".into()));
-    let Some(Layer::Search { session, .. }) = layers.active() else {
+    let Some(Layer::Search(session)) = layers.active() else {
         panic!()
     };
     assert_eq!(session.query().text(), "bar");
@@ -477,7 +474,7 @@ fn prompt_navigation_and_filtered_paste_do_not_generate_file_commands() {
 
 #[test]
 fn all_builtin_sessions_share_the_cancel_lifecycle_contract() {
-    use soda::interaction::{HelpSession, ReplaceSession, SaveWait};
+    use soda::interaction::{HelpSession, SaveWait};
     let (mut app, view) = setup("dirty");
     let document = app.view(view).unwrap().document_id;
     let sessions = vec![
@@ -495,11 +492,8 @@ fn all_builtin_sessions_share_the_cancel_lifecycle_contract() {
             "close".into(),
             "close save".into(),
         )),
-        Layer::Replace(ReplaceSession::new(&app, view).unwrap()),
-        Layer::Search {
-            input: TextInput::default(),
-            session: SearchSession::new(&app, view).unwrap(),
-        },
+        Layer::Search(Box::new(SearchSession::new(&app, view).unwrap().replacing())),
+        Layer::Search(Box::new(SearchSession::new(&app, view).unwrap())),
     ];
     for session in sessions {
         let mut layers = insert_layers();

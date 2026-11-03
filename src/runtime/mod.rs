@@ -282,7 +282,7 @@ impl Runtime {
     pub fn update_viewport(&mut self, view: ViewId, anchor: ByteOffset, horizontal_scroll: usize) {
         if matches!(
             self.layer(),
-            None | Some(Layer::Search { .. } | Layer::Replace(_))
+            None | Some(Layer::Search(_))
         ) {
             self.dispatch(Event::SetViewport {
                 view,

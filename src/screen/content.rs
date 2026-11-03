@@ -117,8 +117,8 @@ pub(crate) struct Status {
 pub(crate) fn mode(runtime: &Runtime) -> Mode {
     match runtime.layer() {
         Some(Layer::CommandLine(_)) => Mode::Prompt("COMMAND"),
-        Some(Layer::Search { .. }) => Mode::Prompt("SEARCH"),
-        Some(Layer::Replace(_)) => Mode::Prompt("REPLACE"),
+        Some(Layer::Search(session)) if session.is_replacing() => Mode::Prompt("REPLACE"),
+        Some(Layer::Search(_)) => Mode::Prompt("SEARCH"),
         Some(Layer::Saving(_)) => Mode::Prompt("SAVING"),
         Some(Layer::Help(_)) => Mode::Prompt("HELP"),
         Some(Layer::Labels(_)) => Mode::Prompt("JUMP"),
@@ -192,8 +192,7 @@ pub(crate) enum Message<'a> {
 pub(crate) fn message<'a>(runtime: &'a Runtime, text: Option<&'a super::TextFrame>) -> Message<'a> {
     match runtime.layer() {
         Some(
-            layer @ (Layer::Search { .. }
-            | Layer::Replace(_)
+            layer @ (Layer::Search(_)
             | Layer::Saving(_)
             | Layer::Labels(_)
             | Layer::Resize(_)),
