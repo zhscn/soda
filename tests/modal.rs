@@ -607,3 +607,13 @@ fn yank_pop_follows_a_put_in_normal_and_stops_after_a_copy() {
     assert_eq!(shown(&r), "xy|\n");
     assert!(r.message().contains("not a yank"), "{}", r.message());
 }
+#[test]
+fn saving_copies_the_selection_and_drops_it() {
+    let mut r = runtime("|one two\n");
+    keys(&mut r, "<c-space><a-f><a-w>");
+    assert_eq!(r.app().clipboard(), "one");
+    assert_eq!(shown(&r), "one| two\n");
+    // The mark goes too: moving does not select again.
+    keys(&mut r, "<a-f>");
+    assert_eq!(shown(&r), "one two|\n");
+}

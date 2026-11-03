@@ -321,6 +321,10 @@ impl Layers {
                     return self.fail(response, "No selection");
                 }
                 response.events.push(at.clipboard(ClipboardAction::Copy));
+                // As Emacs's `kill-ring-save`: the selection goes, which
+                // shows that the copy was made.
+                response.events.push(at.caret());
+                self.modal.tag = None;
             }
             Action::Yank => {
                 response.events.push(at.caret());
