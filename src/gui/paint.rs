@@ -1056,8 +1056,8 @@ fn panel(painter: &mut Painter, area: Rect) {
     painter.outline(area, faded(border, 0.5), 10.0, 1.0);
 }
 
-/// The command line: its input on the bottom row, the candidates above.
-/// `message` is the height of the message row it fills.
+/// The command line: its input in a message-high row under the status
+/// line, the candidates below it.
 fn command_line(
     painter: &mut Painter,
     area: Rect,
@@ -1068,8 +1068,8 @@ fn command_line(
     let (cell, row_h) = (painter.fonts.cell, painter.fonts.line);
     let rows = line.rows();
     let list = line.list();
-    // The input sits in the middle of the message row.
-    let input_top = area.bottom() - message / 2.0 - row_h / 2.0;
+    // The input sits in the middle of a message-high row at the top.
+    let input_top = area.y + message / 2.0 - row_h / 2.0;
     painter.fill(area, painter.bg, 0.0);
     // What the line is for, at the right: an error, else the command's
     // slots and any question, then progress and the count.
@@ -1109,11 +1109,11 @@ fn command_line(
         }
         ix = painter.ui(ix, input_top, words, *style, area.w);
     }
-    // Whole rows above the message row; rounding, not flooring, so that
+    // Whole rows below the input's row; rounding, not flooring, so that
     // a fraction of a pixel lost in the sums does not lose a row.
     let count = ((area.h - message) / row_h).round().max(0.0) as usize;
     if count > 0 {
-        let list_area = Rect::new(0.0, area.y, area.w, count as f32 * row_h);
+        let list_area = Rect::new(0.0, area.y + message, area.w, count as f32 * row_h);
         let (_, bg) = painter.colors(theme.float);
         painter.fill(list_area, bg.unwrap_or(painter.bg), 0.0);
         let selected = list.selected();
