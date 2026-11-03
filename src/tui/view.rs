@@ -916,39 +916,17 @@ fn command_line(
     let list = line.list();
     Clear.render(area, buf);
     buf.set_style(area, theme.text);
-    // What the line is for, right of the input: an error, else the
-    // command's slots and any question, then progress and the count. The
-    // slots go first when it does not fit in half the row.
-    let mut info = vec![];
-    if let Some(error) = line.error() {
-        info.push(Text::styled(error.to_owned(), theme.error));
-    } else if let Some(note) = line.note() {
-        info.push(Text::styled(note.to_owned(), theme.modified));
-    }
-    if line.loading() {
-        info.push(Text::styled("loading…", theme.dim));
-    }
-    if let Some(index) = list.index(rows) {
-        info.push(Text::styled(
-            format!("{}/{}", index + 1, rows.len()),
-            theme.dim,
-        ));
-    }
-    if line.error().is_none() {
-        let heading = line.heading().unwrap_or_else(|| "command".into());
-        let width: usize = info.iter().map(|t| t.width() + 3).sum::<usize>() + heading.len();
-        if width < usize::from(area.width / 2) {
-            info.insert(0, Text::styled(heading, theme.dim));
-        }
-    }
+    // What the line is for, right of the input, in at most half the row.
+    let half = usize::from(area.width / 2);
+    let info = content::command_info(line, theme, |whole| Line::from(whole).width() < half);
     let info: Vec<_> = info
         .into_iter()
         .enumerate()
-        .flat_map(|(i, text)| {
+        .flat_map(|(i, (text, style))| {
             (i > 0)
                 .then(|| Text::styled(" · ", theme.dim))
                 .into_iter()
-                .chain([text])
+                .chain([Text::styled(text, style)])
         })
         .collect();
     let info = Line::from(info);

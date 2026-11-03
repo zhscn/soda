@@ -4,9 +4,10 @@
 use crate::{
     application::{Face, Severity, ViewId},
     editor::DocumentId,
-    interaction::{EditMode, Layer, Presentation},
+    interaction::{CommandLine, EditMode, Layer, Presentation},
     runtime::Runtime,
 };
+use ratatui::style::Style;
 
 /// A document's name as it shows: the name of a scratch document, the path
 /// from the project root when `full`, else the file name.
@@ -210,4 +211,38 @@ pub(crate) fn message<'a>(runtime: &'a Runtime, text: Option<&'a super::TextFram
             }
         }
     }
+}
+
+/// The words right of the command line's input, each with its style: an
+/// error, else the question asked; then progress and the place in the
+/// list. Without an error, the command's heading goes first when `fits`
+/// says the whole, joined with ` · `, is short enough.
+pub(crate) fn command_info(
+    line: &CommandLine,
+    theme: &super::Theme,
+    mut fits: impl FnMut(&str) -> bool,
+) -> Vec<(String, Style)> {
+    let mut info = vec![];
+    if let Some(error) = line.error() {
+        info.push((error.to_owned(), theme.error));
+    } else if let Some(note) = line.note() {
+        info.push((note.to_owned(), theme.modified));
+    }
+    if line.loading() {
+        info.push(("loading…".into(), theme.dim));
+    }
+    if let Some(index) = line.list().index(line.rows()) {
+        info.push((format!("{}/{}", index + 1, line.rows().len()), theme.dim));
+    }
+    if line.error().is_none() {
+        let heading = line.heading().unwrap_or_else(|| "command".into());
+        let whole = std::iter::once(heading.as_str())
+            .chain(info.iter().map(|(text, _)| text.as_str()))
+            .collect::<Vec<_>>()
+            .join(" · ");
+        if fits(&whole) {
+            info.insert(0, (heading, theme.dim));
+        }
+    }
+    info
 }

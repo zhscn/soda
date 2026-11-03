@@ -1119,29 +1119,10 @@ fn command_line(
     // The input sits in the middle of a message-high row at the top.
     let input_top = area.y + message / 2.0 - row_h / 2.0;
     painter.fill(area, painter.bg, 0.0);
-    // What the line is for, at the right: an error, else the command's
-    // slots and any question, then progress and the count.
-    let mut info = vec![];
-    if let Some(error) = line.error() {
-        info.push((error.to_owned(), theme.error));
-    } else if let Some(note) = line.note() {
-        info.push((note.to_owned(), theme.modified));
-    }
-    if line.loading() {
-        info.push(("loading…".into(), theme.dim));
-    }
-    if let Some(index) = list.index(rows) {
-        info.push((format!("{}/{}", index + 1, rows.len()), theme.dim));
-    }
-    if line.error().is_none() {
-        let heading = line.heading().unwrap_or_else(|| "command".into());
-        let joined: Vec<&str> = info.iter().map(|(t, _)| t.as_str()).collect();
-        let used = painter.fonts.width(&joined.join(" · "), Face::UI)
-            + painter.fonts.width(&heading, Face::UI);
-        if used < area.w / 2.0 {
-            info.insert(0, (heading, theme.dim));
-        }
-    }
+    // What the line is for, at the right, in at most half the row.
+    let info = content::command_info(line, theme, |whole| {
+        painter.fonts.width(whole, Face::UI) < area.w / 2.0
+    });
     let joined: Vec<&str> = info.iter().map(|(t, _)| t.as_str()).collect();
     let info_width =
         (painter.fonts.width(&joined.join(" · "), Face::UI) + 2.0 * cell).min(area.w / 2.0);
