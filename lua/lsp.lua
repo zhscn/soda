@@ -15,6 +15,9 @@
 
 soda.lsp.server("cpp", { "clangd", "--function-arg-placeholders=1" })
 
+-- What `require("lsp")` returns, filled in at the end; `token_category`
+-- can be replaced from there.
+local module = {}
 local diagnostics = {}
 local severities = { "error", "warning" }
 
@@ -390,11 +393,41 @@ local token_categories = {
   enumMember = "constant", ["function"] = "function", method = "function", macro = "macro",
   comment = "comment",
 }
-local function show_tokens(buf, data, legend, encoding)
-  local names = {}
-  for index, name in ipairs(legend.tokenTypes) do
-    names[index] = token_categories[name] or ""
+-- The category a token shows in, from its type and the set of its
+-- modifiers; nil keeps the highlighting it has. A read-only variable reads
+-- as a constant.
+function module.token_category(type, modifiers)
+  if modifiers.readonly and (type == "variable" or type == "property") then
+    return "constant"
   end
+  return token_categories[type]
+end
+local function show_tokens(buf, data, legend, encoding)
+  -- One name for each type and set of modifiers that occurs.
+  local names, slots = {}, {}
+  local modifier_names = legend.tokenModifiers or {}
+  local deprecated = nil
+  for index, name in ipairs(modifier_names) do
+    if name == "deprecated" then
+      deprecated = 1 << (index - 1)
+    end
+  end
+  local function slot(type_index, bits)
+    local key = type_index .. ":" .. bits
+    if not slots[key] then
+      local modifiers = {}
+      for index, name in ipairs(modifier_names) do
+        if bits & (1 << (index - 1)) ~= 0 then
+          modifiers[name] = true
+        end
+      end
+      local type = legend.tokenTypes[type_index + 1]
+      table.insert(names, type and module.token_category(type, modifiers) or "")
+      slots[key] = #names - 1
+    end
+    return slots[key]
+  end
+  local struck = {}
   local count, tokens = buf:line_count(), {}
   local line, character, row, text = 0, 0, nil, nil
   for at = 1, #data, 5 do
@@ -410,10 +443,14 @@ local function show_tokens(buf, data, legend, encoding)
       local to = to_byte(text, character + data[at + 2], encoding)
       local size = #tokens
       tokens[size + 1], tokens[size + 2], tokens[size + 3] = line, from, to
-      tokens[size + 4] = data[at + 3]
+      tokens[size + 4] = slot(data[at + 3], data[at + 4])
+      if deprecated and data[at + 4] & deprecated ~= 0 then
+        table.insert(struck, { from = { line + 1, from + 1 }, to = { line + 1, to + 1 }, face = "deprecated" })
+      end
     end
   end
   soda.tokens(tokens, names)
+  soda.paint("lsp-deprecated", struck)
 end
 
 local function show_inlays(buf, result, encoding)
@@ -1547,7 +1584,7 @@ soda.map("global", "<c-c>S", "lsp-workspace-symbols")
 soda.map("global", "<c-c>h", "lsp-switch")
 
 -- What modules for one server's extensions, such as `ccls`, build on.
-return {
+for name, value in pairs({
   path_of = path_of,
   uri_of = uri_of,
   relative = relative,
@@ -1560,4 +1597,7 @@ return {
   show = show,
   location_entry = location_entry,
   open_location = open_location,
-}
+}) do
+  module[name] = value
+end
+return module

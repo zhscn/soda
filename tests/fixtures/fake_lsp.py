@@ -56,7 +56,7 @@ while True:
             "inlayHintProvider": True,
             "semanticTokensProvider": {
                 "legend": {"tokenTypes": ["function", "variable", "parameter"],
-                           "tokenModifiers": []},
+                           "tokenModifiers": ["readonly", "deprecated"]},
                 "full": {"delta": True},
             },
             "completionProvider": {"resolveProvider": True},
@@ -163,6 +163,10 @@ while True:
         answer(message, params)
     elif method == "$/cancelRequest":
         log.write("cancel %s\n" % json.dumps(params["id"]))
+    elif method == "textDocument/semanticTokens/full" and "modifiers" in texts.get(
+            params["textDocument"]["uri"], ""):
+        # A read-only variable, a deprecated function and a plain variable.
+        answer(message, {"resultId": "m", "data": [0, 0, 3, 1, 1, 0, 4, 3, 0, 2, 0, 4, 1, 1, 0]})
     elif method == "textDocument/semanticTokens/full":
         # On line 0, column 1 for 2 units; then line 1, column 0 for 3, of a
         # type the client does not show, and a parameter at column 4.

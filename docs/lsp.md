@@ -54,7 +54,20 @@ rust-analyzer 默认不开，因为它会运行项目的构建脚本，打开一
 
 服务器支持时，语义高亮和 inlay hint 随诊断一起刷新：服务器处理完一次修改就发诊断，这时再问。切换到另一个文档时也问一次。服务器支持 delta 时，语义高亮第一次取全文，之后只取相对上一次的修改，在 Lua 里拼回完整的 token 数组。
 
-语义高亮盖在词法高亮上，区分类型、函数、参数、命名空间、宏和枚举值，clangd 判定为不活跃的预处理分支显示成注释。普通变量和成员没有自己的颜色。编辑时 token 随文本移动，直到新的回答替换它，所以不闪烁。
+语义高亮盖在词法高亮上，区分类型、函数、参数、命名空间、宏和枚举值，clangd 判定为不活跃的预处理分支显示成注释。普通变量和成员没有自己的颜色，只读的（`readonly` 修饰符，如 `const` 变量）显示成常量；带 `deprecated` 修饰符的用 `deprecated` 颜色加删除线。编辑时 token 随文本移动，直到新的回答替换它，所以不闪烁。
+
+token 的类型和修饰符怎样对应颜色由 `require("lsp").token_category(type, modifiers)` 决定，`modifiers` 是修饰符名字的集合，返回语法分类名（`function`、`constant`、`keyword` 等，见[语法高亮](syntax.md)），返回 nil 时保留词法高亮。可以整个换掉：
+
+```lua
+local lsp = require("lsp")
+local default = lsp.token_category
+lsp.token_category = function(type, modifiers)
+  if modifiers.static and type == "method" then
+    return "keyword"
+  end
+  return default(type, modifiers)
+end
+```
 
 inlay hint（参数名、`auto` 的类型）用斜体灰色显示在文字之间，不是文档内容：不能选中，不影响保存；光标、横向滚动和鼠标都按文字算，点在 hint 上等于点它后面的字符。开了 `wrap` 时 hint 集中显示在行尾，否则会把文字挤出屏幕。选项 `inlay-hints` 关闭显示。
 
@@ -108,7 +121,7 @@ soda.lsp.array(t)                             -- 标记 t 是数组
 soda.note(group, {
   { from = { 2, 5 }, to = { 2, 9 }, severity = "warning", text = "..." },  -- 行、字节列，从 1 起
 })                  -- 替换这一组；空表清除。severity 是 error、warning 或 info
-soda.tokens(data, names)  -- 语义高亮：data 是扁平数组，每四项为行、起止字节（都从 0 起）和 names 的下标（从 0 起）
+soda.tokens(data, names)  -- 语义高亮：data 是扁平数组，每四项为行、起止字节（都从 0 起）和 names 的下标（从 0 起）；names 是语法分类名，空字符串表示不着色
 soda.inlays({ { line = 2, column = 5, text = "a: " } })  -- 替换 inlay hint，行和字节列从 1 起
 soda.hint(text)     -- 消息行没有消息时显示，直到换掉；nil 清除
 soda.prompt(text)   -- 打开命令行，预填 text

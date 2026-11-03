@@ -93,18 +93,12 @@ impl Category {
             Self::Match => "match",
         }
     }
-    /// The categories a language server can name.
+    /// The category of a name, as `name` gives them; how semantic tokens
+    /// name what they show.
     pub fn named(name: &str) -> Option<Self> {
-        Some(match name {
-            "comment" => Self::Comment,
-            "constant" => Self::Constant,
-            "type" => Self::Type,
-            "function" => Self::Function,
-            "parameter" => Self::Parameter,
-            "namespace" => Self::Namespace,
-            "macro" => Self::Macro,
-            _ => return None,
-        })
+        Self::ALL
+            .into_iter()
+            .find(|category| category.name() == name)
     }
 }
 

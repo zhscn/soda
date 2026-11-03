@@ -262,7 +262,11 @@ fn initialize(root: &Path, init: &Value) -> Value {
                             "function", "method", "macro", "keyword", "modifier", "comment",
                             "string", "number", "regexp", "operator", "decorator",
                         ],
-                        "tokenModifiers": [],
+                        "tokenModifiers": [
+                            "declaration", "definition", "readonly", "static", "deprecated",
+                            "abstract", "async", "modification", "documentation",
+                            "defaultLibrary",
+                        ],
                         "formats": ["relative"],
                     },
                     "declaration": {},

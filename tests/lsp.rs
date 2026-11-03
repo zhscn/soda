@@ -1013,3 +1013,40 @@ fn a_server_that_exits_starts_again_until_it_exits_too_often() {
         std::fs::read_to_string(&log).is_ok_and(|log| log.matches("initialize ").count() == 5)
     });
 }
+#[test]
+fn token_modifiers_make_read_only_variables_constants_and_strike_deprecated_ones() {
+    use soda::syntax::Category;
+    let Some(mut f) = open("one two modifiers\n") else {
+        return;
+    };
+    let document =
+        f.r.app()
+            .view(f.r.app().active_view().unwrap())
+            .unwrap()
+            .document_id;
+    wait(&mut f.r, |r| !r.app().tokens(document, 0..99).is_empty());
+    assert_eq!(
+        f.r.app().tokens(document, 0..99),
+        [(0..3, Category::Constant), (4..7, Category::Function)]
+    );
+    let deprecated = soda::application::faces::index("deprecated")
+        .map(soda::application::Face::Named)
+        .unwrap();
+    wait(&mut f.r, |r| {
+        r.app().paints(document).contains(&(4..7, deprecated))
+    });
+    // The mapping can be replaced.
+    f.r.source_lua(
+        "t",
+        r#"require("lsp").token_category = function(type, modifiers)
+             return modifiers.deprecated and "keyword" or nil
+           end"#,
+    )
+    .unwrap();
+    f.r.command(Command::SetMode(EditMode::Insert));
+    keys(&mut f.r, " ");
+    wait(&mut f.r, |r| {
+        let tokens = r.app().tokens(document, 0..99);
+        tokens.len() == 1 && tokens[0].1 == Category::Keyword
+    });
+}
