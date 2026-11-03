@@ -301,6 +301,9 @@ pub struct Painter<'a> {
     pub number_colors: Option<([f32; 4], [f32; 4])>,
     /// Where the active window's caret may show.
     pub caret_clip: [f32; 4],
+    /// Where in `out` the caret goes: above what it is in, under the
+    /// panels that float over it, such as the key hints.
+    pub caret_layer: usize,
 }
 impl<'a> Painter<'a> {
     pub fn new(fonts: &'a mut Fonts, atlas: &'a mut Atlas, theme: &'a Theme) -> Self {
@@ -315,6 +318,7 @@ impl<'a> Painter<'a> {
             bg,
             clip: UNCLIPPED,
             band: vec![],
+            caret_layer: 0,
             numbers: vec![],
             number_colors: None,
             caret_clip: UNCLIPPED,
@@ -552,6 +556,7 @@ pub fn screen(
         text,
     );
     let prompt = message(painter, runtime, areas.message, text);
+    painter.caret_layer = painter.out.len();
     match runtime.layer() {
         Some(Layer::CommandLine(line)) => {
             let area = Rect {
@@ -561,6 +566,7 @@ pub fn screen(
             };
             caret = command_line(painter, area, areas.message.h, line);
             painter.caret_clip = UNCLIPPED;
+            painter.caret_layer = painter.out.len();
         }
         Some(Layer::Help(session)) => {
             caret = None;
@@ -682,25 +688,27 @@ fn editor(
     painter.clip_to(window.body);
     let top = area.y - past;
     let selection = rgba(theme.selection.bg, faded(painter.fg, 0.25));
+    // Only the focused window marks the caret line. Its band goes under
+    // every row: gliding, it passes over the rows next to its own.
+    let (_, band) = painter.colors(theme.cursor_line);
+    for (index, row) in text.rows.iter().enumerate() {
+        if let Some(bg) = band.filter(|_| current && row.line == text.caret.0) {
+            let y = top + index as f32 * line;
+            let index = painter.out.len();
+            painter.fill(Rect::new(left, y, window.body.w, line), bg, 0.0);
+            if painter.out.len() > index {
+                painter.band.push(index);
+            }
+        }
+    }
     for (index, row) in text.rows.iter().enumerate() {
         let y = top + index as f32 * line;
-        // Only the focused window marks the caret line.
         let caret_line = current && row.line == text.caret.0;
         let base = if caret_line {
             theme.text.patch(theme.cursor_line)
         } else {
             theme.text
         };
-        if caret_line {
-            let (_, bg) = painter.colors(theme.cursor_line);
-            if let Some(bg) = bg {
-                let index = painter.out.len();
-                painter.fill(Rect::new(left, y, window.body.w, line), bg, 0.0);
-                if painter.out.len() > index {
-                    painter.band.push(index);
-                }
-            }
-        }
         if let Some(digits) = window.digits.filter(|_| !row.continued) {
             let shown = if relative && row.line != text.caret.0 {
                 row.line.abs_diff(text.caret.0)

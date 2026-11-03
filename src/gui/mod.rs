@@ -452,7 +452,12 @@ impl Gui {
                 })
             });
             painter.shade_numbers(band.or(Some((at.y, at.h))));
+            let end = painter.out.len();
             paint::cursor(&mut painter, runtime, at, bar);
+            // Under the panels drawn after what the caret is in.
+            let caret: Vec<_> = painter.out.drain(end..).collect();
+            let layer = painter.caret_layer.min(end);
+            painter.out.splice(layer..layer, caret);
         } else {
             painter.shade_numbers(None);
         }
