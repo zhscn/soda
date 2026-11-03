@@ -103,6 +103,7 @@ local providers = {
   ["textDocument/references"] = "referencesProvider",
   ["textDocument/hover"] = "hoverProvider",
   ["textDocument/rename"] = "renameProvider",
+  ["textDocument/prepareRename"] = "renameProvider",
   ["textDocument/codeAction"] = "codeActionProvider",
   ["textDocument/formatting"] = "documentFormattingProvider",
   ["textDocument/documentSymbol"] = "documentSymbolProvider",
@@ -1038,7 +1039,30 @@ end)
 soda.define_command("lsp-rename", "Rename the symbol across the project", function(name)
   name = (name or ""):match("^%s*(.-)%s*$")
   if name == "" then
-    soda.prompt("lsp-rename " .. soda.val("word"))
+    local info = soda.lsp.info()
+    local provider = info and info.capabilities.renameProvider
+    if type(provider) ~= "table" or not provider.prepareProvider then
+      soda.prompt("lsp-rename " .. soda.val("word"))
+      return
+    end
+    -- The server says first whether there is something to rename, and
+    -- what it is called now.
+    local buf = soda.buffer()
+    ask("textDocument/prepareRename", nil, function(result)
+      if not result then
+        soda.message("Nothing to rename here")
+        return
+      end
+      local current = result.placeholder
+      local range = result.range or (result.start and result)
+      if not current and range and range.start.line == range["end"].line then
+        local text = buf:line(range.start.line + 1)
+        local from = to_byte(text, range.start.character, info.encoding)
+        local to = to_byte(text, range["end"].character, info.encoding)
+        current = text:sub(from + 1, to)
+      end
+      soda.prompt("lsp-rename " .. (current or soda.val("word")))
+    end)
     return
   end
   local buf = soda.buffer()

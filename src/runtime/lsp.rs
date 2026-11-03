@@ -245,7 +245,7 @@ fn initialize(root: &Path, init: &Value) -> Value {
                         "tagSupport": { "valueSet": [1, 2] },
                     },
                     "diagnostic": { "relatedDocumentSupport": false },
-                    "rename": {},
+                    "rename": { "prepareSupport": true },
                     "inlayHint": {},
                     "semanticTokens": {
                         "requests": { "full": { "delta": true } },

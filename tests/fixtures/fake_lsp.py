@@ -64,7 +64,7 @@ while True:
             "typeDefinitionProvider": True, "referencesProvider": True,
             "implementationProvider": True, "documentHighlightProvider": True,
             "diagnosticProvider": {"interFileDependencies": False, "workspaceDiagnostics": False},
-            "hoverProvider": True, "renameProvider": True, "codeActionProvider": True,
+            "hoverProvider": True, "renameProvider": {"prepareProvider": True}, "codeActionProvider": True,
             "documentFormattingProvider": True, "documentSymbolProvider": True,
             "callHierarchyProvider": True, "signatureHelpProvider": {},
             "workspaceSymbolProvider": True,
@@ -234,6 +234,11 @@ while True:
                                            "targetRange": spot(uri, 1, 0)["range"]}])
     elif method == "textDocument/typeDefinition":
         answer(message, [])
+    elif method == "textDocument/prepareRename":
+        # Only the first line has a name, from the second byte on.
+        line = params["position"]["line"]
+        answer(message, None if line > 0 else
+               {"start": {"line": 0, "character": 1}, "end": {"line": 0, "character": 3}})
     elif method == "textDocument/rename" and params["newName"] in ("files", "clash"):
         uri = params["textDocument"]["uri"]
         base = uri.rsplit("/", 1)[0]

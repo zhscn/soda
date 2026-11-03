@@ -300,17 +300,22 @@ fn rename_edits_open_documents_and_files_on_disk() {
     assert_eq!(text(&f.r), "one\n");
 }
 #[test]
-fn rename_without_a_name_asks_with_the_word_and_a_changed_document_refuses() {
-    let Some(mut f) = open("one\n") else { return };
+fn rename_without_a_name_asks_with_the_name_and_a_changed_document_refuses() {
+    let Some(mut f) = open("one\ntwo\n") else {
+        return;
+    };
     std::fs::write(f.dir.path().join("b.cpp"), "x\n  one\n").unwrap();
+    // The server says what is renamed: here the range it gives.
     keys(&mut f.r, "<space>R");
-    match f.r.layer() {
-        Some(soda::interaction::Layer::CommandLine(line)) => {
-            assert_eq!(line.input().text(), "lsp-rename one")
-        }
-        _ => panic!("no command line"),
-    }
-    keys(&mut f.r, "<esc>");
+    let line = |r: &Runtime| match r.layer() {
+        Some(soda::interaction::Layer::CommandLine(line)) => Some(line.input().text().to_owned()),
+        _ => None,
+    };
+    wait(&mut f.r, |r| line(r).as_deref() == Some("lsp-rename ne"));
+    keys(&mut f.r, "<esc>j<space>R");
+    wait(&mut f.r, |r| r.message() == "Nothing to rename here");
+    assert_eq!(line(&f.r), None);
+    keys(&mut f.r, "k");
     f.r.command(Command::Named("lsp-rename two".into()));
     f.r.command(Command::Edit(Edit::InsertText("x".into())));
     wait(&mut f.r, |r| r.message().starts_with("Not applied"));
