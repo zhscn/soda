@@ -24,12 +24,15 @@
 
 Insert 中 `M-/`（`completion-trigger`）不受最小长度和 `completion` 选项限制，直接列出候选。
 
+动过选中项之后，它比已输入的文字多出的部分以灰色斜体显示在光标处，snippet 显示展开后的文字，多行时只显示第一行。这只是绘制，不写入文档、不进撤销，光标仍在原处；候选不以已输入的文字开头时（比如替换范围更长的路径）不显示。选项 `completion-preview` 关闭。
+
 Enter 只在动过选中项之后才接受，这对应 IntelliJ 的 `LookupFocusDegree.UNFOCUSED`：自动弹出的列表不能抢走回车，回车缩进是首要体验。
 
 | 选项 | 默认 | 作用 |
 | --- | --- | --- |
 | `completion` | true | 输入时自动弹出 |
 | `completion-min-prefix` | 2 | 自动弹出需要的字符数 |
+| `completion-preview` | true | 选中项在光标处灰字预览 |
 
 ## 来源
 
@@ -82,10 +85,6 @@ require("snippets").add("cpp", {
 ```
 
 限制：`.` 和宏重放时写入 snippet 展开的文字（候选的 `edits` 不重放），之后在位置里打的字和 `Tab` 不按 snippet 重放；snippet 里再展开 snippet 时，新的会话替换旧的；位置没有高亮，只有当前位置靠选区显示；紧挨着的两个位置，在前一个末尾打字会落进后一个。
-
-## 后续
-
-- 灰字预览：选中项在光标处用绘制层显示，不写入文档。
 
 ## 与 capf 的区别
 

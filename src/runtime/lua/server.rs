@@ -100,12 +100,17 @@ pub(super) fn register<'scope, 'r: 'scope>(
             let Some(key) = runtime.lsp_key() else {
                 return Ok(Value::Nil);
             };
-            let Some((encoding, capabilities)) = runtime.lsp.client_of(&key) else {
+            let Some((encoding, capabilities, watchers)) = runtime.lsp.client_of(&key) else {
                 return Ok(Value::Nil);
             };
             let info = lua.create_table()?;
             info.set("encoding", encoding)?;
             info.set("capabilities", super::to_lua(lua, capabilities)?)?;
+            let list = lua.create_table()?;
+            for watcher in watchers {
+                list.push(super::to_lua(lua, watcher)?)?;
+            }
+            info.set("watchers", list)?;
             Ok(Value::Table(info))
         })?,
     )?;

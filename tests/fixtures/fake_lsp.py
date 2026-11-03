@@ -58,7 +58,32 @@ while True:
                 "full": {"delta": True},
             },
             "completionProvider": {"resolveProvider": True},
+            "workspace": {"fileOperations": {
+                "didCreate": {"filters": [{"pattern": {"glob": "**/*.cpp"}}]},
+                "didRename": {"filters": [{"pattern": {"glob": "**/*.cpp", "matches": "file"}},
+                                          {"pattern": {"glob": "**/old", "matches": "folder"}}]},
+                "didDelete": {"filters": [{"pattern": {"glob": "**/*.{c,h}"}}]},
+            }},
         }})
+    elif method == "initialized":
+        write({"jsonrpc": "2.0", "id": "reg", "method": "client/registerCapability", "params": {
+            "registrations": [{"id": "w", "method": "workspace/didChangeWatchedFiles",
+                               "registerOptions": {"watchers": [
+                                   # Created and deleted anywhere; changed only
+                                   # under made/, relative to the project.
+                                   {"globPattern": "**/*.cpp", "kind": 5},
+                                   {"globPattern": {"baseUri": os.path.dirname(
+                                       "file://" + os.environ["FAKE_LSP_LOG"]),
+                                       "pattern": "made/*.cpp"}, "kind": 2}]}}]}})
+    elif method == "workspace/didChangeWatchedFiles":
+        log.write("watched %s\n" % json.dumps(
+            [[c["uri"].rsplit("/", 1)[1], c["type"]] for c in params["changes"]]))
+    elif method in ("workspace/didCreateFiles", "workspace/didDeleteFiles"):
+        log.write("%s %s\n" % (method.split("/")[1], json.dumps(
+            [f["uri"].rsplit("/", 1)[1] for f in params["files"]])))
+    elif method == "workspace/didRenameFiles":
+        log.write("didRenameFiles %s\n" % json.dumps(
+            [[f["oldUri"].rsplit("/", 1)[1], f["newUri"].rsplit("/", 1)[1]] for f in params["files"]]))
     elif method == "textDocument/didClose":
         log.write("didClose %s\n" % params["textDocument"]["uri"].rsplit("/", 1)[1])
     elif method in ("textDocument/didOpen", "textDocument/didChange"):

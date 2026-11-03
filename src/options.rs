@@ -97,6 +97,12 @@ pub const OPTIONS: &[OptionInfo] = &[
         doc: "Show candidates while typing in Insert; <a-/> asks for them regardless",
     },
     OptionInfo {
+        name: "completion-preview",
+        kind: Kind::Bool,
+        default: Value::Bool(true),
+        doc: "Show the rest of the selected candidate in gray at the caret",
+    },
+    OptionInfo {
         name: "completion-min-prefix",
         kind: Kind::Int { min: 1, max: 16 },
         default: Value::Int(2),

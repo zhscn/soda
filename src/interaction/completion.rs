@@ -155,6 +155,9 @@ pub struct Row {
 }
 pub struct Popup {
     pub rows: Vec<Row>,
+    /// What the selected candidate would add at the caret, its first line:
+    /// the caret's offset and the text, drawn but not in the document.
+    pub preview: Option<(usize, String)>,
     /// Bytes from the anchor to the caret, to place the list under the word.
     pub typed: usize,
 }
@@ -688,8 +691,26 @@ impl State {
                 }
             })
             .collect();
+        // Only a candidate that goes on from what is typed reads as more of
+        // it; one that would change the typed text has no preview.
+        let preview = session.selected.and_then(|at| {
+            let item = &session.items[*session.matches.get(at)?];
+            if item.back != 0 {
+                return None;
+            }
+            let text = if item.snippet {
+                super::snippet::parse(&item.text).text
+            } else {
+                item.text.clone()
+            };
+            let rest = text.strip_prefix(session.query.as_str())?;
+            let rest = rest.lines().next().unwrap_or_default();
+            let caret = session.start.offset.0 + session.query.len();
+            (!rest.is_empty()).then(|| (caret, rest.to_owned()))
+        });
         Some(Popup {
             rows,
+            preview,
             typed: session.query.len(),
         })
     }

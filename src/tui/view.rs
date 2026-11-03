@@ -1298,6 +1298,54 @@ mod tests {
     }
 
     #[test]
+    fn the_selected_candidate_shows_in_gray_at_the_caret_and_not_in_the_text() {
+        let root = tempfile::tempdir().unwrap();
+        let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.start(None);
+        r.command(Command::Edit(crate::editor::Command::InsertText(
+            " end\n".into(),
+        )));
+        r.command(Command::Named("goto 1:1".into()));
+        r.source_lua(
+            "t",
+            r#"soda.completion.register({ complete = function(context, sink)
+              sink:add({ { label = "alpha" }, { label = "fn", filter = "alfa", snippet = "alfa(${1:x})$0" } })
+              sink:done()
+            end })"#,
+        )
+        .unwrap();
+        r.command(Command::SetMode(EditMode::Insert));
+        keys(&mut r, "al");
+        for _ in 0..500 {
+            r.poll();
+            if r.completion_popup().is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        let first_row = |r: &mut Runtime| screen(r, 40, 10).lines().nth(1).unwrap().to_owned();
+        assert!(first_row(&mut r).contains("al end"), "nothing until chosen");
+        keys(&mut r, "<down>");
+        assert!(
+            first_row(&mut r).contains("alpha end"),
+            "{}",
+            first_row(&mut r)
+        );
+        // A snippet shows as the text it would write.
+        keys(&mut r, "<down>");
+        assert!(
+            first_row(&mut r).contains("alfa(x) end"),
+            "{}",
+            first_row(&mut r)
+        );
+        let view = r.app().view(r.app().active_view().unwrap()).unwrap();
+        let editor = r.app().workspace().editor(view.document_id).unwrap();
+        assert_eq!(editor.model().document().snapshot().text(), "al end\n");
+        r.command(Command::Named("set completion-preview false".into()));
+        assert!(first_row(&mut r).contains("al end"));
+    }
+
+    #[test]
     fn inlay_hints_shift_the_row_and_the_caret_and_not_the_text() {
         use crate::application::Event;
         let root = tempfile::tempdir().unwrap();

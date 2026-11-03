@@ -703,6 +703,149 @@ local function plan_edit(steps, encoding)
   }
 end
 
+-- A file URI, as the editor makes them.
+local function uri_of(path)
+  return "file://" .. path:gsub("[^%w/%-_%.~]", function(byte)
+    return string.format("%%%02X", byte:byte())
+  end)
+end
+
+-- Glob patterns as the protocol has them: `*` and `?` within a name, `**`
+-- across directories, `[...]` and `{a,b}`.
+local function expand_braces(glob)
+  local from, to = glob:find("%b{}")
+  if not from then
+    return { glob }
+  end
+  local out = {}
+  for option in (glob:sub(from + 1, to - 1) .. ","):gmatch("([^,]*),") do
+    for _, each in ipairs(expand_braces(glob:sub(1, from - 1) .. option .. glob:sub(to + 1))) do
+      table.insert(out, each)
+    end
+  end
+  return out
+end
+local function glob_at(p, pi, s, si)
+  if pi > #p then
+    return si > #s
+  end
+  local c = p:sub(pi, pi)
+  if c == "*" then
+    local double = p:sub(pi + 1, pi + 1) == "*"
+    local after = pi + (double and 2 or 1)
+    if double and p:sub(after, after) == "/" and glob_at(p, after + 1, s, si) then
+      return true
+    end
+    local at = si
+    while true do
+      if glob_at(p, after, s, at) then
+        return true
+      end
+      if at > #s or (not double and s:sub(at, at) == "/") then
+        return false
+      end
+      at = at + 1
+    end
+  elseif c == "?" then
+    return si <= #s and s:sub(si, si) ~= "/" and glob_at(p, pi + 1, s, si + 1)
+  elseif c == "[" then
+    local close = p:find("]", pi + 2, true)
+    if close then
+      local class = p:sub(pi + 1, close - 1):gsub("^!", "^"):gsub("%%", "%%%%")
+      return si <= #s and s:sub(si, si):find("[" .. class .. "]") ~= nil
+        and glob_at(p, close + 1, s, si + 1)
+    end
+  end
+  return s:sub(si, si) == c and glob_at(p, pi + 1, s, si + 1)
+end
+local function glob_matches(glob, path, ignore_case)
+  if ignore_case then
+    glob, path = glob:lower(), path:lower()
+  end
+  for _, each in ipairs(expand_braces(glob)) do
+    if glob_at(each, 1, path, 1) then
+      return true
+    end
+  end
+  return false
+end
+
+-- Tells the server about files an edit wrote, created, renamed or deleted:
+-- through its file watchers, and the file operations it asked to hear of.
+-- `done` holds { kind, path, to, folder } in the order they happened.
+local function announce(done)
+  local info = soda.lsp.info()
+  if not info or #done == 0 then
+    return
+  end
+  -- Watchers: created 1, changed 2, deleted 3; a watcher's kind is a mask
+  -- of created 1, changed 2 and deleted 4.
+  local changes = {}
+  local function watched(path, change)
+    for _, watcher in ipairs(info.watchers or {}) do
+      local pattern, under = watcher.globPattern, path
+      if type(pattern) == "table" then
+        local base = path_of(type(pattern.baseUri) == "table" and pattern.baseUri.uri or pattern.baseUri)
+        local rest = inside(path, base)
+        under, pattern = rest and rest:gsub("^/", ""), pattern.pattern
+      end
+      local mask = ({ 1, 2, 4 })[change]
+      if under and (watcher.kind or 7) & mask ~= 0 and glob_matches(pattern, under) then
+        table.insert(changes, { uri = uri_of(path), type = change })
+        return
+      end
+    end
+  end
+  local operations = (info.capabilities.workspace or {}).fileOperations or {}
+  local function wanted(registration, path, folder)
+    for _, filter in ipairs(registration and registration.filters or {}) do
+      local pattern = filter.pattern
+      local kind = pattern.matches
+      if (filter.scheme == nil or filter.scheme == "file")
+        and (kind == nil or (kind == "folder") == folder)
+        and glob_matches(pattern.glob, path, pattern.options and pattern.options.ignoreCase)
+      then
+        return true
+      end
+    end
+    return false
+  end
+  local created, renamed, deleted = {}, {}, {}
+  for _, entry in ipairs(done) do
+    if entry.kind == "changed" then
+      watched(entry.path, 2)
+    elseif entry.kind == "created" then
+      watched(entry.path, 1)
+      if wanted(operations.didCreate, entry.path, entry.folder) then
+        table.insert(created, { uri = uri_of(entry.path) })
+      end
+    elseif entry.kind == "renamed" then
+      watched(entry.path, 3)
+      watched(entry.to, 1)
+      if wanted(operations.didRename, entry.path, entry.folder) then
+        table.insert(renamed, { oldUri = uri_of(entry.path), newUri = uri_of(entry.to) })
+      end
+    elseif entry.kind == "deleted" then
+      watched(entry.path, 3)
+      if wanted(operations.didDelete, entry.path, entry.folder) then
+        table.insert(deleted, { uri = uri_of(entry.path) })
+      end
+    end
+  end
+  if #changes > 0 then
+    soda.lsp.notify("workspace/didChangeWatchedFiles", { changes = changes })
+  end
+  if #created > 0 then
+    soda.lsp.notify("workspace/didCreateFiles", { files = created })
+  end
+  if #renamed > 0 then
+    soda.lsp.notify("workspace/didRenameFiles", { files = renamed })
+  end
+  if #deleted > 0 then
+    soda.lsp.notify("workspace/didDeleteFiles", { files = deleted })
+  end
+end
+
 -- Applies a WorkspaceEdit: open documents through their buffers, so that it
 -- can be undone, other files on disk, and files created, renamed and
 -- deleted in order. Nothing is applied unless all of it can be. `origin` is
@@ -719,6 +862,9 @@ local function apply_edit(edit, origin)
     soda.message("Not applied: " .. counts)
     return false
   end
+  -- What reached the disk, for the server; told even when a later step
+  -- fails, since that much happened.
+  local done = {}
   for _, action in ipairs(actions) do
     local ok, failure = pcall(function()
       if action.buf and action.clear then
@@ -730,19 +876,27 @@ local function apply_edit(edit, origin)
         local file = assert(io.open(action.write, "wb"))
         file:write(action.text)
         file:close()
+        table.insert(done, { kind = "changed", path = action.write })
       elseif action.create then
         soda.create_file(action.create)
+        table.insert(done, { kind = "created", path = action.create, folder = false })
       elseif action.from then
         soda.rename_file(action.from, action.to)
+        local folder = soda.file_kind(action.to) == "directory"
+        table.insert(done, { kind = "renamed", path = action.from, to = action.to, folder = folder })
       elseif action.delete then
+        local folder = soda.file_kind(action.delete) == "directory"
         soda.delete_file(action.delete, action.recursive)
+        table.insert(done, { kind = "deleted", path = action.delete, folder = folder })
       end
     end)
     if not ok then
+      announce(done)
       soda.message("Partly applied: " .. tostring(failure))
       return false
     end
   end
+  announce(done)
   local parts = {}
   local function part(n, words)
     if n > 0 then

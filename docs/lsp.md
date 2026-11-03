@@ -49,6 +49,12 @@ inlay hint（参数名、`auto` 的类型）用斜体灰色显示在文字之间
 
 编辑也可以创建、改名和删除文件或目录（`documentChanges` 里的 `create`、`rename`、`delete`），按给出的顺序做，后面的文字修改可以针对前面刚创建或改名的文件。打开着的文档跟着改名换路径，服务器收到旧 URI 的 `didClose` 和新 URI 的 `didOpen`；被删除或被改名覆盖的文档关闭，未保存的修改丢弃。`overwrite`、`ignoreIfExists`、`ignoreIfNotExists` 和 `recursive` 按协议处理。
 
+编辑做完后告诉服务器碰过哪些磁盘上的文件（已打开文档的修改由 `didChange` 送达）：
+- 服务器用 `client/registerCapability` 注册了文件监视时，写入、创建、删除的文件按监视的 glob 和种类发 `workspace/didChangeWatchedFiles`；改名算作旧名删除、新名创建。glob 支持 `*`、`?`、`**`、`[...]`、`{a,b}`，以及带 `baseUri` 的相对模式。
+- 服务器声明了 `workspace.fileOperations` 时，按它的过滤条件发 `didCreateFiles`、`didRenameFiles`、`didDeleteFiles`，区分文件和目录（`matches`），支持 `ignoreCase`。
+
+中途失败时，已经做了的部分照样通知。
+
 应用之前先按顺序推演一遍：等服务器回答期间当前文档变了、有文件读不出来、要改的文件不存在、要创建的已经存在而没有允许覆盖，整个编辑都不应用，消息行说明原因。动手之后失败（比如写磁盘失败）则显示 `Partly applied`，这时前面的步骤已经做了。
 
 clangd 的重构类动作是命令：执行后由服务器发来 `workspace/applyEdit`，走同一段代码。Rust 先回答 `applied: true`，再交给 Lua，所以失败时服务器不知道，但消息行会显示。
@@ -106,5 +112,5 @@ soda.popup(text)    -- 光标旁的浮窗，放不下时滚轮或翻页键滚动
 
 - 项目根目录由版本库标记决定，不按 `compile_commands.json` 找；clangd 自己会按文件找。服务器的根目录标记还不能按语言配置。
 - 调用层级只有一层，不是 ccls 那样可以展开的树。
-- 编辑直接写到磁盘、创建、改名或删除的文件不通知服务器（没有 `didChangeWatchedFiles` 和 `willRenameFiles`），它要到下次读这些文件时才知道。
+- 不发 `willCreateFiles`、`willRenameFiles`、`willDeleteFiles`：这几个请求要等服务器回答一个编辑再动手，而文件操作本身就来自服务器的编辑。目录改名只报告目录本身，不展开成其中每个文件。
 - `completionItem/resolve` 只取说明和 detail；候选的其他修改要在列表里就给出。

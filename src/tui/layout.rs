@@ -80,6 +80,8 @@ pub(super) struct Overlay {
     pub beacons: Vec<std::ops::Range<usize>>,
     /// Digits that extend the selection, drawn over the character there.
     pub digits: Vec<(usize, char)>,
+    /// The rest of the selected candidate, at the caret's offset.
+    pub preview: Option<(usize, String)>,
 }
 /// Byte ranges styled within a row: the selection is document-relative;
 /// matches, the detail offset and highlight categories are relative to the
@@ -865,6 +867,21 @@ pub(super) fn frame(
                 text: format!(" {text}"),
                 face: Some(Face::Todo),
             });
+        }
+        if let Some((offset, preview)) = &modal.preview
+            && (start..=start + text.trim_end_matches(['\n', '\r']).len()).contains(offset)
+            && let Ok(column) = logical_column_at(snapshot, ByteOffset(*offset), tab)
+            && (layout.wrap.is_none()
+                || segment.columns.contains(&column.0)
+                || last_row == Some(true))
+        {
+            let text: String = preview.chars().filter(|c| !c.is_control()).collect();
+            hints.push(Inlay {
+                column: column.0,
+                text,
+                face: None,
+            });
+            hints.sort_by_key(|hint| hint.column);
         }
         if last_row != Some(false)
             && inline_notes

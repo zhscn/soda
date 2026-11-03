@@ -103,6 +103,8 @@ struct Client {
     encoding: String,
     capabilities: Value,
     opened: HashMap<DocumentId, Opened>,
+    /// The file watchers the server registered, by registration id.
+    watchers: Vec<(String, Vec<Value>)>,
 }
 impl Drop for Client {
     fn drop(&mut self) {
@@ -239,6 +241,15 @@ fn initialize(root: &Path) -> Value {
                 },
                 "workspace": {
                     "applyEdit": true,
+                    "didChangeWatchedFiles": {
+                        "dynamicRegistration": true,
+                        "relativePatternSupport": true,
+                    },
+                    "fileOperations": {
+                        "didCreate": true,
+                        "didRename": true,
+                        "didDelete": true,
+                    },
                     "workspaceEdit": {
                         "documentChanges": true,
                         "resourceOperations": ["create", "rename", "delete"],
@@ -273,9 +284,11 @@ impl Lsp {
         self.failed.retain(|failed| failed != key);
         self.clients.remove(key);
     }
-    pub fn client_of(&self, key: &Key) -> Option<(&str, &Value)> {
+    /// A server's position encoding, capabilities and file watchers.
+    pub fn client_of(&self, key: &Key) -> Option<(&str, &Value, Vec<&Value>)> {
         let client = self.clients.get(key)?;
-        Some((&client.encoding, &client.capabilities))
+        let watchers = client.watchers.iter().flat_map(|(_, w)| w).collect();
+        Some((&client.encoding, &client.capabilities, watchers))
     }
     fn start(&mut self, key: &Key) -> Result<(), String> {
         let (language, root) = key;
@@ -329,6 +342,7 @@ impl Lsp {
                 encoding: "utf-16".into(),
                 capabilities: Value::Null,
                 opened: HashMap::new(),
+                watchers: vec![],
             },
         );
         Ok(())
@@ -509,6 +523,29 @@ impl Lsp {
                         function: *function,
                         params: message["params"].clone(),
                     });
+                }
+                let params = &message["params"];
+                match method {
+                    "client/registerCapability" => {
+                        for registration in params["registrations"].as_array().into_iter().flatten()
+                        {
+                            if registration["method"] == "workspace/didChangeWatchedFiles" {
+                                let watchers = registration["registerOptions"]["watchers"]
+                                    .as_array()
+                                    .cloned()
+                                    .unwrap_or_default();
+                                let id = registration["id"].as_str().unwrap_or_default();
+                                client.watchers.push((id.to_owned(), watchers));
+                            }
+                        }
+                    }
+                    "client/unregisterCapability" => {
+                        // The protocol spells it so.
+                        for gone in params["unregisterations"].as_array().into_iter().flatten() {
+                            client.watchers.retain(|(id, _)| gone["id"] != id.as_str());
+                        }
+                    }
+                    _ => {}
                 }
                 let result = match method {
                     "workspace/applyEdit" => json!({ "applied": true }),

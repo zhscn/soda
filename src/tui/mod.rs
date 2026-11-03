@@ -197,6 +197,13 @@ fn frames(
                 layout::Overlay {
                     beacons: runtime.beacons(),
                     digits: runtime.expand_hints(),
+                    preview: runtime
+                        .completion_popup()
+                        .and_then(|popup| popup.preview)
+                        .filter(|_| {
+                            let document = runtime.app().view(window.view).map(|v| v.document_id);
+                            runtime.app().options().bool(document, "completion-preview")
+                        }),
                 }
             } else {
                 layout::Overlay::default()

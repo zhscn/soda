@@ -642,6 +642,25 @@ fn edits_create_rename_and_delete_files_and_open_documents_follow() {
         std::fs::read_to_string(&log)
             .is_ok_and(|log| log.contains("didClose a.cpp") && log.contains("opened c.cpp"))
     });
+    // The server hears of what reached the disk, as far as it asked: its
+    // watchers, and the file operations its filters match.
+    let log = f.log();
+    let line = |start: &str| {
+        log.lines()
+            .find(|line| line.starts_with(start))
+            .unwrap_or_else(|| panic!("no {start} in {log}"))
+            .to_owned()
+    };
+    assert_eq!(
+        line("watched"),
+        r#"watched [["new.cpp", 1], ["new.cpp", 2], ["a.cpp", 3], ["c.cpp", 1], ["gone.cpp", 3]]"#
+    );
+    assert_eq!(line("didCreateFiles"), r#"didCreateFiles ["new.cpp"]"#);
+    assert_eq!(
+        line("didRenameFiles"),
+        r#"didRenameFiles [["a.cpp", "c.cpp"], ["old", "new"]]"#
+    );
+    assert!(!log.contains("didDeleteFiles"), "gone.cpp is no .c or .h");
 }
 #[test]
 fn file_operations_that_cannot_all_be_done_do_nothing() {
