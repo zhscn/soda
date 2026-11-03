@@ -670,7 +670,7 @@ impl CommandLine {
                     .is_some_and(|s| matches!(s.status(), PickerStatus::Loading)))
     }
     fn close(&self, commands: Vec<Command>) -> Transition {
-        Transition::finished(Response {
+        Transition::Closed(Response {
             commands,
             effects: self
                 .files
@@ -725,7 +725,7 @@ impl CommandLine {
         self.error = None;
         let mut response = self.refresh(app, false);
         response.redraw = true;
-        Transition::active(response)
+        Transition::Active(response)
     }
     fn confirm(&mut self, app: &Application) -> Transition {
         let location = self.locate();
@@ -879,7 +879,7 @@ impl CommandLine {
             .query
             .as_ref()
             .is_some_and(|q| q.target == Target::Slot(SlotKind::Buffer));
-        Transition::active(if buffers {
+        Transition::Active(if buffers {
             self.refresh(app, true)
         } else {
             Response::default()

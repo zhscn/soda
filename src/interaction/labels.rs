@@ -107,7 +107,7 @@ impl LabelSession {
         {
             Transition::close()
         } else {
-            Transition::active(Response::default())
+            Transition::Active(Response::default())
         }
     }
     pub(super) fn handle(&mut self, input: Input, app: &Application, time: Duration) -> Transition {
@@ -168,7 +168,7 @@ impl LabelSession {
                 time,
             });
         }
-        Transition::finished(Response {
+        Transition::Closed(Response {
             events,
             redraw: true,
             ..Response::default()
@@ -176,7 +176,7 @@ impl LabelSession {
     }
 }
 fn message(text: String) -> Transition {
-    Transition::finished(Response {
+    Transition::Closed(Response {
         message: Message::Set(text),
         redraw: true,
         ..Response::default()

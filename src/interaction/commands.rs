@@ -29,10 +29,6 @@ pub enum Command {
     },
     /// A command line resolved through the registry when executed.
     Named(String),
-    Line {
-        edit: super::LineEdit,
-        extend: bool,
-    },
     Map {
         context: super::Context,
         keys: Vec<super::KeyStroke>,
@@ -458,10 +454,6 @@ impl Layers {
                 motion,
                 extend: true,
             }),
-            Command::Line {
-                edit,
-                extend: false,
-            } if marked && edit.is_motion() => Command::Line { edit, extend: true },
             command => command,
         };
         match &command {
@@ -564,9 +556,6 @@ impl Layers {
                         response.failed = true;
                     }
                 }
-            }
-            Command::Line { edit, extend } => {
-                return self.execute(edit.command(extend), app, time, file_root);
             }
             Command::Map { .. }
             | Command::Unmap { .. }

@@ -8,12 +8,6 @@ pub(super) enum Transition {
     Closed(Response),
 }
 impl Transition {
-    pub fn active(response: Response) -> Self {
-        Self::Active(response)
-    }
-    pub fn finished(response: Response) -> Self {
-        Self::Closed(response)
-    }
     pub fn redraw() -> Self {
         Self::Active(Response {
             redraw: true,

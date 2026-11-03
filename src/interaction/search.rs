@@ -238,7 +238,7 @@ impl SearchSession {
         let end = field.text().len();
         field.replace_range(0..end, text);
         self.set_query(text);
-        Ok(super::session::Transition::active(self.preview_response(
+        Ok(super::session::Transition::Active(self.preview_response(
             app,
             self.backward,
             false,
@@ -257,8 +257,8 @@ impl SearchSession {
             session::{Transition, edit_field},
         };
         Ok(match input {
-            Input::Cancel => Transition::finished(self.cancel_response(app, time)?),
-            Input::Confirm => Transition::finished(Response {
+            Input::Cancel => Transition::Closed(self.cancel_response(app, time)?),
+            Input::Confirm => Transition::Closed(Response {
                 events: vec![Event::Edit {
                     view: self.view(),
                     command: Command::SetSearchQuery(self.query().clone()),
@@ -268,12 +268,12 @@ impl SearchSession {
                 ..Response::default()
             }),
             Input::Navigate { backward } => {
-                Transition::active(self.preview_response(app, backward, true, time)?)
+                Transition::Active(self.preview_response(app, backward, true, time)?)
             }
             input => match edit_field(field, input) {
                 Some(update) if update.text_changed => {
                     self.set_query(field.text());
-                    Transition::active(self.preview_response(app, self.backward, false, time)?)
+                    Transition::Active(self.preview_response(app, self.backward, false, time)?)
                 }
                 Some(update) if update.selection_changed => Transition::redraw(),
                 _ => Transition::Blocked,
@@ -291,18 +291,18 @@ impl SearchSession {
             return Ok(Transition::close());
         }
         if app.active_view() != Some(self.view()) {
-            return Ok(Transition::finished(self.cancel_response(app, time)?));
+            return Ok(Transition::Closed(self.cancel_response(app, time)?));
         }
         if update.edit.as_ref().is_some_and(|edit| {
             edit.text_changed && edit.document_id == app.view(self.view()).unwrap().document_id
         }) {
-            return Ok(Transition::active(self.preview_response(
+            return Ok(Transition::Active(self.preview_response(
                 app,
                 self.backward,
                 false,
                 time,
             )?));
         }
-        Ok(Transition::active(Response::default()))
+        Ok(Transition::Active(Response::default()))
     }
 }

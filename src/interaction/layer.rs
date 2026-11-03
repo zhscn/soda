@@ -54,7 +54,7 @@ impl Layer {
             Self::Saving(wait) => wait.observe(app, update),
             Self::Replace(session) => session.observe(app, update, time)?,
             Self::Search { session, .. } => session.observe_transition(app, update, time)?,
-            Self::Help(_) => Transition::active(Response::default()),
+            Self::Help(_) => Transition::Active(Response::default()),
             Self::Labels(session) => session.observe(update),
             Self::Resize(session) => session.observe(app, update),
         })

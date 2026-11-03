@@ -4,10 +4,6 @@
 use crate::core::{ByteOffset, Snapshot, step_grapheme};
 use std::ops::Range;
 
-/// Lines the caret can reach: the empty one after a final newline too.
-pub(crate) fn lines(text: &Snapshot) -> usize {
-    text.line_count()
-}
 pub(crate) fn next(text: &Snapshot, offset: usize) -> usize {
     step_grapheme(text, ByteOffset(offset), true).unwrap().0
 }
@@ -161,7 +157,7 @@ pub(crate) fn quoted(text: &Snapshot, at: usize, inner: bool) -> Option<Range<us
 }
 /// The lines of text around `at`, up to the blank lines on either side.
 pub(crate) fn paragraph(text: &Snapshot, at: usize, inner: bool) -> Option<Range<usize>> {
-    let last = lines(text) - 1;
+    let last = text.line_count() - 1;
     let line = text.line_of(at)?.min(last);
     let blank = |line: usize| first(text, line) == text.line_content_range(line).unwrap().end;
     if blank(line) {

@@ -1502,7 +1502,7 @@ impl Registry {
     pub(super) fn parse_builtin(&self, line: &str) -> Result<Command, String> {
         let (name, args) = split(line.trim());
         if let Some((edit, extend)) = LineEdit::parse(name) {
-            return bare(Command::Line { edit, extend })(args);
+            return bare(edit.command(extend))(args);
         }
         let builtin = builtin(name).ok_or_else(|| format!("unknown command: {name}"))?;
         (builtin.build)(args)

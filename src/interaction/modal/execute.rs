@@ -484,11 +484,11 @@ impl Layers {
                     None => logical_column_at(text, ByteOffset(head), width).unwrap(),
                 };
                 self.modal.goal = Some((goal, at.view, head));
-                let line = text.line_of(head).unwrap().min(text::lines(text) - 1);
+                let line = text.line_of(head).unwrap().min(text.line_count() - 1);
                 let target = if step == Step::Up {
                     line.saturating_sub(count)
                 } else {
-                    line.saturating_add(count).min(text::lines(text) - 1)
+                    line.saturating_add(count).min(text.line_count() - 1)
                 };
                 if target == line {
                     self.failed = true;
@@ -555,7 +555,7 @@ impl Layers {
         mut response: Response,
     ) -> Response {
         let text = at.text;
-        let last = text::lines(text) - 1;
+        let last = text.line_count() - 1;
         let head = at.selection.head;
         let line = text.line_of(head).unwrap().min(last);
         let tagged = self
@@ -642,7 +642,7 @@ impl Layers {
             }
             Kind::Line => {
                 let line = at.text.line_of(head).unwrap();
-                let last = text::lines(at.text) - 1;
+                let last = at.text.line_count() - 1;
                 let target = if backward {
                     line.checked_sub(count)?
                 } else {
@@ -765,7 +765,7 @@ impl Layers {
         let line = text
             .line_of(at.selection.head)
             .unwrap()
-            .min(text::lines(text) - 1);
+            .min(text.line_count() - 1);
         let range = text.line_content_range(line).unwrap();
         self.modal.tag = None;
         self.modal.insert_view = Some(at.view);
@@ -939,7 +939,7 @@ impl Layers {
         let view = app.view(at.view).unwrap();
         let rows = (self.page_rows / 2).max(1);
         let line = at.text.line_of(at.selection.head).unwrap();
-        let last = text::lines(at.text) - 1;
+        let last = at.text.line_count() - 1;
         if (down && line == last) || (!down && line == 0) {
             return self.fail(response, "Motion reached a buffer boundary");
         }

@@ -41,7 +41,7 @@ impl ResizeSession {
             },
             _ => return Transition::Blocked,
         };
-        Transition::active(Response {
+        Transition::Active(Response {
             events: vec![event],
             redraw: true,
             ..Response::default()
@@ -52,7 +52,7 @@ impl ResizeSession {
         match size(app) {
             Some(size) if !update.active_changed => {
                 self.current = size;
-                Transition::active(Response::default())
+                Transition::Active(Response::default())
             }
             _ => Transition::close(),
         }

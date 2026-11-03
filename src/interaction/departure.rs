@@ -31,9 +31,6 @@ impl SaveWait {
             retry,
         }
     }
-    pub fn document(&self) -> DocumentId {
-        self.document
-    }
     pub(super) fn presentation(&self) -> Presentation {
         Presentation {
             text: format!("Saving {}; Esc cancels {}", self.name, self.then),
@@ -48,7 +45,7 @@ impl SaveWait {
         }
     }
     fn failed(&self, error: String) -> Transition {
-        Transition::finished(Response {
+        Transition::Closed(Response {
             commands: vec![Command::Ask {
                 line: self.retry.clone(),
                 note: format!("save failed: {error}"),
@@ -91,7 +88,7 @@ impl SaveWait {
                 continue;
             }
             return match &file.result {
-                Ok(_) => Transition::finished(Response {
+                Ok(_) => Transition::Closed(Response {
                     commands: vec![Command::Named(self.then.clone())],
                     redraw: true,
                     ..Response::default()
@@ -99,6 +96,6 @@ impl SaveWait {
                 Err(error) => self.failed(error.to_string()),
             };
         }
-        Transition::active(Response::default())
+        Transition::Active(Response::default())
     }
 }

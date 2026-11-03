@@ -78,10 +78,10 @@ impl ReplaceSession {
         };
         use crate::{application::Event, editor::Command};
         Ok(match (self.phase, input) {
-            (_, Input::Cancel) => Transition::finished(self.search.cancel_response(app, time)?),
+            (_, Input::Cancel) => Transition::Closed(self.search.cancel_response(app, time)?),
             (ReplacePhase::Query, Input::Confirm) => {
                 if !self.search.query().is_valid() {
-                    return Ok(Transition::active(Response::default()));
+                    return Ok(Transition::Active(Response::default()));
                 }
                 self.phase = ReplacePhase::Replacement;
                 self.input = TextInput::default();
@@ -93,7 +93,7 @@ impl ReplaceSession {
                 Transition::redraw()
             }
             (ReplacePhase::Review, input @ (Input::Confirm | Input::ReplaceAll)) => {
-                Transition::finished(Response {
+                Transition::Closed(Response {
                     events: vec![
                         Event::Edit {
                             view: self.search.view(),
@@ -115,7 +115,7 @@ impl ReplaceSession {
                 })
             }
             (ReplacePhase::Query | ReplacePhase::Review, Input::Navigate { backward }) => {
-                Transition::active(self.search.preview_response(app, backward, true, time)?)
+                Transition::Active(self.search.preview_response(app, backward, true, time)?)
             }
             (ReplacePhase::Query, input) => {
                 self.search.handle(&mut self.input, input, app, time)?
