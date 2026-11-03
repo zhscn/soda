@@ -338,6 +338,9 @@ local function flag_current()
     local text = line <= buf:line_count() and buf:line(line) or ""
     return { line, to_byte(text, position.character, info and info.encoding or "utf-8") + 1 }
   end
+  -- Unused code shows dim and what is deprecated struck through, apart
+  -- from the severity's underline.
+  local tagged = {}
   for _, diagnostic in ipairs(diagnostics[uri] or {}) do
     local severity = severities[diagnostic.severity] or "info"
     table.insert(lines[severity], diagnostic.range.start.line + 1)
@@ -345,14 +348,28 @@ local function flag_current()
     if from[1] == to[1] and from[2] == to[2] then
       to[2] = to[2] + 1 -- An empty range still marks a cell.
     end
+    -- Places it speaks of, such as an earlier declaration, follow it.
+    local text = diagnostic.message
+    for _, related in ipairs(diagnostic.relatedInformation or {}) do
+      local location = related.location
+      text = text .. "\n" .. relative(path_of(location.uri)) .. ":"
+        .. (location.range.start.line + 1) .. ": " .. related.message
+    end
     table.insert(notes, {
       from = from,
       to = to,
       severity = severity,
-      text = diagnostic.message,
+      text = text,
     })
+    for _, tag in ipairs(diagnostic.tags or {}) do
+      local face = ({ "unnecessary", "deprecated" })[tag]
+      if face then
+        table.insert(tagged, { from = from, to = to, face = face })
+      end
+    end
   end
   soda.note("lsp", notes)
+  soda.paint("lsp-tags", tagged)
   -- Later groups win a line, so the worst goes last.
   if #lines.info > 0 then
     soda.flag("lsp-info", "info", "I", lines.info)
@@ -502,6 +519,42 @@ local function decorate()
   end
 end
 
+-- Servers that wait to be asked for diagnostics are asked when typing
+-- pauses and when a document comes into view, once for each revision.
+local pulled = {}
+local function pull_diagnostics()
+  local uri, info = soda.lsp.uri(), soda.lsp.info()
+  if not uri or not info or not info.capabilities.diagnosticProvider then
+    return
+  end
+  local buf = soda.buffer()
+  local revision = buf:revision()
+  local last = pulled[uri]
+  if last and last.revision == revision then
+    return
+  end
+  local params = { textDocument = { uri = uri }, previousResultId = last and last.id }
+  send("pull " .. uri, "textDocument/diagnostic", params, function(report)
+    if not report then
+      return
+    end
+    pulled[uri] = { revision = revision, id = report.resultId }
+    if report.kind == "full" then
+      diagnostics[uri] = report.items or {}
+    end
+    if uri == soda.lsp.uri() then
+      flag_current()
+      decorate()
+    end
+  end)
+end
+soda.hook("idle", ".*", pull_diagnostics)
+-- The server knows something changed, such as a header: ask again.
+soda.lsp.on("workspace/diagnostic/refresh", function()
+  pulled = {}
+  pull_diagnostics()
+end)
+
 soda.lsp.on("textDocument/publishDiagnostics", function(params)
   diagnostics[params.uri] = params.diagnostics
   if params.uri == soda.lsp.uri() then
@@ -512,6 +565,7 @@ end)
 soda.hook("focus", ".*", function()
   flag_current()
   decorate()
+  pull_diagnostics()
 end)
 
 soda.define_command("lsp-diagnostics", "List the server's diagnostics", function()

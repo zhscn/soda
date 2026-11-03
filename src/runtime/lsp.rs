@@ -240,7 +240,11 @@ fn initialize(root: &Path, init: &Value) -> Value {
                     "definition": {},
                     "references": {},
                     "callHierarchy": {},
-                    "publishDiagnostics": {},
+                    "publishDiagnostics": {
+                        "relatedInformation": true,
+                        "tagSupport": { "valueSet": [1, 2] },
+                    },
+                    "diagnostic": { "relatedDocumentSupport": false },
                     "rename": {},
                     "inlayHint": {},
                     "semanticTokens": {
@@ -277,6 +281,7 @@ fn initialize(root: &Path, init: &Value) -> Value {
                 "workspace": {
                     "applyEdit": true,
                     "configuration": true,
+                    "diagnostics": { "refreshSupport": true },
                     "didChangeConfiguration": {},
                     "didChangeWatchedFiles": {
                         "dynamicRegistration": true,

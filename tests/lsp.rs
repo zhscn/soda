@@ -915,3 +915,42 @@ fn progress_shows_on_the_status_line_and_messages_reach_the_user() {
     f.r.command(Command::Named("lsp-workspace-symbols end".into()));
     wait(&mut f.r, |r| status(r).is_none());
 }
+#[test]
+fn diagnostics_carry_related_places_and_tags_and_can_be_pulled() {
+    let Some(mut f) = open("one tagged\ntwo\n") else {
+        return;
+    };
+    let document =
+        f.r.app()
+            .view(f.r.app().active_view().unwrap())
+            .unwrap()
+            .document_id;
+    wait(&mut f.r, |r| r.app().notes(document).len() == 3);
+    let notes = f.r.app().notes(document);
+    let unused = notes.iter().find(|n| n.text.starts_with("unused")).unwrap();
+    assert_eq!(unused.text, "unused\na.cpp:2: declared here");
+    let face = |name| {
+        soda::application::faces::index(name)
+            .map(soda::application::Face::Named)
+            .unwrap()
+    };
+    let paints = f.r.app().paints(document);
+    assert!(paints.contains(&(0..3, face("unnecessary"))), "{paints:?}");
+    assert!(paints.contains(&(4..10, face("deprecated"))), "{paints:?}");
+
+    // Pulled when typing pauses, and again with the last result's id.
+    f.r.command(Command::Named("set idle-time 10".into()));
+    f.r.command(Command::SetMode(EditMode::Insert));
+    keys(&mut f.r, "pulled ");
+    wait(&mut f.r, |r| {
+        r.app()
+            .notes(document)
+            .iter()
+            .any(|n| n.text == "pulled one")
+    });
+    keys(&mut f.r, "x");
+    let log = f.log.clone();
+    wait(&mut f.r, move |_| {
+        std::fs::read_to_string(&log).is_ok_and(|log| log.contains(r#"pull "r1""#))
+    });
+}

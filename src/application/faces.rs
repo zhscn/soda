@@ -4,7 +4,7 @@
 //!
 //! A spec is words: `fg:#rrggbb`, `bg:#rrggbb` (or `default`, the
 //! terminal's own), and attributes `bold`, `italic`, `underline`, `dim`,
-//! `reverse`. Colors left out keep the theme's; attributes, once any is
+//! `reverse`, `strikethrough`. Colors left out keep the theme's; attributes, once any is
 //! given, replace the theme's, and `plain` gives none.
 use std::collections::BTreeMap;
 
@@ -42,6 +42,11 @@ pub const UI_FACES: &[(&str, &str)] = &[
         "reference-write",
         "Places where the symbol at the caret is written",
     ),
+    ("unnecessary", "Code a language server finds unused"),
+    (
+        "deprecated",
+        "Uses of what a language server finds deprecated",
+    ),
     ("note-error", "Error notes after the text of their line"),
     ("note-warning", "Warning notes after the text of their line"),
     ("note-info", "Other notes after the text of their line"),
@@ -78,6 +83,7 @@ pub struct Attributes {
     pub underline: bool,
     pub dim: bool,
     pub reverse: bool,
+    pub strikethrough: bool,
 }
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct FaceSpec {
@@ -137,6 +143,7 @@ impl FaceSpec {
                 "underline" => attributes.underline = true,
                 "dim" => attributes.dim = true,
                 "reverse" => attributes.reverse = true,
+                "strikethrough" => attributes.strikethrough = true,
                 "plain" => {}
                 word => return Err(format!("unknown face attribute {word}")),
             }

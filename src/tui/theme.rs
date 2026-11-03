@@ -37,6 +37,8 @@ pub(super) struct Theme {
     /// The symbol at the caret where else it stands, and where it is written.
     pub reference: Style,
     pub reference_write: Style,
+    pub unnecessary: Style,
+    pub deprecated: Style,
     /// Notes after the text of their line, by severity from info up.
     pub notes: [Style; 3],
     pub status_error: Style,
@@ -180,6 +182,8 @@ impl Theme {
             "inlay" => &mut self.inlay,
             "reference" => &mut self.reference,
             "reference-write" => &mut self.reference_write,
+            "unnecessary" => &mut self.unnecessary,
+            "deprecated" => &mut self.deprecated,
             "note-info" => &mut self.notes[0],
             "note-warning" => &mut self.notes[1],
             "note-error" => &mut self.notes[2],
@@ -229,6 +233,8 @@ impl Theme {
             reference_write: Style::new()
                 .bg(c(p.gutter))
                 .add_modifier(Modifier::UNDERLINED),
+            unnecessary: Style::new().fg(c(p.comment)),
+            deprecated: Style::new().add_modifier(Modifier::CROSSED_OUT),
             notes: [p.blue, p.yellow, p.red]
                 .map(|fg| Style::new().fg(c(fg)).add_modifier(Modifier::ITALIC)),
             status_error: on(p.red, p.bg_dark).add_modifier(Modifier::BOLD),
@@ -345,6 +351,7 @@ fn apply(mut style: Style, spec: &crate::application::faces::FaceSpec, truecolor
             (a.underline, Modifier::UNDERLINED),
             (a.dim, Modifier::DIM),
             (a.reverse, Modifier::REVERSED),
+            (a.strikethrough, Modifier::CROSSED_OUT),
         ] {
             if on {
                 modifier |= m;

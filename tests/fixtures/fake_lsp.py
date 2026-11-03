@@ -5,6 +5,7 @@ import os
 import sys
 
 log = open(os.environ["FAKE_LSP_LOG"], "a", buffering=1)
+texts = {}
 
 
 def read():
@@ -62,6 +63,7 @@ while True:
             "definitionProvider": True, "declarationProvider": True,
             "typeDefinitionProvider": True, "referencesProvider": True,
             "implementationProvider": True, "documentHighlightProvider": True,
+            "diagnosticProvider": {"interFileDependencies": False, "workspaceDiagnostics": False},
             "hoverProvider": True, "renameProvider": True, "codeActionProvider": True,
             "documentFormattingProvider": True, "documentSymbolProvider": True,
             "callHierarchyProvider": True, "signatureHelpProvider": {},
@@ -101,6 +103,7 @@ while True:
         document = params["textDocument"]
         text = params.get("contentChanges", [{}])[0].get("text", document.get("text"))
         log.write("%s %d %s\n" % (method, document["version"], json.dumps(text)))
+        texts[document["uri"]] = text
         if method == "textDocument/didOpen":
             log.write("opened %s\n" % document["uri"].rsplit("/", 1)[1])
         # ccls: lines 2 to 3 (zero-based 1 to 2) are not compiled.
@@ -116,7 +119,15 @@ while True:
                     "range": spot("", 1, 0)["range"],
                     "severity": 1,
                     "message": "bad line\nmore",
-                }],
+                }] + ([{
+                    "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 3}},
+                    "severity": 2, "message": "unused", "tags": [1],
+                    "relatedInformation": [{"location": spot(document["uri"], 1, 0),
+                                            "message": "declared here"}],
+                }, {
+                    "range": {"start": {"line": 0, "character": 4}, "end": {"line": 0, "character": 10}},
+                    "severity": 3, "message": "old", "tags": [2],
+                }] if "tagged" in text else []),
             },
         })
     elif method == "textDocument/definition":
@@ -203,6 +214,14 @@ while True:
         # Read on the first line, written on the second.
         answer(message, [{"range": spot("", 0, 0)["range"] | {"end": {"line": 0, "character": 3}}, "kind": 2},
                          {"range": {"start": {"line": 1, "character": 0}, "end": {"line": 1, "character": 3}}, "kind": 3}])
+    elif method == "textDocument/diagnostic":
+        uri = params["textDocument"]["uri"]
+        log.write("pull %s\n" % json.dumps(params.get("previousResultId")))
+        if "pulled" in texts.get(uri, ""):
+            answer(message, {"kind": "full", "resultId": "r1", "items": [
+                {"range": spot("", 0, 0)["range"], "severity": 2, "message": "pulled one"}]})
+        else:
+            answer(message, {"kind": "unchanged", "resultId": "r0"})
     elif method == "textDocument/implementation":
         uri = params["textDocument"]["uri"]
         answer(message, [spot(uri, 0, 1), {"targetUri": uri, "targetSelectionRange": spot(uri, 1, 0)["range"],

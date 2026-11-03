@@ -42,6 +42,10 @@ rust-analyzer 默认不开，因为它会运行项目的构建脚本，打开一
 
 列表是普通的结果文档，`]q` / `[q` 和回车都能用。诊断在行号栏按级别显示：错误 `E`、警告 `W`、其余 `I`，一行有多条时显示最严重的，范围加彩色下划线，消息的第一行显示在行尾（选项 `inline-notes`，见[界面](ui.md)），光标所在行的诊断完整显示在消息行（有其他消息时让位），状态栏显示文档的错误和警告数。
 
+诊断附带的相关位置（`relatedInformation`，比如之前的声明）以 `路径:行: 文字` 接在消息后面，显示在消息行和 `SPC k` 的浮窗里。带 `Unnecessary` 标签的范围（未使用的变量、不可达的代码）用 `unnecessary` 颜色变暗，带 `Deprecated` 的（用到已弃用的函数）用 `deprecated` 加删除线。
+
+服务器声明 `diagnosticProvider` 时，也主动拉取诊断（`textDocument/diagnostic`）：停止输入 `idle-time` 毫秒后和切换到文档时，文档每个版本最多问一次，带上次的 `resultId`，服务器回答没有变化时保留原来的诊断。服务器发 `workspace/diagnostic/refresh` 时重新拉取。只推送的服务器（如 clangd）不受影响。
+
 补全不需要配置，服务器在就是一个来源，`.`、`->`、`::` 触发。候选带的其他修改（`additionalTextEdits`）随它一起做，clangd 因此在补全一个没有 include 的名字时加上 `#include`，这类候选的名字前有 `•`。服务器给出的范围决定替换多少：Enter 用 insert 范围，Tab 用 replace 范围；只有一个范围时它是 Enter 的，Tab 仍替换到词尾。候选的 commit 字符（`commitCharacters`，或列表的默认值、服务器的 `allCommitCharacters`）在选中它之后输入时先确认它，再输入这个字符。服务器支持 `completionItem/resolve` 时，选中的候选再问一次，拿到的说明显示在列表旁边。
 
 输入 `(` 或 `,` 时，正在调用的函数签名显示在消息行，当前参数加方括号，输入 `)` 或离开 Insert 时消失。没有其他消息时才显示，优先于光标处的诊断。光标用方向键移出括号时不会消失，到下一次 `)` 或离开 Insert 为止。

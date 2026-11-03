@@ -106,9 +106,9 @@
 
 内置一套真彩主题，深色与浅色两个变体。选项 `theme` 选择变体：`dark`、`light`，或 `auto`（默认），`auto` 时 `COLORFGBG` 报告浅色背景用浅色变体，否则用深色。
 
-`face NAME [SPEC]`（Lua 里是 `soda.face(name, spec)`）把一个具名部分的颜色和属性改掉，盖在主题上。SPEC 是若干个词：`fg:#rrggbb`、`bg:#rrggbb`（颜色写 `default` 时用终端自己的颜色），以及属性 `bold`、`italic`、`underline`、`dim`、`reverse`。没写的颜色沿用主题；只要写了任何属性，就用这些属性替换主题的属性，`plain` 表示不要任何属性。不带 SPEC 时恢复主题的样子。Lua 里 spec 也可以是表：`{ fg = "#ff0000", bold = true }`，`nil` 恢复主题。
+`face NAME [SPEC]`（Lua 里是 `soda.face(name, spec)`）把一个具名部分的颜色和属性改掉，盖在主题上。SPEC 是若干个词：`fg:#rrggbb`、`bg:#rrggbb`（颜色写 `default` 时用终端自己的颜色），以及属性 `bold`、`italic`、`underline`、`dim`、`reverse`、`strikethrough`。没写的颜色沿用主题；只要写了任何属性，就用这些属性替换主题的属性，`plain` 表示不要任何属性。不带 SPEC 时恢复主题的样子。Lua 里 spec 也可以是表：`{ fg = "#ff0000", bold = true }`，`nil` 恢复主题。
 
-可以设置的名字有界面部分（`text`、`selection`、`cursor-line`、`gutter`、`status`、`mode-normal`、`mode-insert`、`mode-beacon`、`mode-prompt`、`title`、`border`、`float`、`label`、`todo`、`note-error`、`note-warning`、`note-info`、`reference`、`reference-write`、`mark1`…`mark8` 等，命令行里可以补全，说明见 `src/application/faces.rs`），以及每个语法分类 `syntax.comment`、`syntax.keyword`、`syntax.string` 等。`face` 可以写在 `init.lua` 里，也可以随时执行，下一帧生效。
+可以设置的名字有界面部分（`text`、`selection`、`cursor-line`、`gutter`、`status`、`mode-normal`、`mode-insert`、`mode-beacon`、`mode-prompt`、`title`、`border`、`float`、`label`、`todo`、`note-error`、`note-warning`、`note-info`、`reference`、`reference-write`、`unnecessary`、`deprecated`、`mark1`…`mark8` 等，命令行里可以补全，说明见 `src/application/faces.rs`），以及每个语法分类 `syntax.comment`、`syntax.keyword`、`syntax.string` 等。`face` 可以写在 `init.lua` 里，也可以随时执行，下一帧生效。
 
 `COLORTERM` 为 `truecolor` 或 `24bit` 时输出 24 位颜色，否则换算为最接近的 xterm 256 色。主题设置整屏背景，不依赖终端自身的配色。
 

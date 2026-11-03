@@ -33,7 +33,15 @@ pub(super) fn register<'scope, 'r: 'scope>(
                             words.push(format!("{side}:{color}"));
                         }
                     }
-                    for attribute in ["bold", "italic", "underline", "dim", "reverse", "plain"] {
+                    for attribute in [
+                        "bold",
+                        "italic",
+                        "underline",
+                        "dim",
+                        "reverse",
+                        "strikethrough",
+                        "plain",
+                    ] {
                         if table.get::<Option<bool>>(attribute)? == Some(true) {
                             words.push(attribute.to_owned());
                         }
