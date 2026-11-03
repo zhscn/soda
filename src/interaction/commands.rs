@@ -697,7 +697,7 @@ impl Layers {
                     response.events.push(Event::SetViewport {
                         view: view.id,
                         anchor: crate::core::ByteOffset(snapshot.line_start(top).unwrap()),
-                        horizontal_column: view.viewport.horizontal_column,
+                        horizontal_scroll: view.viewport.horizontal_scroll,
                     });
                 }
             }

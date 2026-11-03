@@ -5,7 +5,7 @@
 use crate::syntax::Category;
 use ratatui::style::{Color, Modifier, Style};
 
-pub(super) struct Theme {
+pub(crate) struct Theme {
     pub text: Style,
     pub dim: Style,
     pub gutter: Style,

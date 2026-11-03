@@ -80,7 +80,7 @@ fn shared_document_maps_selection_and_viewport_and_releases_sessions() {
     app.dispatch(Event::SetViewport {
         view: b,
         anchor: ByteOffset(3),
-        horizontal_column: 7,
+        horizontal_scroll: 7,
     })
     .unwrap();
     edit(&mut app, a, Command::SetSelection(Selection::caret(0)));
@@ -93,7 +93,7 @@ fn shared_document_maps_selection_and_viewport_and_releases_sessions() {
         .unwrap();
     assert_eq!(update.changed_views, [a, b]);
     assert_eq!(app.view(b).unwrap().viewport.anchor.offset, ByteOffset(5));
-    assert_eq!(app.view(b).unwrap().viewport.horizontal_column, 7);
+    assert_eq!(app.view(b).unwrap().viewport.horizontal_scroll, 7);
     assert_eq!(
         app.workspace()
             .editor(doc)
@@ -236,7 +236,7 @@ fn dropped_completion_is_applied_by_poll_and_reload_maps_viewports() {
     app.dispatch(Event::SetViewport {
         view,
         anchor: ByteOffset(2),
-        horizontal_column: 0,
+        horizontal_scroll: 0,
     })
     .unwrap();
     let update = app
@@ -363,7 +363,7 @@ fn invalid_viewport_is_rejected_without_changing_view_state() {
         app.dispatch(Event::SetViewport {
             view,
             anchor: ByteOffset(1),
-            horizontal_column: 9
+            horizontal_scroll: 9
         })
         .is_err()
     );

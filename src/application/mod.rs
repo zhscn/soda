@@ -61,7 +61,9 @@ pub struct View {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Viewport {
     pub anchor: DocumentPosition,
-    pub horizontal_column: usize,
+    /// How far the text is scrolled sideways, in the units the frontend
+    /// measures text in: terminal cells, or fractions of a pixel.
+    pub horizontal_scroll: usize,
 }
 
 pub enum Event {
@@ -158,7 +160,7 @@ pub enum Event {
     SetViewport {
         view: ViewId,
         anchor: ByteOffset,
-        horizontal_column: usize,
+        horizontal_scroll: usize,
     },
     Open(PathBuf),
     /// Opens a file with the caret on a zero-based line and byte column.
@@ -768,7 +770,7 @@ impl Application {
                 session_id: session,
                 viewport: Viewport {
                     anchor,
-                    horizontal_column: 0,
+                    horizontal_scroll: 0,
                 },
             },
         );
@@ -987,7 +989,7 @@ impl Application {
             .position(ByteOffset(0), Association::Before)?;
         self.views.get_mut(&view).unwrap().viewport = Viewport {
             anchor: start,
-            horizontal_column: 0,
+            horizontal_scroll: 0,
         };
         update.changed_views.push(view);
         self.focus(Some(view));
@@ -1347,7 +1349,7 @@ impl Application {
             Event::SetViewport {
                 view,
                 anchor,
-                horizontal_column,
+                horizontal_scroll,
             } => {
                 let state = self.views.get_mut(&view).ok_or(Error::UnknownView)?;
                 let document = self
@@ -1358,7 +1360,7 @@ impl Application {
                     .document();
                 state.viewport = Viewport {
                     anchor: document.position(anchor, Association::Before)?,
-                    horizontal_column,
+                    horizontal_scroll,
                 };
                 update.changed_views.push(view);
             }

@@ -1,14 +1,12 @@
 //! Terminal frontend: owns the terminal, turns its events into input, and
-//! copies the frames `screen` draws to it. Runtime owns command execution,
-//! interaction state and task scheduling.
+//! draws the screen in cells, with the text laid out by `screen`. Runtime
+//! owns command execution, interaction state and task scheduling.
 mod clipboard;
 mod color;
 mod input;
-use crate::{
-    host,
-    runtime::Runtime,
-    screen::{CursorShape, MouseEvent, MouseKind, Presenter},
-};
+mod mouse;
+mod view;
+use crate::{host, interaction::EditMode, runtime::Runtime};
 use crossterm::{
     cursor::{Hide, SetCursorStyle, Show},
     event::{
@@ -28,6 +26,7 @@ use std::{
     path::PathBuf,
     time::Duration,
 };
+use view::Presenter;
 /// Restores the terminal when dropped, also while a panic unwinds.
 struct Terminal {
     /// Whether the terminal took the kitty keyboard protocol.
@@ -176,40 +175,22 @@ fn draw(
         if !truecolor {
             color::downgrade(buffer);
         }
-        if let Ok(Some(cursor)) = &rendered
-            && let Some((x, y)) = cursor.position
-        {
-            frame.set_cursor_position((x, y));
+        if let Ok(Some(Some(position))) = rendered {
+            frame.set_cursor_position(position);
         }
     });
-    let shape = match rendered {
-        Ok(Some(cursor)) if cursor.shape == CursorShape::Block => SetCursorStyle::SteadyBlock,
-        _ => SetCursorStyle::SteadyBar,
+    // A block stands on a character in Normal and Beacon; a bar goes
+    // between characters where text is typed.
+    let shape = if runtime.layer().is_none() && runtime.edit_mode() != EditMode::Insert {
+        SetCursorStyle::SteadyBlock
+    } else {
+        SetCursorStyle::SteadyBar
     };
     execute!(io::stdout(), shape, EndSynchronizedUpdate)?;
     drawn?;
     rendered.map_err(io::Error::other)?;
     Ok(())
 }
-/// The pointer events the screen acts on; presses and drags of other
-/// buttons are left out.
-fn mouse_event(event: event::MouseEvent) -> Option<MouseEvent> {
-    use event::{MouseButton, MouseEventKind};
-    let kind = match event.kind {
-        MouseEventKind::Down(MouseButton::Left) => MouseKind::Press,
-        MouseEventKind::Drag(MouseButton::Left) => MouseKind::Drag,
-        MouseEventKind::Up(_) => MouseKind::Release,
-        MouseEventKind::ScrollUp => MouseKind::ScrollUp,
-        MouseEventKind::ScrollDown => MouseKind::ScrollDown,
-        _ => return None,
-    };
-    Some(MouseEvent {
-        kind,
-        column: event.column,
-        row: event.row,
-    })
-}
-
 /// Run the terminal frontend using the shared owner-thread runtime.
 /// Run the terminal frontend using the shared owner-thread runtime.
 pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
@@ -235,6 +216,7 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
     let truecolor = color::truecolor();
     let outcome = host::guard(|| {
         let mut capturing = true;
+        let mut mouse = mouse::Mouse::default();
         let mut catching_up = false;
         let mut resumed = false;
         while !runtime.quit_requested() && !ended.load(std::sync::atomic::Ordering::Relaxed) {
@@ -270,9 +252,8 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
                 loop {
                     match event::read()? {
                         event::Event::Mouse(event) => {
-                            if let Some(event) = mouse_event(event) {
-                                presenter.mouse(&mut runtime, event, width, height);
-                            }
+                            let areas = view::Areas::new(&runtime, width, height);
+                            mouse.handle(event, &mut runtime, &areas);
                         }
                         event => runtime.input(input::normalize(event)),
                     }

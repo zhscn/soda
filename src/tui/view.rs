@@ -1,16 +1,15 @@
-//! Screen composition: buffer tabs, the editing area with its line number
+//! The terminal's screen, in cells: buffer tabs, the editing area with its line number
 //! gutter, the status line and the message row, with the command line panel,
 //! key hints and help drawn over the editing area. Everything here reads
 //! state; viewport changes happen before drawing.
-use super::{
-    highlight::Highlighter,
-    layout::{self, Span},
-    theme::Theme,
-};
 use crate::{
     application::{Area, ViewId},
-    interaction::{CommandLine, EditMode, Layer},
+    interaction::{CommandLine, Layer},
     runtime::Runtime,
+    screen::{
+        self, Cells, Highlighter, Span, TextFrame, Theme,
+        content::{self, Message, Role},
+    },
 };
 use ratatui::{
     buffer::Buffer,
@@ -135,40 +134,118 @@ impl Areas {
     }
 }
 
-/// The text of every window; only the active one shows beacons.
+/// Rows the layout reported to Runtime last.
+#[derive(PartialEq)]
+struct Geometry {
+    editor: u16,
+    list: usize,
+    page: u16,
+    windows: Vec<(ViewId, usize)>,
+}
+/// Presentation state of the terminal's screen: highlighting caches and
+/// the theme.
+pub(super) struct Presenter {
+    highlighter: Highlighter,
+    theme: Theme,
+    theme_key: Option<(String, u64)>,
+    /// What `theme auto` picks.
+    light: bool,
+    geometry: Option<Geometry>,
+}
+impl Presenter {
+    /// `light` tells whether the terminal's background is light, for the
+    /// `auto` theme.
+    pub fn new(light: bool) -> Self {
+        Self {
+            // Highlighting a frame scans for at most this long, so a jump
+            // deep into a large file stays responsive while it catches up.
+            highlighter: Highlighter::with_budget(std::time::Duration::from_millis(12)),
+            theme: Theme::build("auto", &Default::default(), light),
+            theme_key: None,
+            light,
+            geometry: None,
+        }
+    }
+    /// Tells Runtime the rows a screen of this size gives the editing
+    /// area, the windows and the command line's candidates, which paging,
+    /// side windows and display rules use. Call it before handling input
+    /// and before drawing.
+    pub fn measure(&mut self, runtime: &mut Runtime, width: u16, height: u16) {
+        let areas = Areas::new(runtime, width, height);
+        runtime.set_editing_area(areas.editor.width, areas.editor.height);
+        let geometry = Geometry {
+            editor: areas.editor.height,
+            list: areas.list_rows(),
+            page: areas.text(runtime).height,
+            windows: areas
+                .windows
+                .iter()
+                .map(|window| (window.view, usize::from(window.text.height)))
+                .collect(),
+        };
+        if self.geometry.as_ref() != Some(&geometry) {
+            runtime.resize(geometry.editor.into(), geometry.list);
+            runtime.set_page_rows(geometry.page.into());
+            runtime.set_window_rows(geometry.windows.clone());
+            self.geometry = Some(geometry);
+        }
+    }
+    /// Scrolls the active window to its caret and brings the theme and
+    /// highlighting caches up to date. Call it before `render`.
+    pub fn prepare(
+        &mut self,
+        runtime: &mut Runtime,
+        width: u16,
+        height: u16,
+    ) -> Result<(), crate::application::Error> {
+        let areas = Areas::new(runtime, width, height);
+        if let Some(window) = areas.active(runtime) {
+            let (view, text) = (window.view, window.text);
+            screen::follow(runtime, view, &Cells, text.width.into(), text.height)?;
+        }
+        self.highlighter.retain(runtime.app());
+        let app = runtime.app();
+        let key = (
+            app.options().choice(None, "theme").to_owned(),
+            app.faces().revision(),
+        );
+        if self.theme_key.as_ref() != Some(&key) {
+            self.theme = Theme::build(&key.0, app.faces(), self.light);
+            self.theme_key = Some(key);
+        }
+        Ok(())
+    }
+    /// Draws a frame over the whole of `buffer`, whose area is the screen;
+    /// returns where the caret shows, if it does.
+    pub fn render(
+        &mut self,
+        runtime: &Runtime,
+        buffer: &mut Buffer,
+    ) -> Result<Option<(u16, u16)>, crate::application::Error> {
+        let area = buffer.area;
+        // The gutter widens with the line count, so measure again.
+        let areas = Areas::new(runtime, area.width, area.height);
+        let texts = frames(runtime, &mut self.highlighter, &areas)?;
+        Ok(render(buffer, runtime, &self.theme, &areas, &texts))
+    }
+    /// Whether the last frame left lines unhighlighted; draw again soon.
+    pub fn take_pending(&mut self) -> bool {
+        self.highlighter.take_pending()
+    }
+}
+
+/// The text of every window.
 pub(super) fn frames(
     runtime: &Runtime,
     highlighter: &mut Highlighter,
     areas: &Areas,
-) -> Result<Vec<Option<layout::Frame>>, crate::application::Error> {
-    let active = runtime.app().active_view();
+) -> Result<Vec<Option<TextFrame>>, crate::application::Error> {
     areas
         .windows
         .iter()
         .map(|window| {
-            let overlay = if Some(window.view) == active {
-                layout::Overlay {
-                    beacons: runtime.beacons(),
-                    digits: runtime.expand_hints(),
-                    preview: runtime
-                        .completion_popup()
-                        .and_then(|popup| popup.preview)
-                        .filter(|_| {
-                            let document = runtime.app().view(window.view).map(|v| v.document_id);
-                            runtime.app().options().bool(document, "completion-preview")
-                        }),
-                }
-            } else {
-                layout::Overlay::default()
-            };
-            layout::frame(
-                runtime.app(),
-                window.view,
-                highlighter,
-                window.text.width,
-                window.text.height,
-                &overlay,
-            )
+            let (width, rows) = (window.text.width.into(), window.text.height);
+            screen::text(runtime, window.view, highlighter, &Cells, width, rows)
         })
         .collect()
 }
@@ -179,7 +256,7 @@ pub(super) fn render(
     runtime: &Runtime,
     theme: &Theme,
     areas: &Areas,
-    texts: &[Option<layout::Frame>],
+    texts: &[Option<TextFrame>],
 ) -> Option<(u16, u16)> {
     let screen = buf.area;
     buf.set_style(screen, theme.text);
@@ -250,7 +327,7 @@ pub(super) fn render(
             let inner = inset(inset(areas.editor));
             let inner = Rect::new(inner.x, inner.y - 1, inner.width, inner.height + 2);
             for (y, line) in session.lines().enumerate().take(inner.height.into()) {
-                let line = layout::plain(line, 0, inner.width.into());
+                let line = screen::plain(line, 0, inner.width.into());
                 buf.set_stringn(
                     inner.x,
                     inner.y + y as u16,
@@ -288,7 +365,7 @@ fn floating(
     if widest < 8 || area.height < 3 {
         return;
     }
-    let lines = layout::wrap(words, usize::from(widest));
+    let lines = screen::wrap(words, usize::from(widest));
     let caret = caret.unwrap_or(Position::new(area.x, area.y));
     let (above, below) = (caret.y - area.y, area.bottom().saturating_sub(caret.y + 1));
     let room = above.max(below).saturating_sub(2);
@@ -299,7 +376,7 @@ fn floating(
     let first = runtime.popup_scroll(shown, lines.len());
     let inner = lines
         .iter()
-        .map(|line| layout::plain(line, 0, usize::from(widest)).chars().count())
+        .map(|line| screen::plain(line, 0, usize::from(widest)).chars().count())
         .max()
         .unwrap_or(0) as u16;
     let (wide, high) = (inner + 4, shown as u16 + 2);
@@ -314,7 +391,7 @@ fn floating(
         buf.set_stringn(
             x + 2,
             y + 1 + row as u16,
-            layout::plain(line, 0, usize::from(inner)),
+            screen::plain(line, 0, usize::from(inner)),
             usize::from(inner),
             theme.float,
         );
@@ -340,7 +417,7 @@ fn completions(
     popup: crate::interaction::completion::Popup,
     theme: &Theme,
 ) {
-    let width = |text: &str| layout::plain(text, 0, usize::MAX >> 1).chars().count();
+    let width = |text: &str| screen::plain(text, 0, usize::MAX >> 1).chars().count();
     let label = popup
         .rows
         .iter()
@@ -411,14 +488,14 @@ fn documentation(buf: &mut Buffer, area: Rect, list: Rect, doc: &str, theme: &Th
         return;
     }
     let widest = (room - 4).min(72);
-    let lines = layout::wrap(doc.trim_end(), usize::from(widest));
+    let lines = screen::wrap(doc.trim_end(), usize::from(widest));
     let high = (lines.len() as u16 + 2).min(area.bottom().saturating_sub(list.y));
     if high < 3 {
         return;
     }
     let inner = lines
         .iter()
-        .map(|line| layout::plain(line, 0, usize::from(widest)).chars().count())
+        .map(|line| screen::plain(line, 0, usize::from(widest)).chars().count())
         .max()
         .unwrap_or(0) as u16;
     let wide = inner + 4;
@@ -432,7 +509,7 @@ fn documentation(buf: &mut Buffer, area: Rect, list: Rect, doc: &str, theme: &Th
         buf.set_stringn(
             x + 2,
             list.y + 1 + row as u16,
-            layout::plain(line, 0, usize::from(inner)),
+            screen::plain(line, 0, usize::from(inner)),
             usize::from(inner),
             theme.float,
         );
@@ -454,7 +531,16 @@ fn labels(
         let text = window.text;
         let (row, column, label) = match target.offset {
             Some(offset) => {
-                match layout::cell_of(runtime.app(), target.view, text.width, text.height, offset) {
+                let cells = &screen::Cells;
+                let width = text.width.into();
+                match screen::position_of(
+                    runtime.app(),
+                    target.view,
+                    cells,
+                    width,
+                    text.height,
+                    offset,
+                ) {
                     Some((row, column)) => (row, column, rest.to_owned()),
                     None => continue,
                 }
@@ -469,8 +555,9 @@ fn labels(
         buf.set_stringn(x, text.y + row as u16, label, width, theme.label);
     }
 }
+/// Draws spans placed from `x`, each text followed by blanks to its width,
+/// within `width` cells.
 fn spans(buf: &mut Buffer, x: u16, y: u16, width: u16, spans: &[Span], base: Style, theme: &Theme) {
-    let mut x = x;
     let right = x.saturating_add(width);
     for span in spans {
         let mut style = base;
@@ -495,12 +582,12 @@ fn spans(buf: &mut Buffer, x: u16, y: u16, width: u16, spans: &[Span], base: Sty
         if span.inlay {
             style = style.patch(theme.inlay);
         }
-        if x >= right {
+        let start = u16::try_from(span.x).map_or(right, |at| x.saturating_add(at));
+        if start >= right {
             break;
         }
-        x = buf
-            .set_stringn(x, y, &span.text, usize::from(right - x), style)
-            .0;
+        let room = usize::from(right - start).min(span.width);
+        buf.set_stringn(start, y, screen::padded(span), room, style);
     }
 }
 
@@ -523,15 +610,10 @@ fn window_header(
     theme: &Theme,
 ) {
     buf.set_style(area, theme.tabs);
-    let Some(document) = runtime.app().view(view).map(|view| view.document_id) else {
+    let Some((path, dirty)) = content::title(runtime, view) else {
         return;
     };
-    let dirty = runtime.app().workspace().is_dirty(document);
-    let label = format!(
-        " {}{} ",
-        file_label(runtime, document, true),
-        if dirty { " ●" } else { "" }
-    );
+    let label = format!(" {path}{} ", if dirty { " ●" } else { "" });
     let label = tail(&label, area.width.into());
     let style = if current {
         theme.tab_active
@@ -543,7 +625,7 @@ fn window_header(
 fn editor(
     buf: &mut Buffer,
     window: &Window,
-    text: &layout::Frame,
+    text: &TextFrame,
     theme: &Theme,
     current: bool,
     relative: bool,
@@ -591,12 +673,12 @@ fn editor(
         }
         spans(buf, area.x, y, area.width, &row.spans, base, theme);
         if let Some(column) = text.ruler {
-            let cell = &mut buf[(area.x + column, y)];
+            let cell = &mut buf[(area.x + column as u16, y)];
             cell.set_style(cell.style().patch(theme.ruler));
         }
     }
     text.cursor
-        .map(|(x, y)| Position::new(area.x + x, area.y + y))
+        .map(|(x, y)| Position::new(area.x + x as u16, area.y + y as u16))
 }
 
 fn splash(buf: &mut Buffer, area: Rect, theme: &Theme) {
@@ -621,51 +703,20 @@ fn splash(buf: &mut Buffer, area: Rect, theme: &Theme) {
     }
 }
 
-fn file_label(runtime: &Runtime, document: crate::editor::DocumentId, full: bool) -> String {
-    let app = runtime.app();
-    if let Some(name) = app
-        .workspace()
-        .file(document)
-        .and_then(|file| file.scratch())
-    {
-        return name.to_owned();
-    }
-    match app.workspace().file(document).and_then(|file| file.path()) {
-        Some(path) if full => path
-            .strip_prefix(app.root_of(document))
-            .unwrap_or(path)
-            .display()
-            .to_string(),
-        Some(path) => path.file_name().map_or_else(
-            || path.display().to_string(),
-            |n| n.to_string_lossy().into(),
-        ),
-        None => format!("[untitled {}]", document.number()),
-    }
-}
-
 /// Tabs that fit in `width` cells, with their documents, starting columns
 /// and labels; tabs drop from the left until the active one fits.
 pub(super) fn tab_items(
     runtime: &Runtime,
     width: u16,
 ) -> Vec<(crate::editor::DocumentId, u16, String)> {
-    let app = runtime.app();
-    let active = app
-        .active_view()
-        .and_then(|id| app.view(id))
-        .map(|view| view.document_id);
-    let items: Vec<_> = app
-        .workspace()
-        .documents()
-        .map(|id| {
-            let dirty = if app.workspace().is_dirty(id) {
-                " ●"
-            } else {
-                ""
-            };
-            let label = format!(" {}{dirty} ", file_label(runtime, id, false));
-            (id, layout::plain(&label, 0, usize::from(width)))
+    let tabs = content::tabs(runtime);
+    let active = tabs.iter().find(|tab| tab.active).map(|tab| tab.document);
+    let items: Vec<_> = tabs
+        .into_iter()
+        .map(|tab| {
+            let dirty = if tab.dirty { " ●" } else { "" };
+            let label = format!(" {}{dirty} ", tab.label);
+            (tab.document, screen::plain(&label, 0, usize::from(width)))
         })
         .collect();
     let widths: Vec<u16> = items
@@ -721,81 +772,51 @@ fn status(
     area: Rect,
     runtime: &Runtime,
     theme: &Theme,
-    text: Option<&layout::Frame>,
+    text: Option<&TextFrame>,
 ) {
     // The row may have been pushed up over text, and styling keeps symbols.
     Clear.render(area, buf);
     buf.set_style(area, theme.status);
-    let (badge, style) = match runtime.layer() {
-        Some(Layer::CommandLine(_)) => ("COMMAND", theme.mode_prompt),
-        Some(Layer::Search { .. }) => ("SEARCH", theme.mode_prompt),
-        Some(Layer::Replace(_)) => ("REPLACE", theme.mode_prompt),
-        Some(Layer::Saving(_)) => ("SAVING", theme.mode_prompt),
-        Some(Layer::Help(_)) => ("HELP", theme.mode_prompt),
-        Some(Layer::Labels(_)) => ("JUMP", theme.mode_prompt),
-        Some(Layer::Resize(_)) => ("RESIZE", theme.mode_prompt),
-        None => match runtime.edit_mode() {
-            EditMode::Normal => ("NORMAL", theme.mode_normal),
-            EditMode::Insert => ("INSERT", theme.mode_insert),
-            EditMode::Beacon => ("BEACON", theme.mode_visual),
-        },
+    let status = content::status(runtime, text);
+    let badge = match status.mode {
+        content::Mode::Normal => theme.mode_normal,
+        content::Mode::Insert => theme.mode_insert,
+        content::Mode::Beacon => theme.mode_visual,
+        content::Mode::Prompt(_) => theme.mode_prompt,
     };
-    let app = runtime.app();
-    let view = app.active_view().and_then(|id| app.view(id));
-    let mut right = vec![];
-    if runtime.recording() {
-        right.push(Text::styled("recording  ", theme.modified));
-    }
-    if let Some(pending) = runtime.pending_keys() {
-        right.push(Text::styled(format!("{pending}  "), theme.key));
-    }
-    if runtime.grep_running() {
-        right.push(Text::raw("searching…  "));
-    }
-    if runtime.run_running() {
-        right.push(Text::raw("run…  "));
-    }
-    if runtime.shell_running() {
-        right.push(Text::raw("running…  "));
-    }
-    for (_, segment, face) in runtime.status_segments() {
-        let style = face.map_or(theme.status, |face| theme.status.patch(theme.face(face)));
-        right.push(Text::styled(format!("{segment}  "), style));
-    }
-    if let Some(text) = text.filter(|_| view.is_some()) {
-        let (errors, warnings) = text.problems;
-        if errors > 0 {
-            right.push(Text::styled(format!("E{errors}  "), theme.status_error));
-        }
-        if warnings > 0 {
-            right.push(Text::styled(format!("W{warnings}  "), theme.status_warning));
-        }
-        right.push(Text::raw(format!("{}  ", text.language)));
-        let (line, column) = text.caret;
-        let percent = (line + 1) * 100 / text.line_count.max(1);
+    let mut right: Vec<_> = status
+        .segments
+        .iter()
+        .map(|(words, role)| Text::styled(format!("{words}  "), role_style(*role, theme)))
+        .collect();
+    if let Some((line, column, percent)) = status.place {
         right.push(Text::styled(
-            format!("{}:{}", line + 1, column + 1),
+            format!("{line}:{column}"),
             theme.status_strong,
         ));
         right.push(Text::raw(format!("  {percent:>3}% ")));
     }
     let right = Line::from(right);
     let right_width = (right.width() as u16).min(area.width);
-    let mut left = vec![Text::styled(format!(" {badge} "), style), Text::raw(" ")];
-    if let Some(view) = view {
-        let document = view.document_id;
+    let mut left = vec![
+        Text::styled(format!(" {} ", status.mode.label()), badge),
+        Text::raw(" "),
+    ];
+    if let Some(document) = status.document {
         let mut marks = vec![];
-        if app.workspace().is_dirty(document) {
+        if document.dirty {
             marks.push(Text::styled(" [+]", theme.modified));
         }
-        if app.workspace().is_saving(document) {
+        if document.saving {
             marks.push(Text::raw(" saving…"));
         }
         // Long paths keep their file name and lose leading directories.
         let used = Line::from(left.clone()).width() + Line::from(marks.clone()).width();
         let room = usize::from(area.width).saturating_sub(usize::from(right_width) + used + 2);
-        let path = file_label(runtime, document, true);
-        left.push(Text::styled(tail(&path, room), theme.status_strong));
+        left.push(Text::styled(
+            tail(&document.path, room),
+            theme.status_strong,
+        ));
         left.extend(marks);
     }
     buf.set_line(
@@ -805,6 +826,19 @@ fn status(
         area.width.saturating_sub(right_width + 1),
     );
     buf.set_line(area.right() - right_width, area.y, &right, right_width);
+}
+/// The style of a piece of the status line or the message row.
+fn role_style(role: Role, theme: &Theme) -> Style {
+    match role {
+        Role::Plain => Style::new(),
+        Role::Key => theme.key,
+        Role::Modified => theme.modified,
+        Role::Detail => theme.detail,
+        Role::Severity(crate::application::Severity::Error) => theme.status_error,
+        Role::Severity(crate::application::Severity::Warning) => theme.status_warning,
+        Role::Severity(severity) => theme.severity(severity),
+        Role::Face(face) => face.map_or(theme.status, |face| theme.status.patch(theme.face(face))),
+    }
 }
 
 /// The end of `text` within `width` cells, marked with `…` when cut.
@@ -834,39 +868,22 @@ fn message(
     area: Rect,
     runtime: &Runtime,
     theme: &Theme,
-    text: Option<&layout::Frame>,
+    text: Option<&TextFrame>,
 ) -> Option<Position> {
     let width = usize::from(area.width);
-    match runtime.layer() {
-        Some(
-            Layer::Search { .. }
-            | Layer::Replace(_)
-            | Layer::Saving(_)
-            | Layer::Labels(_)
-            | Layer::Resize(_),
-        ) => {
-            let presentation = runtime.layer().unwrap().presentation();
-            let (row, cursor) = layout::prompt_row(&presentation, width);
+    match content::message(runtime, text) {
+        Message::Prompt(presentation) => {
+            let (row, cursor) = screen::prompt_row(&presentation, width);
             spans(buf, area.x, area.y, area.width, &row, theme.text, theme);
             cursor.map(|x| Position::new(area.x + x.min(width.saturating_sub(1)) as u16, area.y))
         }
-        _ => {
-            // A message outranks the note under the caret, which comes back
-            // with the next key.
-            let note = text
-                .and_then(|text| text.note.as_ref())
-                .filter(|_| runtime.message().is_empty());
-            let hint = runtime.hint().filter(|_| runtime.message().is_empty());
-            let (words, style) = match (hint, note) {
-                (Some(words), _) => (words, theme.detail),
-                (None, Some((severity, words))) => (
-                    words.lines().next().unwrap_or(""),
-                    theme.severity(*severity),
-                ),
-                (None, None) => (runtime.message(), theme.text),
+        Message::Words(words, role) => {
+            let style = match role {
+                Role::Plain => theme.text,
+                Role::Severity(severity) => theme.severity(severity),
+                role => role_style(role, theme),
             };
-            let row = layout::plain(words, 0, width);
-            buf.set_stringn(area.x, area.y, row, width, style);
+            buf.set_stringn(area.x, area.y, screen::plain(words, 0, width), width, style);
             None
         }
     }
@@ -949,7 +966,7 @@ fn command_line(
     let info = Line::from(info);
     let info_width = (info.width() as u16 + 1).min(area.width / 2);
     let field = Rect::new(area.x, area.y, area.width - info_width, 1);
-    let (input, column) = layout::prompt_row(&line.field(), usize::from(field.width));
+    let (input, column) = screen::prompt_row(&line.field(), usize::from(field.width));
     spans(
         buf,
         field.x,
@@ -982,7 +999,7 @@ fn command_line(
         };
         let width = area.width.saturating_sub(2);
         let label =
-            layout::candidate_row(row, None, row.candidate.payload.detail, usize::from(width));
+            screen::candidate_row(row, None, row.candidate.payload.detail, usize::from(width));
         spans(buf, area.x + 2, y, width, &label, base, theme);
     }
     column.map(|x| {
@@ -1047,7 +1064,7 @@ fn key_hints(buf: &mut Buffer, areas: &Areas, runtime: &Runtime, theme: &Theme) 
                 .key
                 .patch(Style::new().bg(theme.panel.bg.unwrap_or_default())),
         );
-        let doc = layout::plain(doc, 0, column_width - key_width - 2);
+        let doc = screen::plain(doc, 0, column_width - key_width - 2);
         buf.set_string(x + key_width as u16 + 2, y, doc, theme.panel);
     }
 }
@@ -1055,11 +1072,11 @@ fn key_hints(buf: &mut Buffer, areas: &Areas, runtime: &Runtime, theme: &Theme) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::interaction::{Command, KeyStroke, UserInput};
+    use crate::interaction::{Command, EditMode, KeyStroke, UserInput};
 
     /// A frame as a frontend draws it: measured, prepared, then rendered.
     fn draw(runtime: &mut Runtime, width: u16, height: u16) -> Buffer {
-        let mut presenter = super::super::Presenter::new(false);
+        let mut presenter = Presenter::new(false);
         presenter.measure(runtime, width, height);
         presenter.prepare(runtime, width, height).unwrap();
         let mut buffer = Buffer::empty(Rect::new(0, 0, width, height));
@@ -1232,10 +1249,10 @@ mod tests {
 
     #[test]
     fn wrapping_breaks_at_spaces_and_inside_long_words() {
-        assert_eq!(layout::wrap("aaa bbb ccc", 7), ["aaa bbb", "ccc"]);
-        assert_eq!(layout::wrap("a\n\nb", 7), ["a", "", "b"]);
+        assert_eq!(screen::wrap("aaa bbb ccc", 7), ["aaa bbb", "ccc"]);
+        assert_eq!(screen::wrap("a\n\nb", 7), ["a", "", "b"]);
         assert_eq!(
-            layout::wrap("abcdefghij kl", 4),
+            screen::wrap("abcdefghij kl", 4),
             ["abcd", "efgh", "ij", "kl"]
         );
     }
@@ -1412,9 +1429,18 @@ mod tests {
 
         // A click goes by the text: on a hint, to the character after it.
         let width = areas.text(&r).width;
-        assert_eq!(layout::offset_at(r.app(), width, 0, 14), Some(8));
-        assert_eq!(layout::offset_at(r.app(), width, 0, 6), Some(5));
-        assert_eq!(layout::offset_at(r.app(), width, 0, 2), Some(2));
+        assert_eq!(
+            screen::offset_at(r.app(), &screen::Cells, width.into(), 0, 14),
+            Some(8)
+        );
+        assert_eq!(
+            screen::offset_at(r.app(), &screen::Cells, width.into(), 0, 6),
+            Some(5)
+        );
+        assert_eq!(
+            screen::offset_at(r.app(), &screen::Cells, width.into(), 0, 2),
+            Some(2)
+        );
 
         r.command(Command::Named("set inlay-hints false".into()));
         assert!(screen(&mut r, 40, 8).contains("call(1, 2)"));
@@ -1441,22 +1467,6 @@ mod tests {
         assert!(!text.contains("one ["), "{text}");
         keys(&mut r, "l");
         assert!(!screen(&mut r, 40, 8).contains("[2/3]"));
-    }
-
-    #[test]
-    fn semantic_tokens_replace_the_category_under_them() {
-        use crate::syntax::Category::{Function, Keyword, Type};
-        let base = [(0..4, Keyword), (6..10, Keyword)];
-        assert_eq!(
-            layout::overlay(&base, &[(2..3, Type), (6..8, Function)]),
-            [
-                (0..2, Keyword),
-                (2..3, Type),
-                (3..4, Keyword),
-                (6..8, Function),
-                (8..10, Keyword)
-            ]
-        );
     }
 
     #[test]

@@ -3,30 +3,15 @@
 //! caret, a drag selects, and the wheel scrolls an open popup, else the
 //! window under it. Dragging the column between side-by-side windows, or
 //! the title row of a window below another, moves that edge.
-use super::{layout, view};
+use super::view;
 use crate::{
     application::{Axis, ViewId},
     interaction::{Pointer, UserInput},
     runtime::Runtime,
+    screen::{self, Cells},
 };
 
-/// What the pointer did. Presses and drags are of the primary button;
-/// other buttons are not reported.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MouseKind {
-    Press,
-    Drag,
-    Release,
-    ScrollUp,
-    ScrollDown,
-}
-/// A pointer event at a cell of the screen.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct MouseEvent {
-    pub kind: MouseKind,
-    pub column: u16,
-    pub row: u16,
-}
+use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
 #[derive(Default)]
 pub(super) struct Mouse {
@@ -64,11 +49,11 @@ impl Mouse {
             let text = areas.text(runtime);
             let row = event.row as isize - text.y as isize;
             let column = event.column.saturating_sub(text.x);
-            layout::offset_at(runtime.app(), text.width, row, column.into())
+            screen::offset_at(runtime.app(), &Cells, text.width.into(), row, column.into())
         };
         let window = areas.window_at(event.column, event.row);
         match event.kind {
-            MouseKind::Press => {
+            MouseEventKind::Down(MouseButton::Left) => {
                 self.press = None;
                 self.edge =
                     edge_at(areas, event.column, event.row).filter(|_| runtime.layer().is_none());
@@ -96,7 +81,7 @@ impl Mouse {
                     runtime.input(UserInput::Pointer(Pointer::Click(offset)));
                 }
             }
-            MouseKind::Drag if self.edge.is_some() => {
+            MouseEventKind::Drag(MouseButton::Left) if self.edge.is_some() => {
                 let (view, axis) = self.edge.unwrap();
                 let Some(area) = runtime.app().window_area(view) else {
                     return;
@@ -114,7 +99,7 @@ impl Mouse {
                     runtime.input(UserInput::Pointer(Pointer::Edge { view, axis, delta }));
                 }
             }
-            MouseKind::Drag => {
+            MouseEventKind::Drag(MouseButton::Left) => {
                 let Some(anchor) = self.press else {
                     return;
                 };
@@ -126,42 +111,43 @@ impl Mouse {
                     runtime.input(UserInput::Pointer(Pointer::Drag { anchor, head }));
                 }
             }
-            MouseKind::Release => {
+            MouseEventKind::Up(_) => {
                 self.press = None;
                 self.edge = None;
             }
-            MouseKind::ScrollUp | MouseKind::ScrollDown
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
                 if runtime.layer().is_none() && runtime.popup().is_some() =>
             {
-                let lines = if event.kind == MouseKind::ScrollUp {
+                let lines = if event.kind == MouseEventKind::ScrollUp {
                     -3
                 } else {
                     3
                 };
                 runtime.scroll_popup(lines);
             }
-            MouseKind::ScrollUp | MouseKind::ScrollDown if runtime.layer().is_none() => {
+            MouseEventKind::ScrollUp | MouseEventKind::ScrollDown if runtime.layer().is_none() => {
                 let Some(window) = window else {
                     return;
                 };
                 let document = runtime.app().view(window.view).map(|view| view.document_id);
                 let step = runtime.app().options().int(document, "scroll-lines") as isize;
-                let lines = if event.kind == MouseKind::ScrollUp {
+                let lines = if event.kind == MouseEventKind::ScrollUp {
                     -step
                 } else {
                     step
                 };
                 let active = runtime.app().active_view() == Some(window.view);
-                let Some((viewport, reveal)) = layout::scroll(
+                let Some((viewport, reveal)) = screen::scroll(
                     runtime.app(),
                     window.view,
+                    &Cells,
                     lines,
-                    window.text.width,
+                    window.text.width.into(),
                     window.text.height,
                 ) else {
                     return;
                 };
-                runtime.update_viewport(viewport.view, viewport.anchor, viewport.horizontal_column);
+                runtime.update_viewport(viewport.view, viewport.anchor, viewport.horizontal_scroll);
                 // Other windows keep their carets; focusing one later
                 // scrolls back to its caret.
                 if let Some(offset) = reveal.filter(|_| active) {
@@ -177,9 +163,15 @@ impl Mouse {
 mod tests {
     use super::*;
     use crate::interaction::{Command, KeyStroke};
+    use crossterm::event::KeyModifiers;
 
-    fn event(kind: MouseKind, column: u16, row: u16) -> MouseEvent {
-        MouseEvent { kind, column, row }
+    fn event(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
     }
     fn drag(runtime: &mut Runtime, from: (u16, u16), to: &[(u16, u16)]) {
         let mut mouse = Mouse::default();
@@ -189,13 +181,25 @@ mod tests {
             areas
         };
         let a = areas(runtime);
-        mouse.handle(event(MouseKind::Press, from.0, from.1), runtime, &a);
+        mouse.handle(
+            event(MouseEventKind::Down(MouseButton::Left), from.0, from.1),
+            runtime,
+            &a,
+        );
         for &(column, row) in to {
             let a = areas(runtime);
-            mouse.handle(event(MouseKind::Drag, column, row), runtime, &a);
+            mouse.handle(
+                event(MouseEventKind::Drag(MouseButton::Left), column, row),
+                runtime,
+                &a,
+            );
         }
         let a = areas(runtime);
-        mouse.handle(event(MouseKind::Release, 0, 0), runtime, &a);
+        mouse.handle(
+            event(MouseEventKind::Up(MouseButton::Left), 0, 0),
+            runtime,
+            &a,
+        );
     }
     #[test]
     fn dragging_a_separator_or_a_title_moves_that_edge() {

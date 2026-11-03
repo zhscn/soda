@@ -177,7 +177,7 @@ impl SearchSession {
             Event::SetViewport {
                 view: self.view,
                 anchor: self.viewport.anchor.resolve(document)?,
-                horizontal_column: self.viewport.horizontal_column,
+                horizontal_scroll: self.viewport.horizontal_scroll,
             },
         ])
     }

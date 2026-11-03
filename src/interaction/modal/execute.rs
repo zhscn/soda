@@ -349,7 +349,7 @@ impl Layers {
                 response.events.push(Event::SetViewport {
                     view: at.view,
                     anchor: ByteOffset(at.text.line_start(top).unwrap()),
-                    horizontal_column: view.viewport.horizontal_column,
+                    horizontal_scroll: view.viewport.horizontal_scroll,
                 });
             }
             Action::HalfPage { down } => return self.half_page(app, &at, down, response),
@@ -954,7 +954,7 @@ impl Layers {
         response.events.push(Event::SetViewport {
             view: at.view,
             anchor: ByteOffset(at.text.line_start(top).unwrap()),
-            horizontal_column: view.viewport.horizontal_column,
+            horizontal_scroll: view.viewport.horizontal_scroll,
         });
         let target = if down {
             (line + rows).min(last)

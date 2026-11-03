@@ -278,7 +278,7 @@ fn help_resize_does_not_apply_editing_viewport_feedback() {
     runtime.input(key(KeyCode::Esc));
     runtime.update_viewport(view, before.anchor.offset, 20);
     assert_eq!(
-        runtime.app.view(view).unwrap().viewport.horizontal_column,
+        runtime.app.view(view).unwrap().viewport.horizontal_scroll,
         20
     );
 }

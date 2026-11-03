@@ -126,7 +126,7 @@ fn cancel_restores_reversed_selection_viewport_and_previous_query_after_edit() {
     app.dispatch(Event::SetViewport {
         view,
         anchor: ByteOffset(4),
-        horizontal_column: 7,
+        horizontal_scroll: 7,
     })
     .unwrap();
     let mut layers = search(&app, view);
@@ -158,7 +158,7 @@ fn cancel_restores_reversed_selection_viewport_and_previous_query_after_edit() {
         app.view(view).unwrap().viewport.anchor.offset,
         ByteOffset(7)
     );
-    assert_eq!(app.view(view).unwrap().viewport.horizontal_column, 7);
+    assert_eq!(app.view(view).unwrap().viewport.horizontal_scroll, 7);
     assert_eq!(
         app.workspace()
             .editor(document)
@@ -180,14 +180,14 @@ fn empty_or_missing_query_restores_origin_and_viewport() {
     app.dispatch(Event::SetViewport {
         view,
         anchor: ByteOffset(0),
-        horizontal_column: 2,
+        horizontal_scroll: 2,
     })
     .unwrap();
     let mut layers = search(&app, view);
     input(&mut layers, &mut app, Input::Paste("foo".into()));
     input(&mut layers, &mut app, Input::Text(InputKey::Char('x')));
     assert_eq!(selection(&app, view), Selection::caret(0));
-    assert_eq!(app.view(view).unwrap().viewport.horizontal_column, 2);
+    assert_eq!(app.view(view).unwrap().viewport.horizontal_scroll, 2);
     for _ in 0..4 {
         input(
             &mut layers,

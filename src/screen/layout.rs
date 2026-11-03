@@ -1,17 +1,131 @@
+//! Layout of a view's text area: which lines and parts of lines its rows
+//! show, where each piece of text goes across a row, where the caret is,
+//! and back from a place on screen to an offset. Rows are lines of one
+//! height; across a row, text is measured by the frontend (`Measure`), so a
+//! terminal lays it out in cells and a graphical frontend in pixels, by the
+//! same rules.
 use super::highlight::Highlighter;
 use crate::{
     application::{Application, Face, Severity, ViewId},
-    core::{
-        ByteOffset, LogicalColumn, column_width, logical_column_at, offset_at_logical_column,
-        step_grapheme,
-    },
+    core::{ByteOffset, column_width, logical_column_at, step_grapheme},
     syntax::Category,
 };
 use std::num::NonZeroUsize;
 use unicode_segmentation::UnicodeSegmentation;
 
+/// Which font a piece of text is measured and drawn in.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Font {
+    /// The document's text, and what stands for it: digits over it, the
+    /// rest of a completion before it is taken.
+    Text,
+    /// What is not in the text: inlay hints, and notes and indicators
+    /// after a line.
+    Hint,
+}
+/// Widths of text as a frontend draws it, in the frontend's own units:
+/// terminal cells, or fractions of a pixel. Text is laid out a grapheme
+/// cluster at a time, each as wide as this says, so the clusters of a span
+/// are drawn one after another at these widths.
+pub trait Measure {
+    /// The width of a grapheme cluster other than a tab.
+    fn width(&self, cluster: &str, font: Font) -> usize;
+    /// The width of a column of the text font. Tab stops, the ruler and
+    /// the caret at the end of a line count in columns.
+    fn column(&self) -> usize;
+    /// The width of each printable ASCII character in the text font, when
+    /// they are all as wide, so that a line of ASCII is measured a byte at
+    /// a time; control characters are as wide as nothing.
+    fn ascii(&self) -> Option<usize> {
+        None
+    }
+}
+/// Terminal cells, as wide as the core counts columns.
+pub struct Cells;
+impl Measure for Cells {
+    fn width(&self, cluster: &str, _: Font) -> usize {
+        column_width(cluster, 0, NonZeroUsize::MIN)
+    }
+    fn column(&self) -> usize {
+        1
+    }
+    fn ascii(&self) -> Option<usize> {
+        Some(1)
+    }
+}
+/// The width of a run of text in `font`, a cluster at a time; tabs in it
+/// count as other control characters, as nothing.
+pub(crate) fn text_width(measure: &dyn Measure, text: &str, font: Font) -> usize {
+    text.graphemes(true)
+        .filter(|cluster| *cluster != "\t")
+        .map(|cluster| measure.width(cluster, font))
+        .sum()
+}
+/// Lays a line out from its start, a cluster at a time, with a tab stop
+/// every `stop` units.
+#[derive(Clone, Copy)]
+struct Walk<'a> {
+    measure: &'a dyn Measure,
+    stop: usize,
+}
+impl<'a> Walk<'a> {
+    fn new(measure: &'a dyn Measure, tab: NonZeroUsize) -> Self {
+        Self {
+            measure,
+            stop: (tab.get() * measure.column()).max(1),
+        }
+    }
+    /// The width of a cluster that starts `x` from the line's start.
+    fn advance(&self, cluster: &str, x: usize) -> usize {
+        if cluster == "\t" {
+            self.stop - x % self.stop
+        } else {
+            self.measure.width(cluster, Font::Text)
+        }
+    }
+    /// How far from the line's start `byte` of its text is.
+    fn x_of(&self, text: &str, byte: usize) -> usize {
+        let mut byte = byte.min(text.len());
+        while !text.is_char_boundary(byte) {
+            byte -= 1;
+        }
+        let prefix = &text[..byte];
+        if let Some(width) = self.measure.ascii()
+            && prefix.is_ascii()
+        {
+            return prefix.bytes().fold(0, |x, b| match b {
+                b'\t' => x + self.stop - x % self.stop,
+                b if b < 0x20 || b == 0x7f => x,
+                _ => x + width,
+            });
+        }
+        prefix
+            .graphemes(true)
+            .fold(0, |x, cluster| x + self.advance(cluster, x))
+    }
+    /// Where the cluster `x` from the line's start begins; past the end of
+    /// the text, the end before the line break.
+    fn byte_at(&self, text: &str, x: usize) -> usize {
+        let content = text.trim_end_matches(['\n', '\r']);
+        let mut at = 0;
+        for (offset, cluster) in content.grapheme_indices(true) {
+            let width = self.advance(cluster, at);
+            if x < at + width {
+                return offset;
+            }
+            at += width;
+        }
+        content.len()
+    }
+}
+
+/// A piece of a row in one style. Its text fills the start of it, and the
+/// rest is blank, as a tab is or a wide character cut at the edge.
 #[derive(Debug)]
-pub(super) struct Span {
+pub(crate) struct Span {
+    /// Where it starts, from the left of its area, and how wide it is.
+    pub x: usize,
+    pub width: usize,
     pub text: String,
     pub selected: bool,
     pub matched: bool,
@@ -25,7 +139,7 @@ pub(super) struct Span {
     pub inlay: bool,
 }
 /// One screen row: the zero-based line it shows and its clipped text.
-pub(super) struct Row {
+pub(crate) struct Row {
     pub line: usize,
     /// A later row of a wrapped line, which has no number.
     pub continued: bool,
@@ -34,25 +148,27 @@ pub(super) struct Row {
     pub spans: Vec<Span>,
 }
 /// The text area of the active view, positioned relative to its top left.
-pub(super) struct Frame {
+pub(crate) struct Frame {
     pub rows: Vec<Row>,
-    pub cursor: Option<(u16, u16)>,
+    /// Across and down: in measured units from the left, and in rows.
+    pub cursor: Option<(usize, usize)>,
     /// Zero-based line and logical column of the caret.
     pub caret: (usize, usize),
     pub line_count: usize,
     /// The highlighting language's display name.
     pub language: String,
-    /// The column of the ruler on screen, when it is in view.
-    pub ruler: Option<u16>,
+    /// Where the ruler is from the left, when it is in view.
+    pub ruler: Option<usize>,
     /// The note to show for the caret: the worst at it, else on its line.
     pub note: Option<(crate::application::Severity, String)>,
     /// Errors and warnings in the document.
     pub problems: (usize, usize),
 }
 
-/// Clip by terminal cells. Partially visible tabs/wide graphemes become spaces;
-/// control characters never pass through to the terminal command stream.
-pub(super) fn row(
+/// Clip by terminal cells. Partially visible tabs/wide graphemes are
+/// blank; control characters never pass through to the terminal command
+/// stream.
+pub(crate) fn row(
     text: &str,
     byte_start: usize,
     selection: std::ops::Range<usize>,
@@ -71,11 +187,11 @@ pub(super) fn row(
         faces: &[],
         inlays: &[],
     };
-    styled_row(text, byte_start, marks, left, width, tab)
+    styled_row(text, byte_start, marks, left, width, Walk::new(&Cells, tab))
 }
 /// What the modal layer shows over the text of the active window.
 #[derive(Default)]
-pub(super) struct Overlay {
+pub(crate) struct Overlay {
     /// The other selections of Beacon.
     pub beacons: Vec<std::ops::Range<usize>>,
     /// Digits that extend the selection, drawn over the character there.
@@ -98,32 +214,35 @@ struct Marks<'a> {
     whitespace: bool,
     /// Highlighted ranges in the row, ordered by start.
     faces: &'a [(std::ops::Range<usize>, crate::application::Face)],
-    /// Hints by logical column, in order. They take cells from the row.
+    /// Hints in order of where they stand. They take room from the row.
     inlays: &'a [Inlay],
 }
-/// A hint at a logical column.
+/// A hint, before the character `x` from its line's start; `usize::MAX`
+/// puts it after the line.
 #[derive(Clone)]
 struct Inlay {
-    column: usize,
+    x: usize,
     text: String,
     face: Option<Face>,
+    font: Font,
 }
-fn cells_of(text: &str) -> usize {
-    unicode_width::UnicodeWidthStr::width(text)
-}
-/// What shows of a hint within `room` cells.
-fn clipped(text: &str, room: usize) -> String {
+/// What shows of a text within `room`, a cluster at a time.
+fn clipped(measure: &dyn Measure, text: &str, room: usize, font: Font) -> (String, usize) {
     let mut used = 0;
-    text.chars()
-        .take_while(|ch| {
-            used += unicode_width::UnicodeWidthChar::width(*ch).unwrap_or(0);
-            used <= room
-        })
-        .collect()
+    let mut shown = String::new();
+    for cluster in text.graphemes(true) {
+        let width = measure.width(cluster, font);
+        if used + width > room {
+            break;
+        }
+        used += width;
+        shown.push_str(cluster);
+    }
+    (shown, used)
 }
 /// A row's text with categories of `over` replacing those of `base`; both
 /// are ordered and disjoint.
-pub(super) fn overlay(
+pub(crate) fn overlay(
     base: &[(std::ops::Range<usize>, Category)],
     over: &[(std::ops::Range<usize>, Category)],
 ) -> Vec<(std::ops::Range<usize>, Category)> {
@@ -145,13 +264,15 @@ pub(super) fn overlay(
     between(at, usize::MAX, &mut runs);
     runs
 }
+/// The part of a line from `left` that fits in `width`, as spans placed
+/// from the area's left edge.
 fn styled_row(
     text: &str,
     byte_start: usize,
     marks: Marks,
     left: usize,
     width: usize,
-    tab: NonZeroUsize,
+    walk: Walk,
 ) -> Vec<Span> {
     let Marks {
         selection,
@@ -164,27 +285,41 @@ fn styled_row(
         faces,
         inlays,
     } = marks;
+    let measure = walk.measure;
     // Spaces and tabs from here to the end of the line trail.
     let trailing = text.trim_end_matches(['\n', '\r']);
     let trailing = trailing.trim_end_matches([' ', '\t']).len();
     let mut spans = Vec::<Span>::new();
+    // Whether the last span's text fills it, so that more text can follow
+    // in it.
+    let mut filled = false;
+    // Where the next span starts on screen.
+    let mut at = 0;
     let mut next_category = 0;
-    let mut column = 0;
+    let mut x = 0;
     let mut right = left.saturating_add(width);
     let mut next_inlay = 0;
-    // Each hint shown leaves that many fewer cells for the text.
-    let mut hint = |until: usize, column: usize, right: &mut usize, spans: &mut Vec<Span>| {
-        while let Some(inlay) = inlays.get(next_inlay).filter(|i| i.column <= until) {
+    // Each hint shown leaves that much less room for the text.
+    let mut hint = |until: usize,
+                    x: usize,
+                    right: &mut usize,
+                    at: &mut usize,
+                    spans: &mut Vec<Span>,
+                    filled: &mut bool| {
+        while let Some(inlay) = inlays.get(next_inlay).filter(|i| i.x <= until) {
             next_inlay += 1;
-            if inlay.column < left {
+            if inlay.x < left {
                 continue;
             }
-            let shown = clipped(&inlay.text, right.saturating_sub(column.max(left)));
+            let room = right.saturating_sub(x.max(left));
+            let (shown, used) = clipped(measure, &inlay.text, room, inlay.font);
             if shown.is_empty() {
                 continue;
             }
-            *right -= cells_of(&shown);
+            *right -= used;
             spans.push(Span {
+                x: *at,
+                width: used,
                 text: shown,
                 selected: false,
                 matched: false,
@@ -194,40 +329,44 @@ fn styled_row(
                 face: inlay.face,
                 inlay: inlay.face.is_none(),
             });
+            *at += used;
+            *filled = false;
         }
     };
     for (offset, cluster) in text.grapheme_indices(true) {
-        hint(column, column, &mut right, &mut spans);
-        let end = column_width(cluster, column, tab);
-        let cells = end - column;
-        if column >= right {
+        hint(x, x, &mut right, &mut at, &mut spans, &mut filled);
+        let end = x + walk.advance(cluster, x);
+        if x >= right {
             break;
         }
-        if end > left && cells > 0 {
-            let visible = end.min(right).saturating_sub(column.max(left));
+        if end > left && end > x {
+            let visible = end.min(right).saturating_sub(x.max(left));
+            let whole = x >= left && end <= right;
             let marked = whitespace && (cluster == "\t" || (cluster == " " && offset >= trailing));
             let digit = digits
                 .iter()
                 .find(|(place, _)| *place == byte_start + offset)
                 .map(|(_, digit)| *digit);
-            let rendered = if let Some(digit) = digit {
-                format!("{digit}{}", " ".repeat(visible.saturating_sub(1)))
-            } else if marked && column >= left {
+            // Text that fills its cluster's width can run on with more.
+            let (shown, fills) = if let Some(digit) = digit {
+                (digit.to_string(), false)
+            } else if marked && x >= left {
                 let mark = if cluster == "\t" { "»" } else { "·" };
-                format!("{mark}{}", " ".repeat(visible - 1))
-            } else if cluster == "\t" || column < left || end > right {
-                " ".repeat(visible)
+                let fills = measure.width(mark, Font::Text) == visible;
+                (mark.to_owned(), fills)
+            } else if cluster == "\t" || !whole {
+                (String::new(), false)
             } else if cluster.chars().any(char::is_control) {
-                "�".into()
+                ("�".into(), false)
             } else {
-                cluster.into()
+                (cluster.to_owned(), true)
             };
-            let at = byte_start + offset;
+            let start = byte_start + offset;
             let selected = (!selection.is_empty()
-                && at < selection.end
-                && at + cluster.len() > selection.start)
+                && start < selection.end
+                && start + cluster.len() > selection.start)
                 || beacons.iter().any(|beacon| {
-                    at < beacon.end.max(beacon.start + 1) && at + cluster.len() > beacon.start
+                    start < beacon.end.max(beacon.start + 1) && start + cluster.len() > beacon.start
                 });
             let matched = matches
                 .iter()
@@ -250,6 +389,7 @@ fn styled_row(
                 .find(|(range, _)| range.start <= offset && offset < range.end)
                 .map(|(_, face)| *face)
                 .or(digit.map(|_| Face::Todo));
+            let blank = shown.is_empty();
             if let Some(last) = spans.last_mut().filter(|last| {
                 last.selected == selected
                     && last.matched == matched
@@ -258,11 +398,15 @@ fn styled_row(
                     && last.whitespace == marked
                     && last.face == face
                     && !last.inlay
+                    && ((filled && fills) || (last.text.is_empty() && blank))
             }) {
-                last.text.push_str(&rendered);
+                last.text.push_str(&shown);
+                last.width += visible;
             } else {
                 spans.push(Span {
-                    text: rendered,
+                    x: at,
+                    width: visible,
+                    text: shown,
                     selected,
                     matched,
                     detail: secondary,
@@ -271,18 +415,20 @@ fn styled_row(
                     face,
                     inlay: false,
                 });
+                filled = fills;
             }
+            at += visible;
         }
-        column = end;
+        x = end;
     }
-    if column < right {
-        hint(usize::MAX, column, &mut right, &mut spans);
+    if x < right {
+        hint(usize::MAX, x, &mut right, &mut at, &mut spans, &mut filled);
     }
     spans
 }
 /// A candidate label with its matched ranges; text from `detail` on is
 /// secondary.
-pub(super) fn candidate_row<T>(
+pub(crate) fn candidate_row<T>(
     row: &crate::interaction::picker::MatchedCandidate<T>,
     selected: Option<crate::interaction::picker::CandidateKey>,
     detail: Option<usize>,
@@ -305,11 +451,12 @@ pub(super) fn candidate_row<T>(
         faces: &[],
         inlays: &[],
     };
-    styled_row(text, 0, marks, 0, width, NonZeroUsize::new(4).unwrap())
+    let walk = Walk::new(&Cells, NonZeroUsize::new(4).unwrap());
+    styled_row(text, 0, marks, 0, width, walk)
 }
 /// Lines of `text` at most `width` cells wide, broken at spaces where they
 /// can be.
-pub(super) fn wrap(text: &str, width: usize) -> Vec<String> {
+pub(crate) fn wrap(text: &str, width: usize) -> Vec<String> {
     let mut lines = vec![];
     for line in text.lines() {
         let mut current = String::new();
@@ -342,52 +489,59 @@ pub(super) fn wrap(text: &str, width: usize) -> Vec<String> {
     }
     lines
 }
-pub(super) fn plain(text: &str, left: usize, width: usize) -> String {
+/// A span's text with its blank rest as spaces, as a terminal shows it.
+pub(crate) fn padded(span: &Span) -> String {
+    let used = text_width(&Cells, &span.text, Font::Text);
+    let mut text = span.text.clone();
+    text.extend(std::iter::repeat_n(' ', span.width.saturating_sub(used)));
+    text
+}
+pub(crate) fn plain(text: &str, left: usize, width: usize) -> String {
     row(text, 0, 0..0, left, width, NonZeroUsize::new(4).unwrap())
-        .into_iter()
-        .map(|span| span.text)
+        .iter()
+        .map(padded)
         .collect()
 }
 
 /// The part of a line one screen row shows: where it starts in the line's
-/// text and the logical columns it covers.
+/// text, and how far from the line's start it begins and ends.
 #[derive(Clone, Debug, PartialEq)]
 struct Segment {
     start: usize,
-    columns: std::ops::Range<usize>,
+    xs: std::ops::Range<usize>,
 }
-/// Splits a line into screen rows `width` cells wide, breaking after the
-/// last space that fits and inside a word only when none does. Without a
-/// width the line is one row, cut at the edge and scrolled sideways.
-fn segments(text: &str, width: Option<usize>, tab: NonZeroUsize) -> Vec<Segment> {
+/// Splits a line into screen rows `width` wide, breaking after the last
+/// space that fits and inside a word only when none does. Without a width
+/// the line is one row, cut at the edge and scrolled sideways.
+fn segments(text: &str, width: Option<usize>, walk: Walk) -> Vec<Segment> {
     let Some(width) = width.map(|w| w.max(1)) else {
         return vec![Segment {
             start: 0,
-            columns: 0..usize::MAX,
+            xs: 0..usize::MAX,
         }];
     };
     let mut out = vec![];
     let (mut start, mut first) = (0, 0);
     let mut space = None;
-    let mut column = 0;
+    let mut x = 0;
     for (offset, cluster) in text.grapheme_indices(true) {
-        let end = column_width(cluster, column, tab);
-        while end - first > width && column > first {
-            let (at, at_column) = space.take().unwrap_or((offset, column));
+        let end = x + walk.advance(cluster, x);
+        while end - first > width && x > first {
+            let (at, at_x) = space.take().unwrap_or((offset, x));
             out.push(Segment {
                 start,
-                columns: first..at_column,
+                xs: first..at_x,
             });
-            (start, first) = (at, at_column);
+            (start, first) = (at, at_x);
         }
         if cluster == " " || cluster == "\t" {
             space = Some((offset + cluster.len(), end));
         }
-        column = end;
+        x = end;
     }
     out.push(Segment {
         start,
-        columns: first..column.max(first),
+        xs: first..x.max(first),
     });
     out
 }
@@ -421,7 +575,7 @@ type Place = (usize, usize);
 /// How one view's lines meet its text area.
 struct Rows<'a> {
     snapshot: &'a crate::core::Snapshot,
-    tab: NonZeroUsize,
+    walk: Walk<'a>,
     wrap: Option<usize>,
     /// Lines shown, the empty one after a final newline too: the caret can
     /// go there, as at the end of an Emacs buffer.
@@ -432,13 +586,18 @@ struct Rows<'a> {
     measured: std::cell::RefCell<std::collections::HashMap<usize, std::rc::Rc<[Segment]>>>,
 }
 impl<'a> Rows<'a> {
-    fn new(app: &'a Application, view: &crate::application::View, width: u16) -> Option<Self> {
+    fn new(
+        app: &'a Application,
+        view: &crate::application::View,
+        measure: &'a dyn Measure,
+        width: usize,
+    ) -> Option<Self> {
         let document = app.workspace().editor(view.document_id)?.model().document();
         let snapshot = document.snapshot();
         let wrap = app
             .options()
             .bool(Some(view.document_id), "wrap")
-            .then_some(usize::from(width))
+            .then_some(width)
             .filter(|_| {
                 let session = app
                     .workspace()
@@ -447,69 +606,73 @@ impl<'a> Rows<'a> {
                 let head = session.map_or(0, |session| session.state().selection().head);
                 !long_line_near(snapshot, &[view.viewport.anchor.offset.0, head])
             });
-        let tab = document.whitespace().tab_width;
+        let walk = Walk::new(measure, document.whitespace().tab_width);
         let mut inlays = std::collections::BTreeMap::<usize, Vec<Inlay>>::new();
         if app.options().bool(Some(view.document_id), "inlay-hints") {
             for (offset, text) in app.inlays(view.document_id) {
+                let offset = offset.min(snapshot.len_bytes());
                 let line = snapshot.line_of(offset)?;
-                let column = logical_column_at(snapshot, ByteOffset(offset), tab).ok()?.0;
+                let start = snapshot.line_start(line)?;
+                let x = walk.x_of(&snapshot.line(line)?, offset - start);
                 let text = text.chars().filter(|c| !c.is_control()).collect();
                 inlays.entry(line).or_default().push(Inlay {
-                    column,
+                    x,
                     text,
                     face: None,
+                    font: Font::Hint,
                 });
             }
         }
         Some(Self {
             snapshot,
-            tab,
+            walk,
             wrap,
             lines: snapshot.line_count(),
             inlays,
             measured: Default::default(),
         })
     }
-    /// The cells hints take from `left` up to a character at `column`. A
-    /// wrapped line keeps its hints at the end, so it has none to count.
-    fn hinted(&self, line: usize, left: usize, column: usize) -> usize {
+    /// The room hints take from `left` up to a character `x` from its
+    /// line's start. A wrapped line keeps its hints at the end, so it has
+    /// none to count.
+    fn hinted(&self, line: usize, left: usize, x: usize) -> usize {
         if self.wrap.is_some() {
             return 0;
         }
         let hints = self.inlays.get(&line).map_or(&[][..], Vec::as_slice);
         hints
             .iter()
-            .filter(|hint| (left..=column).contains(&hint.column))
-            .map(|hint| cells_of(&hint.text))
+            .filter(|hint| (left..=x).contains(&hint.x))
+            .map(|hint| text_width(self.walk.measure, &hint.text, hint.font))
             .sum()
     }
-    /// The logical column under a cell `cells` right of `left`; a cell of a
-    /// hint counts as the character after it.
-    fn unhinted(&self, line: usize, left: usize, cells: usize) -> usize {
+    /// How far from its line's start the character is that shows `across`
+    /// right of `left`; a hint counts as the character after it.
+    fn unhinted(&self, line: usize, left: usize, across: usize) -> usize {
         let mut used = 0;
         if self.wrap.is_none() {
             for hint in self.inlays.get(&line).into_iter().flatten() {
-                if hint.column < left {
+                if hint.x < left {
                     continue;
                 }
-                let start = hint.column - left + used;
-                if cells < start {
+                let start = hint.x - left + used;
+                if across < start {
                     break;
                 }
-                let width = cells_of(&hint.text);
-                if cells < start + width {
-                    return hint.column;
+                let width = text_width(self.walk.measure, &hint.text, hint.font);
+                if across < start + width {
+                    return hint.x;
                 }
                 used += width;
             }
         }
-        left + cells - used
+        left + across - used
     }
     /// A line's rows. Moving over rows asks for the same lines again and
     /// again, so each is measured once.
     fn segments(&self, line: usize) -> std::rc::Rc<[Segment]> {
         if self.wrap.is_none() {
-            return segments("", None, self.tab).into();
+            return segments("", None, self.walk).into();
         }
         self.measured
             .borrow_mut()
@@ -518,25 +681,31 @@ impl<'a> Rows<'a> {
                 segments(
                     &self.snapshot.line(line).unwrap_or_default(),
                     self.wrap,
-                    self.tab,
+                    self.walk,
                 )
                 .into()
             })
             .clone()
     }
-    /// The row showing `offset` and the logical column there.
+    /// The row showing `offset`, and how far from its line's start it is.
     fn place(&self, offset: usize) -> (Place, usize) {
         let offset = offset.min(self.snapshot.len_bytes());
         let line = self.snapshot.line_of(offset).unwrap().min(self.lines - 1);
-        let column =
-            logical_column_at(self.snapshot, ByteOffset(offset), self.tab).map_or(0, |c| c.0);
         let within = offset - self.snapshot.line_start(line).unwrap();
+        let x = self
+            .walk
+            .x_of(&self.snapshot.line(line).unwrap_or_default(), within);
         let row = self
             .segments(line)
             .iter()
             .rposition(|segment| segment.start <= within)
             .unwrap_or(0);
-        ((line, row), column)
+        ((line, row), x)
+    }
+    /// The offset of the character `x` from a line's start.
+    fn offset(&self, line: usize, x: usize) -> usize {
+        let text = self.snapshot.line(line).unwrap_or_default();
+        self.snapshot.line_start(line).unwrap() + self.walk.byte_at(&text, x)
     }
     /// The offset where a row starts.
     fn start(&self, (line, row): Place) -> usize {
@@ -591,10 +760,11 @@ impl<'a> Rows<'a> {
 
 /// Scroll only the active view. Byte anchors remain application-owned and map
 /// through document updates; this frontend resolves them into screen rows.
-pub(super) fn follow_caret(
+pub(crate) fn follow_caret(
     app: &Application,
     id: ViewId,
-    width: u16,
+    measure: &dyn Measure,
+    width: usize,
     rows: u16,
 ) -> Result<Option<ViewportAdjustment>, crate::application::Error> {
     let view = app.view(id).unwrap();
@@ -602,9 +772,8 @@ pub(super) fn follow_caret(
     let state = editor.model().session(view.session_id).unwrap().state();
     let snapshot = editor.model().document().snapshot();
     let head = state.selection().head;
-    let layout = Rows::new(app, view, width).unwrap();
-    let tab = layout.tab;
-    let (place, column) = layout.place(head);
+    let layout = Rows::new(app, view, measure, width).unwrap();
+    let (place, x) = layout.place(head);
     let rows = usize::from(rows);
     let (mut top, _) = layout.place(view.viewport.anchor.offset.0);
     if rows > 0 {
@@ -614,138 +783,146 @@ pub(super) fn follow_caret(
             top = layout.step(place, 1 - rows as isize);
         }
     }
-    let mut left = view.viewport.horizontal_column;
+    let mut left = view.viewport.horizontal_scroll;
     if layout.wrap.is_some() {
         left = 0;
     } else if width > 0 {
-        if column < left {
-            left = column;
+        if x < left {
+            left = x;
         }
         let next = step_grapheme(snapshot, ByteOffset(head), true)?;
         let cluster = snapshot.byte_slice(head..next.0).unwrap().to_string();
-        let caret_cells = (column_width(&cluster, column, tab) - column)
-            .max(1)
-            .min(usize::from(width));
+        let caret = layout
+            .walk
+            .advance(&cluster, x)
+            .max(measure.column())
+            .min(width);
         let (line, _) = place;
-        let caret_end = column.saturating_add(caret_cells) + layout.hinted(line, left, column);
-        if caret_end > left.saturating_add(usize::from(width)) {
-            left = caret_end - usize::from(width);
+        let caret_end = x.saturating_add(caret) + layout.hinted(line, left, x);
+        if caret_end > left.saturating_add(width) {
+            left = caret_end - width;
         }
     }
     let anchor = ByteOffset(layout.start(top));
     Ok(
-        (anchor != view.viewport.anchor.offset || left != view.viewport.horizontal_column)
+        (anchor != view.viewport.anchor.offset || left != view.viewport.horizontal_scroll)
             .then_some(ViewportAdjustment {
                 view: id,
                 anchor,
-                horizontal_column: left,
+                horizontal_scroll: left,
             }),
     )
 }
 
-/// The row and column, within a view's text area `width` cells wide, that
-/// shows `offset`; none when it is scrolled out above or to the left, or
-/// more than `rows` rows down.
-pub(super) fn cell_of(
+/// The row of a view's text area `width` wide that shows `offset`, and how
+/// far from the area's left; none when it is scrolled out above or to the
+/// left, or more than `rows` rows down.
+pub(crate) fn position_of(
     app: &Application,
     view: ViewId,
-    width: u16,
+    measure: &dyn Measure,
+    width: usize,
     rows: u16,
     offset: usize,
 ) -> Option<(usize, usize)> {
     let view = app.view(view)?;
-    let layout = Rows::new(app, view, width)?;
+    let layout = Rows::new(app, view, measure, width)?;
     let (top, _) = layout.place(view.viewport.anchor.offset.0);
-    let (place, column) = layout.place(offset);
+    let (place, x) = layout.place(offset);
     let row = layout.distance(top, place, rows.into())?;
     let first = if layout.wrap.is_some() {
-        layout.segments(place.0)[place.1].columns.start
+        layout.segments(place.0)[place.1].xs.start
     } else {
-        view.viewport.horizontal_column
+        view.viewport.horizontal_scroll
     };
-    let cells = column.checked_sub(first)? + layout.hinted(place.0, first, column);
-    Some((row, cells))
+    let across = x.checked_sub(first)? + layout.hinted(place.0, first, x);
+    Some((row, across))
 }
-/// The byte offset under a cell of the active view's text area. Rows past
-/// either edge resolve to the lines beyond it, within the document.
-pub(super) fn offset_at(app: &Application, width: u16, row: isize, column: usize) -> Option<usize> {
+/// The byte offset at a place in the active view's text area: `row` rows
+/// down and `across` from its left. Rows past either edge resolve to the
+/// lines beyond it, within the document.
+pub(crate) fn offset_at(
+    app: &Application,
+    measure: &dyn Measure,
+    width: usize,
+    row: isize,
+    across: usize,
+) -> Option<usize> {
     let view = app.view(app.active_view()?)?;
-    let layout = Rows::new(app, view, width)?;
+    let layout = Rows::new(app, view, measure, width)?;
     let (top, _) = layout.place(view.viewport.anchor.offset.0);
     let (line, index) = layout.step(top, row);
     let line = line.min(layout.snapshot.line_count() - 1);
-    let column = if layout.wrap.is_some() {
+    let x = if layout.wrap.is_some() {
         let segments = layout.segments(line);
         let segment = &segments[index.min(segments.len() - 1)];
-        // Past the end of a row that continues, stay on its last cell.
+        // Past the end of a row that continues, stay on its last character.
         let last = index + 1 < segments.len();
-        let room = segment.columns.len().saturating_sub(usize::from(last));
-        segment.columns.start + column.min(room)
+        let room = segment.xs.len().saturating_sub(usize::from(last));
+        segment.xs.start + across.min(room)
     } else {
-        layout.unhinted(line, view.viewport.horizontal_column, column)
+        layout.unhinted(line, view.viewport.horizontal_scroll, across)
     };
-    offset_at_logical_column(layout.snapshot, line, LogicalColumn(column), layout.tab)
-        .ok()
-        .map(|offset| offset.0)
+    Some(layout.offset(line, x))
 }
 /// Scrolls the active view by `lines` screen rows, keeping the last line
 /// reachable at the top. When the caret leaves the text area, the second
-/// value is where it comes back: the nearest visible row, at the same column.
-pub(super) fn scroll(
+/// value is where it comes back: the nearest visible row, as far across.
+pub(crate) fn scroll(
     app: &Application,
     id: ViewId,
+    measure: &dyn Measure,
     lines: isize,
-    width: u16,
+    width: usize,
     rows: u16,
 ) -> Option<(ViewportAdjustment, Option<usize>)> {
     let view = app.view(id)?;
     let editor = app.workspace().editor(view.document_id)?;
     let head = editor.model().session(view.session_id)?.selection().head;
-    let layout = Rows::new(app, view, width)?;
+    let layout = Rows::new(app, view, measure, width)?;
     let (top, _) = layout.place(view.viewport.anchor.offset.0);
     let top = layout.step(top, lines);
     let top = (top.0.min(layout.snapshot.line_count() - 1), top.1);
-    let (place, column) = layout.place(head);
+    let (place, x) = layout.place(head);
     let rows = usize::from(rows.max(1));
     let bottom = layout.step(top, rows as isize - 1);
     let reveal = (place < top || place > bottom).then(|| {
         let (line, row) = if place < top { top } else { bottom };
-        let column = match layout.wrap {
+        let x = match layout.wrap {
             Some(_) => {
-                let within = layout.segments(place.0)[place.1].columns.start;
+                let within = layout.segments(place.0)[place.1].xs.start;
                 let segments = layout.segments(line);
                 let segment = &segments[row.min(segments.len() - 1)];
-                (segment.columns.start + (column - within)).min(segment.columns.end)
+                (segment.xs.start + (x - within)).min(segment.xs.end)
             }
-            None => column,
+            None => x,
         };
-        offset_at_logical_column(layout.snapshot, line, LogicalColumn(column), layout.tab)
-            .unwrap()
-            .0
+        layout.offset(line, x)
     });
     Some((
         ViewportAdjustment {
             view: id,
             anchor: ByteOffset(layout.start(top)),
-            horizontal_column: view.viewport.horizontal_column,
+            horizontal_scroll: view.viewport.horizontal_scroll,
         },
         reveal,
     ))
 }
 
-pub(super) struct ViewportAdjustment {
+pub(crate) struct ViewportAdjustment {
     pub view: ViewId,
     pub anchor: ByteOffset,
-    pub horizontal_column: usize,
+    pub horizontal_scroll: usize,
 }
 
 /// Render an immutable application projection of the active view's text
 /// area. Viewport decisions are applied by Runtime before this is called.
-pub(super) fn frame(
+pub(crate) fn frame(
     app: &Application,
     id: ViewId,
     highlighter: &mut Highlighter,
-    width: u16,
+    measure: &dyn Measure,
+    width: usize,
     rows: u16,
     modal: &Overlay,
 ) -> Result<Option<Frame>, crate::application::Error> {
@@ -760,9 +937,10 @@ pub(super) fn frame(
     let line = snapshot.line_of(head).unwrap();
     let tab = document.whitespace().tab_width;
     let column = logical_column_at(snapshot, ByteOffset(head), tab)?.0;
-    let layout = Rows::new(app, view, width).unwrap();
+    let layout = Rows::new(app, view, measure, width).unwrap();
+    let walk = layout.walk;
     let lines = layout.lines;
-    let left = view.viewport.horizontal_column;
+    let left = view.viewport.horizontal_scroll;
     let mut output = Vec::new();
     // The rows shown, each with its line's segment.
     let (mut place, _) = layout.place(view.viewport.anchor.offset.0);
@@ -788,10 +966,9 @@ pub(super) fn frame(
     // The ruler marks the first column past the limit.
     let ruler = match options.int(Some(view.document_id), "ruler") as usize {
         0 => None,
-        limit => limit
+        limit => (limit * measure.column())
             .checked_sub(left)
-            .filter(|column| *column < usize::from(width))
-            .map(|column| column as u16),
+            .filter(|x| *x < width),
     };
     let patterns: Vec<_> = app.highlights(view.document_id).collect();
     let flags = app.flags(view.document_id);
@@ -826,9 +1003,8 @@ pub(super) fn frame(
             let to = note.range.end.min(start + text.len()).checked_sub(start)?;
             (from < to).then_some((from..to, Face::Note(note.severity)))
         }));
-        let line_start = snapshot.line_start(number).unwrap();
         let base = highlights.get(number - top).map_or(&[][..], Vec::as_slice);
-        let semantic = app.tokens(view.document_id, line_start..line_start + text.len());
+        let semantic = app.tokens(view.document_id, start..start + text.len());
         let categories = overlay(base, &semantic);
         // A wrapped line would lose what hints push past the edge, so they
         // wait at its end, on a row of their own width.
@@ -836,52 +1012,46 @@ pub(super) fn frame(
             .wrap
             .is_some()
             .then(|| *row + 1 == layout.segments(number).len());
+        let after = |text: String, face: Option<Face>, font: Font| Inlay {
+            x: usize::MAX,
+            text,
+            face,
+            font,
+        };
         let mut hints: Vec<Inlay> = match last_row {
             None => layout.inlays.get(&number).cloned().unwrap_or_default(),
             Some(false) => vec![],
             Some(true) => (layout.inlays.get(&number).into_iter().flatten())
-                .map(|hint| Inlay {
-                    column: usize::MAX,
-                    text: format!(" {}", hint.text),
-                    face: None,
-                })
+                .map(|hint| after(format!(" {}", hint.text), None, hint.font))
                 .collect(),
         };
         // A digit at the end of a line has no character to stand on, so it
         // stands after the text, as the indicator does.
+        let content = text.trim_end_matches(['\n', '\r']).len();
         if last_row != Some(false) {
-            let end = line_start + text.trim_end_matches(['\n', '\r']).len();
-            for (_, digit) in modal.digits.iter().filter(|(at, _)| *at == end) {
-                hints.push(Inlay {
-                    column: usize::MAX,
-                    text: digit.to_string(),
-                    face: Some(Face::Todo),
-                });
+            for (_, digit) in modal.digits.iter().filter(|(at, _)| *at == start + content) {
+                hints.push(after(digit.to_string(), Some(Face::Todo), Font::Text));
             }
         }
         if last_row != Some(false)
             && let Some(text) = app.indicator(view.document_id, number)
         {
-            hints.push(Inlay {
-                column: usize::MAX,
-                text: format!(" {text}"),
-                face: Some(Face::Todo),
-            });
+            hints.push(after(format!(" {text}"), Some(Face::Todo), Font::Hint));
         }
         if let Some((offset, preview)) = &modal.preview
-            && (start..=start + text.trim_end_matches(['\n', '\r']).len()).contains(offset)
-            && let Ok(column) = logical_column_at(snapshot, ByteOffset(*offset), tab)
-            && (layout.wrap.is_none()
-                || segment.columns.contains(&column.0)
-                || last_row == Some(true))
+            && (start..=start + content).contains(offset)
         {
-            let text: String = preview.chars().filter(|c| !c.is_control()).collect();
-            hints.push(Inlay {
-                column: column.0,
-                text,
-                face: None,
-            });
-            hints.sort_by_key(|hint| hint.column);
+            let x = walk.x_of(&text, offset - start);
+            if layout.wrap.is_none() || segment.xs.contains(&x) || last_row == Some(true) {
+                let text: String = preview.chars().filter(|c| !c.is_control()).collect();
+                hints.push(Inlay {
+                    x,
+                    text,
+                    face: None,
+                    font: Font::Text,
+                });
+                hints.sort_by_key(|hint| hint.x);
+            }
         }
         if last_row != Some(false)
             && inline_notes
@@ -894,16 +1064,17 @@ pub(super) fn frame(
             } else {
                 String::new()
             };
-            hints.push(Inlay {
-                column: usize::MAX,
-                text: format!("    {}{more}", first.trim()),
-                face: crate::application::faces::index(match note.severity {
-                    Severity::Error => "note-error",
-                    Severity::Warning => "note-warning",
-                    Severity::Info => "note-info",
-                })
-                .map(Face::Named),
-            });
+            let face = crate::application::faces::index(match note.severity {
+                Severity::Error => "note-error",
+                Severity::Warning => "note-warning",
+                Severity::Info => "note-info",
+            })
+            .map(Face::Named);
+            hints.push(after(
+                format!("    {}{more}", first.trim()),
+                face,
+                Font::Hint,
+            ));
         }
         let marks = Marks {
             selection: state.selection().range(),
@@ -916,10 +1087,10 @@ pub(super) fn frame(
             faces: &faces,
             inlays: &hints,
         };
-        let (first, cells) = match layout.wrap {
-            Some(_) if hints.is_empty() => (segment.columns.start, segment.columns.len()),
-            Some(_) => (segment.columns.start, usize::from(width)),
-            None => (left, usize::from(width)),
+        let (first, room) = match layout.wrap {
+            Some(_) if hints.is_empty() => (segment.xs.start, segment.xs.len()),
+            Some(_) => (segment.xs.start, width),
+            None => (left, width),
         };
         output.push(Row {
             line: number,
@@ -928,14 +1099,7 @@ pub(super) fn frame(
                 .get(&number)
                 .filter(|_| *row == 0)
                 .map(|flag| (*flag).clone()),
-            spans: styled_row(
-                &text,
-                snapshot.line_start(number).unwrap(),
-                marks,
-                first,
-                cells,
-                tab,
-            ),
+            spans: styled_row(&text, start, marks, first, room, walk),
         });
     }
     let line_of = |offset| snapshot.line_of(offset);
@@ -957,24 +1121,24 @@ pub(super) fn frame(
             .count()
     };
     let problems = (count(Severity::Error), count(Severity::Warning));
-    let (caret_place, _) = layout.place(head);
+    let (caret_place, caret_x) = layout.place(head);
     let cursor = shown
         .iter()
         .position(|(place, _)| *place == caret_place)
         .filter(|_| rows > 0 && width > 0)
         .and_then(|y| {
             let first = match layout.wrap {
-                Some(_) => shown[y].1.columns.start,
+                Some(_) => shown[y].1.xs.start,
                 None => left,
             };
-            // A caret at the end of a full row stays on its last cell.
-            let x = column.checked_sub(first)? + layout.hinted(line, first, column);
+            // A caret at the end of a full row stays on its last character.
+            let x = caret_x.checked_sub(first)? + layout.hinted(line, first, caret_x);
             let x = if layout.wrap.is_some() {
-                x.min(usize::from(width) - 1)
+                x.min(width.saturating_sub(measure.column()))
             } else {
                 x
             };
-            (x < usize::from(width)).then_some((x as u16, y as u16))
+            (x < width).then_some((x, y))
         });
     Ok(Some(Frame {
         rows: output,
@@ -1005,7 +1169,7 @@ fn worst_note<'a>(
     Some((worst, count - 1))
 }
 
-pub(super) fn prompt_row(
+pub(crate) fn prompt_row(
     presentation: &crate::interaction::Presentation,
     width: usize,
 ) -> (Vec<Span>, Option<usize>) {
@@ -1044,19 +1208,25 @@ mod tests {
         width: u16,
         height: u16,
     ) -> Result<Frame, crate::application::Error> {
-        if let Some(viewport) = super::follow_caret(app, app.active_view().unwrap(), width, height)?
-        {
+        if let Some(viewport) = super::follow_caret(
+            app,
+            app.active_view().unwrap(),
+            &Cells,
+            width.into(),
+            height,
+        )? {
             app.dispatch(Event::SetViewport {
                 view: viewport.view,
                 anchor: viewport.anchor,
-                horizontal_column: viewport.horizontal_column,
+                horizontal_scroll: viewport.horizontal_scroll,
             })?;
         }
         Ok(super::frame(
             app,
             app.active_view().unwrap(),
             &mut Highlighter::default(),
-            width,
+            &Cells,
+            width.into(),
             height,
             &Overlay::default(),
         )?
@@ -1083,10 +1253,10 @@ mod tests {
         app
     }
     fn joined_row(row: &super::Row) -> String {
-        row.spans.iter().map(|span| span.text.as_str()).collect()
+        row.spans.iter().map(padded).collect()
     }
     fn joined(spans: Vec<Span>) -> String {
-        spans.into_iter().map(|span| span.text).collect()
+        spans.iter().map(padded).collect()
     }
     #[test]
     fn highlighted_patterns_style_their_spans() {
@@ -1133,7 +1303,7 @@ mod tests {
         let marks: Vec<_> = spans
             .iter()
             .filter(|span| span.whitespace)
-            .map(|span| span.text.as_str())
+            .map(padded)
             .collect();
         assert_eq!(marks, ["»  ", "··"]);
         assert_eq!(joined(spans), "a»  b c··");
@@ -1193,11 +1363,12 @@ mod tests {
         .unwrap();
         let frame = frame(&mut app, 6, 3).unwrap();
         assert_eq!(frame.cursor, Some((5, 0)));
-        assert_eq!(app.view(view).unwrap().viewport.horizontal_column, 5);
+        assert_eq!(app.view(view).unwrap().viewport.horizontal_scroll, 5);
         let frame = super::frame(
             &app,
             app.active_view().unwrap(),
             &mut Highlighter::default(),
+            &Cells,
             0,
             0,
             &Overlay::default(),
@@ -1219,7 +1390,7 @@ mod tests {
         .unwrap();
         let frame = frame(&mut app, 5, 2).unwrap();
         assert_eq!(frame.cursor, Some((3, 0)));
-        assert_eq!(app.view(view).unwrap().viewport.horizontal_column, 1);
+        assert_eq!(app.view(view).unwrap().viewport.horizontal_scroll, 1);
         assert_eq!(
             frame.rows[0]
                 .spans
@@ -1324,6 +1495,7 @@ mod tests {
             &app,
             app.active_view().unwrap(),
             &mut Highlighter::default(),
+            &Cells,
             10,
             4,
             &Overlay::default(),
@@ -1333,18 +1505,18 @@ mod tests {
         assert_eq!(app.view(view).unwrap().viewport, before);
         assert!(projected.cursor.is_none());
         assert!(
-            super::follow_caret(&app, app.active_view().unwrap(), 10, 4)
+            super::follow_caret(&app, app.active_view().unwrap(), &Cells, 10, 4)
                 .unwrap()
                 .is_some()
         );
     }
     #[test]
     fn wrapped_lines_break_after_spaces_and_inside_long_words() {
-        let tab = NonZeroUsize::new(4).unwrap();
+        let walk = Walk::new(&Cells, NonZeroUsize::new(4).unwrap());
         let rows = |text: &str, width| -> Vec<_> {
-            super::segments(text, Some(width), tab)
+            super::segments(text, Some(width), walk)
                 .into_iter()
-                .map(|s| (s.start, s.columns))
+                .map(|s| (s.start, s.xs))
                 .collect()
         };
         // Words move to the next row whole; the space stays behind.
@@ -1435,10 +1607,13 @@ mod tests {
         );
         assert_eq!(shown.cursor, Some((6, 1)));
         // A click on the second row lands on it; past its end, on its end.
-        assert_eq!(super::offset_at(&app, 10, 1, 0), Some(8));
-        assert_eq!(super::offset_at(&app, 10, 0, 9), Some(7));
-        assert_eq!(super::offset_at(&app, 10, 2, 2), Some(21));
-        assert_eq!(super::cell_of(&app, view, 10, 5, 21), Some((2, 2)));
+        assert_eq!(super::offset_at(&app, &Cells, 10, 1, 0), Some(8));
+        assert_eq!(super::offset_at(&app, &Cells, 10, 0, 9), Some(7));
+        assert_eq!(super::offset_at(&app, &Cells, 10, 2, 2), Some(21));
+        assert_eq!(
+            super::position_of(&app, view, &Cells, 10, 5, 21),
+            Some((2, 2))
+        );
         // In two rows the caret's row stays in view: the view starts on the
         // first line's second row and scrolls by rows.
         app.dispatch(Event::Edit {
@@ -1450,7 +1625,7 @@ mod tests {
         let shown = frame(&mut app, 10, 2).unwrap();
         assert_eq!(joined_row(&shown.rows[0]), "three four");
         assert_eq!(shown.cursor, Some((1, 1)));
-        let (viewport, reveal) = super::scroll(&app, view, -1, 10, 2).unwrap();
+        let (viewport, reveal) = super::scroll(&app, view, &Cells, -1, 10, 2).unwrap();
         assert_eq!(viewport.anchor, ByteOffset(0));
         // The caret comes back to the bottom row, at its column in the row.
         assert_eq!(reveal, Some(9));
@@ -1467,22 +1642,119 @@ mod tests {
         .unwrap();
         frame(&mut app, 10, 2).unwrap();
         // Columns inside a tab resolve to the tab; past the end, to the end.
-        assert_eq!(super::offset_at(&app, 80, 0, 3), Some(1));
-        assert_eq!(super::offset_at(&app, 80, 0, 40), Some(3));
-        assert_eq!(super::offset_at(&app, 80, 1, 1), Some(5));
-        assert_eq!(super::offset_at(&app, 80, -1, 0), Some(0));
-        assert_eq!(super::offset_at(&app, 80, 9, 0), Some(13));
-        let (viewport, reveal) = super::scroll(&app, app.active_view().unwrap(), 3, 80, 2).unwrap();
+        assert_eq!(super::offset_at(&app, &Cells, 80, 0, 3), Some(1));
+        assert_eq!(super::offset_at(&app, &Cells, 80, 0, 40), Some(3));
+        assert_eq!(super::offset_at(&app, &Cells, 80, 1, 1), Some(5));
+        assert_eq!(super::offset_at(&app, &Cells, 80, -1, 0), Some(0));
+        assert_eq!(super::offset_at(&app, &Cells, 80, 9, 0), Some(13));
+        let (viewport, reveal) =
+            super::scroll(&app, app.active_view().unwrap(), &Cells, 3, 80, 2).unwrap();
         assert_eq!(viewport.anchor, ByteOffset(10));
         assert_eq!(reveal, Some(10));
         // The last line can scroll to the top and no further.
-        let (viewport, _) = super::scroll(&app, app.active_view().unwrap(), 30, 80, 2).unwrap();
+        let (viewport, _) =
+            super::scroll(&app, app.active_view().unwrap(), &Cells, 30, 80, 2).unwrap();
         assert_eq!(viewport.anchor, ByteOffset(13));
         assert_eq!(
-            super::scroll(&app, app.active_view().unwrap(), -1, 80, 2)
+            super::scroll(&app, app.active_view().unwrap(), &Cells, -1, 80, 2)
                 .unwrap()
                 .1,
             None
         );
+    }
+    #[test]
+    fn semantic_tokens_replace_the_category_under_them() {
+        use crate::syntax::Category::{Function, Keyword, Type};
+        let base = [(0..4, Keyword), (6..10, Keyword)];
+        assert_eq!(
+            super::overlay(&base, &[(2..3, Type), (6..8, Function)]),
+            [
+                (0..2, Keyword),
+                (2..3, Type),
+                (3..4, Keyword),
+                (6..8, Function),
+                (8..10, Keyword)
+            ]
+        );
+    }
+
+    /// Ten units a column, and hints in a smaller font: a frontend that
+    /// measures in pixels lays text out by the same rules as cells.
+    struct Pixels;
+    impl Measure for Pixels {
+        fn width(&self, cluster: &str, font: Font) -> usize {
+            Cells.width(cluster, font) * if font == Font::Hint { 7 } else { 10 }
+        }
+        fn column(&self) -> usize {
+            10
+        }
+    }
+    #[test]
+    fn other_measures_place_text_hints_and_the_caret_by_their_widths() {
+        let mut app = app("a\t中x", Language::PlainText);
+        let view = app.active_view().unwrap();
+        let document = app.view(view).unwrap().document_id;
+        app.dispatch(Event::Inlays {
+            document,
+            hints: vec![(0, "a\t中".len(), "h: ".into())],
+        })
+        .unwrap();
+        app.dispatch(Event::SetOption {
+            scope: crate::options::Scope::Global,
+            name: "ruler",
+            value: crate::options::Value::Int(3),
+        })
+        .unwrap();
+        app.dispatch(Event::Edit {
+            view,
+            command: Command::SetSelection(Selection::caret("a\t中".len())),
+            time: Duration::ZERO,
+        })
+        .unwrap();
+        let shown = super::frame(
+            &app,
+            view,
+            &mut Highlighter::default(),
+            &Pixels,
+            200,
+            2,
+            &Overlay::default(),
+        )
+        .unwrap()
+        .unwrap();
+        let spans: Vec<_> = shown.rows[0]
+            .spans
+            .iter()
+            .map(|span| (span.x, span.width, span.text.as_str(), span.inlay))
+            .collect();
+        // The tab runs to the stop at four columns; the hint is narrower.
+        assert_eq!(
+            spans,
+            [
+                (0, 10, "a", false),
+                (10, 30, "", false),
+                (40, 20, "中", false),
+                (60, 21, "h: ", true),
+                (81, 10, "x", false),
+            ]
+        );
+        assert_eq!(shown.cursor, Some((81, 0)));
+        assert_eq!(shown.caret, (0, 6));
+        assert_eq!(shown.ruler, Some(30));
+        // Back from a place: inside the tab, the wide character, the hint.
+        let at = |across| super::offset_at(&app, &Pixels, 200, 0, across);
+        assert_eq!(at(25), Some(1));
+        assert_eq!(at(55), Some(2));
+        assert_eq!(at(70), Some("a\t中".len()));
+        assert_eq!(at(500), Some("a\t中x".len()));
+        assert_eq!(
+            super::position_of(&app, view, &Pixels, 200, 2, "a\t中".len()),
+            Some((0, 81))
+        );
+        // Scrolled sideways by units, so that the caret's right edge shows.
+        let follow = super::follow_caret(&app, view, &Pixels, 50, 2)
+            .unwrap()
+            .unwrap();
+        assert_eq!(follow.horizontal_scroll, 81 + 10 - 50);
     }
 }
