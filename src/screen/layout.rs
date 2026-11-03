@@ -155,6 +155,10 @@ pub(crate) struct Frame {
     pub rows: Vec<Row>,
     /// Across and down: in measured units from the left, and in rows.
     pub cursor: Option<(usize, usize)>,
+    /// How wide the character under the caret is, at least a column: a
+    /// block caret covers it.
+    #[cfg_attr(not(feature = "gui"), allow(dead_code))]
+    pub caret_width: usize,
     /// Zero-based line and logical column of the caret.
     pub caret: (usize, usize),
     pub line_count: usize,
@@ -1127,6 +1131,19 @@ pub(crate) fn frame(
     };
     let problems = (count(Severity::Error), count(Severity::Warning));
     let (caret_place, caret_x) = layout.place(head);
+    let caret_width = {
+        let text = snapshot.line(line).unwrap_or_default();
+        let within = head - snapshot.line_start(line).unwrap_or(head);
+        let cluster = text
+            .get(within..)
+            .and_then(|rest| rest.graphemes(true).next());
+        // On a tab it stays a column wide, as Emacs keeps it unless
+        // `x-stretch-cursor` is set.
+        cluster
+            .filter(|cluster| *cluster != "\t")
+            .map_or(0, |cluster| walk.advance(cluster, caret_x))
+            .max(measure.column())
+    };
     let cursor = shown
         .iter()
         .position(|(place, _)| *place == caret_place)
@@ -1148,6 +1165,7 @@ pub(crate) fn frame(
     Ok(Some(Frame {
         rows: output,
         cursor,
+        caret_width,
         caret: (line, column),
         line_count: lines,
         language: document.language().profile().name.clone(),

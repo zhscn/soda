@@ -249,6 +249,40 @@ pub struct Painter<'a> {
     pub theme: &'a Theme,
     fg: [f32; 4],
     pub bg: [f32; 4],
+    /// The caret line's band in the active window, one piece a row, in
+    /// `out`: it moves with the caret while the caret glides.
+    pub band: Vec<usize>,
+    /// The line numbers of the active window: their glyphs in `out`, the
+    /// top of their row and whether it is the caret's. Their color goes
+    /// from the gutter's to the current line's as the band covers them.
+    pub numbers: Vec<(std::ops::Range<usize>, f32, bool)>,
+    /// The gutter's color and the current line number's, when the two
+    /// differ only in color.
+    pub number_colors: Option<([f32; 4], [f32; 4])>,
+}
+impl Painter<'_> {
+    /// Colors the line numbers of the active window by how much of their
+    /// row the band covers, from `top` down `height`; without a band, by
+    /// whether they are on the caret's line.
+    pub fn shade_numbers(&mut self, band: Option<(f32, f32)>) {
+        let Some((plain, current)) = self.number_colors else {
+            return;
+        };
+        let line = self.fonts.line;
+        for (glyphs, y, caret) in &self.numbers {
+            let t = match band {
+                Some((top, height)) => {
+                    let overlap = (y + line).min(top + height) - y.max(top);
+                    (overlap / line).clamp(0.0, 1.0)
+                }
+                None => f32::from(u8::from(*caret)),
+            };
+            let color: [f32; 4] = std::array::from_fn(|i| plain[i] + (current[i] - plain[i]) * t);
+            for instance in &mut self.out[glyphs.clone()] {
+                instance.color = color;
+            }
+        }
+    }
 }
 impl<'a> Painter<'a> {
     pub fn new(fonts: &'a mut Fonts, atlas: &'a mut Atlas, theme: &'a Theme) -> Self {
@@ -258,6 +292,9 @@ impl<'a> Painter<'a> {
             fonts,
             atlas,
             out: Vec::with_capacity(8192),
+            band: vec![],
+            numbers: vec![],
+            number_colors: None,
             theme,
             fg,
             bg,
@@ -561,7 +598,11 @@ fn editor(
         if caret_line {
             let (_, bg) = painter.colors(theme.cursor_line);
             if let Some(bg) = bg {
+                let index = painter.out.len();
                 painter.fill(Rect::new(left, y, area.w + window.gutter, line), bg, 0.0);
+                if painter.out.len() > index {
+                    painter.band.push(index);
+                }
             }
         }
         if let Some(digits) = window.digits.filter(|_| !row.continued) {
@@ -571,12 +612,18 @@ fn editor(
                 row.line + 1
             };
             let number = format!("{shown:>digits$}");
-            let style = if caret_line {
+            // In the active window the number's color follows the band, as
+            // long as the two styles differ only in color.
+            let shaded = current
+                && theme.gutter.add_modifier == theme.gutter_current.add_modifier
+                && theme.gutter.sub_modifier == theme.gutter_current.sub_modifier;
+            let style = if caret_line && !shaded {
                 theme.gutter_current
             } else {
                 theme.gutter
             };
             let style = Style { bg: None, ..style };
+            let start = painter.out.len();
             painter.words(
                 left + cell,
                 y,
@@ -586,6 +633,13 @@ fn editor(
                 digits as f32 * cell,
                 false,
             );
+            if shaded {
+                let plain = rgba(theme.gutter.fg, painter.fg);
+                let bright = rgba(theme.gutter_current.fg, painter.fg);
+                painter.number_colors = Some((plain, bright));
+                let end = painter.out.len();
+                painter.numbers.push((start..end, y, caret_line));
+            }
         }
         // The flag sits in the fringe, before the numbers.
         if let Some(flag) = &row.flag
@@ -626,12 +680,13 @@ fn editor(
         }
     }
     text.cursor.map(|(x, y)| {
-        Rect::new(
-            area.x + x as f32 / UNIT,
-            area.y + y as f32 * line,
-            cell,
-            line,
-        )
+        let x = area.x + x as f32 / UNIT;
+        // A block covers the whole character, two columns for a Chinese
+        // one, but not past the window.
+        let width = (text.caret_width as f32 / UNIT)
+            .min(area.right() - x)
+            .max(1.0);
+        Rect::new(x, area.y + y as f32 * line, width, line)
     })
 }
 

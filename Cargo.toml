@@ -32,9 +32,17 @@ unicode-width = "0.2"
 bytemuck = { version = "1", features = ["derive"], optional = true }
 cosmic-text = { version = "0.19", optional = true }
 pollster = { version = "0.4", optional = true }
+unicode-script = { version = "0.5", optional = true }
 wgpu = { version = "30", optional = true }
 winit = { version = "0.30.13", optional = true }
 
 [features]
 # The graphical frontend, the `soda-gui` program.
-gui = ["dep:bytemuck", "dep:cosmic-text", "dep:pollster", "dep:wgpu", "dep:winit"]
+gui = [
+    "dep:bytemuck",
+    "dep:cosmic-text",
+    "dep:pollster",
+    "dep:unicode-script",
+    "dep:wgpu",
+    "dep:winit",
+]

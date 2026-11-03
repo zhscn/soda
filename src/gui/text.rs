@@ -3,15 +3,21 @@
 //!
 //! The text font is monospace and laid out on a grid, as in a terminal or
 //! Emacs: a cluster is as many columns wide as the core counts, and glyphs
-//! of fallback fonts are fitted to whole columns. Hints use a smaller font
-//! and are as wide as their glyphs.
+//! of fallback fonts are fitted to whole columns, wide ones centered in
+//! theirs. Hints use a smaller font and are as wide as their glyphs.
+//!
+//! Fonts are the ones fontconfig picks, as for the rest of the desktop: the
+//! `monospace` family, and for Chinese, Japanese and Korean the monospace
+//! font of the language. Without fontconfig, as on macOS, the platform's
+//! defaults stand.
 use super::render::{Atlas, COLOR, Instance, MASK};
 use crate::screen::{Cells, Font, Measure};
 use cosmic_text::{
-    Attrs, Buffer, CacheKey, Family, FontSystem, LayoutGlyph, Metrics, Shaping, Style, SwashCache,
-    SwashContent, Weight,
+    Attrs, Buffer, CacheKey, Fallback, Family, FontSystem, LayoutGlyph, Metrics, PlatformFallback,
+    Shaping, Style, SwashCache, SwashContent, Weight,
 };
 use std::{collections::HashMap, rc::Rc};
+use unicode_script::Script;
 
 /// Measured units in a pixel; the layout counts in fractions of a pixel.
 pub const UNIT: f32 = 64.0;
@@ -47,8 +53,87 @@ struct Placed {
     color: bool,
 }
 
+/// The first family fontconfig matches a pattern with.
+fn fontconfig(pattern: &str) -> Option<String> {
+    let output = std::process::Command::new("fc-match")
+        .args([pattern, "family"])
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()
+        .filter(|output| output.status.success())?;
+    let families = String::from_utf8(output.stdout).ok()?;
+    let family = families.lines().next()?.split(',').next()?.trim();
+    (!family.is_empty()).then(|| family.to_owned())
+}
+/// The language of the environment, as `en-US`.
+fn locale() -> String {
+    ["LC_ALL", "LC_CTYPE", "LANG"]
+        .iter()
+        .filter_map(|name| std::env::var(name).ok())
+        .find(|value| !value.is_empty())
+        .map(|value| {
+            value
+                .split(['.', '@'])
+                .next()
+                .unwrap_or("")
+                .replace('_', "-")
+        })
+        .filter(|value| !value.is_empty() && value != "C" && value != "POSIX")
+        .unwrap_or_else(|| "en-US".into())
+}
+/// The platform's fallback fonts, with fontconfig's choice first for Han
+/// and the scripts that share its punctuation. Japanese and Korean text
+/// asks for their own; otherwise Chinese of the environment's language,
+/// simplified when it is not Chinese.
+struct Fallbacks {
+    han: Vec<&'static str>,
+    kana: Vec<&'static str>,
+    hangul: Vec<&'static str>,
+}
+impl Fallbacks {
+    fn new(locale: &str) -> Self {
+        let platform = PlatformFallback;
+        let chinese = match locale {
+            "zh-TW" | "zh-HK" | "zh-MO" => locale.to_lowercase(),
+            _ => "zh-cn".into(),
+        };
+        let list = |lang: &str, script: Script, locale: &str| {
+            let mut fonts: Vec<&'static str> = vec![];
+            if let Some(family) = fontconfig(&format!("monospace:lang={lang}")) {
+                fonts.push(Box::leak(family.into_boxed_str()));
+            }
+            fonts.extend(platform.script_fallback(script, locale));
+            fonts
+        };
+        Self {
+            han: list(&chinese, Script::Han, locale),
+            kana: list("ja", Script::Hiragana, locale),
+            hangul: list("ko", Script::Hangul, locale),
+        }
+    }
+}
+impl Fallback for Fallbacks {
+    fn common_fallback(&self) -> &[&'static str] {
+        PlatformFallback.common_fallback()
+    }
+    fn forbidden_fallback(&self) -> &[&'static str] {
+        PlatformFallback.forbidden_fallback()
+    }
+    fn script_fallback(&self, script: Script, locale: &str) -> &[&'static str] {
+        match script {
+            Script::Han | Script::Bopomofo => &self.han,
+            Script::Hiragana | Script::Katakana => &self.kana,
+            Script::Hangul => &self.hangul,
+            _ => PlatformFallback.script_fallback(script, locale),
+        }
+    }
+}
+
 pub struct Fonts {
     system: FontSystem,
+    /// The text font; the generic family would let any monospace font with
+    /// a character stand in for it, not the one fontconfig prefers.
+    family: Option<String>,
     swash: SwashCache,
     /// The text font's size and a column's width, in pixels.
     pub size: f32,
@@ -62,8 +147,14 @@ pub struct Fonts {
 }
 impl Fonts {
     pub fn new(size: f32) -> Self {
+        let locale = locale();
+        let mut db = cosmic_text::fontdb::Database::new();
+        db.load_system_fonts();
+        db.set_monospace_family("Noto Sans Mono");
+        let fallbacks = Fallbacks::new(&locale);
         let mut fonts = Self {
-            system: FontSystem::new(),
+            system: FontSystem::new_with_locale_and_db_and_fallback(locale, db, fallbacks),
+            family: fontconfig("monospace"),
             swash: SwashCache::new(),
             size: 0.0,
             cell: 0.0,
@@ -94,13 +185,20 @@ impl Fonts {
             .map_or(size * 0.6, |glyph| glyph.w);
         self.shaped.clear();
         let mut buffer = Buffer::new(&mut self.system, Metrics::new(size, self.line));
-        buffer.set_text("0", &Attrs::new(), Shaping::Advanced, None);
+        let attrs = Attrs::new().family(self.family());
+        buffer.set_text("0", &attrs, Shaping::Advanced, None);
         buffer.shape_until_scroll(&mut self.system, false);
         self.baseline = buffer
             .layout_runs()
             .next()
             .map_or(size, |run| run.line_y)
             .round();
+    }
+    fn family(&self) -> Family<'_> {
+        match &self.family {
+            Some(name) => Family::Name(name),
+            None => Family::Monospace,
+        }
     }
     /// A column's width in measured units.
     pub fn column(&self) -> usize {
@@ -118,7 +216,7 @@ impl Fonts {
             buffer.set_monospace_width(Some(self.cell));
         }
         let attrs = Attrs::new()
-            .family(Family::Monospace)
+            .family(self.family())
             .weight(if face.bold {
                 Weight::BOLD
             } else {
@@ -169,12 +267,26 @@ impl Fonts {
         // The column each cluster starts at, and where its first glyph
         // shaped, so that glyphs keep their offsets within a cluster.
         let mut cluster = (usize::MAX, 0.0, 0.0);
-        for glyph in glyphs.iter() {
+        for (index, glyph) in glyphs.iter().enumerate() {
             if glyph.start != cluster.0 {
                 let column = if face.hint {
                     glyph.x
                 } else {
-                    Cells.width(&text[..glyph.start], Font::Text) as f32 * self.cell
+                    // A glyph narrower than its columns, as a Chinese
+                    // character is in two, is centered in them.
+                    let cells = Cells.width(&text[glyph.start..glyph.end], Font::Text);
+                    let room = cells as f32 * self.cell;
+                    let inked: f32 = glyphs[index..]
+                        .iter()
+                        .take_while(|g| g.start == glyph.start)
+                        .map(|g| g.w)
+                        .sum();
+                    let inset = if cells > 1 && inked < room {
+                        ((room - inked) / 2.0).round()
+                    } else {
+                        0.0
+                    };
+                    Cells.width(&text[..glyph.start], Font::Text) as f32 * self.cell + inset
                 };
                 cluster = (glyph.start, column, glyph.x);
             }

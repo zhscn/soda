@@ -301,8 +301,26 @@ impl Gui {
         // Text being composed stays put while the caret glides.
         let smooth = runtime.app().options().bool(None, "smooth-caret") && self.preedit.is_empty();
         let (shown, gliding) = self.caret.place(caret, smooth, std::time::Instant::now());
-        if let (Some(at), Some((_, bar))) = (shown, caret) {
+        if let (Some(at), Some((target, bar))) = (shown, caret) {
+            // The caret line's band goes along, so the two never part.
+            let shift = at.y - target.y;
+            for &index in &painter.band {
+                painter.out[index].rect[1] += shift;
+            }
+            // The band's span, or the caret's row without one; the line
+            // numbers brighten where it covers them.
+            let rows = painter.band.iter().map(|&index| painter.out[index].rect);
+            let band = rows.fold(None, |span: Option<(f32, f32)>, rect| {
+                let (top, bottom) = (rect[1], rect[1] + rect[3]);
+                Some(match span {
+                    Some((t, h)) => (t.min(top), (t + h).max(bottom) - t.min(top)),
+                    None => (top, bottom - top),
+                })
+            });
+            painter.shade_numbers(band.or(Some((at.y, at.h))));
             paint::cursor(&mut painter, runtime, at, bar);
+        } else {
+            painter.shade_numbers(None);
         }
         let (background, instances) = (painter.bg, std::mem::take(&mut painter.out));
         self.renderer.draw(background, &instances);

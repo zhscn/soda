@@ -2868,6 +2868,7 @@ dependencies = [
  "serde_json",
  "signal-hook",
  "tempfile",
+ "unicode-script",
  "unicode-segmentation",
  "unicode-width",
  "wgpu",
