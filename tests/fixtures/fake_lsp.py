@@ -64,7 +64,7 @@ while True:
             "typeDefinitionProvider": True, "referencesProvider": True,
             "implementationProvider": True, "documentHighlightProvider": True,
             "diagnosticProvider": {"interFileDependencies": False, "workspaceDiagnostics": False},
-            "hoverProvider": True, "renameProvider": {"prepareProvider": True}, "codeActionProvider": True,
+            "hoverProvider": True, "renameProvider": {"prepareProvider": True}, "codeActionProvider": {"resolveProvider": True},
             "documentFormattingProvider": True, "documentRangeFormattingProvider": True, "documentSymbolProvider": True,
             "callHierarchyProvider": True, "signatureHelpProvider": {},
             "workspaceSymbolProvider": True,
@@ -288,7 +288,12 @@ while True:
             {"title": "Tweak", "kind": "refactor",
              "command": {"title": "Tweak", "command": "tweak", "arguments": [uri]}},
             {"title": "Unavailable", "disabled": {"reason": "no"}},
+            {"title": "Lazy", "kind": "refactor", "data": {"uri": uri}},
         ])
+    elif method == "codeAction/resolve":
+        log.write("resolve action %s\n" % params["title"])
+        params["edit"] = {"changes": {params["data"]["uri"]: [replacement(0, 0, 3, "lazy")]}}
+        answer(message, params)
     elif method == "workspace/executeCommand":
         log.write("execute %s\n" % params["command"])
         uri = params["arguments"][0]

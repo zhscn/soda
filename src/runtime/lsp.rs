@@ -283,6 +283,8 @@ fn initialize(root: &Path, init: &Value) -> Value {
                     },
                     "documentSymbol": { "hierarchicalDocumentSymbolSupport": true },
                     "codeAction": {
+                        "dataSupport": true,
+                        "resolveSupport": { "properties": ["edit"] },
                         "codeActionLiteralSupport": {
                             "codeActionKind": {
                                 "valueSet": ["quickfix", "refactor", "source"],

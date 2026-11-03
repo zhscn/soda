@@ -338,7 +338,7 @@ fn code_actions_offer_titles_and_apply_edits_and_commands() {
         _ => vec![],
     };
     keys(&mut f.r, "<space>a");
-    wait(&mut f.r, |r| rows(r) == ["Fix it", "Tweak"]);
+    wait(&mut f.r, |r| rows(r) == ["Fix it", "Tweak", "Lazy"]);
     keys(&mut f.r, "<ret>");
     wait(&mut f.r, |r| text(r) == "fixed\ntwo\n");
 
@@ -1049,4 +1049,16 @@ fn token_modifiers_make_read_only_variables_constants_and_strike_deprecated_ones
         let tokens = r.app().tokens(document, 0..99);
         tokens.len() == 1 && tokens[0].1 == Category::Keyword
     });
+}
+#[test]
+fn a_code_action_without_its_edit_is_resolved_when_chosen() {
+    let Some(mut f) = open("one\n") else { return };
+    keys(&mut f.r, "<space>a");
+    wait(&mut f.r, |r| {
+        matches!(r.layer(), Some(soda::interaction::Layer::CommandLine(_)))
+    });
+    f.r.input(UserInput::Paste("lazy".into()));
+    keys(&mut f.r, "<ret>");
+    wait(&mut f.r, |r| text(r) == "lazy\n");
+    assert!(f.log().contains("resolve action Lazy"), "{}", f.log());
 }

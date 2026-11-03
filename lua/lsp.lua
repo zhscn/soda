@@ -1115,6 +1115,24 @@ soda.define_command("lsp-rename", "Rename the symbol across the project", functi
 end)
 
 local function perform(action, origin)
+  -- An action may come without its edit, which the server works out when
+  -- it is chosen.
+  local info = soda.lsp.info()
+  local provider = info and info.capabilities.codeActionProvider
+  if action.edit == nil and action.data ~= nil and type(provider) == "table" and provider.resolveProvider then
+    local asked = send("codeAction/resolve", "codeAction/resolve", action, function(resolved, failure)
+      if failure then
+        soda.message(failed("codeAction/resolve", failure))
+      elseif resolved then
+        resolved.data = nil
+        perform(resolved, origin)
+      end
+    end)
+    if not asked then
+      soda.message("No language server for this document")
+    end
+    return
+  end
   if action.edit and not apply_edit(action.edit, origin) then
     return
   end
