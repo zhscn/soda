@@ -36,7 +36,7 @@ rust-analyzer 默认不开，因为它会运行项目的构建脚本，打开一
 | `SPC c` / `SPC C` | `lsp-callers` / `lsp-callees` | 列出调用者 / 被调用者，只有一层 |
 | `SPC R` | `lsp-rename [NAME]` | 重命名光标处的符号；没给名字时打开命令行，预填符号现在的名字。服务器支持 `prepareRename` 时先问它：光标处没有可以改名的符号就直接说明，名字取服务器给的，否则取光标处的词 |
 | `SPC a` | `lsp-code-action` | 列出光标或选区处的代码动作，选一个执行 |
-| | `lsp-format` | 让服务器格式化整个文档，clangd 读 `.clang-format` |
+| | `lsp-format` | 让服务器格式化选区，没有选区时格式化整个文档，clangd 读 `.clang-format`；服务器不支持范围格式化时总是整个文档 |
 | | `lsp-diagnostics` | 列出所有诊断 |
 | | `lsp-restart` | 重启当前语言的服务器，失败后也用它重试 |
 

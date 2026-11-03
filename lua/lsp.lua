@@ -106,6 +106,7 @@ local providers = {
   ["textDocument/prepareRename"] = "renameProvider",
   ["textDocument/codeAction"] = "codeActionProvider",
   ["textDocument/formatting"] = "documentFormattingProvider",
+  ["textDocument/rangeFormatting"] = "documentRangeFormattingProvider",
   ["textDocument/documentSymbol"] = "documentSymbolProvider",
   ["textDocument/prepareCallHierarchy"] = "callHierarchyProvider",
   ["textDocument/signatureHelp"] = "signatureHelpProvider",
@@ -1140,12 +1141,28 @@ soda.define_command("lsp-code-action", "Pick one of the server's code actions", 
   end)
 end)
 
-soda.define_command("lsp-format", "Format the buffer with the language server", function()
+soda.define_command("lsp-format", "Format the selection, or else the buffer, with the language server", function()
   local buf = soda.buffer()
   local origin = { buffer = buf, revision = buf:revision() }
   local uri = soda.lsp.uri()
+  local info = soda.lsp.info()
   local options = { tabSize = soda.option("indent-width"), insertSpaces = true }
-  ask("textDocument/formatting", { options = options }, function(edits)
+  local method, extend = "textDocument/formatting", { options = options }
+  -- A selection formats only its lines, when the server can.
+  local anchor, head = buf:selection()
+  local selected = anchor[1] ~= head[1] or anchor[2] ~= head[2]
+  if selected and info and info.capabilities.documentRangeFormattingProvider then
+    if anchor[1] > head[1] or (anchor[1] == head[1] and anchor[2] > head[2]) then
+      anchor, head = head, anchor
+    end
+    local function position(place)
+      local text = buf:line(math.min(place[1], buf:line_count()))
+      return { line = place[1] - 1, character = to_character(text, place[2] - 1, info.encoding) }
+    end
+    method = "textDocument/rangeFormatting"
+    extend.range = { start = position(anchor), ["end"] = position(head) }
+  end
+  ask(method, extend, function(edits)
     if not edits or #edits == 0 then
       soda.message("Already formatted")
     else

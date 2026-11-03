@@ -263,6 +263,7 @@ fn initialize(root: &Path, init: &Value) -> Value {
                     "implementation": {},
                     "documentHighlight": {},
                     "formatting": {},
+                    "rangeFormatting": {},
                     "signatureHelp": {
                         "signatureInformation": {
                             "parameterInformation": { "labelOffsetSupport": true },

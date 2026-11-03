@@ -65,7 +65,7 @@ while True:
             "implementationProvider": True, "documentHighlightProvider": True,
             "diagnosticProvider": {"interFileDependencies": False, "workspaceDiagnostics": False},
             "hoverProvider": True, "renameProvider": {"prepareProvider": True}, "codeActionProvider": True,
-            "documentFormattingProvider": True, "documentSymbolProvider": True,
+            "documentFormattingProvider": True, "documentRangeFormattingProvider": True, "documentSymbolProvider": True,
             "callHierarchyProvider": True, "signatureHelpProvider": {},
             "workspaceSymbolProvider": True,
             "workspace": {"fileOperations": {
@@ -211,6 +211,11 @@ while True:
         answer(message, [dict(name=params["query"], containerName="space", location=spot(uri, 1, 0))])
     elif method == "textDocument/switchSourceHeader":
         answer(message, params["uri"].replace("a.cpp", "b.cpp"))
+    elif method == "textDocument/rangeFormatting":
+        r = params["range"]
+        log.write("rangeFormat %d:%d-%d:%d\n" % (r["start"]["line"], r["start"]["character"],
+                                                r["end"]["line"], r["end"]["character"]))
+        answer(message, [replacement(r["start"]["line"], 0, 3, "ranged")])
     elif method == "textDocument/formatting":
         log.write("format %d\n" % params["options"]["tabSize"])
         answer(message, [replacement(0, 0, 3, "formatted")])

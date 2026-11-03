@@ -966,3 +966,16 @@ fn a_parameter_given_by_its_place_in_the_label_is_bracketed() {
     keys(&mut f.r, "a_long_name_to_pass_twenty(");
     wait(&mut f.r, |r| r.hint() == Some("é(int a, [int b])"));
 }
+#[test]
+fn a_selection_formats_only_its_range() {
+    let Some(mut f) = open("one\ntwo\n") else {
+        return;
+    };
+    f.r.command(Command::Edit(Edit::SetSelection(Selection {
+        anchor: 4,
+        head: 6,
+    })));
+    f.r.command(Command::Named("lsp-format".into()));
+    wait(&mut f.r, |r| text(r) == "one\nranged\n");
+    assert!(f.log().contains("rangeFormat 1:0-1:2"), "{}", f.log());
+}
