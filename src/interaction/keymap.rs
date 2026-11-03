@@ -1,8 +1,8 @@
 //! Context-scoped key tables. Defaults are command lines resolved through the
 //! registry; user bindings shadow them and unbinding restores the default.
 use super::{
-    Command, EditMode, Input, InputKey, InputMotion, Key, KeyStroke, modal::Action,
-    picker::ListMotion, registry::Registry,
+    Command, EditMode, Input, InputKey, InputMotion, Key, KeyStroke, picker::ListMotion,
+    registry::Registry,
 };
 use crate::{
     application::ClipboardAction,
@@ -77,8 +77,8 @@ pub enum LineEdit {
     LineEnd,
     DeleteBackward,
     DeleteForward,
-    DeleteWordBackward,
-    DeleteWordForward,
+    KillWordBackward,
+    KillWordForward,
     KillLineStart,
     KillLineEnd,
     Yank,
@@ -101,14 +101,14 @@ pub(super) const LINE_EDITS: &[(&str, LineEdit, &str)] = &[
     ),
     ("delete-forward", LineEdit::DeleteForward, "Delete forward"),
     (
-        "delete-word-backward",
-        LineEdit::DeleteWordBackward,
-        "Delete to the previous word boundary",
+        "kill-word-backward",
+        LineEdit::KillWordBackward,
+        "Cut to the previous word boundary",
     ),
     (
-        "delete-word-forward",
-        LineEdit::DeleteWordForward,
-        "Delete to the next word boundary",
+        "kill-word-forward",
+        LineEdit::KillWordForward,
+        "Cut to the next word boundary",
     ),
     (
         "kill-line-start",
@@ -159,8 +159,14 @@ impl LineEdit {
                 direction: Direction::Forward,
                 smart: false,
             }),
-            Self::DeleteWordBackward => Command::Modal(Action::EraseWord),
-            Self::DeleteWordForward => Command::Edit(Edit::DeleteWord(Direction::Forward)),
+            Self::KillWordBackward => Command::Clipboard(ClipboardAction::Kill {
+                backward: true,
+                word: true,
+            }),
+            Self::KillWordForward => Command::Clipboard(ClipboardAction::Kill {
+                backward: false,
+                word: true,
+            }),
             Self::KillLineStart => Command::Clipboard(ClipboardAction::Kill {
                 backward: true,
                 word: false,
@@ -186,8 +192,8 @@ impl LineEdit {
                 backward: false,
                 word: false,
             },
-            Self::DeleteWordBackward => InputKey::Kill(InputMotion::WordLeft),
-            Self::DeleteWordForward => InputKey::Delete {
+            Self::KillWordBackward => InputKey::Kill(InputMotion::WordLeft),
+            Self::KillWordForward => InputKey::Delete {
                 backward: false,
                 word: true,
             },
@@ -300,11 +306,11 @@ const READLINE: &[(&str, &str)] = &[
     ("<c-h>", "delete-backward"),
     ("<del>", "delete-forward"),
     ("<c-d>", "delete-forward"),
-    ("<c-w>", "delete-word-backward"),
-    ("<c-bs>", "delete-word-backward"),
-    ("<a-bs>", "delete-word-backward"),
-    ("<c-del>", "delete-word-forward"),
-    ("<a-d>", "delete-word-forward"),
+    ("<c-w>", "kill-word-backward"),
+    ("<c-bs>", "kill-word-backward"),
+    ("<a-bs>", "kill-word-backward"),
+    ("<c-del>", "kill-word-forward"),
+    ("<a-d>", "kill-word-forward"),
     ("<c-u>", "kill-line-start"),
     ("<c-k>", "kill-line-end"),
     ("<c-y>", "yank"),
@@ -459,8 +465,9 @@ const NORMAL: &[(&str, &str)] = &[
     ("<c-y>", "put"),
     ("<a-y>", "yank-pop"),
     ("<c-d>", "delete"),
-    ("<a-d>", "delete-word-forward"),
-    ("<a-bs>", "delete-word-backward"),
+    ("<c-k>", "kill-line-end"),
+    ("<a-d>", "kill-word-forward"),
+    ("<a-bs>", "kill-word-backward"),
     ("<c-space>", "set-mark"),
     ("'", "join"),
     ("n", "search-next"),

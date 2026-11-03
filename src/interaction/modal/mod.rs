@@ -119,8 +119,6 @@ pub enum Action {
     HalfPage {
         down: bool,
     },
-    EraseWord,
-    EraseLineStart,
     /// Starts the selection at the caret for `C-Space`.
     SetMark,
     /// Enters Beacon inside the selection, or leaves a marker to swap with.

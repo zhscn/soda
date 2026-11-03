@@ -146,6 +146,32 @@ fn kill_puts_the_text_on_the_clipboard() {
     assert_eq!(text(&r), ";f(a,\nb)\n");
 }
 #[test]
+fn kills_go_to_the_kill_ring_and_join_one_after_another() {
+    let (_dir, mut r) = open("a.cpp", "|f(a,\n  b);\nint x;\n", EditMode::Insert);
+    // The expression past the line end, then what is left of the line:
+    // one entry.
+    keys(&mut r, "<c-k><c-k><c-k>");
+    assert_eq!(shown(&r), "|int x;\n");
+    assert_eq!(r.app().clipboard(), "f(a,\n  b);\n");
+    // Words, forward and backward, join too.
+    keys(&mut r, "<a-f><a-d><a-bs>");
+    assert_eq!(shown(&r), "|;\n");
+    assert_eq!(r.app().clipboard(), "int x");
+    assert_eq!(r.app().kill_ring().count(), 2);
+    keys(&mut r, "<c-y>");
+    assert_eq!(shown(&r), "int x|;\n");
+    keys(&mut r, "<a-y>");
+    assert_eq!(shown(&r), "f(a,\n  b);\n|;\n");
+    // `C-w` cuts the selection, else a word backward.
+    let (_dir, mut r) = open("a.cpp", "int |value = 1;\n", EditMode::Insert);
+    keys(&mut r, "<s-right><s-right><c-w>");
+    assert_eq!(shown(&r), "int |lue = 1;\n");
+    assert_eq!(r.app().clipboard(), "va");
+    keys(&mut r, "<c-w>");
+    assert_eq!(shown(&r), "|lue = 1;\n");
+    assert_eq!(r.app().clipboard(), "int va");
+}
+#[test]
 fn backspace_keeps_pairs() {
     use EditMode::Insert as I;
     check(

@@ -31,6 +31,7 @@ pub(super) const METHODS: &[&str] = &[
     "set_selection",
     "select",
     "edit",
+    "kill",
     "indent",
     "line_comment",
     "offset",
@@ -376,6 +377,46 @@ pub(super) fn register<'scope, 'r: 'scope>(
                 Ok(snapshot_version(&runtime, document))
             },
         )?,
+    )?;
+    soda.set(
+        "buffer_kill",
+        scope.create_function(|_, (number, from, to): (u64, Table, Table)| {
+            let mut runtime = runtime.borrow_mut();
+            let document = document(&runtime, number)?;
+            let snapshot = snapshot(&runtime, document);
+            let from = offset(snapshot, &from)?;
+            let to = offset(snapshot, &to)?;
+            if from > to {
+                return Err(error("range ends before it starts"));
+            }
+            if from == to {
+                return Ok(());
+            }
+            if !edited.borrow().iter().any(|(d, _)| *d == document) {
+                let depth = runtime
+                    .app
+                    .workspace()
+                    .editor(document)
+                    .unwrap()
+                    .model()
+                    .document()
+                    .history_depth();
+                edited.borrow_mut().push((document, depth));
+            }
+            let view = view(&runtime, document)?;
+            let time = runtime.epoch.elapsed();
+            // As the editor's own kills: into the kill ring, joining a
+            // kill just before it.
+            runtime.edit_event(Event::Clipboard {
+                view,
+                action: crate::application::ClipboardAction::Operate {
+                    range: from..to,
+                    edit: Change::new(from..to, ""),
+                    selection: Selection::caret(from),
+                },
+                time,
+            })
+        })?,
     )?;
     soda.set(
         "buffer_indent",

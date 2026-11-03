@@ -193,9 +193,10 @@ impl Application {
             });
             return Ok(());
         }
-        let range = if !selection.range().is_empty() {
-            selection.range()
-        } else if let ClipboardAction::Kill { backward, word } = action {
+        // A kill goes from the caret, as Emacs's `kill-line` and
+        // `kill-word` ignore the region; copying and cutting take the
+        // selection, or else the line.
+        let range = if let ClipboardAction::Kill { backward, word } = action {
             let head = selection.head;
             let line = snapshot.line_of(head).unwrap();
             let other = if word {
@@ -211,6 +212,8 @@ impl Application {
                 }
             };
             head.min(other)..head.max(other)
+        } else if !selection.range().is_empty() {
+            selection.range()
         } else {
             snapshot
                 .line_range(snapshot.line_of(selection.head).unwrap())

@@ -170,13 +170,8 @@ fn word_navigation_and_deletion_cross_crlf_without_splitting_graphemes() {
         ..KeyStroke::plain(Key::Right)
     }));
     assert_eq!(editor.selection(), Selection { anchor: 3, head: 7 });
-    editor.input(UserInput::Key(KeyStroke {
-        control: true,
-        ..KeyStroke::plain(Key::Delete)
-    }));
-    assert_eq!(editor.text(), "e\u{301}\r\n\nbar");
-    editor.command(Command::Edit(Edit::Undo));
-    editor.select(Selection::caret(7));
+    // A word kill goes from the caret whatever is selected, as Emacs's
+    // `kill-word`, and over the line breaks.
     editor.input(UserInput::Key(KeyStroke {
         control: true,
         ..KeyStroke::plain(Key::Delete)

@@ -4,7 +4,7 @@ use crate::{
     application::{Application, ClipboardAction, Event, View, ViewId},
     core::{
         Association, ByteOffset, Change, Selection, Snapshot, Transaction, logical_column_at,
-        offset_at_logical_column, word_boundary,
+        offset_at_logical_column,
     },
     editor::{Command as Edit, Direction, Document, search::SearchQuery},
     interaction::{Command, EditMode, Layers, Message, Response},
@@ -353,17 +353,6 @@ impl Layers {
                 });
             }
             Action::HalfPage { down } => return self.half_page(app, &at, down, response),
-            Action::EraseWord => {
-                let head = at.selection.head;
-                let start =
-                    word_boundary(at.text, ByteOffset(head), true).map_or(head, |offset| offset.0);
-                response.events.push(at.erase(start..head));
-            }
-            Action::EraseLineStart => {
-                let head = at.selection.head;
-                let start = at.text.line_start(at.text.line_of(head).unwrap()).unwrap();
-                response.events.push(at.erase(start..head));
-            }
             Action::SetMark => {
                 self.select(
                     &at,

@@ -204,7 +204,8 @@ Insert 中按选项 `auto-pairs`（默认开）成对输入括号，与 Emacs �
 | Normal、Insert `<c-k>` | `sexp-kill` | 剪切到行尾；有表达式越过行尾时剪切到它结束，遇到所在分组的闭括号时停在它之前 |
 | Normal、Insert `<c-s-right>` / `<c-s-left>` | `sexp-slurp` / `sexp-barf` | 把闭括号移到下一个表达式之后 / 最后一个表达式之前 |
 | Insert `<bs>`、`<c-h>` | `soft-backspace` | 删除会破坏配对时只移动光标；空的一对整个删除 |
-| Insert `<c-w>`、`<c-bs>`、`<a-bs>` | `soft-delete-word` | 标点删到最近的括号为止，紧邻括号时同 `soft-backspace` |
+| Insert `<c-bs>`、`<a-bs>` | `soft-kill-word` | 向前剪一个词，进 kill ring；标点剪到最近的括号为止，紧邻括号时同 `soft-backspace`；不管选区 |
+| Insert `<c-w>` | `kill-region-or-word` | 有选区时剪切选区（puni 的 `puni-kill-region`），否则同 `soft-kill-word` |
 
 `foo(a,⏎ b);` 行首的 `<c-k>` 留下 `;`，`if (x) {⏎} else {⏎}` 行首的留下 `else {⏎}`，这与 puni 的 `beyond` 相同。没有写模式的键在 Normal 和 Insert 中都有效。用 `unmap insert <bs>` 这样的命令恢复内置行为。
 
@@ -245,8 +246,9 @@ Normal 中：
 | `C-g` | 取消选区 |
 | `C-w`、`M-w`、`C-y`、`M-y` | `kill`、`save`、`yank`、`yank-pop` |
 | `C-d` | `delete` |
+| `C-k` | `kill-line-end`（`pairs` 模块换成 `sexp-kill`） |
 | `C-s`、`C-r` | `search`、`search-backward` |
-| `M-d`、`M-Backspace` | 删除到词尾、词首 |
+| `M-d`、`M-Backspace` | `kill-word-forward`、`kill-word-backward` |
 
 Normal、Insert 都有效：
 
@@ -276,14 +278,14 @@ Insert 和 prompt 共享一组 readline 风格的行编辑命令。名字只定�
 | Ctrl-Left / Ctrl-Right、Alt-B / Alt-F | `word-left` / `word-right` | 按词移动 |
 | Home / End、Ctrl-A / Ctrl-E | `line-start` / `line-end` | 到行首 / 行尾 |
 | Backspace / Ctrl-H、Delete / Ctrl-D | `delete-backward` / `delete-forward` | 删除字符簇；Insert 的退格保留按缩进单位回退 |
-| Ctrl-W、Ctrl-Backspace、Alt-Backspace | `delete-word-backward` | 删除到前一个词边界 |
-| Ctrl-Delete、Alt-D | `delete-word-forward` | 删除到后一个词边界 |
+| Ctrl-W、Ctrl-Backspace、Alt-Backspace | `kill-word-backward` | 剪切到前一个词边界 |
+| Ctrl-Delete、Alt-D | `kill-word-forward` | 剪切到后一个词边界 |
 | Ctrl-U | `kill-line-start` | 剪切到行首 |
 | Ctrl-K | `kill-line-end` | 剪切到行尾；位于行尾时剪切换行 |
 | Ctrl-Y | `yank` | 粘贴剪切内容 |
 | Alt-Y | `yank-pop` | 紧跟在粘贴后，换成 kill ring 里更早的一条；Insert 和 Normal 有，输入框没有 |
 
-Shift 加方向键、Home 和 End 扩展选区，对应 `extend-` 前缀的同名命令。Insert 中 `kill-line-start`、`kill-line-end` 写入 kill ring，连续的剪切合并成一条（见[剪贴板](#剪贴板)），`yank` 等同于粘贴剪贴板；输入框使用组件自己的剪切缓冲。Normal 不使用这组键；它的 Emacs 键见[Emacs 键位](#emacs-键位)。
+Shift 加方向键、Home 和 End 扩展选区，对应 `extend-` 前缀的同名命令。Insert 中 `kill-*` 写入 kill ring，连续的剪切合并成一条（见[剪贴板](#剪贴板)）；它们和 Emacs 的 `kill-line`、`kill-word` 一样从光标算起，不管选区。`yank` 等同于粘贴剪贴板；输入框使用组件自己的剪切缓冲。Normal 不使用这组键；它的 Emacs 键见[Emacs 键位](#emacs-键位)。
 
 Ctrl-N/Ctrl-P 上下移动；补全列表打开期间由补全使用。
 
@@ -597,12 +599,12 @@ Runtime 在更新中观察 SaveId，并将带 Operation 身份的失败交给等
 
 ## 剪贴板
 
-Application 拥有一个跨文档共享的剪贴板。ClipboardAction 提供复制、剪切、粘贴和 `yank-pop`。存在选区时复制或剪切选区，否则操作光标所在整行，保留原来的换行字节。空行末尾没有可复制内容时保留此前剪贴板。
+Application 拥有一个跨文档共享的剪贴板。ClipboardAction 提供复制、剪切、粘贴和 `yank-pop`。存在选区时复制或剪切选区，否则操作光标所在整行，保留原来的换行字节；`kill-line-*`、`kill-word-*` 例外，总是从光标剪到行尾、行首或词边界。空行末尾没有可复制内容时保留此前剪贴板。
 
 复制保留文档、选区和历史；剪切在事务成功后才替换剪贴板，并将光标放到删除范围起点。粘贴在光标处插入或替换选区，作为一次独立的可撤销编辑。撤销恢复文档与选区，不改变剪贴板。模态层阻止这些文档命令；终端 bracketed paste 仍可直接输入到当前组件。
 
 剪贴板是 Emacs 式的 kill ring：每次复制、剪切或从系统剪贴板读回新内容都加一条，最新的一条就是剪贴板，最多保留 120 条，与最新一条相同的文字不重复加入。
-- **连续剪切合并**：剪切时，如果文档自上次剪切后没有变过、光标还在上次剪切留下的位置，并且这次剪掉的范围一端正好在那里，就并进最新的一条，向后剪接在后面，向前剪（`kill-line-start`）放在前面。所以 `C-k C-k` 剪掉一行连同换行，是一条。判断看的是状态而不是上一个按键，宏和 Lua 调用也一样；复制或读回系统剪贴板之后不再合并。
+- **连续剪切合并**：剪切时，如果文档自上次剪切后没有变过、光标还在上次剪切留下的位置，并且这次剪掉的范围一端正好在那里，就并进最新的一条，向后剪接在后面，向前剪（`kill-line-start`、`kill-word-backward`）放在前面。所以 `C-k C-k` 剪掉一行连同换行，是一条，`M-d M-Backspace` 剪掉的两段也是一条。判断看的是状态而不是上一个按键，宏和 Lua 的 `buf:kill` 也一样（`pairs` 模块的剪切都用它）；复制或读回系统剪贴板之后不再合并。
 - **`yank-pop`（`M-y`）**：粘贴之后，文档和光标都没有动过时，把刚粘贴的文字换成 kill ring 里更早的一条，每再按一次换成更早的一条，过了最旧的回到最新的；否则报告 the last command was not a yank。它不改变剪贴板，之后的粘贴仍是最新的一条。
 
 剪贴板每次被替换时版本号加一。前端可以给 Runtime 提供一个 `SystemClipboard`，Runtime 据此与系统剪贴板同步：

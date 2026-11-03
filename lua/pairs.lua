@@ -134,8 +134,7 @@ soda.define_command("sexp-kill", "Kill to the line end, keeping pairs whole", fu
   end
   local stop = kill_end(buf, head)
   if not same(stop, head) then
-    soda.clipboard(buf:text(head, stop))
-    buf:edit({ { head, stop, "" } })
+    buf:kill(head, stop)
   end
 end)
 
@@ -205,22 +204,35 @@ soda.define_command("soft-backspace", "Delete backward without breaking a pair",
   soft_backspace(soda.buffer())
 end)
 
--- A word goes as usual; punctuation goes up to the nearest bracket, and at
--- a bracket deletion is a soft backspace.
-soda.define_command("soft-delete-word", "Delete a word backward without breaking a pair", function()
-  local buf = soda.buffer()
-  local anchor, head = buf:selection()
+-- A word goes as usual, into the kill ring; punctuation goes up to the
+-- nearest bracket, and at a bracket deletion is a soft backspace. The
+-- selection plays no part, as in puni's `puni-backward-kill-word`.
+local function soft_kill_word(buf)
+  local _, head = buf:selection()
   local before_caret = buf:line(head[1]):sub(1, head[2] - 1)
   local run = before_caret:match("[^%w_%s]+%s*$")
-  if not same(anchor, head) or not run or not run:find("[%(%)%[%]{}\"']") or buf:in_literal(head) then
-    soda.command("delete-word-backward")
+  if not run or not run:find("[%(%)%[%]{}\"']") or buf:in_literal(head) then
+    soda.command("kill-word-backward")
     return
   end
   local tail = run:match("[^%(%)%[%]{}\"']*$")
   if tail == "" then
     soft_backspace(buf)
   else
-    buf:edit({ { { head[1], head[2] - #tail }, head, "" } })
+    buf:kill({ head[1], head[2] - #tail }, head)
+  end
+end
+soda.define_command("soft-kill-word", "Cut a word backward without breaking a pair", function()
+  soft_kill_word(soda.buffer())
+end)
+-- `C-w` as `puni-kill-region`: the selection, or else a word backward.
+soda.define_command("kill-region-or-word", "Cut the selection, or else a word backward", function()
+  local buf = soda.buffer()
+  local anchor, head = buf:selection()
+  if same(anchor, head) then
+    soft_kill_word(buf)
+  else
+    soda.command("cut")
   end
 end)
 
@@ -253,11 +265,6 @@ soda.define_command("sexp-barf", "Move the closing bracket before the last expre
   buf:edit({ { target, target, close }, { group.inner_to, group.to, "" } })
 end)
 
-local function kill_to(buf, from, to)
-  soda.clipboard(buf:text(from, to))
-  buf:edit({ { from, to, "" } })
-end
-
 soda.define_command("sexp-beginning", "Go to the start of the group's contents", function()
   local buf = soda.buffer()
   local _, head = buf:selection()
@@ -281,7 +288,7 @@ soda.define_command("sexp-kill-forward", "Kill the next expression", function()
   local _, head = buf:selection()
   local item = step(buf, head, "next_item")
   if item then
-    kill_to(buf, head, item.to)
+    buf:kill(head, item.to)
   end
 end)
 
@@ -290,7 +297,7 @@ soda.define_command("sexp-kill-backward", "Kill the previous expression", functi
   local _, head = buf:selection()
   local item = step(buf, head, "prev_item")
   if item then
-    kill_to(buf, item.from, head)
+    buf:kill(item.from, head)
   end
 end)
 
@@ -314,6 +321,6 @@ for _, mode in ipairs({ "normal", "insert" }) do
 end
 soda.map("insert", "<bs>", "soft-backspace")
 soda.map("insert", "<c-h>", "soft-backspace")
-soda.map("insert", "<c-w>", "soft-delete-word")
-soda.map("insert", "<c-bs>", "soft-delete-word")
-soda.map("insert", "<a-bs>", "soft-delete-word")
+soda.map("insert", "<c-w>", "kill-region-or-word")
+soda.map("insert", "<c-bs>", "soft-kill-word")
+soda.map("insert", "<a-bs>", "soft-kill-word")

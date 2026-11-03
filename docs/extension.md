@@ -207,6 +207,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `buf:set_selection(anchor, head?)` | 设置选区；省略 head 时为 caret |
 | `buf:select(anchor, head)` | 选中这段范围；`head` 可以在 `anchor` 之前 |
 | `buf:edit(changes, revision?)` | 应用编辑，返回新的修订号 |
+| `buf:kill(from, to)` | 剪掉这段文字放进 kill ring，与编辑器自己的剪切一样：紧接上一次剪切时合并进同一条，同步到系统剪贴板；光标留在 `from` |
 | `buf:indent(n)` | 语言给第 n 行的缩进字符串；语言不给出时为 nil |
 | `buf:line_comment()` | 该语言的行注释标记，来自语言档案；没有行注释时为 nil |
 | `buf:offset(position)`、`buf:point(offset)` | 位置与字节偏移互相转换 |
