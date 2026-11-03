@@ -954,3 +954,10 @@ fn diagnostics_carry_related_places_and_tags_and_can_be_pulled() {
         std::fs::read_to_string(&log).is_ok_and(|log| log.contains(r#"pull "r1""#))
     });
 }
+#[test]
+fn a_parameter_given_by_its_place_in_the_label_is_bracketed() {
+    let Some(mut f) = open("\n") else { return };
+    f.r.command(Command::SetMode(EditMode::Insert));
+    keys(&mut f.r, "a_long_name_to_pass_twenty(");
+    wait(&mut f.r, |r| r.hint() == Some("é(int a, [int b])"));
+}

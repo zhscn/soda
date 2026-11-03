@@ -263,7 +263,12 @@ fn initialize(root: &Path, init: &Value) -> Value {
                     "implementation": {},
                     "documentHighlight": {},
                     "formatting": {},
-                    "signatureHelp": {},
+                    "signatureHelp": {
+                        "signatureInformation": {
+                            "parameterInformation": { "labelOffsetSupport": true },
+                            "activeParameterSupport": true,
+                        },
+                    },
                     "documentSymbol": { "hierarchicalDocumentSymbolSupport": true },
                     "codeAction": {
                         "codeActionLiteralSupport": {

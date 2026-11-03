@@ -48,7 +48,7 @@ rust-analyzer 默认不开，因为它会运行项目的构建脚本，打开一
 
 补全不需要配置，服务器在就是一个来源，`.`、`->`、`::` 触发。候选带的其他修改（`additionalTextEdits`）随它一起做，clangd 因此在补全一个没有 include 的名字时加上 `#include`，这类候选的名字前有 `•`。服务器给出的范围决定替换多少：Enter 用 insert 范围，Tab 用 replace 范围；只有一个范围时它是 Enter 的，Tab 仍替换到词尾。候选的 commit 字符（`commitCharacters`，或列表的默认值、服务器的 `allCommitCharacters`）在选中它之后输入时先确认它，再输入这个字符。服务器支持 `completionItem/resolve` 时，选中的候选再问一次，拿到的说明显示在列表旁边。
 
-输入 `(` 或 `,` 时，正在调用的函数签名显示在消息行，当前参数加方括号，输入 `)` 或离开 Insert 时消失。没有其他消息时才显示，优先于光标处的诊断。光标用方向键移出括号时不会消失，到下一次 `)` 或离开 Insert 为止。
+输入 `(` 或 `,` 时，正在调用的函数签名显示在消息行，当前参数加方括号（服务器按名字或按在签名里的位置给出参数都可以），输入 `)` 或离开 Insert 时消失。没有其他消息时才显示，优先于光标处的诊断。光标用方向键移出括号时不会消失，到下一次 `)` 或离开 Insert 为止。
 
 停止输入 `idle-time` 毫秒后，光标处符号在文档中的各处出现（`textDocument/documentHighlight`）加上背景色：读的地方是 `reference`，写的地方是 `reference-write`，加下划线。光标离开符号后下一次空闲时清除；选项 `lsp-highlight` 关闭。这和按文字匹配的 `symbol-overlay` 不同，只标出服务器认为是同一个符号的地方。
 

@@ -1225,6 +1225,13 @@ local function signature_of(help)
   local parameter = signature.parameters and signature.parameters[active + 1]
   local name = parameter and parameter.label
   local label = signature.label
+  -- A parameter may be where it stands in the label rather than its words.
+  if type(name) == "table" and name[1] and name[2] then
+    local info = soda.lsp.info()
+    local encoding = info and info.encoding or "utf-16"
+    local from, to = to_byte(label, name[1], encoding), to_byte(label, name[2], encoding)
+    return label:sub(1, from) .. "[" .. label:sub(from + 1, to) .. "]" .. label:sub(to + 1)
+  end
   if type(name) == "string" then
     local from, to = label:find(name, 1, true)
     if from then

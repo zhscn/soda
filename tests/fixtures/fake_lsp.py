@@ -192,9 +192,15 @@ while True:
         write({"jsonrpc": "2.0", "method": "$/progress", "params": {"token": "t", "value": {"kind": "end"}}})
         answer(message, [])
     elif method == "textDocument/signatureHelp":
-        answer(message, {"activeSignature": 0, "activeParameter": 1, "signatures": [
-            {"label": "add(int a, int b)", "parameters": [{"label": "int a"}, {"label": "int b"}]},
-        ]})
+        # A label with é, whose parameters are where they stand, in UTF-16.
+        if params["position"]["character"] > 20:
+            answer(message, {"activeSignature": 0, "activeParameter": 1, "signatures": [
+                {"label": "é(int a, int b)", "parameters": [{"label": [2, 7]}, {"label": [9, 14]}]},
+            ]})
+        else:
+            answer(message, {"activeSignature": 0, "activeParameter": 1, "signatures": [
+                {"label": "add(int a, int b)", "parameters": [{"label": "int a"}, {"label": "int b"}]},
+            ]})
     elif method == "textDocument/documentSymbol":
         answer(message, [{"name": "Outer", "kind": 5,
                           "selectionRange": spot("", 0, 1)["range"],
