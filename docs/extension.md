@@ -55,6 +55,7 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `final-newline` | true/false | true | 保存时给有内容的文件补上末尾换行 |
 | `auto-reload` | true/false | true | 磁盘上变化了的文件没有未保存编辑时自动重新加载 |
 | `clipboard` | system/internal | system | internal 时复制和粘贴不经过系统剪贴板 |
+| `mark-keys` | true/false | true | 光标在标记的符号上时 `mark` 键位表生效；false 对应 Emacs 的 `symbol-overlay-inhibit-map`，Normal 的键不被遮住 |
 
 `set` 在解析命令行时就按类型检查取值，所以错误在命令执行前报告，Application 收到的永远是合法值。布尔值也接受 yes/no、on/off。`set` 和 `set-local` 的选项名可以在命令行中补全，候选附带说明。
 

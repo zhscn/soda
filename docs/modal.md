@@ -146,6 +146,7 @@ Lua 的 `buf:line_count()` 仍按文本行计，最后一个换行之后的空�
 | Beacon 输入 | 退出 Insert 后回放 | 实时同步 | 真实的多处修改 |
 | 块和括号 thing | 语法表、纯文本配对 | CST | soda 的核心资产 |
 | `v` | 补全缓冲区里的符号 | 同 meow：`visit`，命令行补全文档的符号 | 一致 |
+| 标记上的单键 | symbol-overlay 的 overlay 键表盖过 meow | `mark` 表盖过 Normal，`mark-keys` 关闭 | 与 Emacs 相同的设计，选项对应 `symbol-overlay-inhibit-map` |
 
 用户配置里 `t` 是 query-replace，soda 的 `t` 是 till，query-replace 在 `R`。
 
@@ -154,7 +155,6 @@ Lua 的 `buf:line_count()` 仍按文本行计，最后一个换行之后的空�
 - Lua 命令在 Beacon 里只作用于主选区，Lua 也读不到其余选区。
 - Lua 设的选区不带种类，数字不能扩展它。
 - Lua 不能新建键位表，只能往已有的表里加键。
-- symbol-overlay 的 `mark` 表在光标位于标记上时遮住 `i p w e d s q r h`，这些现在都是常用的 meow 键。
 - 没有 undo-in-selection、sync-grab、`z` 跳回 grab、`d`（defun）thing，`y` 在没有选区时报错。
 - 数字提示的消失时间固定为 1.5 秒，不是选项。
 

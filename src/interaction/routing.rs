@@ -276,7 +276,18 @@ impl Layers {
                     stack.push(Context::Snippet);
                 }
             }
-            EditMode::Normal if !self.modal.active() && app.on_mark() => stack.push(Context::Mark),
+            EditMode::Normal
+                if !self.modal.active()
+                    && app.options().bool(
+                        app.active_view()
+                            .and_then(|view| app.view(view))
+                            .map(|view| view.document_id),
+                        "mark-keys",
+                    )
+                    && app.on_mark() =>
+            {
+                stack.push(Context::Mark)
+            }
             EditMode::Normal
                 if !self.modal.active()
                     && app

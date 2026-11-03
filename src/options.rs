@@ -91,6 +91,12 @@ pub const OPTIONS: &[OptionInfo] = &[
         doc: "Type brackets, and the quotes a language lists, in pairs; Backspace removes an empty pair",
     },
     OptionInfo {
+        name: "mark-keys",
+        kind: Kind::Bool,
+        default: Value::Bool(true),
+        doc: "Keys of the mark table act while the caret is on a marked symbol, as Emacs's symbol-overlay-map",
+    },
+    OptionInfo {
         name: "completion",
         kind: Kind::Bool,
         default: Value::Bool(true),

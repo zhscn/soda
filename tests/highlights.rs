@@ -205,6 +205,22 @@ fn keys_mean_what_they_always_do_off_a_mark_and_in_a_count() {
 }
 
 #[test]
+fn an_option_keeps_the_keys_of_normal_on_a_mark() {
+    let mut r = runtime("foo bar foo\n");
+    r.load_startup_lua();
+    keys(&mut r, "<space>i");
+    line(&mut r, "set mark-keys false");
+    // On the mark, i is Insert, as with symbol-overlay-inhibit-map.
+    keys(&mut r, "i");
+    assert_eq!(r.edit_mode(), EditMode::Insert);
+    assert!(!shown(&r).is_empty(), "the mark stays");
+    keys(&mut r, "<esc>");
+    line(&mut r, "set mark-keys true");
+    keys(&mut r, "<a-lt>i");
+    assert!(shown(&r).is_empty(), "i takes the mark off again");
+}
+
+#[test]
 fn renaming_changes_every_occurrence_in_one_step_and_keeps_the_colour() {
     let mut r = runtime("foo bar foobar foo\n");
     r.load_startup_lua();

@@ -651,7 +651,7 @@ highlight todo \b(TODO|FIXME|XXX)\b
 | `r` | `symbol-rename [NAME]` | 重命名当前文档里所有出现处，一步撤销，标记跟过去 |
 | `h` | `symbol-help` | 列出这些键 |
 
-这些键遮住了 Normal 里的 `i`、`p`、`w`、`e`、`d`、`s`、`q`、`r`、`h` 等，和 Emacs 里 overlay 内键位盖过 meow 一样。不想要的用 `unmap mark h` 去掉，也可以用 `map mark KEY COMMAND` 改绑。
+这些键遮住了 Normal 里的 `i`、`p`、`w`、`e`、`d`、`s`、`q`、`r`、`h` 等，和 Emacs 一样：symbol-overlay 把键表挂在 overlay 的 `keymap` 属性上，Emacs 查键时它排在 meow 所在的 `emulation-mode-map-alists` 之前。整张表不要时 `set mark-keys false`，对应 Emacs 的 `symbol-overlay-inhibit-map`，标记之间仍可以用 `<a-n>` / `<a-p>` 跳，也可以 `set-local` 只对某个文档关掉；只去掉个别键用 `unmap mark h`，改绑用 `map mark KEY COMMAND`。
 
 跳转后行尾显示位置，比如 `[3/12]`，和 meow-visit 一样，下一个按键清除。Lua 用 `soda.indicator(line, text)` 显示。
 
