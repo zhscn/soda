@@ -186,7 +186,8 @@ C++ 的缩进、制表符宽度由 clang-format 配置决定，`indent-width`、
 | `symbol-overlay` | 标记符号并在标记之间跳转、改名，见[交互层](interaction.md#高亮模式) | leader 下的 `i`、`I`，`<a-n>`、`<a-p>`，以及 `mark` 键位表 |
 | `git-changes` | 把 `git diff` 的每个改动块列入 `*changes*` | leader 下的 `g` |
 | `git-flags` | 用行标记标出新增、修改和删除的行，不随启动加载 | 无 |
-| `ccls` | 用 ccls 代替 clangd，加上它的扩展：逐层展开的调用、继承和成员树，类型的变量，按语法树移动，跳过的预处理分支变暗。不随启动加载，`require("ccls").setup({...})`，见[语言服务器](lsp.md#ccls) | `setup` 后 leader 下的 `c`、`C`、`t`、`T`、`m`、`M` |
+| `git` | 只读的 git 查询：`root(path)` 找工作树顶层，`status(path, fn)` 在后台问 git，回调得到根目录、分支、提交、上游和前后差几个提交，以及路径是否被跟踪、忽略、未跟踪、已暂存、已修改、冲突。不随启动加载，`require("git")` | 无 |
+| `ccls` | 让 C++ 使用 ccls，加上它的扩展：逐层展开的调用、继承和成员树，类型的变量，按语法树移动，跳过的预处理分支变暗。不随启动加载，`require("ccls").setup({...})`，见[语言服务器](lsp.md#ccls) | `setup` 后 leader 下的 `c`、`C`、`t`、`T`、`m`、`M` |
 
 ### 文档
 

@@ -5,7 +5,11 @@
 //! A server is started for the first document of a language under a root,
 //! so two projects have two servers. Documents are sent whole, shortly
 //! after typing stops and before any request. Bytes are written on a thread, so that a large document costs the editor nothing.
-use crate::{application::Application, core::Snapshot, editor::DocumentId};
+use crate::{
+    application::{Application, RootSource},
+    core::Snapshot,
+    editor::DocumentId,
+};
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
@@ -85,6 +89,12 @@ pub(super) enum Delivery {
         result: Value,
         error: Value,
     },
+    /// A language's function, to choose the root of a document's server.
+    Root {
+        function: u64,
+        document: DocumentId,
+        path: PathBuf,
+    },
     /// A notification, for a function given to `soda.lsp.on`.
     Notification { function: u64, params: Value },
     /// A request from a server, for the functions given to `soda.lsp.on`:
@@ -105,6 +115,27 @@ pub(super) struct Server {
     /// What `workspace/configuration` answers from, by dotted section, and
     /// `workspace/didChangeConfiguration` sends once the server is up.
     pub settings: Value,
+    pub auto: Auto,
+    /// A Lua function that chooses a document's root, instead of markers.
+    pub roots: Option<u64>,
+}
+/// When opening a document starts its server.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum Auto {
+    Always,
+    /// Only where its root was found: a marker, a jump or a function, not
+    /// a project taken for want of one.
+    Marked,
+    /// Only by `lsp-start`.
+    Never,
+}
+/// A server as `soda.lsp.servers` lists it.
+pub(super) struct Listed {
+    pub language: String,
+    pub root: PathBuf,
+    pub command: Vec<String>,
+    pub state: &'static str,
+    pub uris: Vec<String>,
 }
 
 /// A language and the root a server for it runs in.
@@ -151,6 +182,14 @@ pub(super) struct Lsp {
     clients: HashMap<Key, Client>,
     /// Servers that failed; `lsp-restart` lets them try again.
     failed: Vec<Key>,
+    /// Servers `lsp-stop` stopped, and the documents it took from them, by
+    /// language: only `lsp-start` starts a server for them again.
+    stopped: Vec<Key>,
+    held: HashMap<DocumentId, String>,
+    /// Documents whose root a function was asked for, and the questions
+    /// not yet handed out.
+    asking: std::collections::HashSet<DocumentId>,
+    asks: Vec<Delivery>,
     /// When each server exited lately.
     crashes: HashMap<Key, Vec<Instant>>,
     handlers: HashMap<String, Vec<u64>>,
@@ -163,6 +202,10 @@ impl Default for Lsp {
             servers: HashMap::new(),
             clients: HashMap::new(),
             failed: vec![],
+            stopped: vec![],
+            held: HashMap::new(),
+            asking: Default::default(),
+            asks: vec![],
             crashes: HashMap::new(),
             handlers: HashMap::new(),
             incoming: mpsc::channel(),
@@ -346,6 +389,68 @@ impl Lsp {
     pub fn on(&mut self, method: String, function: u64) {
         self.handlers.entry(method).or_default().push(function);
     }
+    /// Lets a server start where `lsp-stop` stopped it, or one failed.
+    pub fn allow(&mut self, key: &Key) {
+        self.stopped.retain(|stopped| stopped != key);
+        self.held.retain(|_, language| *language != key.0);
+        self.failed.retain(|failed| failed != key);
+        self.crashes.remove(key);
+    }
+    /// Stops a server until `lsp-start`; returns the documents it had.
+    pub fn stop(&mut self, key: &Key) -> Vec<(DocumentId, String)> {
+        if !self.stopped.contains(key) {
+            self.stopped.push(key.clone());
+        }
+        let opened: Vec<_> = self.clients.remove(key).map_or(vec![], |client| {
+            client
+                .opened
+                .iter()
+                .map(|(document, opened)| (*document, opened.uri.clone()))
+                .collect()
+        });
+        for (document, _) in &opened {
+            self.held.insert(*document, key.0.clone());
+        }
+        opened
+    }
+    /// Running, failed and stopped servers.
+    pub fn servers(&self) -> Vec<Listed> {
+        let command = |language: &str| {
+            self.servers
+                .get(language)
+                .map_or(vec![], |server| server.command.clone())
+        };
+        let mut listed: Vec<Listed> = self
+            .clients
+            .iter()
+            .map(|(key, client)| {
+                let mut uris: Vec<_> = client.opened.values().map(|o| o.uri.clone()).collect();
+                uris.sort();
+                Listed {
+                    language: key.0.clone(),
+                    root: key.1.clone(),
+                    command: command(&key.0),
+                    state: if client.held.is_some() {
+                        "starting"
+                    } else {
+                        "running"
+                    },
+                    uris,
+                }
+            })
+            .collect();
+        for (keys, state) in [(&self.failed, "failed"), (&self.stopped, "stopped")] {
+            listed.extend(keys.iter().map(|key| Listed {
+                language: key.0.clone(),
+                root: key.1.clone(),
+                command: command(&key.0),
+                state,
+                uris: vec![],
+            }));
+        }
+        listed.sort_by(|a, b| (&a.language, &a.root).cmp(&(&b.language, &b.root)));
+        listed
+    }
     pub fn restart(&mut self, key: &Key) {
         self.failed.retain(|failed| failed != key);
         self.crashes.remove(key);
@@ -423,14 +528,46 @@ impl Lsp {
         }
         let mut failure = None;
         let workspace = app.workspace();
+        self.asking
+            .retain(|document| workspace.editor(*document).is_some());
+        self.held
+            .retain(|document, _| workspace.editor(*document).is_some());
         for document in workspace.documents() {
             let Some(path) = workspace.file(document).and_then(|file| file.path()) else {
                 continue;
             };
             let model = workspace.editor(document).unwrap().model().document();
             let language = model.language().profile().id.clone();
-            let key = (language.clone(), app.server_root_of(document));
-            if !self.servers.contains_key(&language) || self.failed.contains(&key) {
+            let Some(server) = self.servers.get(&language) else {
+                continue;
+            };
+            let root = app.server_root(document);
+            // A function chooses where markers would; its answer comes later.
+            if let Some(function) = server.roots
+                && matches!(root.source, RootSource::Marked | RootSource::Project)
+                && !app.server_root_chosen(document)
+            {
+                if self.asking.insert(document) {
+                    self.asks.push(Delivery::Root {
+                        function,
+                        document,
+                        path: path.to_owned(),
+                    });
+                }
+                continue;
+            }
+            let wanted = match (server.auto, root.source) {
+                (_, RootSource::Started) => true,
+                (Auto::Never, _) | (Auto::Marked, RootSource::Project) => false,
+                _ => true,
+            };
+            let key = (language.clone(), root.path);
+            if self.failed.contains(&key) {
+                continue;
+            }
+            let held = self.held.contains_key(&document) && root.source != RootSource::Started;
+            if !self.clients.contains_key(&key) && (!wanted || held || self.stopped.contains(&key))
+            {
                 continue;
             }
             if !self.clients.contains_key(&key)
@@ -565,7 +702,7 @@ impl Lsp {
     /// What servers said since the last call, and an error to show if one
     /// went away.
     pub fn poll(&mut self) -> (Vec<Delivery>, Option<String>) {
-        let mut deliveries = vec![];
+        let mut deliveries = std::mem::take(&mut self.asks);
         let mut failure = None;
         while let Ok(incoming) = self.incoming.1.try_recv() {
             match incoming {

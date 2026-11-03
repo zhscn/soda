@@ -86,6 +86,10 @@ const FUNCTIONS: &[&str] = &[
     "lsp_info",
     "lsp_restart",
     "lsp_array",
+    "lsp_set_root",
+    "lsp_start",
+    "lsp_stop",
+    "lsp_servers",
 ];
 const PRELUDE: &str = r#"
 local current, names, methods, bundled = ...
@@ -209,7 +213,8 @@ local completion_source = soda.completion_source
 soda.completion_source = nil
 soda.completion = {}
 soda.lsp = {}
-for _, name in ipairs({ "server", "request", "cancel", "notify", "on", "uri", "info", "restart", "array" }) do
+for _, name in ipairs({ "server", "request", "cancel", "notify", "on", "uri", "info", "restart", "array",
+                        "set_root", "start", "stop", "servers" }) do
   soda.lsp[name] = soda["lsp_" .. name]
   soda["lsp_" .. name] = nil
 end
@@ -535,6 +540,31 @@ impl Host {
                     let result = answer.as_ref().ok().cloned().flatten().unwrap_or(fallback);
                     runtime.borrow_mut().lsp.reply(&key, id, result);
                     answer.map(|_| ())
+                }
+                Request::Lsp(super::lsp::Delivery::Root {
+                    function,
+                    document,
+                    path,
+                }) => {
+                    // It answers by returning a directory, or false for
+                    // none, or later through `done`.
+                    let id = document.number();
+                    let done = lua.create_function(move |lua, root: Value| {
+                        let soda: Table = lua.globals().get("soda")?;
+                        let lsp: Table = soda.get("lsp")?;
+                        lsp.get::<Function>("set_root")?.call::<()>((id, root))
+                    })?;
+                    let call = self.callbacks()?.get::<Function>(function)?;
+                    let path = path.to_string_lossy().into_owned();
+                    match call.call::<Value>((path, done.clone())) {
+                        Ok(Value::Nil) => Ok(()),
+                        Ok(root) => done.call::<()>(root),
+                        Err(error) => {
+                            // A failing function leaves the document its project.
+                            let _ = done.call::<()>(Value::Boolean(false));
+                            Err(error)
+                        }
+                    }
                 }
                 Request::Lsp(super::lsp::Delivery::Notification { function, params }) => self
                     .callbacks()?

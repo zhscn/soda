@@ -1253,3 +1253,80 @@ fn a_replaced_tree_lets_its_functions_go_and_a_redraw_keeps_the_view() {
     keys(&mut r, "<tab>");
     assert_eq!(top(&r), before);
 }
+#[test]
+fn git_tells_the_root_branch_and_state_of_a_path() {
+    let git = |dir: &std::path::Path, args: &[&str]| {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env("GIT_AUTHOR_NAME", "t")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "t")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .output()
+            .is_ok_and(|out| out.status.success())
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().canonicalize().unwrap();
+    if !git(&base, &["init", "-q", "-b", "main"]) {
+        return;
+    }
+    std::fs::create_dir_all(base.join("src")).unwrap();
+    std::fs::write(base.join("src/a.txt"), "a\n").unwrap();
+    std::fs::write(base.join(".gitignore"), "*.log\n").unwrap();
+    assert!(git(&base, &["add", "."]) && git(&base, &["commit", "-qm", "one"]));
+    std::fs::write(base.join("src/a.txt"), "b\n").unwrap();
+    std::fs::write(base.join("src/new.txt"), "").unwrap();
+    std::fs::write(base.join("src/x.log"), "").unwrap();
+    let mut r = runtime();
+    let show = |name: &str| {
+        format!(
+            r#"require("git").status("{}", function(s)
+                 soda.message(s and string.format("%s %s %s t=%s m=%s s=%s u=%s i=%s",
+                   s.root == "{root}" and "root" or s.root, s.branch, s.head and #s.head,
+                   s.tracked, s.modified, s.staged, s.untracked, s.ignored) or "none")
+               end)"#,
+            base.join(name).display(),
+            root = base.display()
+        )
+    };
+    let ask = |r: &mut Runtime, name: &str| -> String {
+        r.command(Command::Named("echo".into()));
+        lua(r, &show(name));
+        for _ in 0..400 {
+            r.poll();
+            if !r.message().is_empty() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        r.message().to_owned()
+    };
+    assert_eq!(
+        ask(&mut r, "src/a.txt"),
+        "root main 40 t=true m=true s=false u=false i=false"
+    );
+    assert_eq!(
+        ask(&mut r, "src/new.txt"),
+        "root main 40 t=false m=false s=false u=true i=false"
+    );
+    assert_eq!(
+        ask(&mut r, "src/x.log"),
+        "root main 40 t=false m=false s=false u=false i=true"
+    );
+    assert!(git(&base, &["add", "src/a.txt"]));
+    assert_eq!(
+        ask(&mut r, "src/a.txt"),
+        "root main 40 t=true m=false s=true u=false i=false"
+    );
+    lua(
+        &mut r,
+        &format!(
+            r#"local git = require("git")
+               soda.message(tostring(git.root("{}") == "{}") .. " " .. tostring(git.root("/")))"#,
+            base.join("src/a.txt").display(),
+            base.display()
+        ),
+    );
+    assert_eq!(r.message(), "true nil");
+}

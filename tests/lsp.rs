@@ -43,7 +43,7 @@ impl Fixture {
         std::fs::read_to_string(&self.log).unwrap_or_default()
     }
 }
-/// A C++ file open with the fake server in clangd's place, or `None`
+/// A C++ file open with the fake server as its language server, or `None`
 /// without Python to run it.
 fn open(source: &str) -> Option<Fixture> {
     open_with(source, "", "")
@@ -1107,4 +1107,133 @@ fn a_code_action_without_its_edit_is_resolved_when_chosen() {
     keys(&mut f.r, "<ret>");
     wait(&mut f.r, |r| text(r) == "lazy\n");
     assert!(f.log().contains("resolve action Lazy"), "{}", f.log());
+}
+
+/// A runtime started on `file` under `base`, its C++ server the fake one
+/// with `options`; the log of what the server was told.
+fn server_in(base: &std::path::Path, file: &str, options: &str) -> (Runtime, PathBuf) {
+    let log = base.join("log");
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_lsp.py");
+    let mut r = Runtime::started_in(base.to_owned()).unwrap();
+    r.load_startup_lua();
+    r.enable_lsp();
+    r.source_lua(
+        "test",
+        &format!(
+            r#"soda.lsp.server("cpp", {{ "env", "FAKE_LSP_LOG={}", "python3", "{}" }}, {options})"#,
+            log.display(),
+            script.display()
+        ),
+    )
+    .unwrap();
+    r.start(Some(base.join(file)));
+    wait(&mut r, |r| r.app().active_view().is_some());
+    (r, log)
+}
+fn initialized(log: &std::path::Path) -> Vec<String> {
+    std::fs::read_to_string(log)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| line.strip_prefix("initialize file://"))
+        .map(str::to_owned)
+        .collect()
+}
+fn settle(r: &mut Runtime) {
+    for _ in 0..100 {
+        r.poll();
+        std::thread::sleep(Duration::from_millis(2));
+    }
+}
+#[test]
+fn a_server_waits_for_its_markers_or_lsp_start_and_lsp_stop_holds() {
+    if Process::new("python3").arg("--version").output().is_err() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().canonicalize().unwrap();
+    std::fs::create_dir_all(base.join("repo/.git")).unwrap();
+    std::fs::create_dir_all(base.join("repo/sub")).unwrap();
+    std::fs::write(base.join("repo/sub/a.cpp"), "x\n").unwrap();
+    let (mut r, log) = server_in(
+        &base,
+        "repo/sub/a.cpp",
+        r#"{ roots = { ".ccls" }, auto = "marked" }"#,
+    );
+    settle(&mut r);
+    assert!(initialized(&log).is_empty(), "no marker, no server");
+    // By hand, in the project.
+    r.command(Command::Named("lsp-start".into()));
+    let seen = log.clone();
+    wait(&mut r, move |_| initialized(&seen).len() == 1);
+    assert_eq!(initialized(&log), [base.join("repo").display().to_string()]);
+    let seen = log.clone();
+    wait(&mut r, move |_| {
+        std::fs::read_to_string(&seen).unwrap().contains("didOpen")
+    });
+    r.command(Command::Named("lsp-stop".into()));
+    settle(&mut r);
+    assert_eq!(initialized(&log).len(), 1, "stopped stays stopped");
+    r.source_lua("test", "soda.message(tostring(soda.lsp.info()))")
+        .unwrap();
+    assert_eq!(r.message(), "nil");
+    // Starting it in another directory takes the documents below it.
+    let sub = base.join("repo/sub");
+    r.command(Command::Named(format!("lsp-start {}", sub.display())));
+    let seen = log.clone();
+    wait(&mut r, move |_| initialized(&seen).len() == 2);
+    assert_eq!(initialized(&log)[1], sub.display().to_string());
+    r.command(Command::Named("lsp-servers".into()));
+    let listing = text(&r);
+    assert!(
+        listing.contains("repo  ") && listing.contains("(stopped)"),
+        "{listing}"
+    );
+    assert!(
+        listing.contains("sub  ") && listing.contains("sub/a.cpp:1:1:"),
+        "{listing}"
+    );
+}
+#[test]
+fn roots_can_be_the_git_working_tree() {
+    if Process::new("python3").arg("--version").output().is_err() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().canonicalize().unwrap();
+    // A linked worktree: `.git` is a file.
+    std::fs::create_dir_all(base.join("tree/src")).unwrap();
+    std::fs::write(
+        base.join("tree/.git"),
+        "gitdir: /elsewhere/.git/worktrees/tree\n",
+    )
+    .unwrap();
+    std::fs::write(base.join("tree/src/a.cpp"), "x\n").unwrap();
+    let (mut r, log) = server_in(
+        &base,
+        "tree/src/a.cpp",
+        r#"{ roots = { "compile_commands.json", "git" }, auto = "marked" }"#,
+    );
+    let seen = log.clone();
+    wait(&mut r, move |_| !initialized(&seen).is_empty());
+    assert_eq!(initialized(&log), [base.join("tree").display().to_string()]);
+}
+#[test]
+fn a_function_can_choose_the_root_later() {
+    if Process::new("python3").arg("--version").output().is_err() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().canonicalize().unwrap();
+    std::fs::create_dir_all(base.join("ws/member")).unwrap();
+    std::fs::write(base.join("ws/member/a.cpp"), "x\n").unwrap();
+    let (mut r, log) = server_in(
+        &base,
+        "ws/member/a.cpp",
+        r#"{ auto = "marked", roots = function(path, done)
+              soda.defer(20, function() done(path:match("^(.*)/member/")) end)
+            end }"#,
+    );
+    let seen = log.clone();
+    wait(&mut r, move |_| !initialized(&seen).is_empty());
+    assert_eq!(initialized(&log), [base.join("ws").display().to_string()]);
 }

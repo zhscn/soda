@@ -23,21 +23,40 @@ pub(super) fn register<'scope, 'r: 'scope>(
                         Some(value) => lua.from_value(value),
                     }
                 };
+                use crate::runtime::lsp::Auto;
+                let auto = match options
+                    .as_ref()
+                    .map(|o| o.get::<Value>("auto"))
+                    .transpose()?
+                {
+                    None | Some(Value::Nil | Value::Boolean(true)) => Auto::Always,
+                    Some(Value::Boolean(false)) => Auto::Never,
+                    Some(Value::String(s)) if s.to_str()? == "marked" => Auto::Marked,
+                    Some(_) => {
+                        return Err(mlua::Error::runtime("auto is true, false or \"marked\""));
+                    }
+                };
+                // Markers, or a function that chooses.
+                let (roots, function) = match options
+                    .as_ref()
+                    .map(|o| o.get::<Value>("roots"))
+                    .transpose()?
+                {
+                    None | Some(Value::Nil) => (vec![], None),
+                    Some(Value::Function(function)) => (vec![], Some(host.keep(function)?)),
+                    Some(value) => (lua.from_value::<Vec<String>>(value)?, None),
+                };
                 let server = command
                     .map(|command| -> mlua::Result<_> {
                         Ok(crate::runtime::lsp::Server {
                             command,
                             init: json("init")?,
                             settings: json("settings")?,
+                            auto,
+                            roots: function,
                         })
                     })
                     .transpose()?;
-                let roots: Vec<String> = match &options {
-                    Some(options) => options
-                        .get::<Option<Vec<String>>>("roots")?
-                        .unwrap_or_default(),
-                    None => vec![],
-                };
                 let mut runtime = runtime.borrow_mut();
                 runtime.lsp.set_server(language.clone(), server);
                 runtime.edit_event(crate::application::Event::ServerRoots {
@@ -134,6 +153,8 @@ pub(super) fn register<'scope, 'r: 'scope>(
                 return Ok(Value::Nil);
             };
             let info = lua.create_table()?;
+            info.set("language", key.0.as_str())?;
+            info.set("root", key.1.to_string_lossy().into_owned())?;
             info.set("encoding", encoding)?;
             info.set("capabilities", super::to_lua(lua, capabilities)?)?;
             let list = lua.create_table()?;
@@ -142,6 +163,118 @@ pub(super) fn register<'scope, 'r: 'scope>(
             }
             info.set("watchers", list)?;
             Ok(Value::Table(info))
+        })?,
+    )?;
+    soda.set(
+        "lsp_set_root",
+        scope.create_function(|_, (id, root): (u64, Value)| {
+            let mut runtime = runtime.borrow_mut();
+            let document = super::buffer::document(&runtime, id)?;
+            let root = match root {
+                Value::String(dir) => {
+                    let dir = dir.to_str()?.to_string();
+                    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+                    Some(
+                        crate::interaction::path::resolve_path(
+                            &runtime.app.root_of(document),
+                            home.as_deref(),
+                            std::path::Path::new(&dir),
+                        )
+                        .map_err(mlua::Error::runtime)?,
+                    )
+                }
+                Value::Nil | Value::Boolean(false) => None,
+                _ => return Err(mlua::Error::runtime("a root is a directory, or false")),
+            };
+            runtime.edit_event(crate::application::Event::ChosenRoot { document, root })
+        })?,
+    )?;
+    soda.set(
+        "lsp_start",
+        scope.create_function(|_, dir: Option<String>| {
+            let mut runtime = runtime.borrow_mut();
+            let document = runtime.document().map_err(mlua::Error::runtime)?;
+            let Some((language, root)) = runtime.lsp_key_of(document) else {
+                return Ok(None);
+            };
+            let root = match dir {
+                Some(dir) if !dir.trim().is_empty() => {
+                    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+                    crate::interaction::path::resolve_path(
+                        &runtime.app.root(),
+                        home.as_deref(),
+                        std::path::Path::new(dir.trim()),
+                    )
+                    .map_err(mlua::Error::runtime)?
+                }
+                _ => root,
+            };
+            runtime.lsp.allow(&(language.clone(), root.clone()));
+            runtime.edit_event(crate::application::Event::StartedRoot {
+                language,
+                root: root.clone(),
+                started: true,
+            })?;
+            Ok(Some(root.to_string_lossy().into_owned()))
+        })?,
+    )?;
+    soda.set(
+        "lsp_stop",
+        scope.create_function(|lua, ()| {
+            let mut runtime = runtime.borrow_mut();
+            let Some(key) = runtime.lsp_key() else {
+                return Ok(Value::Nil);
+            };
+            let documents = runtime.lsp.stop(&key);
+            runtime.edit_event(crate::application::Event::StartedRoot {
+                language: key.0.clone(),
+                root: key.1.clone(),
+                started: false,
+            })?;
+            // What it said about its documents goes with it.
+            let uris = lua.create_table()?;
+            for (document, uri) in documents {
+                use crate::application::Event;
+                runtime.edit_event(Event::Note {
+                    document,
+                    group: "lsp".into(),
+                    notes: vec![],
+                })?;
+                runtime.edit_event(Event::Tokens {
+                    document,
+                    tokens: vec![],
+                })?;
+                runtime.edit_event(Event::Inlays {
+                    document,
+                    hints: vec![],
+                })?;
+                for group in ["lsp-tags", "lsp-deprecated", "lsp-highlight"] {
+                    runtime.edit_event(Event::Paint {
+                        document,
+                        group: group.into(),
+                        paints: vec![],
+                    })?;
+                }
+                uris.push(uri)?;
+            }
+            Ok(Value::Table(uris))
+        })?,
+    )?;
+    soda.set(
+        "lsp_servers",
+        scope.create_function(|lua, ()| {
+            let runtime = runtime.borrow();
+            let list = lua.create_table()?;
+            for server in runtime.lsp.servers() {
+                let entry = lua.create_table()?;
+                entry.set("language", server.language)?;
+                entry.set("root", server.root.to_string_lossy().into_owned())?;
+                entry.set("command", server.command)?;
+                entry.set("state", server.state)?;
+                entry.set("uris", server.uris)?;
+                list.push(entry)?;
+            }
+            Ok(list)
         })?,
     )?;
     soda.set(

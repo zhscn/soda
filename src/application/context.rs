@@ -22,6 +22,25 @@ pub(super) struct Context {
     /// The root of the language server this document was reached through.
     server: Option<PathBuf>,
 }
+/// Where a document's server root came from.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RootSource {
+    /// The server of the document it was reached from.
+    Reached,
+    /// A server started there by hand.
+    Started,
+    /// A function of the language's chose it.
+    Chosen,
+    /// The nearest directory with one of the language's root markers.
+    Marked,
+    /// None of those: the document's project, or its directory.
+    Project,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ServerRoot {
+    pub path: PathBuf,
+    pub source: RootSource,
+}
 /// What a jump carries from where it started.
 #[derive(Clone, Debug)]
 pub(super) struct Reached {
@@ -187,19 +206,54 @@ impl Application {
         let context = self.active_context();
         context.project.unwrap_or(context.directory)
     }
-    /// The root of the language server for a document: the one it was
-    /// reached through, the nearest directory with a root marker of its
-    /// language, or its project.
+    /// The root of the language server for a document.
     pub fn server_root_of(&self, document: DocumentId) -> PathBuf {
-        match self.contexts.get(&document) {
-            Some(Context {
-                server: Some(server),
-                ..
-            }) => server.clone(),
-            _ => self
-                .marked_root(document)
-                .unwrap_or_else(|| self.root_of(document)),
+        self.server_root(document).path
+    }
+    /// The root of the language server for a document, and where it came
+    /// from: the server it was reached through, the deepest root a server
+    /// was started in by hand, the one chosen for it, the nearest directory
+    /// with a root marker of its language, or else its project.
+    pub fn server_root(&self, document: DocumentId) -> ServerRoot {
+        let found = |path: PathBuf, source| ServerRoot { path, source };
+        if let Some(Context {
+            server: Some(server),
+            ..
+        }) = self.contexts.get(&document)
+        {
+            return found(server.clone(), RootSource::Reached);
         }
+        let language = self
+            .workspace
+            .editor(document)
+            .map(|editor| editor.model().document().language().profile().id.clone());
+        let path = self.workspace.file(document).and_then(|file| file.path());
+        if let (Some(language), Some(path)) = (&language, path)
+            && let Some((_, root)) = self
+                .started_roots
+                .iter()
+                .filter(|(of, root)| of == language && path.starts_with(root))
+                .max_by_key(|(_, root)| root.as_os_str().len())
+        {
+            return found(root.clone(), RootSource::Started);
+        }
+        match self.chosen_roots.get(&document) {
+            Some(Some(root)) => return found(root.clone(), RootSource::Chosen),
+            Some(None) => return found(self.root_of(document), RootSource::Project),
+            None => {}
+        }
+        match self.marked_root(document) {
+            Some(root) => found(root, RootSource::Marked),
+            None => found(self.root_of(document), RootSource::Project),
+        }
+    }
+    /// Whether a root was chosen for the document, or none.
+    pub fn server_root_chosen(&self, document: DocumentId) -> bool {
+        self.chosen_roots.contains_key(&document)
+    }
+    /// The roots servers were started in by hand.
+    pub fn started_roots(&self) -> &[(String, PathBuf)] {
+        &self.started_roots
     }
     /// The nearest directory around a document holding one of its
     /// language's root markers; found once for each directory.
@@ -215,7 +269,14 @@ impl Application {
         let found = key
             .0
             .ancestors()
-            .find(|dir| markers.iter().any(|marker| dir.join(marker).exists()))
+            .find(|dir| {
+                markers.iter().any(|marker| {
+                    // The top of a Git working tree, a submodule's or a
+                    // linked worktree's included: `.git` is a file there.
+                    let name = if marker == "git" { ".git" } else { marker };
+                    dir.join(name).exists()
+                })
+            })
             .map(Path::to_owned);
         self.found_roots.borrow_mut().insert(key, found.clone());
         found

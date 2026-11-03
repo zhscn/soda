@@ -4,11 +4,12 @@ Rust 只负责协议：启动进程、JSON-RPC、让服务器手里的文档保�
 
 ## 默认行为
 
-C++ 文档打开时启动 clangd，带 `--function-arg-placeholders=1`，工作目录是文档的项目根目录。其他语言要自己指定：
+没有内置的服务器，C++ 也一样：哪种语言用哪个服务器都在 `init.lua` 里指定，或者由模块指定（如 `require("ccls").setup({})`）。
 
 ```lua
-soda.lsp.server("rust", { "rust-analyzer" })
-soda.lsp.server("cpp", nil)  -- 不用 clangd
+soda.lsp.server("cpp", { "clangd", "--function-arg-placeholders=1" })
+soda.lsp.server("rust", { "rust-analyzer" }, { auto = "marked" })
+soda.lsp.server("cpp", nil)  -- 去掉
 soda.lsp.server("cpp", { "ccls" }, {
   init = { cache = { directory = "/tmp/ccls" }, compilationDatabaseDirectory = "build" },
   settings = { ... },
@@ -19,9 +20,28 @@ soda.lsp.server("cpp", { "ccls" }, {
 第三个参数可选：
 - `init`：`initialize` 的 `initializationOptions`。
 - `settings`：服务器用 `workspace/configuration` 要设置时，按 `section` 的点分路径从这里取，没有的部分回答 null，不带 `section` 时给整张表；服务器启动后也用 `workspace/didChangeConfiguration` 发一次。
-- `roots`：根目录标记。文档所在目录往上，最近的含有其中任一文件或目录的目录就是服务器的根目录，没有找到时用项目根目录。只影响服务器，`grep` 等仍按项目；通过跳转打开的文档仍跟随来源的服务器。
+- `roots`：根目录标记。文档所在目录往上，最近的含有其中任一文件或目录的目录就是服务器的根目录，没有找到时用项目根目录。`"git"` 是 git 工作树的顶层（含 `.git` 的目录，submodule 和 linked worktree 的 `.git` 是文件，也算）。只影响服务器，`grep` 等仍按项目；通过跳转打开的文档仍跟随来源的服务器。
+  `roots` 也可以是函数 `function(path, done)`：返回目录，返回 `false` 表示没有（用项目根目录），或者返回 nil 之后再调用 `done(目录或 false)`，比如等 `soda.spawn` 跑完 `cargo metadata`。回答之前这个文档不启动服务器。
+- `auto`：打开文档时是否自动启动服务器。`true`（默认）总是启动；`"marked"` 只在根目录是找到的时候启动（标记、函数、跳转来源或 `lsp-start`），退回项目根目录时不启动；`false` 只由 `lsp-start` 启动。
 
-rust-analyzer 默认不开，因为它会运行项目的构建脚本，打开一个文件不应该做这件事。clangd 打开项目时可能在项目里写 `.cache/clangd`。
+各语言合适的设置不同，单文件也能工作的服务器（clangd、pyright、lua-language-server）用默认值即可；要按项目建索引或离开项目配置没法用的服务器适合 `"marked"`：
+
+```lua
+require("ccls").setup({})  -- 默认 auto = "marked"
+soda.lsp.server("go", { "gopls" }, { roots = { "go.mod" }, auto = "marked" })
+-- cargo workspace 的根不是最近的 Cargo.toml，问 cargo
+soda.lsp.server("rust", { "rust-analyzer" }, {
+  auto = "marked",
+  roots = function(path, done)
+    local dir = path:match("^(.*)/[^/]*$")
+    soda.spawn({ "cargo", "metadata", "--no-deps", "--format-version", "1" }, function(code, out)
+      done(code == 0 and out:match('"workspace_root":"([^"]*)"') or false)
+    end, { cwd = dir })
+  end,
+})
+```
+
+rust-analyzer 会运行项目的构建脚本，clangd 打开项目时可能在项目里写 `.cache/clangd`，ccls 写 `.ccls-cache`：启动哪个服务器、在哪里自动启动，都由配置决定。
 
 | 键 | 命令 | 作用 |
 | --- | --- | --- |
@@ -40,6 +60,9 @@ rust-analyzer 默认不开，因为它会运行项目的构建脚本，打开一
 | | `lsp-format` | 让服务器格式化选区，没有选区时格式化整个文档，clangd 读 `.clang-format`；服务器不支持范围格式化时总是整个文档 |
 | | `lsp-diagnostics` | 列出所有诊断 |
 | | `lsp-restart` | 重启当前语言的服务器，失败后也用它重试 |
+| | `lsp-start [DIR]` | 手动启动服务器，像 eglot：在 `DIR`（默认是文档按上面规则得到的根目录）启动，之后这个目录下这种语言的文档都归它，不管标记怎么说；也解除 `lsp-stop` |
+| | `lsp-stop` | 停掉当前文档的服务器，清掉它给的诊断、语义高亮和 inlay hint；它管的文档在 `lsp-start` 之前不再自动启动服务器 |
+| | `lsp-servers` | 在 `*servers*` 里列出服务器：语言、根目录、程序、状态（starting、running、failed、stopped），以及各自管的文档，回车打开 |
 
 调用层级和类型层级显示成树（见[树](extension.md#树)）：根节点是光标处的函数或类型，第一层随之取来，再往下展开一个节点时才问服务器那一层。
 
@@ -115,8 +138,12 @@ soda.lsp.cancel(id)                           -- 发 $/cancelRequest，之后到
 soda.lsp.notify(method, params, [buf])
 soda.lsp.on(method, function(params) end)     -- 服务器的通知和请求；对请求返回的值就是回答
 soda.lsp.uri()                                -- 当前文档的 URI
-soda.lsp.info([buf])                          -- encoding、capabilities、watchers；没有服务器时为 nil
+soda.lsp.info([buf])                          -- language、root、encoding、capabilities、watchers；没有服务器时为 nil
 soda.lsp.restart()
+soda.lsp.start([dir])                         -- 同 lsp-start，返回根目录；没有服务器时为 nil
+soda.lsp.stop()                               -- 同 lsp-stop，返回它管的文档的 URI；没有服务器时为 nil
+soda.lsp.servers()                            -- { {language, root, command, state, uris}, ... }
+soda.lsp.set_root(buf_id, dir_or_false)       -- 给文档指定服务器根目录，roots 函数的 done 就是它
 soda.lsp.array(t)                             -- 标记 t 是数组
 ```
 
@@ -147,7 +174,10 @@ soda.popup(text)    -- 光标旁的浮窗，放不下时滚轮或翻页键滚动
 每个 `(语言, 根目录)` 一个服务器，所以同时开多个项目互不影响。文档的服务器按下面的顺序决定，详见[文档的位置](interaction.md#文档的位置)：
 
 1. 通过跳转第一次打开的文档，用跳转来源的服务器，即使它在另一个 git 仓库里：只有那个服务器有编译参数。这同样适用于从那里继续跳转。
-2. 否则用文档的项目根目录；没有项目时用文件所在目录，所以 `/tmp` 下的单个文件也有服务器。
+2. `lsp-start` 启动过服务器的目录，包含文档的取最深的。
+3. `roots` 函数选的目录。
+4. `roots` 标记找到的目录。
+5. 否则用文档的项目根目录；没有项目时用文件所在目录，所以 `/tmp` 下的单个文件也有服务器（`auto = "marked"` 的服务器在这一步不自动启动）。
 
 跳到已经打开的文档时不改变它的服务器，除非它不属于任何项目。历史回跳（`<a-,>`）不算跳转。
 
@@ -159,7 +189,7 @@ require("ccls").setup({
 })
 ```
 
-`setup` 让 C++ 改用 ccls（`command` 可以换程序，`languages` 默认 `{ "cpp" }`），`init`、`settings` 原样传给 `soda.lsp.server`，`roots` 默认 `.ccls-root`、`.ccls`、`compile_commands.json`，找不到时用项目根目录。标准功能和 clangd 一样走 `lsp` 模块；ccls 没有的（如 `SPC h` 头文件切换）会直接说明。
+`setup` 让 C++ 使用 ccls（`command` 可以换程序，`languages` 默认 `{ "cpp" }`），`init`、`settings` 原样传给 `soda.lsp.server`，`roots` 默认 `.ccls-root`、`.ccls`、`compile_commands.json`，`auto` 默认 `"marked"`：找不到这些标记时不自动启动，因为 ccls 会把整个根目录建索引并写入 `.ccls-cache`，要用时 `lsp-start`。标准功能走 `lsp` 模块，和其他服务器一样；ccls 没有的（如 `SPC h` 头文件切换）会直接说明。
 
 | 键 | 命令 | 作用 |
 | --- | --- | --- |
@@ -177,5 +207,6 @@ ccls 发来的 `$ccls/publishSkippedRanges`（没有参与编译的预处理分�
 ## 限制
 
 - 没有 `roots` 时，服务器的根目录就是项目根目录，由版本库标记决定，不按 `compile_commands.json` 找；clangd 自己会按文件找。
+- `lsp-stop` 直接结束服务器进程，不发 `shutdown`/`exit`，和 `lsp-restart` 一样。
 - 不发 `willCreateFiles`、`willRenameFiles`、`willDeleteFiles`：这几个请求要等服务器回答一个编辑再动手，而文件操作本身就来自服务器的编辑。目录改名只报告目录本身，不展开成其中每个文件。
 - `completionItem/resolve` 只取说明和 detail；候选的其他修改要在列表里就给出。

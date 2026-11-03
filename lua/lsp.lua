@@ -1,10 +1,10 @@
 -- Language server features over soda.lsp, which keeps documents in step and
--- passes messages. clangd runs for C++; for anything else, name a server:
+-- passes messages. No language has a server until init.lua names one:
 --
---   soda.lsp.server("rust", { "rust-analyzer" })
+--   soda.lsp.server("cpp", { "clangd" })
+--   soda.lsp.server("rust", { "rust-analyzer" }, { auto = "marked" })
 --
--- rust-analyzer is not on by default: it runs a project's build scripts,
--- which is not something opening a file should do.
+-- or a module does, as ccls's setup does.
 --
 -- Built in: <a-.> goes to the definition, <a-?> lists references, <a-,> comes
 -- back. Under the leader (SPC, which is <c-c>): k shows what the caret is on
@@ -13,8 +13,6 @@
 -- renames and a offers code actions; s and S find symbols; h switches header
 -- and source; . goes to the implementations.
 -- Completion follows from the server being there.
-
-soda.lsp.server("cpp", { "clangd", "--function-arg-placeholders=1" })
 
 -- What `require("lsp")` returns, filled in at the end; `token_category`
 -- can be replaced from there.
@@ -1533,6 +1531,45 @@ end)
 
 soda.define_command("lsp-restart", "Restart the language server", function()
   soda.lsp.restart()
+end)
+
+-- By hand, as eglot does: a server in a directory takes the documents of
+-- its language below it, whatever their markers say.
+soda.define_command("lsp-start", "Start the language server, in DIR or where the document's root is", function(dir)
+  local root = soda.lsp.start(dir)
+  if root then
+    soda.message("Language server for " .. relative(root))
+  else
+    soda.message("No language server for this document")
+  end
+end, { args = { { name = "DIR", kind = "path", optional = true } } })
+soda.define_command("lsp-stop", "Stop the document's language server until lsp-start", function()
+  local uris = soda.lsp.stop()
+  if not uris then
+    soda.message("No language server for this document")
+    return
+  end
+  for _, uri in ipairs(uris) do
+    diagnostics[uri] = nil
+    token_results[uri] = nil
+    pulled[uri] = nil
+  end
+  soda.message("Stopped the language server")
+end)
+soda.define_command("lsp-servers", "List language servers and their documents", function()
+  local lines = {}
+  for _, server in ipairs(soda.lsp.servers()) do
+    table.insert(lines, string.format("%s  %s  %s  (%s)", server.language, server.root,
+      table.concat(server.command, " "), server.state))
+    for _, uri in ipairs(server.uris) do
+      table.insert(lines, relative(path_of(uri)) .. ":1:1:")
+    end
+  end
+  if #lines == 0 then
+    soda.message("No language servers")
+  else
+    soda.results("servers", lines)
+  end
 end)
 
 -- Documentation as text, from a string or MarkupContent.

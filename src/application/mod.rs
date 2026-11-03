@@ -17,6 +17,7 @@
 mod clipboard;
 mod context;
 pub use clipboard::ClipboardAction;
+pub use context::{RootSource, ServerRoot};
 mod display;
 pub mod faces;
 mod flags;
@@ -121,6 +122,19 @@ pub enum Event {
     ServerRoots {
         language: String,
         markers: Vec<String>,
+    },
+    /// A server of `language` was started in `root` by hand, or stopped:
+    /// its documents below it go to it.
+    StartedRoot {
+        language: String,
+        root: PathBuf,
+        started: bool,
+    },
+    /// The root a language's function chose for a document's server, or
+    /// none: then it has its project.
+    ChosenRoot {
+        document: DocumentId,
+        root: Option<PathBuf>,
     },
     /// A document shows a tree; its keys are those of the `tree` context.
     MarkTree(DocumentId),
@@ -441,6 +455,8 @@ pub struct Application {
     /// Files whose presence makes a directory the root of a language's
     /// server, and the roots found so far by directory and language.
     server_roots: std::collections::HashMap<String, Vec<String>>,
+    started_roots: Vec<(String, PathBuf)>,
+    chosen_roots: std::collections::HashMap<DocumentId, Option<PathBuf>>,
     found_roots: std::cell::RefCell<std::collections::HashMap<(PathBuf, String), Option<PathBuf>>>,
     /// Documents that show a tree, whose keys are those of `tree`.
     trees: std::collections::BTreeSet<DocumentId>,
@@ -1159,6 +1175,7 @@ impl Application {
                 self.paints.forget(document);
                 self.tokens.forget(document);
                 self.inlays.forget(document);
+                self.chosen_roots.remove(&document);
                 self.trees.remove(&document);
                 self.repair_windows();
                 update.closed_views = ids;
@@ -1172,6 +1189,20 @@ impl Application {
                     self.server_roots.insert(language, markers);
                 }
                 self.found_roots.borrow_mut().clear();
+            }
+            Event::StartedRoot {
+                language,
+                root,
+                started,
+            } => {
+                let entry = (language, root);
+                self.started_roots.retain(|other| *other != entry);
+                if started {
+                    self.started_roots.push(entry);
+                }
+            }
+            Event::ChosenRoot { document, root } => {
+                self.chosen_roots.insert(document, root);
             }
             Event::MarkTree(document) => {
                 self.trees.insert(document);

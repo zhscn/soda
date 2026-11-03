@@ -1,4 +1,4 @@
--- ccls in clangd's place, with its extensions: hierarchies that open level
+-- ccls for C and C++, with its extensions: hierarchies that open level
 -- by level, members, variables of a type, moves by the syntax tree, and the
 -- preprocessor branches it skips shown dim. In init.lua:
 --
@@ -8,6 +8,8 @@
 --
 -- Options: `command` (default { "ccls" }), `init` (initializationOptions),
 -- `settings`, `roots` (default .ccls-root, .ccls, compile_commands.json),
+-- `auto` (default "marked": only where one of the roots is; lsp-start
+-- starts it anywhere),
 -- `languages` (default { "cpp" }) and `keys = false` to bind nothing.
 --
 -- Keys under the leader: c and C open the callers and the callees as trees,
@@ -236,7 +238,7 @@ soda.define_command("ccls-reload", "Make ccls index the project again", function
   end
 end)
 
--- Runs ccls for C++ in clangd's place.
+-- Runs ccls for C++.
 function M.setup(options)
   options = options or {}
   for _, language in ipairs(options.languages or { "cpp" }) do
@@ -244,6 +246,8 @@ function M.setup(options)
       init = options.init,
       settings = options.settings,
       roots = options.roots or { ".ccls-root", ".ccls", "compile_commands.json" },
+      -- It indexes the whole root: not a directory merely around a file.
+      auto = options.auto == nil and "marked" or options.auto,
     })
   end
   if options.keys ~= false then
