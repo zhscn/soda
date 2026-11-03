@@ -1,32 +1,45 @@
 //! Words shown between the characters of a line without being part of it,
 //! such as the names of parameters at a call. They move with the text and
-//! stay until the server gives new ones.
+//! stay until the server gives new ones. A document may have tens of
+//! thousands, so, like tokens, they are plain sorted offsets that one pass
+//! moves along with an edit, and drawing reads only the lines it shows.
 use crate::{
-    core::{Association, ByteOffset},
-    editor::{Document, DocumentId, DocumentPosition, DocumentUpdate},
+    core::Association,
+    editor::{Document, DocumentId, DocumentUpdate},
 };
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, ops::Range};
 
 #[derive(Default)]
 pub(super) struct Inlays {
-    documents: BTreeMap<DocumentId, Vec<(DocumentPosition, String)>>,
+    documents: BTreeMap<DocumentId, Vec<(usize, String)>>,
 }
 impl Inlays {
     /// Replaces a document's hints, given as zero-based line, byte and text.
     /// Places past the end of a line stop at it.
-    pub fn set(&mut self, document: &Document, hints: Vec<(usize, usize, String)>) {
+    pub fn set(&mut self, document: &Document, mut hints: Vec<(usize, usize, String)>) {
         let snapshot = document.snapshot();
-        let stored = hints.into_iter().filter_map(|(line, byte, text)| {
-            let range = snapshot
-                .line_content_range(line)
-                .filter(|_| line < snapshot.text_lines())?;
-            let offset = (range.start + byte).min(range.end);
-            let position = document
-                .position(ByteOffset(offset), Association::After)
-                .ok()?;
-            Some((position, text))
-        });
-        let stored = stored.collect();
+        let lines = snapshot.text_lines();
+        hints.sort_by_key(|(line, byte, _)| (*line, *byte));
+        let mut stored = Vec::with_capacity(hints.len());
+        let mut walk = snapshot.walk_lines();
+        let mut current: Option<(usize, Range<usize>)> = None;
+        for (line, byte, text) in hints {
+            if line >= lines {
+                continue;
+            }
+            if current.as_ref().is_none_or(|(at, _)| *at != line) {
+                let Some((range, _)) = walk.content(line) else {
+                    continue;
+                };
+                current = Some((line, range));
+            }
+            let range = &current.as_ref().unwrap().1;
+            let mut offset = (range.start + byte).min(range.end);
+            while !snapshot.is_char_boundary(offset) {
+                offset -= 1;
+            }
+            stored.push((offset, text));
+        }
         self.documents.insert(document.id(), stored);
     }
     pub fn forget(&mut self, document: DocumentId) {
@@ -36,25 +49,12 @@ impl Inlays {
         let Some(hints) = self.documents.get_mut(&change.document_id) else {
             return;
         };
-        for (position, _) in hints {
-            *position = position
-                .map(change, false)
-                .expect("application maps every document revision")
-                .unwrap();
+        for (offset, _) in hints {
+            *offset = change.mapping.map(*offset, Association::After);
         }
     }
     /// A document's hints with their offsets, in order.
-    pub fn of(&self, document: &Document) -> Vec<(usize, &str)> {
-        let mut hints: Vec<_> = self
-            .documents
-            .get(&document.id())
-            .into_iter()
-            .flatten()
-            .filter_map(|(position, text)| {
-                Some((position.resolve(document).ok()?.0, text.as_str()))
-            })
-            .collect();
-        hints.sort_by_key(|(offset, _)| *offset);
-        hints
+    pub fn of(&self, document: DocumentId) -> &[(usize, String)] {
+        self.documents.get(&document).map_or(&[], Vec::as_slice)
     }
 }

@@ -20,4 +20,4 @@ pub use state::{
     Association, Change, ChangeMap, EditError, EditorState, Selection, StandaloneEditor,
     Transaction, UserEvent,
 };
-pub use text::Snapshot;
+pub use text::{LineWalk, Snapshot};

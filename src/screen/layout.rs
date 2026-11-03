@@ -589,8 +589,11 @@ struct Rows<'a> {
     /// Lines shown, the empty one after a final newline too: the caret can
     /// go there, as at the end of an Emacs buffer.
     lines: usize,
-    /// Hints by line, when they are shown.
-    inlays: std::collections::BTreeMap<usize, Vec<Inlay>>,
+    /// The document's hints by offset, when they are shown.
+    hints: &'a [(usize, String)],
+    /// Hints by line, placed as lines are asked for: a document may have
+    /// tens of thousands, and only the lines on screen need theirs.
+    inlays: std::cell::RefCell<std::collections::HashMap<usize, std::rc::Rc<[Inlay]>>>,
     /// Rows of wrapped lines measured so far.
     measured: std::cell::RefCell<std::collections::HashMap<usize, std::rc::Rc<[Segment]>>>,
 }
@@ -616,30 +619,45 @@ impl<'a> Rows<'a> {
                 !long_line_near(snapshot, &[view.viewport.anchor.offset.0, head])
             });
         let walk = Walk::new(measure, document.whitespace().tab_width);
-        let mut inlays = std::collections::BTreeMap::<usize, Vec<Inlay>>::new();
-        if app.options().bool(Some(view.document_id), "inlay-hints") {
-            for (offset, text) in app.inlays(view.document_id) {
-                let offset = offset.min(snapshot.len_bytes());
-                let line = snapshot.line_of(offset)?;
-                let start = snapshot.line_start(line)?;
-                let x = walk.x_of(&snapshot.line(line)?, offset - start);
-                let text = text.chars().filter(|c| !c.is_control()).collect();
-                inlays.entry(line).or_default().push(Inlay {
-                    x,
-                    text,
-                    face: None,
-                    font: Font::Hint,
-                });
-            }
-        }
+        let hints = match app.options().bool(Some(view.document_id), "inlay-hints") {
+            true => app.inlays(view.document_id),
+            false => &[],
+        };
         Some(Self {
             snapshot,
             walk,
             wrap,
             lines: snapshot.line_count(),
-            inlays,
+            hints,
+            inlays: Default::default(),
             measured: Default::default(),
         })
+    }
+    /// A line's hints, placed by the width of the text before them.
+    fn inlays(&self, line: usize) -> std::rc::Rc<[Inlay]> {
+        if let Some(placed) = self.inlays.borrow().get(&line) {
+            return placed.clone();
+        }
+        let placed: std::rc::Rc<[Inlay]> =
+            match (self.snapshot.line_start(line), self.snapshot.line(line)) {
+                (Some(start), Some(text)) if !self.hints.is_empty() => {
+                    let end = start + text.len();
+                    let first = self.hints.partition_point(|(offset, _)| *offset < start);
+                    self.hints[first..]
+                        .iter()
+                        .take_while(|(offset, _)| *offset <= end)
+                        .map(|(offset, hint)| Inlay {
+                            x: self.walk.x_of(&text, offset - start),
+                            text: hint.chars().filter(|c| !c.is_control()).collect(),
+                            face: None,
+                            font: Font::Hint,
+                        })
+                        .collect()
+                }
+                _ => std::rc::Rc::new([]),
+            };
+        self.inlays.borrow_mut().insert(line, placed.clone());
+        placed
     }
     /// The room hints take from `left` up to a character `x` from its
     /// line's start. A wrapped line keeps its hints at the end, so it has
@@ -648,8 +666,7 @@ impl<'a> Rows<'a> {
         if self.wrap.is_some() {
             return 0;
         }
-        let hints = self.inlays.get(&line).map_or(&[][..], Vec::as_slice);
-        hints
+        self.inlays(line)
             .iter()
             .filter(|hint| (left..=x).contains(&hint.x))
             .map(|hint| text_width(self.walk.measure, &hint.text, hint.font))
@@ -660,7 +677,7 @@ impl<'a> Rows<'a> {
     fn unhinted(&self, line: usize, left: usize, across: usize) -> usize {
         let mut used = 0;
         if self.wrap.is_none() {
-            for hint in self.inlays.get(&line).into_iter().flatten() {
+            for hint in self.inlays(line).iter() {
                 if hint.x < left {
                     continue;
                 }
@@ -1060,9 +1077,9 @@ pub(crate) fn frame(
             font,
         };
         let mut hints: Vec<Inlay> = match last_row {
-            None => layout.inlays.get(&number).cloned().unwrap_or_default(),
+            None => layout.inlays(number).to_vec(),
             Some(false) => vec![],
-            Some(true) => (layout.inlays.get(&number).into_iter().flatten())
+            Some(true) => (layout.inlays(number).iter())
                 .map(|hint| after(format!(" {}", hint.text), None, hint.font))
                 .collect(),
         };

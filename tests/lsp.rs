@@ -238,7 +238,13 @@ fn tokens_and_hints_arrive_after_the_diagnostics_and_move_with_the_text() {
         f.r.app().tokens(document, 0..99),
         [(2..4, Category::Function), (11..12, Category::Parameter)]
     );
-    assert_eq!(f.r.app().inlays(document), [(3, "a: "), (7, "int&")]);
+    let hints: Vec<_> =
+        f.r.app()
+            .inlays(document)
+            .iter()
+            .map(|(at, text)| (*at, text.as_str()))
+            .collect();
+    assert_eq!(hints, [(3, "a: "), (7, "int&")]);
 
     f.r.command(Command::SetMode(EditMode::Insert));
     keys(&mut f.r, "xx");

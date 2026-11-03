@@ -82,7 +82,7 @@ end
 -- same thing cancels the older, whose answer nobody wants any more.
 local pending = {}
 -- `buf` names the document whose server to ask, when not the current one.
-local function send(slot, method, params, answer, buf)
+local function send(slot, method, params, answer, buf, raw)
   soda.lsp.cancel(pending[slot])
   local id
   id = soda.lsp.request(method, params, function(result, failure)
@@ -90,7 +90,7 @@ local function send(slot, method, params, answer, buf)
       pending[slot] = nil
     end
     answer(result, failure)
-  end, buf)
+  end, buf, raw)
   pending[slot] = id or nil
   return id
 end
@@ -459,102 +459,26 @@ function module.token_category(type, modifiers)
   end
   return token_categories[type]
 end
-local function show_tokens(buf, data, legend, encoding)
-  -- One name for each type and set of modifiers that occurs.
-  local names, slots = {}, {}
+-- Tokens and hints for a whole document are many: Rust decodes them from
+-- the raw answer, and Lua only names each kind of token once.
+local function show_tokens(data, legend, encoding)
   local modifier_names = legend.tokenModifiers or {}
-  local deprecated = nil
-  for index, name in ipairs(modifier_names) do
-    if name == "deprecated" then
-      deprecated = 1 << (index - 1)
-    end
-  end
-  local function slot(type_index, bits)
-    local key = type_index .. ":" .. bits
-    if not slots[key] then
-      local modifiers = {}
-      for index, name in ipairs(modifier_names) do
-        if bits & (1 << (index - 1)) ~= 0 then
-          modifiers[name] = true
-        end
-      end
-      local type = legend.tokenTypes[type_index + 1]
-      table.insert(names, type and module.token_category(type, modifiers) or "")
-      slots[key] = #names - 1
-    end
-    return slots[key]
-  end
-  local struck = {}
-  local count, tokens = buf:line_count(), {}
-  local line, character, row, text = 0, 0, nil, nil
-  for at = 1, #data, 5 do
-    if data[at] > 0 then
-      line, character = line + data[at], 0
-    end
-    character = character + data[at + 1]
-    if line < count then
-      if row ~= line then
-        row, text = line, buf:line(line + 1)
-      end
-      local from = to_byte(text, character, encoding)
-      local to = to_byte(text, character + data[at + 2], encoding)
-      local size = #tokens
-      tokens[size + 1], tokens[size + 2], tokens[size + 3] = line, from, to
-      tokens[size + 4] = slot(data[at + 3], data[at + 4])
-      if deprecated and data[at + 4] & deprecated ~= 0 then
-        table.insert(struck, { from = { line + 1, from + 1 }, to = { line + 1, to + 1 }, face = "deprecated" })
+  local struck = soda.lsp.tokens(data, encoding, function(type_index, bits)
+    local modifiers = {}
+    for index, name in ipairs(modifier_names) do
+      if bits & (1 << (index - 1)) ~= 0 then
+        modifiers[name] = true
       end
     end
-  end
-  soda.tokens(tokens, names)
+    local type = legend.tokenTypes[type_index + 1]
+    return type and module.token_category(type, modifiers) or "", modifiers.deprecated == true
+  end)
   soda.paint("lsp-deprecated", struck)
-end
-
-local function show_inlays(buf, result, encoding)
-  local count, hints = buf:line_count(), {}
-  for _, hint in ipairs(result or {}) do
-    local line = hint.position.line + 1
-    if line <= count then
-      local label = hint.label
-      if type(label) == "table" then
-        local parts = {}
-        for _, part in ipairs(label) do
-          table.insert(parts, part.value)
-        end
-        label = table.concat(parts)
-      end
-      table.insert(hints, {
-        line = line,
-        column = to_byte(buf:line(line), hint.position.character, encoding) + 1,
-        text = (hint.paddingLeft and " " or "") .. label .. (hint.paddingRight and " " or ""),
-      })
-    end
-  end
-  soda.inlays(hints)
 end
 
 -- The last tokens of each document and the server's name for them, so that
 -- the next answer can be only what changed.
 local token_results = {}
--- Old token data with a server's edits made: each replaces `deleteCount`
--- numbers from `start` (zero-based) with its own `data`.
-local function apply_token_edits(old, edits)
-  table.sort(edits, function(a, b)
-    return a.start < b.start
-  end)
-  local new, size, at = {}, 0, 0
-  for _, edit in ipairs(edits) do
-    table.move(old, at + 1, edit.start, size + 1, new)
-    size = size + math.max(edit.start - at, 0)
-    for _, number in ipairs(edit.data or {}) do
-      size = size + 1
-      new[size] = number
-    end
-    at = edit.start + (edit.deleteCount or 0)
-  end
-  table.move(old, at + 1, #old, size + 1, new)
-  return new
-end
 local function ask_tokens(buf, uri, info, revision)
   local provider = info.capabilities.semanticTokensProvider
   local full = provider.full
@@ -571,20 +495,21 @@ local function ask_tokens(buf, uri, info, revision)
       token_results[uri] = nil
       return
     end
-    local data = result.data
-    if result.edits then
-      if not previous then
+    -- The numbers stay in Rust; delta edits are made there too.
+    local data = result:numbers("data")
+    local edits = result:get("edits")
+    if edits then
+      if not previous or not previous.data then
         return
       end
-      data = apply_token_edits(previous.data, result.edits)
+      data = previous.data:edited(edits)
     end
-    data = data or {}
-    token_results[uri] = { id = result.resultId, data = data }
+    token_results[uri] = { id = result:get("resultId"), data = data }
     -- Kept even for text that has changed: the server counts from it.
     if buf:revision() == revision then
-      show_tokens(buf, data, provider.legend, info.encoding)
+      show_tokens(data, provider.legend, info.encoding)
     end
-  end)
+  end, nil, true)
 end
 
 -- Asks for what is drawn over the text. A server reports diagnostics when it
@@ -609,9 +534,9 @@ local function decorate()
     local params = { textDocument = document, range = whole }
     send("inlays " .. uri, "textDocument/inlayHint", params, function(result)
       if buf:revision() == revision then
-        show_inlays(buf, result, info.encoding)
+        soda.lsp.inlays(result, info.encoding)
       end
-    end)
+    end, nil, true)
   end
 end
 

@@ -89,7 +89,14 @@ pub(super) fn register<'scope, 'r: 'scope>(
     soda.set(
         "lsp_request",
         scope.create_function(
-            |lua, (method, params, function, buffer): (String, Value, Function, Option<Table>)| {
+            |lua,
+             (method, params, function, buffer, raw): (
+                String,
+                Value,
+                Function,
+                Option<Table>,
+                Option<bool>,
+            )| {
                 let params: serde_json::Value = lua.from_value(params)?;
                 let key = key_for(&runtime.borrow(), buffer)?;
                 let id = host.keep(function)?;
@@ -101,7 +108,7 @@ pub(super) fn register<'scope, 'r: 'scope>(
                 let Runtime { lsp, app, .. } = &mut **runtime;
                 lsp.sync(app, true);
                 // The function's id names the request, for `soda.lsp.cancel`.
-                if lsp.request(&key, &method, params, id) {
+                if lsp.request(&key, &method, params, id, raw.unwrap_or(false)) {
                     Ok(Value::Integer(id as i64))
                 } else {
                     host.callbacks()?.set(id, Value::Nil)?;

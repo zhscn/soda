@@ -88,6 +88,8 @@ pub(super) enum Delivery {
         function: u64,
         result: Value,
         error: Value,
+        /// Whether Lua takes the result as JSON behind a handle.
+        raw: bool,
     },
     /// A language's function, to choose the root of a document's server.
     Root {
@@ -154,7 +156,8 @@ struct Client {
     next: i64,
     /// Waiting for the answer to `initialize`.
     held: Option<Vec<Outgoing>>,
-    waiting: HashMap<i64, u64>,
+    /// The function each answer goes to, and whether it goes raw.
+    waiting: HashMap<i64, (u64, bool)>,
     encoding: String,
     capabilities: Value,
     opened: HashMap<DocumentId, Opened>,
@@ -677,13 +680,20 @@ impl Lsp {
         }
         failure
     }
-    pub fn request(&mut self, key: &Key, method: &str, params: Value, function: u64) -> bool {
+    pub fn request(
+        &mut self,
+        key: &Key,
+        method: &str,
+        params: Value,
+        function: u64,
+        raw: bool,
+    ) -> bool {
         let Some(client) = self.clients.get_mut(key) else {
             return false;
         };
         let id = client.next;
         client.next += 1;
-        client.waiting.insert(id, function);
+        client.waiting.insert(id, (function, raw));
         client.send(Outgoing::Message(json!({
             "jsonrpc": "2.0", "id": id, "method": method, "params": params,
         })));
@@ -696,7 +706,7 @@ impl Lsp {
             let Some(id) = client
                 .waiting
                 .iter()
-                .find(|(_, waiting)| **waiting == function)
+                .find(|(_, waiting)| waiting.0 == function)
                 .map(|(id, _)| *id)
             else {
                 continue;
@@ -762,7 +772,7 @@ impl Lsp {
         }
         (deliveries, failure)
     }
-    fn message(&mut self, key: &Key, message: Value, out: &mut Vec<Delivery>) {
+    fn message(&mut self, key: &Key, mut message: Value, out: &mut Vec<Delivery>) {
         let Some(client) = self.clients.get_mut(key) else {
             return;
         };
@@ -862,11 +872,14 @@ impl Lsp {
                 }
             }
             (Some(id), None) => {
-                if let Some(function) = id.as_i64().and_then(|id| client.waiting.remove(&id)) {
+                if let Some((function, raw)) = id.as_i64().and_then(|id| client.waiting.remove(&id))
+                {
+                    // Taken, not copied: an answer may be megabytes.
                     out.push(Delivery::Answer {
                         function,
-                        result: message["result"].clone(),
-                        error: message["error"].clone(),
+                        result: message["result"].take(),
+                        error: message["error"].take(),
+                        raw,
                     });
                 }
             }

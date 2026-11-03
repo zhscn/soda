@@ -601,10 +601,8 @@ impl Application {
         self.tokens.within(document, range)
     }
     /// A document's inlay hints with their offsets, in order.
-    pub fn inlays(&self, document: DocumentId) -> Vec<(usize, &str)> {
-        self.workspace
-            .editor(document)
-            .map_or_else(Vec::new, |editor| self.inlays.of(editor.model().document()))
+    pub fn inlays(&self, document: DocumentId) -> &[(usize, String)] {
+        self.inlays.of(document)
     }
     /// A document's painted ranges and their faces.
     pub fn paints(&self, document: DocumentId) -> Vec<(std::ops::Range<usize>, Face)> {

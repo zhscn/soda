@@ -25,15 +25,23 @@ impl Tokens {
     /// to it, and any overlapping an earlier one are dropped.
     pub fn set(&mut self, document: &Document, mut tokens: Vec<TokenSpan>) {
         let snapshot = document.snapshot();
+        let lines = snapshot.text_lines();
         tokens.sort_by_key(|token| (token.line, token.bytes.start));
         let mut kept: Vec<(Range<usize>, Category)> = Vec::with_capacity(tokens.len());
+        // Tokens come line by line: each line is found once, walking on.
+        let mut walk = snapshot.walk_lines();
+        let mut line: Option<(usize, Range<usize>)> = None;
         for token in tokens {
-            let Some(range) = snapshot
-                .line_content_range(token.line)
-                .filter(|_| token.line < snapshot.text_lines())
-            else {
+            if token.line >= lines {
                 continue;
-            };
+            }
+            if line.as_ref().is_none_or(|(at, _)| *at != token.line) {
+                let Some((range, _)) = walk.content(token.line) else {
+                    continue;
+                };
+                line = Some((token.line, range));
+            }
+            let range = line.as_ref().unwrap().1.clone();
             let start = (range.start + token.bytes.start).min(range.end);
             let end = (range.start + token.bytes.end).min(range.end);
             if start < end && kept.last().is_none_or(|(last, _)| last.end <= start) {

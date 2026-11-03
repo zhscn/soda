@@ -13,6 +13,43 @@ struct TextStorage {
     lone_cr: OnceLock<bool>,
 }
 
+/// See [`Snapshot::walk_lines`].
+pub struct LineWalk<'a> {
+    snapshot: &'a Snapshot,
+    text: &'a str,
+    line: usize,
+    start: usize,
+}
+impl<'a> LineWalk<'a> {
+    /// Lines further on than this are looked up rather than walked to.
+    const STRIDE: usize = 64;
+    /// A line's content range and text, as `line_content_range` gives it.
+    pub fn content(&mut self, line: usize) -> Option<(Range<usize>, &'a str)> {
+        if line >= self.snapshot.line_count() {
+            return None;
+        }
+        if line < self.line || line - self.line > Self::STRIDE {
+            self.start = self.snapshot.line_start(line)?;
+            self.line = line;
+        }
+        while self.line < line {
+            self.start += self.text[self.start..].find('\n')? + 1;
+            self.line += 1;
+        }
+        let end = match self.text[self.start..].find('\n') {
+            Some(at) => {
+                let newline = self.start + at;
+                match newline > self.start && self.text.as_bytes()[newline - 1] == b'\r' {
+                    true => newline - 1,
+                    false => newline,
+                }
+            }
+            None => self.text.len(),
+        };
+        Some((self.start..end, &self.text[self.start..end]))
+    }
+}
+
 /// Immutable UTF-8 rope. Public positions are byte offsets, lines use LF/CRLF,
 /// and snapshots share both the rope and any lazily materialized parser input.
 #[derive(Clone, Debug)]
@@ -120,6 +157,16 @@ impl Snapshot {
         }
         Some(range)
     }
+    /// Lines asked for in increasing order, found by walking the text on
+    /// from the last one instead of looking each up in the rope.
+    pub fn walk_lines(&self) -> LineWalk<'_> {
+        LineWalk {
+            snapshot: self,
+            text: self.text(),
+            line: 0,
+            start: 0,
+        }
+    }
     pub fn line_of(&self, offset: usize) -> Option<usize> {
         if !self.is_char_boundary(offset) {
             return None;
@@ -177,6 +224,36 @@ impl Snapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn walking_lines_finds_what_looking_them_up_finds() {
+        let mut long = String::new();
+        for line in 0..200 {
+            long.push_str(&format!("line {line}\r\n"));
+        }
+        for text in ["a\nb\r\n\nc", "a\n", "", "x\ry\n\n", &long] {
+            let snapshot = Snapshot::new(text.to_owned(), 0);
+            let count = snapshot.line_count();
+            // Forward, backward and far ahead.
+            let order: Vec<usize> = (0..count)
+                .chain([0, count / 2, 1])
+                .chain((0..count).step_by(70))
+                .chain([count])
+                .collect();
+            let mut walk = snapshot.walk_lines();
+            for line in order {
+                let expected = snapshot.line_content_range(line);
+                let found = walk.content(line);
+                assert_eq!(
+                    found.as_ref().map(|(range, _)| range.clone()),
+                    expected,
+                    "{line} in {text:?}"
+                );
+                if let (Some((range, line_text)), Some(_)) = (found, expected) {
+                    assert_eq!(line_text, &text[range]);
+                }
+            }
+        }
+    }
     use crate::core::{EditorState, Selection, StandaloneEditor, Transaction};
 
     #[test]

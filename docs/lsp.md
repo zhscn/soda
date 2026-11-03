@@ -105,7 +105,7 @@ end
 
 ```lua
 soda.lsp.server(language, command, [options])  -- command 为 nil 表示去掉
-soda.lsp.request(method, params, function(result, error) end, [buf])  -- 返回请求编号；没有服务器时 false
+soda.lsp.request(method, params, function(result, error) end, [buf], [raw])  -- 返回请求编号；没有服务器时 false
 soda.lsp.cancel(id)                           -- 发 $/cancelRequest；回答已到时返回 false
 soda.lsp.notify(method, params, [buf])
 soda.lsp.on(method, function(params) end)     -- 服务器的通知和请求
@@ -131,6 +131,19 @@ LSP 模块用的显示原语是通用的（`soda.note`、`soda.hint`、`soda.pop
 soda.tokens(data, names)  -- 语义高亮：扁平数组，每四项为行、起止字节（从 0 起）和 names 的下标（从 0 起）；names 是语法分类名，空串表示不着色
 soda.inlays({ { line = 2, column = 5, text = "a: " } })  -- 替换 inlay hint，行和字节列从 1 起
 ```
+
+整个文档的语义高亮和 inlay hint 很大：6.5 万行的 C++ 文件上，clangd 的回答是 2.8 MB 和 5.4 MB，转成 Lua 表再在 Lua 里逐个处理，主线程要停约 0.5 s。所以 `lua/lsp.lua` 对这两种请求传 `raw`：回答以 JSON 句柄交给 Lua，只取用得到的小部分，大块数据在 Rust 里解码，现在两者合计约 40 ms。
+
+```lua
+result:get(key)       -- 字段（或从 1 起的元素）转成 Lua 值
+result:numbers(key)   -- 数字数组留在 Rust，得到 numbers 句柄；不是数字数组时 nil
+result:decode()       -- 整个回答转成 Lua 值
+numbers:edited(edits) -- semanticTokens/full/delta 的 edits 做在旧数据上，得到新句柄；#numbers、numbers[i] 可读
+soda.lsp.tokens(data, encoding, function(type, bits) return category, struck end)  -- 解码并替换当前文档的语义高亮；每种 (type, bits) 只问一次，返回划掉的范围给 soda.paint
+soda.lsp.inlays(result, encoding)  -- 替换当前文档的 inlay hint，result 是 inlayHint 的回答（句柄或表）
+```
+
+inlay hint 按偏移排序保存，编辑时和语义高亮一样一次映射；绘制只为排到的行放置 hint，不每帧走全文档的 hint。
 
 `require("lsp")` 返回给针对某个服务器的模块用的辅助函数：`path_of`、`uri_of`、`relative`、`to_byte`、`to_character`、`here`、`send`（同一用途的新请求取消旧请求）、`supports`、`failed`、`show`、`location_entry`、`open_location`、`token_category`。
 

@@ -13,6 +13,7 @@ mod bundled;
 mod editor;
 mod files;
 mod marks;
+mod raw;
 mod server;
 mod setup;
 use crate::interaction::{
@@ -93,6 +94,8 @@ const FUNCTIONS: &[&str] = &[
     "lsp_start",
     "lsp_stop",
     "lsp_servers",
+    "lsp_tokens",
+    "lsp_inlays",
 ];
 const PRELUDE: &str = r#"
 local current, names, methods, bundled = ...
@@ -217,7 +220,7 @@ soda.completion_source = nil
 soda.completion = {}
 soda.lsp = {}
 for _, name in ipairs({ "server", "request", "cancel", "notify", "on", "uri", "info", "restart", "array",
-                        "set_root", "start", "stop", "servers" }) do
+                        "set_root", "start", "stop", "servers", "tokens", "inlays" }) do
   soda.lsp[name] = soda["lsp_" .. name]
   soda["lsp_" .. name] = nil
 end
@@ -479,6 +482,7 @@ impl Host {
             files::register(scope, &soda, &runtime)?;
             setup::register(scope, &soda, &runtime, self)?;
             server::register(scope, &soda, &runtime, self)?;
+            raw::register(scope, &soda, &runtime)?;
             lua.set_named_registry_value(IMPLEMENTATION, soda)?;
             let result = match request {
                 Request::Chunk { origin, code } => lua.load(code).set_name(origin).exec(),
@@ -514,11 +518,19 @@ impl Host {
                     function,
                     result,
                     error,
+                    raw,
                 }) => {
                     let callbacks = self.callbacks()?;
                     let call = callbacks.get::<Function>(function)?;
                     callbacks.set(function, Value::Nil)?;
-                    call.call::<()>((to_lua(lua, &result)?, to_lua(lua, &error)?))
+                    // Asked for raw, the answer stays JSON behind a handle.
+                    let result = match raw && !result.is_null() {
+                        true => Value::UserData(
+                            lua.create_userdata(raw::Json(std::sync::Arc::new(result)))?,
+                        ),
+                        false => to_lua(lua, &result)?,
+                    };
+                    call.call::<()>((result, to_lua(lua, &error)?))
                 }
                 Request::Lsp(super::lsp::Delivery::Request {
                     functions,
@@ -590,7 +602,7 @@ impl Host {
 }
 /// JSON as Lua sees it: `null` is `nil`, so a field left out and a field
 /// set to null read alike.
-fn to_lua(lua: &Lua, value: &serde_json::Value) -> mlua::Result<Value> {
+pub(super) fn to_lua(lua: &Lua, value: &serde_json::Value) -> mlua::Result<Value> {
     lua.to_value_with(
         value,
         SerializeOptions::new()
