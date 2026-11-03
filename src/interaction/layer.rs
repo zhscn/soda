@@ -59,6 +59,10 @@ impl Layer {
             Self::Resize(session) => session.observe(app, update),
         })
     }
+    /// Whether the layer is a command line asking a question.
+    pub(super) fn asks(&self) -> bool {
+        matches!(self, Self::CommandLine(session) if session.asking())
+    }
     /// The history a prompt uses and its text, for prompts that have one.
     pub(super) fn history(&self) -> Option<(usize, &str)> {
         match self {

@@ -1381,3 +1381,30 @@ fn git_tells_the_root_branch_and_state_of_a_path() {
     );
     assert_eq!(r.message(), "true nil");
 }
+#[test]
+fn a_question_put_aside_is_not_answered_later() {
+    let mut r = runtime();
+    lua(
+        &mut r,
+        r#"
+        soda.choose("pick", {"alpha", "beta"}, function(i) soda.message("chose " .. i) end)
+        "#,
+    );
+    keys(&mut r, "bet<ret>");
+    assert_eq!(r.message(), "chose 2");
+    lua(
+        &mut r,
+        r#"soda.choose("pick", {"alpha", "beta"}, function(i) soda.message("late " .. i) end)"#,
+    );
+    keys(&mut r, "<esc>");
+    // A command line of its own neither offers the items nor calls the function.
+    r.command(Command::Named("choose 1".into()));
+    assert_eq!(r.message(), "Nothing to choose");
+    lua(
+        &mut r,
+        r#"soda.input("name", "", function(text) soda.message("got " .. text) end)"#,
+    );
+    keys(&mut r, "<esc>");
+    r.command(Command::Named("answer x".into()));
+    assert_eq!(r.message(), "Nothing to answer");
+}

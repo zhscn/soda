@@ -507,6 +507,10 @@ impl Layers {
                     Command::Ex(text) => (text, None),
                     _ => unreachable!(),
                 };
+                // A command line of its own answers no earlier question.
+                if note.is_none() {
+                    self.forget_reply();
+                }
                 let mut line = CommandLine::new(
                     &text,
                     self.registry.commands(),

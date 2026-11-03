@@ -409,10 +409,17 @@ impl Layers {
         let Some(mut layer) = self.active.take() else {
             return Ok(Response::default());
         };
+        if layer.asks() {
+            self.forget_reply();
+        }
         Ok(match layer.handle(Input::Cancel, app, time)? {
             Transition::Active(response) | Transition::Closed(response) => response,
             Transition::Blocked => Response::default(),
         })
+    }
+    fn forget_reply(&mut self) {
+        self.offer = None;
+        self.question = None;
     }
     fn transition(&mut self, transition: Transition) -> Option<Response> {
         match transition {
@@ -475,6 +482,7 @@ impl Layers {
             }
         }
         let confirm = matches!(input, Input::Confirm);
+        let asks = layer.asks();
         let searching = matches!(layer, Layer::Search { .. });
         let labels = matches!(layer, Layer::Labels(_));
         let transition = layer.handle(input, app, time)?;
@@ -485,6 +493,11 @@ impl Layers {
             self.history[kind].record(&text);
         }
         let closed = matches!(transition, Transition::Closed(_));
+        // A question put aside goes unanswered: its Lua function is not
+        // called, and its items do not linger in later command lines.
+        if closed && asks && !confirm {
+            self.forget_reply();
+        }
         let result = self.transition(transition);
         if closed && labels {
             self.jumps.expect();
