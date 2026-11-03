@@ -12,8 +12,6 @@ use std::{
 /// Candidates kept from a scan, nearest first. Filtering them runs on every
 /// key on the owner thread.
 const LIMIT: usize = 10_000;
-/// Entries read from a directory.
-const DIRECTORY_LIMIT: usize = 10_000;
 
 #[derive(Default)]
 pub(super) struct Completions {
@@ -91,34 +89,28 @@ fn words(request: &Request) -> Vec<Item> {
         .map(|(_, word)| Item::plain(word, "word", 0))
         .collect()
 }
-/// Entries of the directory the caret's path names, directories first.
+/// Entries of the directory the caret's path names, directories first;
+/// none for a directory too large to list.
 fn files(request: &Request) -> Vec<Item> {
     let Some(directory) = &request.directory else {
         return vec![];
     };
-    let Ok(entries) = std::fs::read_dir(&directory.path) else {
+    let never = std::sync::atomic::AtomicBool::new(false);
+    let Ok(entries) = crate::files::paths::list(&directory.path, &never) else {
         return vec![];
     };
-    let mut found: Vec<(bool, String)> = entries
-        .take(DIRECTORY_LIMIT)
-        .flatten()
-        .filter_map(|entry| {
-            let name = entry.file_name().into_string().ok()?;
-            let is_directory = entry.path().is_dir();
-            (!name.chars().any(char::is_control)).then_some((!is_directory, name))
-        })
-        .collect();
-    found.sort();
-    found
+    entries
         .into_iter()
-        .map(|(file, name)| {
-            let text = if file {
-                name.clone()
+        .filter_map(|entry| {
+            let name = entry.name.into_string().ok()?;
+            if name.chars().any(char::is_control) {
+                return None;
+            }
+            Some(if entry.directory {
+                Item::plain(format!("{name}/"), "directory", directory.back)
             } else {
-                format!("{name}/")
-            };
-            let detail = if file { "file" } else { "directory" };
-            Item::plain(text, detail, directory.back)
+                Item::plain(name, "file", directory.back)
+            })
         })
         .collect()
 }

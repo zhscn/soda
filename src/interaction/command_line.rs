@@ -510,7 +510,6 @@ impl CommandLine {
             let cancelled = Arc::new(AtomicBool::new(false));
             response.path_requests.push(PathRequest {
                 directory: path.clone(),
-                prefix: String::new(),
                 cancelled: cancelled.clone(),
             });
             self.directory = Some(Directory {
