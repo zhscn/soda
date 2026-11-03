@@ -281,6 +281,10 @@ impl Application {
         self.found_roots.borrow_mut().insert(key, found.clone());
         found
     }
+    /// A document's project, if it has one.
+    pub fn project_of(&self, document: DocumentId) -> Option<PathBuf> {
+        self.contexts.get(&document).and_then(|c| c.project.clone())
+    }
     /// A document's directory.
     pub fn directory_of(&self, document: DocumentId) -> PathBuf {
         self.contexts

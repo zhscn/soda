@@ -220,7 +220,7 @@ Insert 中按选项 `auto-pairs`（默认关）成对输入括号，与 Emacs �
 | `C-x b`、`C-x C-b`、`C-x k`、`C-x C-c` | `buffer`、`buffer`、`close`、`quit` |
 | `C-x 0`、`1`、`2`、`3`、`o` | `close-window`、`only`、`split`、`vsplit`、`window-next` |
 | `C-x ^` | `resize-window` |
-| `C-x p f`、`C-x p b`、`C-x p g` | `project`、`buffer`、`grep` |
+| `C-x p f`、`C-x p p`、`C-x p b`、`C-x p g` | `project`、`project-switch`、`buffer`、`grep` |
 | `M-x`、`M-!`、`M-\|`、`M-%` | `commands`、`shell`、`pipe`、`replace` |
 | `M-g g`、`M-g M-g` | `goto` |
 | `M-g n`、`M-g p`、``C-x ` `` | `next-result`、`previous-result`、`next-result` |
@@ -332,7 +332,7 @@ end)
 | --- | --- |
 | `edit [PATH]`、`open PATH`、`new` | 打开文件（`edit` 无参数时重新加载）；新文件在保存时创建；新建无标题文档 |
 | `write [PATH]`、`saveas PATH`、`write-quit` | 保存、另存为、保存后退出 |
-| `buffer NAME`、`recent FILE`、`project FILE`、`project-root [DIR]` | 切换文档、打开最近或项目中的文件、查看或指定项目 |
+| `buffer NAME`、`recent FILE`、`project FILE`、`project-switch DIR`、`project-root [DIR]` | 切换文档、打开最近或项目中的文件、选一个项目再打开其中的文件、查看或指定项目 |
 | `next-view` | 在当前窗口显示下一个视图，跳过其他窗口中的视图 |
 | `split [PATH]` / `vsplit [PATH]` | 上下 / 左右分屏，新窗口复制当前视图或打开 PATH |
 | `close-window` / `only` | 关闭当前窗口（视图保留为隐藏）/ 只留当前窗口 |
@@ -374,6 +374,7 @@ Normal 的模态命令（`left`、`next-word`、`block`、`kill`、`put`、`grab
 | `Path` | 目录项 | 否，可输入新文件名 | `edit`、`open`、`write`、`saveas` |
 | `File` | 项目文件 | 是 | `project` |
 | `Recent` | 最近用过的文件 | 是 | `recent` |
+| `Project` | 记住的项目 | 否，可输入目录 | `project-switch` |
 | `Buffer` | 已打开的文档 | 是 | `buffer` |
 | `Symbol` | 当前文档的符号 | 否 | `visit` |
 | `Choice` | 命令声明的固定词及说明，可带单键 | 是 | `map` 的 MODE，`close`、`reload`、`quit` 的 DECISION |
@@ -389,7 +390,7 @@ Normal 的模态命令（`left`、`next-word`、`block`、`kill`、`put`、`grab
 | --- | --- | --- |
 | 命令名 | 名字模糊匹配；都不匹配时按说明的子串匹配 | 名字完全相同的最前，然后按得分，同分保持命令表顺序，说明匹配最后 |
 | 缓冲区 | 显示名模糊匹配 | 按得分，同分时当前文档在后 |
-| 项目文件、最近文件 | 相对路径模糊匹配 | 按得分 |
+| 项目文件、最近文件、记住的项目 | 路径模糊匹配 | 按得分，同分时较近用过的在前 |
 | 目录项 | orderless：空格分开的每个词都出现在文件名中，位置和顺序不限 | 以输入开头的在前，目录优先 |
 | `Choice`、选项、face、语言 | 前缀匹配 | 声明顺序 |
 
@@ -451,6 +452,8 @@ Enter 依次处理：
 - git submodule（`.git` 文件指向 `modules/`）属于外层仓库；linked worktree 自成项目。
 - 文件打开后才创建的标记（比如之后才 `git init`），要重新打开文档或用 `project-root` 才生效。
 - 没有项目的文件若是通过跳转打开的（结果列表、`soda.open`），继承来源文档的项目，所以从项目跳进系统头文件后，`grep` 和项目文件仍在原项目。直接打开的文件没有项目。
+
+**记住的项目**：同 `project.el` 的项目列表，文件打开时它的项目成为最新的一个，最多 100 个，跨会话保留，已不存在的目录不列出。`project`（`C-x p f`）在活动文档有项目时直接列出项目文件；没有项目时（比如在 `$HOME` 下）先问项目，即 `project-switch`，而不是列出整个目录。`project-switch`（`C-x p p`）的候选显示成 `~/project/flowmq/` 这样；回车取高亮的项目，输入以 `/`、`~`、`.` 开头时取输入的目录，没有标记的目录从此也算项目。选定后命令行换成那个项目的 `project`，打开的文件属于它，与活动文档的项目无关。
 
 启动目录只用于解析命令行上的路径，以及作为不带文件启动时第一个文档的目录。`soda DIR` 把 `DIR` 当作项目，不论有没有标记。
 

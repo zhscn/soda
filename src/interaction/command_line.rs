@@ -85,6 +85,9 @@ pub struct CommandLine {
     matcher: Matcher,
     /// Recently used files, newest first.
     recent: Vec<PathBuf>,
+    projects: Vec<PathBuf>,
+    /// Whether project files complete to absolute paths.
+    absolute_files: bool,
     /// The items of an `Item` slot.
     items: Vec<String>,
     /// The key tables by name, for a KEYMAP slot.
@@ -211,6 +214,8 @@ impl CommandLine {
             error: None,
             matcher: Matcher::new(Config::DEFAULT),
             recent: vec![],
+            projects: vec![],
+            absolute_files: false,
             items: vec![],
             keymaps: vec![],
             symbols: None,
@@ -220,6 +225,16 @@ impl CommandLine {
     /// Recently used files for a `recent` slot, newest first.
     pub fn with_recent(mut self, recent: Vec<PathBuf>) -> Self {
         self.recent = recent;
+        self
+    }
+    /// Remembered projects for a `project-switch` slot, newest first.
+    pub fn with_projects(mut self, projects: Vec<PathBuf>) -> Self {
+        self.projects = projects;
+        self
+    }
+    /// Project files complete to absolute paths rather than relative ones.
+    pub fn with_absolute_files(mut self) -> Self {
+        self.absolute_files = true;
         self
     }
     /// Items for an `Item` slot.
@@ -417,6 +432,12 @@ impl CommandLine {
                 Target::Slot(SlotKind::Recent) => {
                     recent(&self.recent, &self.root, &query.text, &mut self.matcher)
                 }
+                Target::Slot(SlotKind::Project) => projects(
+                    &self.projects,
+                    self.home.as_deref(),
+                    &query.text,
+                    &mut self.matcher,
+                ),
                 Target::Slot(SlotKind::Item) => self.item_rows(&query.text),
                 Target::Slot(SlotKind::Path) => self.paths(&query.text, &mut response),
                 Target::Slot(SlotKind::File) => self.project_files(&query.text, &mut response),
@@ -603,7 +624,10 @@ impl CommandLine {
             .iter()
             .map(|matched| {
                 let path = &matched.candidate.payload;
-                let relative = path.strip_prefix(&self.root).unwrap_or(path);
+                let relative = match self.absolute_files {
+                    true => path,
+                    false => path.strip_prefix(&self.root).unwrap_or(path),
+                };
                 MatchedCandidate {
                     candidate: Arc::new(Candidate {
                         key: matched.candidate.key,
@@ -767,6 +791,14 @@ impl CommandLine {
         let accept = match location.target {
             Some(Target::Name) => chosen || self.info(slot_text).is_none(),
             Some(Target::Slot(SlotKind::Path)) => chosen,
+            // A remembered project, unless a directory is being typed.
+            Some(Target::Slot(SlotKind::Project)) => {
+                if slot_text.trim().is_empty() && self.rows.is_empty() {
+                    self.error = Some("no remembered project; type a directory".into());
+                    return Transition::redraw();
+                }
+                chosen || !slot_text.starts_with(['/', '~', '.'])
+            }
             Some(Target::Slot(kind)) if kind.requires_match() => {
                 chosen
                     || !self
@@ -1003,6 +1035,37 @@ fn recent(
     ranked(matcher, query, shown, |_| false)
         .map(|((age, path), shown, highlights)| {
             let replacement = path.to_str().filter(|p| !p.chars().any(char::is_control));
+            mark(
+                row(age as u64, shown, replacement.map(str::to_owned), false),
+                highlights,
+                None,
+            )
+        })
+        .collect()
+}
+/// Remembered projects that still exist, newest first, shown as
+/// project.el shows them: under `~`, ending in a slash.
+fn projects(
+    roots: &[PathBuf],
+    home: Option<&std::path::Path>,
+    query: &str,
+    matcher: &mut Matcher,
+) -> Vec<MatchedCandidate<Completion>> {
+    matcher.config = Config::DEFAULT.match_paths();
+    let shown = roots
+        .iter()
+        .filter(|root| root.is_dir())
+        .enumerate()
+        .map(|(age, root)| {
+            let shown = match home.and_then(|home| root.strip_prefix(home).ok()) {
+                Some(below) => format!("~/{}/", below.display()),
+                None => format!("{}/", root.display()),
+            };
+            ((age, root), printable(&shown))
+        });
+    ranked(matcher, query, shown, |_| false)
+        .map(|((age, root), shown, highlights)| {
+            let replacement = root.to_str().filter(|p| !p.chars().any(char::is_control));
             mark(
                 row(age as u64, shown, replacement.map(str::to_owned), false),
                 highlights,

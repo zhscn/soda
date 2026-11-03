@@ -422,6 +422,7 @@ impl Runtime {
         );
         self.state = state;
         self.layers.set_recent_files(self.state.recent());
+        self.layers.set_projects(self.state.projects());
     }
     /// What the next session should start from: histories and where the
     /// caret is in every file, the focused one most recent.
@@ -651,6 +652,11 @@ impl Runtime {
                     if let Some(path) = self.app.workspace().file(document).and_then(|f| f.path()) {
                         self.state.touch(path);
                         self.layers.set_recent_files(self.state.recent());
+                    }
+                    // As project.el remembers projects it is used in.
+                    if let Some(project) = self.app.project_of(document) {
+                        self.state.remember_project(project);
+                        self.layers.set_projects(self.state.projects());
                     }
                     ("open", self.app.document_name(document), Some(*view))
                 }),

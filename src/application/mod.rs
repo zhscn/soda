@@ -178,6 +178,8 @@ pub enum Event {
     },
     /// Makes a directory the project of the active document.
     SetProject(PathBuf),
+    /// Makes a directory a project for the files below it.
+    AddProject(PathBuf),
     /// `kind` is a list of results; see `Rules::results`.
     ResultsDisplay {
         kind: String,
@@ -1409,6 +1411,7 @@ impl Application {
                 directory,
             } => self.scratch(&name, text, directory, &mut update)?,
             Event::SetProject(directory) => self.set_project(directory),
+            Event::AddProject(directory) => self.add_project(directory),
             Event::SetDisplay { kind, placement } => self.rules.set(kind, placement),
             Event::ResultsDisplay { kind } => self.rules.results(kind),
             Event::SetOption { scope, name, value } => {

@@ -376,6 +376,7 @@ const GLOBAL: &[(&str, &str)] = &[
     ("C-x C-x", "reverse"),
     ("C-x `", "next-result"),
     ("C-x p f", "project"),
+    ("C-x p p", "project-switch"),
     ("C-x p b", "buffer"),
     ("C-x p g", "grep"),
     ("M-x", "commands"),

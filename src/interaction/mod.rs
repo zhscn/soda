@@ -168,6 +168,8 @@ pub struct Layers {
     hooks: hooks::Hooks,
     /// Recently used files, newest first, for `recent`.
     recent_files: Vec<std::path::PathBuf>,
+    /// Remembered projects, newest first, for `project-switch`.
+    projects: Vec<std::path::PathBuf>,
     /// The Lua function and the items of the question last offered.
     offer: Option<(u64, Vec<String>)>,
     /// The Lua function a line of text is asked for.
@@ -528,6 +530,10 @@ impl Layers {
     /// Recently used files, newest first.
     pub fn set_recent_files(&mut self, files: Vec<std::path::PathBuf>) {
         self.recent_files = files;
+    }
+    /// Remembered projects, newest first.
+    pub fn set_projects(&mut self, projects: Vec<std::path::PathBuf>) {
+        self.projects = projects;
     }
     /// Takes back histories from an earlier session, oldest first.
     pub fn restore_history(&mut self, commands: &[String], searches: &[String]) {

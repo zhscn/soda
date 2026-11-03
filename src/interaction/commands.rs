@@ -105,6 +105,13 @@ pub enum Command {
     /// through; lines that name no location stay as headings.
     /// Opens a file named relative to the project.
     OpenProjectFile(std::path::PathBuf),
+    /// Asks for a project file, or first for a project when the active
+    /// document has none, as project.el's `project-find-file` does.
+    FindProjectFile,
+    /// Asks for a file of another project.
+    SwitchProject(std::path::PathBuf),
+    /// The command line for `project`, choosing among this project's files.
+    ProjectLine(std::path::PathBuf),
     /// Asks for a file, starting from the active document's directory.
     OpenPrompt,
     /// Shows the project, or makes a directory it.
@@ -538,10 +545,11 @@ impl Layers {
             }
             // Only the runtime can do these; it takes them from the response.
             effect @ Command::Effect(_) => response.commands.push(effect),
-            Command::Ex(_) | Command::Ask { .. } => {
-                let (text, note) = match command {
-                    Command::Ask { line, note } => (line, Some(note)),
-                    Command::Ex(text) => (text, None),
+            Command::Ex(_) | Command::Ask { .. } | Command::ProjectLine(_) => {
+                let (text, note, project) = match command {
+                    Command::Ask { line, note } => (line, Some(note), None),
+                    Command::Ex(text) => (text, None, None),
+                    Command::ProjectLine(project) => ("project ".to_owned(), None, Some(project)),
                     _ => unreachable!(),
                 };
                 // A command line of its own answers no earlier question.
@@ -551,15 +559,21 @@ impl Layers {
                 let mut line = CommandLine::new(
                     &text,
                     self.registry.commands(),
-                    file_root.to_owned(),
+                    project.clone().unwrap_or_else(|| file_root.to_owned()),
                     app.directory(),
                     app,
                 )
                 .with_recent(self.recent_files.clone())
+                .with_projects(self.projects.clone())
                 .with_keymaps(self.keymap.names())
                 .with_items(self.offer.as_ref().map_or(vec![], |(_, i)| i.clone()));
                 if let Some(note) = note {
                     line = line.with_note(note);
+                }
+                // Files of another project complete to absolute paths, which
+                // `project` opens whatever the active document's project.
+                if project.is_some() {
+                    line = line.with_absolute_files();
                 }
                 response = self.enter(Layer::CommandLine(Box::new(line)), app, time)?;
                 if let Some(Layer::CommandLine(line)) = &mut self.active {
@@ -655,6 +669,36 @@ impl Layers {
             }
             Command::OpenProjectFile(path) => {
                 response.events.push(Event::Open(file_root.join(path)));
+            }
+            Command::FindProjectFile => {
+                let line = match app.project() {
+                    Some(_) => "project ",
+                    None => "project-switch ",
+                };
+                return self.execute(Command::Ex(line.into()), app, time, file_root);
+            }
+            Command::SwitchProject(path) => {
+                match resolve(app, &path).and_then(|path| {
+                    std::fs::canonicalize(&path)
+                        .ok()
+                        .filter(|path| path.is_dir())
+                        .ok_or_else(|| format!("{} is not a directory", path.display()))
+                }) {
+                    Ok(directory) => {
+                        // A directory chosen without a marker is a project
+                        // from now on, so the file opened in it has it.
+                        let line = Command::ProjectLine(directory.clone());
+                        let mut opened = self.execute(line, app, time, file_root)?;
+                        if let super::InputResult::Handled(response) = &mut opened {
+                            response.events.insert(0, Event::AddProject(directory));
+                        }
+                        return Ok(opened);
+                    }
+                    Err(error) => {
+                        response.message = Message::Set(error);
+                        response.failed = true;
+                    }
+                }
             }
             Command::OpenPath(path) | Command::SavePath(path) => {
                 match resolve(app, &path) {

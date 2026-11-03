@@ -190,3 +190,50 @@ fn a_directory_can_be_made_the_project() {
     r.start(None);
     assert_eq!(r.app().project(), Some(tree.base.join("elsewhere")));
 }
+#[test]
+fn outside_a_project_project_files_start_by_choosing_a_project() {
+    let tree = tree();
+    let mut r = started(&tree);
+    let repo = tree.base.join("repo");
+    // Opening a file in a project remembers the project, as project.el does.
+    open(&mut r, &repo.join("src/a.txt"));
+    open(&mut r, &tree.base.join("outside/x.txt"));
+    keys(&mut r, "C-x p f");
+    let Some(Layer::CommandLine(line)) = r.layer() else {
+        panic!("no command line");
+    };
+    assert_eq!(line.input().text(), "project-switch ");
+    let labels: Vec<String> = line
+        .rows()
+        .iter()
+        .map(|row| row.candidate.label.to_string())
+        .collect();
+    assert_eq!(labels, [format!("{}/", repo.display())]);
+    // The chosen project's files follow, and the one picked opens there
+    // whatever the active document's project.
+    keys(&mut r, "RET");
+    let Some(Layer::CommandLine(line)) = r.layer() else {
+        panic!("no command line");
+    };
+    assert_eq!(line.input().text(), "project ");
+    keys(&mut r, "b.txt");
+    wait(&mut r, |r| {
+        matches!(r.layer(), Some(Layer::CommandLine(line))
+            if line.rows().iter().any(|row| row.candidate.label.ends_with("b.txt")))
+    });
+    keys(&mut r, "RET");
+    let wanted = repo.join("src/b.txt");
+    wait(&mut r, |r| path(r).as_deref() == Some(&wanted));
+    assert_eq!(r.app().project(), Some(repo.clone()));
+    // Inside a project, the files come at once.
+    keys(&mut r, "C-x p f");
+    let Some(Layer::CommandLine(line)) = r.layer() else {
+        panic!("no command line");
+    };
+    assert_eq!(line.input().text(), "project ");
+    // The list outlives the session.
+    assert!(
+        r.persist()
+            .contains(&format!("project\t{}\n", repo.display()))
+    );
+}

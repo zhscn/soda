@@ -33,6 +33,8 @@ pub enum SlotKind {
     Keymap,
     /// A recently used file.
     Recent,
+    /// A remembered project, or any directory.
+    Project,
     /// One of the items of the question being asked.
     Item,
     /// A symbol of the current document.
@@ -540,8 +542,26 @@ pub static BUILTINS: &[Builtin] = &[
     builtin!(
         "project",
         [slot("FILE", SlotKind::File)],
-        "Open a project file",
-        |a| { Ok(path_or(a, Command::OpenProjectFile, interactive("project"))) }
+        "Open a project file; outside a project, choose a project first",
+        |a| {
+            Ok(path_or(
+                a,
+                Command::OpenProjectFile,
+                Command::FindProjectFile,
+            ))
+        }
+    ),
+    builtin!(
+        "project-switch",
+        [slot("DIR", SlotKind::Project)],
+        "Open a file of a remembered project, or of any directory",
+        |a| {
+            Ok(path_or(
+                a,
+                Command::SwitchProject,
+                interactive("project-switch"),
+            ))
+        }
     ),
     builtin!("search", "Search the document", Command::Search),
     builtin!(
