@@ -1,9 +1,11 @@
 //! What languages are, and language-neutral suggestions in the request
 //! snapshot's UTF-8 coordinates.
+mod comment;
 mod profile;
 mod structure;
 mod whitespace;
 use crate::core::Change;
+pub(crate) use comment::{Comment, continuation};
 pub(crate) use profile::plain_json;
 pub use profile::{Analyzer, Catalog, Profile, catalog};
 pub(crate) use structure::Scanner;

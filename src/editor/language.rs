@@ -5,6 +5,7 @@ use crate::{
         Analyzer, EnterAdvice, Group, IndentAdvice, IndentRequest, IndentTrigger, Item, ItemKind,
         Profile, Scanner, Side, WhitespacePolicy, catalog, materialize,
     },
+    rust::RustSession,
     syntax::Tokens,
 };
 use std::sync::Arc;
@@ -47,6 +48,9 @@ enum Session {
         profile: Arc<Profile>,
         whitespace: WhitespacePolicy,
         tokens: Tokens,
+        /// Structure and indentation where soda knows the language beyond
+        /// its grammar.
+        rust: Option<RustSession>,
     },
     Cpp(CppSession),
 }
@@ -72,6 +76,7 @@ impl LanguageSession {
                         Analyzer::TextMate { scope } => scope,
                         _ => "",
                     }),
+                    rust: (profile.id == "rust").then(RustSession::default),
                     profile,
                     whitespace: plain_whitespace(),
                 },
@@ -156,6 +161,9 @@ impl LanguageSession {
     pub fn in_literal(&mut self, snapshot: &Snapshot, position: usize) -> Result<bool, EditError> {
         match &mut self.inner {
             Session::Cpp(session) => session.in_literal(snapshot, position),
+            Session::TextMate {
+                rust: Some(rust), ..
+            } => rust.in_literal(snapshot, position),
             Session::TextMate { tokens, .. } => {
                 if !snapshot.is_char_boundary(position) {
                     return Err(EditError::InvalidRange);
@@ -185,6 +193,9 @@ impl LanguageSession {
     pub fn enclosing(&mut self, snapshot: &Snapshot, at: usize) -> Option<Group> {
         match &mut self.inner {
             Session::Cpp(session) => session.enclosing(snapshot, at),
+            Session::TextMate {
+                rust: Some(rust), ..
+            } => rust.enclosing(snapshot, at),
             _ => self.scanned(snapshot, |scanner| scanner.enclosing(at)),
         }
     }
@@ -193,6 +204,9 @@ impl LanguageSession {
     pub fn item(&mut self, snapshot: &Snapshot, at: usize, side: Side) -> Option<Item> {
         match &mut self.inner {
             Session::Cpp(session) => session.item(snapshot, at, side),
+            Session::TextMate {
+                rust: Some(rust), ..
+            } => rust.item(snapshot, at, side),
             _ => self.scanned(snapshot, |scanner| scanner.item(at, side)),
         }
     }
@@ -284,6 +298,9 @@ impl LanguageSession {
     pub fn triggers(&self, ch: char) -> bool {
         match &self.inner {
             Session::Cpp(session) => session.triggers(ch),
+            Session::TextMate {
+                rust: Some(rust), ..
+            } => rust.triggers(ch),
             _ => false,
         }
     }
@@ -294,6 +311,9 @@ impl LanguageSession {
     ) -> Result<EnterAdvice, EditError> {
         match &mut self.inner {
             Session::Cpp(session) => session.enter_advice(snapshot, position),
+            Session::TextMate {
+                rust: Some(rust), ..
+            } => rust.enter_advice(snapshot, position),
             _ => Ok(EnterAdvice {
                 expand_pair: self.between_pair(snapshot, position),
                 ..EnterAdvice::default()
@@ -307,6 +327,11 @@ impl LanguageSession {
     ) -> Result<IndentAdvice, EditError> {
         match &mut self.inner {
             Session::Cpp(session) => session.indent(snapshot, request),
+            Session::TextMate {
+                rust: Some(rust),
+                whitespace,
+                ..
+            } => rust.indent(snapshot, request, whitespace),
             _ => Ok(self.bracket_indent(snapshot, request)),
         }
     }

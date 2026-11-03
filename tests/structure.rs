@@ -264,6 +264,51 @@ fn other_languages_use_brackets_and_literals() {
     check("a.txt", I, &[("f(a)|", "<bs>", "f(a|)")]);
 }
 #[test]
+fn rust_generics_and_closures_are_groups() {
+    use EditMode::Normal as N;
+    check(
+        "a.rs",
+        N,
+        &[
+            (
+                "let v: Vec|<HashMap<K, V>> = a;",
+                "<c-a-f>",
+                "let v: Vec<HashMap<K, V>>| = a;",
+            ),
+            (
+                "let v: Vec<HashMap<K, V>>| = a;",
+                "<c-a-b>",
+                "let v: Vec|<HashMap<K, V>> = a;",
+            ),
+            (
+                "x.collect::<Vec<|_>>()",
+                "<c-a-u>",
+                "x.collect::<Vec|<_>>()",
+            ),
+            (
+                "let b = |a < b && c > d;",
+                "<c-a-f><c-a-f>",
+                "let b = a < b| && c > d;",
+            ),
+            // The caret is the first `|`; closure parameters are a group.
+            (
+                "let g = |move |a, b| a;",
+                "<c-a-f><c-a-f>",
+                "let g = move |a, b|| a;",
+            ),
+            ("f(|a, |x| x)", "<c-a-f><c-a-f>", "f(a, |x|| x)"),
+            // Lifetimes are words, and a quoted brace is a literal.
+            (
+                "fn f<'a>(x: &|'a str) {}",
+                "<c-a-f>",
+                "fn f<'a>(x: &'a| str) {}",
+            ),
+            ("(a, '(' |b)", "<c-a-u>", "|(a, '(' b)"),
+            ("(r#\")\"# |b)", "<c-a-u>", "|(r#\")\"# b)"),
+        ],
+    );
+}
+#[test]
 fn a_group_split_by_conditional_compilation_is_not_a_group() {
     let source = "#if X\nvoid f() {\n#else\nvoid g() {\n#endif\n    |h();\n}\nz;\n";
     check("a.cpp", EditMode::Normal, &[(source, "<c-a-u>", source)]);
