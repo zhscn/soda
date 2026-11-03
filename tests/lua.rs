@@ -884,6 +884,31 @@ fn hooks_see_changes_moves_and_idleness_and_timers_fire_once() {
     lua(&mut r, "assert(fired == 1, fired)");
 }
 #[test]
+fn an_idle_hook_leaves_the_keys_of_a_binding_being_typed() {
+    let mut r = runtime();
+    lua(
+        &mut r,
+        r#"
+        idle = 0
+        soda.hook("idle", ".*", function()
+          idle = idle + 1
+          soda.command("set tab-width 5")
+        end)
+        soda.command("set idle-time 10")
+        soda.map("global", "<c-c>qw", "set tab-width 7", "A long binding")
+        "#,
+    );
+    keys(&mut r, "<c-c>q");
+    std::thread::sleep(Duration::from_millis(20));
+    r.poll();
+    lua(&mut r, "assert(idle == 1, idle)");
+    assert_eq!(r.app().options().int(None, "tab-width"), 5);
+    assert_eq!(r.pending_keys().as_deref(), Some("C-c q"));
+    keys(&mut r, "w");
+    assert_eq!(r.pending_keys(), None);
+    assert_eq!(r.app().options().int(None, "tab-width"), 7);
+}
+#[test]
 fn modules_declare_options_and_read_typed_values() {
     let mut r = runtime();
     lua(

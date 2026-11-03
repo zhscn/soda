@@ -426,7 +426,11 @@ impl Layers {
         if self.active().is_some() {
             return Ok(super::InputResult::Blocked);
         }
-        self.sequence.clear();
+        // A hook runs between keys, not because of one: the keys of a
+        // binding being typed stay.
+        if self.hook.is_none() {
+            self.sequence.clear();
+        }
         // The prefix argument waits for the keypad to give it a command.
         if !matches!(
             command,
