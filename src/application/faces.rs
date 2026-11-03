@@ -37,6 +37,11 @@ pub const UI_FACES: &[(&str, &str)] = &[
     ("candidate-selected", "The selected candidate"),
     ("marker", "Line markers in the gutter"),
     ("inlay", "Inlay hints"),
+    ("reference", "Other places of the symbol at the caret"),
+    (
+        "reference-write",
+        "Places where the symbol at the caret is written",
+    ),
     ("note-error", "Error notes after the text of their line"),
     ("note-warning", "Warning notes after the text of their line"),
     ("note-info", "Other notes after the text of their line"),

@@ -257,6 +257,7 @@ fn initialize(root: &Path, init: &Value) -> Value {
                     "declaration": {},
                     "typeDefinition": {},
                     "implementation": {},
+                    "documentHighlight": {},
                     "formatting": {},
                     "signatureHelp": {},
                     "documentSymbol": { "hierarchicalDocumentSymbolSupport": true },

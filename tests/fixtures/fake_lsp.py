@@ -61,7 +61,7 @@ while True:
             "completionProvider": {"resolveProvider": True},
             "definitionProvider": True, "declarationProvider": True,
             "typeDefinitionProvider": True, "referencesProvider": True,
-            "implementationProvider": True,
+            "implementationProvider": True, "documentHighlightProvider": True,
             "hoverProvider": True, "renameProvider": True, "codeActionProvider": True,
             "documentFormattingProvider": True, "documentSymbolProvider": True,
             "callHierarchyProvider": True, "signatureHelpProvider": {},
@@ -188,6 +188,10 @@ while True:
         answer(message, [replacement(0, 0, 3, "formatted")])
     elif method == "textDocument/declaration":
         answer(message, spot(params["textDocument"]["uri"], 1, 2))
+    elif method == "textDocument/documentHighlight":
+        # Read on the first line, written on the second.
+        answer(message, [{"range": spot("", 0, 0)["range"] | {"end": {"line": 0, "character": 3}}, "kind": 2},
+                         {"range": {"start": {"line": 1, "character": 0}, "end": {"line": 1, "character": 3}}, "kind": 3}])
     elif method == "textDocument/implementation":
         uri = params["textDocument"]["uri"]
         answer(message, [spot(uri, 0, 1), {"targetUri": uri, "targetSelectionRange": spot(uri, 1, 0)["range"],

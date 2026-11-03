@@ -99,6 +99,7 @@ local providers = {
   ["textDocument/declaration"] = "declarationProvider",
   ["textDocument/typeDefinition"] = "typeDefinitionProvider",
   ["textDocument/implementation"] = "implementationProvider",
+  ["textDocument/documentHighlight"] = "documentHighlightProvider",
   ["textDocument/references"] = "referencesProvider",
   ["textDocument/hover"] = "hoverProvider",
   ["textDocument/rename"] = "renameProvider",
@@ -1201,6 +1202,46 @@ soda.hook("mode", ".*", function(mode)
   if mode ~= "insert" then
     soda.hint(nil)
   end
+end)
+
+-- When typing pauses, the other places of the symbol at the caret, as the
+-- server finds them: where it is written apart from where it is read.
+soda.declare_option("lsp-highlight", {
+  default = true,
+  doc = "Highlight the places of the symbol at the caret as the language server finds them",
+})
+soda.hook("idle", ".*", function()
+  local buf = soda.buffer()
+  if not soda.option("lsp-highlight") then
+    soda.paint("lsp-highlight", {})
+    return
+  end
+  local params = here()
+  if not params or not supports("textDocument/documentHighlight", true) then
+    return
+  end
+  local revision = buf:revision()
+  local encoding = soda.lsp.info().encoding
+  send("highlight", "textDocument/documentHighlight", params, function(result)
+    -- An answer about text that has changed would mark the wrong places,
+    -- and paints go to the current document.
+    if soda.buffer() ~= buf or buf:revision() ~= revision then
+      return
+    end
+    local count, spans = buf:line_count(), {}
+    local function place(position)
+      local line = math.min(position.line + 1, count)
+      return { line, to_byte(buf:line(line), position.character, encoding) + 1 }
+    end
+    for _, highlight in ipairs(result or {}) do
+      table.insert(spans, {
+        from = place(highlight.range.start),
+        to = place(highlight.range["end"]),
+        face = highlight.kind == 3 and "reference-write" or "reference",
+      })
+    end
+    soda.paint("lsp-highlight", spans)
+  end)
 end)
 
 soda.hook("save", ".*", function()

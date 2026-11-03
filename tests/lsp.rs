@@ -863,8 +863,36 @@ fn ccls_hierarchies_open_level_by_level_and_skipped_branches_are_dim() {
 }
 #[test]
 fn implementations_are_listed_when_there_are_several() {
-    let Some(mut f) = open("one\ntwo\n") else { return };
+    let Some(mut f) = open("one\ntwo\n") else {
+        return;
+    };
     keys(&mut f.r, "<c-c>.");
     wait(&mut f.r, |r| text(r).contains("a.cpp"));
     assert_eq!(text(&f.r), "a.cpp\n  1:2  one\n  2:1  two\n");
+}
+#[test]
+fn the_symbol_at_the_caret_is_highlighted_where_it_is_read_and_written() {
+    let Some(mut f) = open("one\ntwo\n") else {
+        return;
+    };
+    let document =
+        f.r.app()
+            .view(f.r.app().active_view().unwrap())
+            .unwrap()
+            .document_id;
+    f.r.command(Command::Named("set idle-time 10".into()));
+    keys(&mut f.r, "l");
+    let face = |name| {
+        soda::application::faces::index(name)
+            .map(soda::application::Face::Named)
+            .unwrap()
+    };
+    wait(&mut f.r, |r| r.app().paints(document).len() == 2);
+    assert_eq!(
+        f.r.app().paints(document),
+        [(0..3, face("reference")), (4..7, face("reference-write"))]
+    );
+    f.r.command(Command::Named("set lsp-highlight false".into()));
+    keys(&mut f.r, "l");
+    wait(&mut f.r, |r| r.app().paints(document).is_empty());
 }
