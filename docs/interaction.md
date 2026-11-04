@@ -112,7 +112,7 @@ Backspace 退掉上一个键，Esc 取消，计数跨过 keypad 保留。与 meo
 
 `F3`、`C-x (` 开始录制；`F4`、`C-x )` 结束录制，没在录制时播放上一个宏；`C-x e`（`macro-end-and-call`）同 Emacs 的 `kmacro-end-and-call-macro`，录制中按下时结束录制并立即播放一次。
 
-"连按"同 Emacs 的 `last-command`：看上一个键执行的命令，中间输入了文字也算打断。`recenter` 的循环、`previous-buffer`/`next-buffer` 的继续走都按这个判断。录的是按键，回放走同一条路由，补全列表中的选择录成结果文字。`E` 在选中的每一行行首播放，`V` 在搜索的每处匹配播放，都合成一次撤销；任一命令失败时停止。
+录的是按键，回放走同一条路由，补全列表中的选择录成结果文字。`E` 在选中的每一行行首播放，`V` 在搜索的每处匹配播放，都合成一次撤销；任一命令失败时停止。
 
 ### Beacon
 
@@ -228,6 +228,7 @@ Insert 中按选项 `auto-pairs`（默认关）成对输入括号，与 Emacs �
 | `M-x`、`M-!`、`M-\|`、`M-%` | `commands`、`shell`、`pipe`、`replace` |
 | `M-s .` | `search-symbol`：搜索光标处的符号（整个符号匹配），从符号开头开始，第一处就是它，`C-s` 往下 |
 | `C-x z` | `repeat`：再执行一次上一个键的命令 |
+| `C-u` | `universal-argument`，见下 |
 | `M-g g`、`M-g M-g` | `goto` |
 | `M-g n`、`M-g p`、``C-x ` `` | `next-result`、`previous-result`、`next-result` |
 | `M-,`、`C-M-,` | `jump-back`、`jump-forward` |
@@ -236,6 +237,10 @@ Insert 中按选项 `auto-pairs`（默认关）成对输入括号，与 Emacs �
 | `C-z` | `suspend` |
 | `C-c C-c` | `stop` |
 | `F3`、`C-x (`；`F4`、`C-x )`；`C-x e` | `macro-start`；`macro-end`；`macro-end-and-call` |
+
+`C-u` 同 Emacs 的 `universal-argument`：给下一个命令一个次数，默认 4，再按 `C-u` 乘 4（`C-u C-u` 为 16）；之后输入的数字替换 4（`C-u 8` 是 8，`C-u 1 2` 是 12），`-` 取负。模态命令自己读次数（Normal 的移动、宏等）；编辑命令、剪切和 Lua 命令不读次数，执行这么多遍，合成一次撤销：`C-u 8 C-n` 下移 8 行，`C-u 5 a` 输入 5 个 a，`C-u 3 M-u` 大写 3 个词。`kill-line`（`C-k`）带次数时同 Emacs，剪掉整行连同换行：`C-u 2 C-k` 剪两行，`C-u 0 C-k` 剪到行首。其他命令（打开命令行、列表、窗口操作等）只执行一次，次数丢弃。负数按绝对值重复，不反转方向；`C-u C-SPC`、`C-u M-!` 这类原始前缀的特殊含义没有实现。`C-u C-g` 取消；`C-c` 开头的绑定照常接收次数（`C-u 3 C-c z`）。
+
+"连按"同 Emacs 的 `last-command`：看上一个键执行的命令，中间输入了文字也算打断。`recenter` 的循环、`previous-buffer`/`next-buffer` 的继续走都按这个判断。
 
 `C-c` 是前缀，不离开 Insert；模态编辑时离开 Insert 用 Esc、`C-[` 或 `C-g`。
 
@@ -277,7 +282,7 @@ Insert 和输入框共享一组 readline 风格的命令。名字只定义一次
 | Backspace / `C-h`、Delete / `C-d` | `delete-backward` / `delete-forward` | 删除字符簇；Insert 的退格在行首空白中按缩进单位回退 |
 | `C-w`、`C-Backspace`、`M-Backspace` | `kill-word-backward` | 剪切到前一个词边界 |
 | `C-Delete`、`M-d` | `kill-word-forward` | 剪切到后一个词边界 |
-| `C-u` | `kill-line-start` | 剪切到行首 |
+| `C-u` | `kill-line-start` | 剪切到行首；只在输入框中，Insert 的 `C-u` 是 `universal-argument`（往回剪到行首用 `C-u 0 C-k`） |
 | `C-k` | `kill-line-end` | 剪切到行尾；位于行尾时剪切换行 |
 | `C-y` | `yank` | 粘贴 |
 

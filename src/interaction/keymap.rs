@@ -362,6 +362,7 @@ const GLOBAL: &[(&str, &str)] = &[
     ("C-x C-f", "open"),
     ("C-x C-r", "recent"),
     ("C-x C-c", "quit"),
+    ("C-u", "universal-argument"),
     ("C-x b", "buffer"),
     ("C-x C-b", "buffer"),
     ("C-x k", "kill-buffer"),
@@ -484,6 +485,8 @@ const TREE: &[(&str, &str)] = &[
 ];
 const RESULTS: &[(&str, &str)] = &[("RET", "jump")];
 const INSERT: &[(&str, &str)] = &[
+    // Before readline's C-u, which kills to the line start in prompts.
+    ("C-u", "universal-argument"),
     ("C-SPC", "set-mark"),
     ("C-w", "kill-region"),
     ("M-w", "kill-ring-save"),

@@ -575,12 +575,13 @@ fn kills_one_after_another_join_and_yank_pop_goes_back_through_the_ring() {
     assert_eq!(shown(&r), "|\nthree\n");
     assert_eq!(r.app().clipboard(), "one\ntwo");
     // A kill elsewhere starts a new entry.
-    keys(&mut r, "C-n C-e C-u");
+    // C-u 0 C-k kills back to the line start, as in Emacs.
+    keys(&mut r, "C-n C-e C-u 0 C-k");
     assert_eq!(shown(&r), "\n|\n");
     assert_eq!(r.app().clipboard(), "three");
     // Typing in between does too; killing backward puts the text in
     // front of the forward kill.
-    keys(&mut r, "xyz C-b C-k C-u");
+    keys(&mut r, "xyz C-b C-k C-u 0 C-k");
     assert_eq!(shown(&r), "\n|\n");
     assert_eq!(r.app().clipboard(), "xyz");
     assert_eq!(r.app().kill_ring().count(), 3);

@@ -98,6 +98,9 @@ pub enum Action {
     Expand(usize),
     Negative,
     Digit(usize),
+    /// `C-u`: a count of 4, or four times the count `C-u` gave; digits and
+    /// `-` typed next make the count, as Emacs's universal-argument.
+    Universal,
     Insert(Entry),
     Leave,
     Kill,
@@ -245,6 +248,12 @@ impl Things {
         }
     }
 }
+/// What `C-u` has read so far.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(in crate::interaction) struct UniversalArgument {
+    /// Digits were typed after it, so more extend them.
+    pub digits: bool,
+}
 #[derive(Default)]
 pub(in crate::interaction) struct State {
     /// The things `,` and `.` select, by key.
@@ -280,6 +289,9 @@ pub(in crate::interaction) struct State {
     /// over.
     pub this_key: Option<super::Command>,
     pub last_key: Option<super::Command>,
+    /// `C-u` was typed and its count is still open: digits and `-` typed
+    /// next are the count's, and the first digit replaces the 4.
+    pub universal: Option<UniversalArgument>,
     /// Where `recenter` put the caret's line last: middle, top, bottom.
     pub recenter_step: u8,
     /// The buffers `previous-buffer` and `next-buffer` go through, in the
@@ -304,6 +316,7 @@ impl State {
         self.count = None;
         self.negative = false;
         self.read = None;
+        self.universal = None;
     }
     pub fn active(&self) -> bool {
         self.count.is_some() || self.negative || self.read.is_some()
@@ -344,6 +357,7 @@ impl State {
     }
     /// The count of the prefix argument and whether it is negative.
     pub fn take_prefix(&mut self) -> (usize, bool) {
+        self.universal = None;
         let negative = std::mem::take(&mut self.negative);
         (self.count.take().unwrap_or(1), negative)
     }

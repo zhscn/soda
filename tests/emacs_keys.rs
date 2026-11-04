@@ -196,3 +196,59 @@ fn save_some_buffers_asks_about_each_unsaved_file() {
     assert!(r.layer().is_none());
     assert_eq!(r.message(), "(No files need saving)");
 }
+fn caret(r: &Runtime) -> usize {
+    let view = r.app().view(r.app().active_view().unwrap()).unwrap();
+    let editor = r.app().workspace().editor(view.document_id).unwrap();
+    editor
+        .model()
+        .session(view.session_id)
+        .unwrap()
+        .selection()
+        .head
+}
+#[test]
+fn universal_argument_repeats_what_does_not_read_a_count() {
+    let mut r = runtime();
+    let lines: String = (0..30).map(|n| format!("line {n}\n")).collect();
+    r.input(UserInput::Paste(lines));
+    keys(&mut r, "M-<");
+    // C-u is 4, C-u C-u 16, and digits after it replace the 4.
+    keys(&mut r, "C-u C-f");
+    assert_eq!(caret(&r), 4);
+    keys(&mut r, "M-< C-u C-u C-f");
+    assert_eq!(caret(&r), 16);
+    keys(&mut r, "M-< C-u 8 C-n");
+    assert_eq!(caret(&r), "line 0\n".len() * 8);
+    keys(&mut r, "M-< C-u 1 2 C-n");
+    assert_eq!(caret(&r), 7 * 10 + 8 * 2);
+    // Typed text repeats, and undoes as one step.
+    keys(&mut r, "M-< C-u 3 x");
+    assert!(text(&r).starts_with("xxxline 0\n"));
+    keys(&mut r, "C-/");
+    assert!(text(&r).starts_with("line 0\n"));
+    // C-u 2 C-k kills two whole lines; C-u 0 C-k back to the line start.
+    keys(&mut r, "M-< C-u 2 C-k");
+    assert!(text(&r).starts_with("line 2\n"), "{}", &text(&r)[..20]);
+    keys(&mut r, "C-e C-u 0 C-k");
+    assert!(text(&r).starts_with("\nline 3\n"), "{}", &text(&r)[..20]);
+    // Lua commands repeat too.
+    r.source_lua(
+        "z",
+        r#"
+        soda.define_command("insert-z", "Insert z", function()
+          local buf = soda.buffer()
+          local _, head = buf:selection()
+          buf:edit({ { head, head, "z" } })
+        end)
+        soda.map("insert", "C-c z", "insert-z")
+        "#,
+    )
+    .unwrap();
+    keys(&mut r, "M-< C-u 3 C-c z");
+    assert!(text(&r).starts_with("zzz\nline 3\n"), "{}", &text(&r)[..20]);
+    // A count does not linger after a command that has no use for it.
+    keys(&mut r, "M-< C-u C-x b C-g C-f");
+    assert_eq!(caret(&r), 1);
+    keys(&mut r, "M-< C-u C-x o C-f");
+    assert_eq!(caret(&r), 1);
+}

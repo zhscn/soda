@@ -423,6 +423,32 @@ impl Layers {
             };
             return Ok(InputResult::Handled(self.modal_read(read, ch, app, time)));
         }
+        // After C-u, digits and `-` make its count rather than text or keys.
+        if let Some(universal) = self.modal.universal
+            && !self.sequence.active()
+            && !key.alt
+            && !key.control
+            && let Key::Char(ch @ ('0'..='9' | '-')) = key.code
+        {
+            if ch == '-' {
+                self.modal.negative = !self.modal.negative;
+                if !universal.digits {
+                    self.modal.count = None;
+                }
+            } else {
+                let digit = ch.to_digit(10).unwrap() as usize;
+                let count = if universal.digits {
+                    self.modal.count.unwrap_or(0)
+                } else {
+                    0
+                };
+                self.modal.count = Some(count.saturating_mul(10).saturating_add(digit).min(10000));
+                self.modal.universal = Some(super::modal::UniversalArgument { digits: true });
+            }
+            let sign = if self.modal.negative { "-" } else { "" };
+            let count = self.modal.count.map_or(String::new(), |n| n.to_string());
+            return Ok(pending(Message::Set(format!("C-u {sign}{count}"))));
+        }
         // A count goes on with digits, as the transient map of `digit-argument`.
         if self.modal.count.is_some()
             && !self.sequence.active()
@@ -484,7 +510,18 @@ impl Layers {
             return result;
         }
         let stack = self.stack(app);
-        let cancel = keymap::is_cancel(&key) && !self.sequence.continues(key, &stack, &self.keymap);
+        // C-c is the leader as well as a cancel key: one that begins a
+        // binding begins it, so `C-u C-c z` gives the count to `C-c z`.
+        let leads = key.control
+            && key.code == Key::Char('c')
+            && self.sequence.keys().is_empty()
+            && !matches!(
+                self.keymap.resolve(&stack, &[key], &|_| false).0,
+                Resolution::Pass
+            );
+        let cancel = keymap::is_cancel(&key)
+            && !leads
+            && !self.sequence.continues(key, &stack, &self.keymap);
         if cancel && (self.sequence.active() || self.modal.active()) {
             self.sequence.clear();
             self.modal.clear();
@@ -542,6 +579,9 @@ impl Layers {
                 if self.sequence.source == Some(keymap::Context::Completion.into()) {
                     self.modal.replay.unrecord();
                 }
+                if let Some(repeated) = self.repeat_by_prefix(&command, app) {
+                    return Ok(InputResult::Handled(repeated));
+                }
                 return self.execute(command, app, time, file_root);
             }
             Resolution::Prefix => return Ok(pending(Message::Clear)),
@@ -564,6 +604,10 @@ impl Layers {
         match key.code {
             Key::Char(ch) if plain => {
                 self.completion.typed = !self.replaying;
+                let typed = Command::Edit(EditCommand::TypeChar(ch));
+                if let Some(repeated) = self.repeat_by_prefix(&typed, app) {
+                    return Ok(InputResult::Handled(repeated));
+                }
                 self.execute(
                     Command::Edit(EditCommand::TypeChar(ch)),
                     app,
@@ -573,5 +617,70 @@ impl Layers {
             }
             _ => Ok(InputResult::Blocked),
         }
+    }
+    /// A count given to a command that does not read one runs it that many
+    /// times, as one step to undo: `C-u 8 C-n`, `C-u 3 C-k`, `C-u 5 a`.
+    /// Only edits and Lua commands repeat; a command that opens a prompt or
+    /// a list runs once, and the count is dropped. A negative count
+    /// repeats as its size.
+    fn repeat_by_prefix(
+        &mut self,
+        command: &Command,
+        app: &Application,
+    ) -> Option<super::Response> {
+        if self.modal.count.is_none() && !self.modal.negative {
+            return None;
+        }
+        // A binding written as a command line, as `soda.map` makes, is
+        // judged by the command it stands for; one that stands for more
+        // than one runs as it is.
+        let expanded;
+        let command = match command {
+            Command::Named(line) => match self.registry.expand(line) {
+                Ok(mut commands) if commands.len() == 1 => {
+                    expanded = commands.pop().unwrap();
+                    &expanded
+                }
+                _ => return None,
+            },
+            command => command,
+        };
+        if !matches!(
+            command,
+            Command::Edit(_) | Command::Clipboard(_) | Command::LuaCall { .. }
+        ) {
+            // Modal commands read the count themselves, and the keypad goes
+            // on building a key; anything else has no use for it.
+            if !matches!(command, Command::Modal(_) | Command::Keypad(_)) {
+                self.modal.take_prefix();
+            }
+            return None;
+        }
+        let (count, _) = self.modal.take_prefix();
+        // kill-line with a count kills whole lines, newlines and all, which
+        // killing to the line end again and again does not.
+        use crate::application::ClipboardAction;
+        let (command, count) = match command {
+            Command::Clipboard(ClipboardAction::Kill {
+                backward: false,
+                word: false,
+            }) => (Command::Clipboard(ClipboardAction::KillLines(count)), 1),
+            command => (command.clone(), count),
+        };
+        let view = app.active_view().and_then(|view| app.view(view))?;
+        let depth = app
+            .workspace()
+            .editor(view.document_id)?
+            .model()
+            .document()
+            .history_depth();
+        let mut commands = vec![command; count];
+        commands.push(Command::Edit(EditCommand::SquashHistory(depth)));
+        Some(super::Response {
+            commands,
+            redraw: true,
+            message: Message::Clear,
+            ..super::Response::default()
+        })
     }
 }

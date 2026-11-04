@@ -156,6 +156,17 @@ impl Layers {
                 self.modal.negative = !self.modal.negative;
                 return response;
             }
+            Action::Universal => {
+                self.modal.count = Some(match (self.modal.universal, self.modal.count) {
+                    (Some(universal), Some(count)) if !universal.digits => {
+                        count.saturating_mul(4).min(10000)
+                    }
+                    _ => 4,
+                });
+                self.modal.universal = Some(Default::default());
+                response.message = Message::Set(format!("C-u {}-", self.modal.count.unwrap()));
+                return response;
+            }
             Action::Digit(digit) => {
                 let count = self.modal.count.unwrap_or(0);
                 self.modal.count = Some(count.saturating_mul(10).saturating_add(digit).min(10000));
@@ -451,7 +462,11 @@ impl Layers {
                 Some(command) => response.commands.push(command),
                 None => return self.fail(response, "No command to repeat"),
             },
-            Action::Negative | Action::Digit(_) | Action::Find { .. } | Action::ThingAt { .. } => {
+            Action::Negative
+            | Action::Digit(_)
+            | Action::Universal
+            | Action::Find { .. }
+            | Action::ThingAt { .. } => {
                 unreachable!("handled above")
             }
         }

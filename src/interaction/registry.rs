@@ -1095,6 +1095,11 @@ pub static BUILTINS: &[Builtin] = &[
         |a| Ok(Command::Modal(Action::Expand(digit(a)?)))
     ),
     builtin!(
+        "universal-argument",
+        "Begin a count of 4, or multiply it by 4; digits and - typed next make the count",
+        modal(Action::Universal)
+    ),
+    builtin!(
         "digit-argument",
         [slot("N", SlotKind::Word)],
         "Start or extend a count for the next command",

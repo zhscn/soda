@@ -27,6 +27,9 @@ pub enum ClipboardAction {
         backward: bool,
         word: bool,
     },
+    /// Kills from the caret to the start of the line `n` lines down, as
+    /// `kill-line` does with a count; 0 kills back to the line's start.
+    KillLines(usize),
 }
 
 /// Entries the kill ring keeps, as Emacs's `kill-ring-max`.
@@ -196,7 +199,18 @@ impl Application {
         // A kill goes from the caret, as Emacs's `kill-line` and
         // `kill-word` ignore the region; copying and cutting take the
         // selection, or else the line.
-        let range = if let ClipboardAction::Kill { backward, word } = action {
+        let range = if let ClipboardAction::KillLines(lines) = action {
+            let head = selection.head;
+            let line = snapshot.line_of(head).unwrap();
+            if lines == 0 {
+                snapshot.line_start(line).unwrap()..head
+            } else {
+                let end = snapshot
+                    .line_start(line.saturating_add(lines))
+                    .unwrap_or(snapshot.len_bytes());
+                head..end.max(head)
+            }
+        } else if let ClipboardAction::Kill { backward, word } = action {
             let head = selection.head;
             let line = snapshot.line_of(head).unwrap();
             let other = if word {
@@ -224,7 +238,10 @@ impl Application {
         }
         let document = state.document_id;
         let text = snapshot.byte_slice(range.clone()).unwrap().to_string();
-        let cut = matches!(action, ClipboardAction::Cut | ClipboardAction::Kill { .. });
+        let cut = matches!(
+            action,
+            ClipboardAction::Cut | ClipboardAction::Kill { .. } | ClipboardAction::KillLines(_)
+        );
         let join = cut.then(|| self.kill_join(view, &range)).flatten();
         if cut {
             let mut tx = Transaction::new(snapshot.version(), vec![Change::new(range.clone(), "")]);
