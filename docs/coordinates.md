@@ -44,7 +44,7 @@ C++ 缩进、空白命令、Tab、`Goto` 和垂直移动共用这套规则。会
 - `leading_whitespace` 借用前导空白。坐标查询不初始化快照的连续全文缓存。
 
 ```sh
-cargo test --test coordinates
+cargo test --test it coordinates::
 cargo run --release --example text_coordinate_trace -- 1000000 100
 ```
 

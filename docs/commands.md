@@ -78,7 +78,7 @@ core 的 `History` 保存、组合和恢复修改；editor 的 `InputHistory` �
 ## 验证
 
 ```sh
-cargo test --test commands --test files --test mvp
+cargo test --test it -- commands:: files:: mvp::
 cargo run --release --example cpp_input_trace -- PATH_TO_CPP_FILE 20
 ```
 

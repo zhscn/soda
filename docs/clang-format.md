@@ -99,8 +99,8 @@ YAML 由纯 Rust 的 serde-saphyr 解析，支持 flow mapping、嵌套对象、
 
 | 命令 | 覆盖 |
 | --- | --- |
-| `cargo test --test config` | YAML、预设、覆盖、目录继承、语言选择、错误和配置到编辑操作的链路；装有 `clang-format-23` 时预设与其 `--dump-config` 对照 |
-| `cargo test --test clang_format_options` | 枚举兼容、可选字段、序列类型、策略映射和编辑结果 |
+| `cargo test --test it config::` | YAML、预设、覆盖、目录继承、语言选择、错误和配置到编辑操作的链路；装有 `clang-format-23` 时预设与其 `--dump-config` 对照 |
+| `cargo test --test it clang_format_options::` | 枚举兼容、可选字段、序列类型、策略映射和编辑结果 |
 
 配置语义以 [LLVM 配置文档](https://clang.llvm.org/docs/ClangFormatStyleOptions.html) 和 clang-format 源码为准。
 

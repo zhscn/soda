@@ -4,10 +4,20 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 default-run = "soda"
+# The tests are gathered in tests/main.rs; see there.
+autotests = false
 
 [[bin]]
 name = "soda-gui"
 required-features = ["gui"]
+
+[[test]]
+name = "it"
+path = "tests/main.rs"
+
+[[test]]
+name = "home"
+path = "tests/home.rs"
 
 [[example]]
 name = "gui_snapshot"
