@@ -6,7 +6,7 @@ use soda::{
 use std::path::PathBuf;
 fn runtime() -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     r.command(Command::SetMode(soda::interaction::EditMode::Insert));
     r
 }

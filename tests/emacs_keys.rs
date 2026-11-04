@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 fn runtime() -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     r
 }
 fn keys(r: &mut Runtime, keys: &str) {
@@ -125,7 +125,7 @@ fn save_some_buffers_asks_about_each_unsaved_file() {
         std::fs::write(path, "").unwrap();
     }
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     for path in &paths {
         r.command(Command::OpenPath(path.clone()));
         for _ in 0..200 {

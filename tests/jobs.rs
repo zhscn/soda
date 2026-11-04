@@ -53,7 +53,7 @@ fn run_streams_output_and_steps_through_its_locations() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("a.txt"), "one\ntwo\nthree\n").unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     line(
         &mut r,
         "run printf 'building\\na.txt:3: warning: x\\n' >&2; echo a.txt:2:2: error: y; exit 3",
@@ -85,7 +85,7 @@ fn run_streams_output_and_steps_through_its_locations() {
 fn stop_ends_runs_and_shell_commands() {
     let dir = tempfile::tempdir().unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     line(&mut r, "stop");
     assert_eq!(r.message(), "");
     let started = Instant::now();
@@ -110,7 +110,7 @@ fn stepping_starts_at_the_first_result() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("a.txt"), "x needle\nx\nneedle\n").unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     line(&mut r, "grep needle");
     wait(&mut r, |r| r.message().starts_with("2 matches"));
     keys(&mut r, "M-g n");
@@ -128,7 +128,7 @@ fn grep_groups_results_under_file_names_and_enter_reaches_them() {
     std::fs::write(dir.path().join("a b.txt"), "x\n    needle\n").unwrap();
     std::fs::write(dir.path().join("c.txt"), "needle\n").unwrap();
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     line(&mut r, "grep needle");
     wait(&mut r, |r| r.message().starts_with("2 matches"));
     assert_eq!(

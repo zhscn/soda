@@ -23,7 +23,7 @@ fn host() -> Runtime {
     runtime
         .source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
         .unwrap();
-    runtime.start(None);
+    runtime.command(crate::interaction::Command::New);
     runtime.command(Action::SetMode(crate::interaction::EditMode::Insert));
     runtime
 }
@@ -394,7 +394,7 @@ fn work_done_elsewhere_wakes_the_loop_and_deadlines_say_when_to_look() {
     let mut host = Runtime::new(PathBuf::from("/")).unwrap();
     host.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
         .unwrap();
-    host.start(None);
+    host.command(crate::interaction::Command::New);
     // Nothing typed, nothing running: nothing to look for.
     assert_eq!(host.deadline(), None);
     // A Lua timer is a deadline.
@@ -434,4 +434,21 @@ fn work_done_elsewhere_wakes_the_loop_and_deadlines_say_when_to_look() {
         std::thread::sleep(Duration::from_millis(1));
         host.poll();
     }
+}
+#[test]
+fn starting_without_a_file_opens_nothing_and_the_splash_names_keys_in_force() {
+    let mut runtime = Runtime::new(PathBuf::from("/")).unwrap();
+    runtime.start(None);
+    assert!(runtime.app().active_view().is_none());
+    assert_eq!(runtime.app().workspace().documents().count(), 0);
+    let splash = crate::screen::content::splash(&runtime);
+    let keys: Vec<_> = splash.iter().map(|(keys, _)| keys.as_str()).collect();
+    assert_eq!(keys, ["C-x C-f", "C-x p f", "M-x new", "M-x", "<f1>"]);
+    // Keys an earlier table takes are no way to run the command they
+    // stand for in a later one.
+    runtime.command(Action::Named("map insert \"C-x C-f\" new".into()));
+    assert_eq!(runtime.where_is("new").as_deref(), Some("C-x C-f"));
+    assert_eq!(runtime.where_is("open"), None);
+    let splash = crate::screen::content::splash(&runtime);
+    assert_eq!(splash[0].0, "M-x open");
 }

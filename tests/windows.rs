@@ -11,7 +11,7 @@ fn runtime(text: &str) -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     r.command(Command::SetMode(EditMode::Insert));
     r.command(Command::Edit(Edit::InsertText(text.into())));
     r.command(Command::Edit(Edit::SetSelection(Selection::caret(2))));
@@ -167,7 +167,7 @@ fn grep_results_show_below_and_open_locations_in_the_other_window() {
     let mut r = Runtime::new(root.path().to_owned()).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     let main = r.app().active_view().unwrap();
     r.command(Command::Grep("needle".into()));
     settle(&mut r, |r| active_name(r) == "*grep*");

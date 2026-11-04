@@ -32,7 +32,7 @@ fn plain() -> (tempfile::TempDir, Runtime) {
         .unwrap();
     r.source_lua("auto-pairs", r#"soda.set("auto-pairs", true)"#)
         .unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     (dir, r)
 }
 fn cpp() -> (tempfile::TempDir, Runtime) {

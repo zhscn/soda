@@ -545,6 +545,12 @@ impl Layers {
         }
         Ok(result.map_or(InputResult::Blocked, InputResult::Handled))
     }
+    /// The keys in force now that run the command `name`, in Emacs
+    /// notation.
+    pub fn where_is(&self, app: &Application, name: &str) -> Option<String> {
+        let keys = self.keymap.where_is(&self.stack(app), name)?;
+        Some(emacs_notation(&keys))
+    }
     /// The bindings in force in a context, user ones over defaults: keys
     /// and what they show.
     pub fn bindings(&self, keymap: &str) -> Option<Vec<(Vec<KeyStroke>, String)>> {

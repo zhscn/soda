@@ -51,7 +51,7 @@ fn recent_files_come_newest_first_and_survive_the_session() {
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     for name in names {
         open(&mut r, &dir.path().join(name));
     }
@@ -67,7 +67,7 @@ fn recent_files_come_newest_first_and_survive_the_session() {
     next.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
     next.restore(&text);
-    next.start(None);
+    next.command(soda::interaction::Command::New);
     keys(&mut next, "SPC r");
     assert_eq!(rows(&next), ["src/alpha.rs", "gamma.txt", "src/beta.rs"]);
 }

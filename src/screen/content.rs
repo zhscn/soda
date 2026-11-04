@@ -1,6 +1,7 @@
 //! What the parts of the screen around the text say: the tabs, window
-//! titles, the status line and the message row. A frontend decides how they
-//! look and where they go; the words and their roles are the same.
+//! titles, the status line, the message row and the splash. A frontend
+//! decides how they look and where they go; the words and their roles are
+//! the same.
 use crate::{
     application::{Face, Severity, ViewId},
     editor::DocumentId,
@@ -248,4 +249,28 @@ pub(crate) fn command_info(
         }
     }
     info
+}
+
+/// What the splash offers when no window is open: each command's keys in
+/// force, as Emacs's `where-is` finds them, and what it does. A command
+/// without keys is run by name through the one that runs commands; one
+/// that cannot be reached either way is left out.
+pub(crate) fn splash(runtime: &Runtime) -> Vec<(String, &'static str)> {
+    const OFFERS: [(&str, &str); 5] = [
+        ("open", "Open a file"),
+        ("project", "Find a project file"),
+        ("new", "New document"),
+        ("commands", "Run any command"),
+        ("help", "Help"),
+    ];
+    let commands = runtime.where_is("commands");
+    OFFERS
+        .iter()
+        .filter_map(|&(name, doc)| {
+            let keys = runtime
+                .where_is(name)
+                .or_else(|| Some(format!("{} {name}", commands.as_ref()?)))?;
+            Some((keys, doc))
+        })
+        .collect()
 }

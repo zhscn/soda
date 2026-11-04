@@ -230,7 +230,7 @@ mod tests {
     #[test]
     fn unsaved_documents_are_recovered_into_files() {
         let mut runtime = crate::runtime::Runtime::new(std::path::PathBuf::from("/")).unwrap();
-        runtime.start(None);
+        runtime.command(crate::interaction::Command::New);
         assert!(runtime.unsaved().is_empty());
         runtime.command(crate::interaction::Command::SetMode(
             crate::interaction::EditMode::Insert,

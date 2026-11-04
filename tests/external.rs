@@ -49,7 +49,7 @@ fn regaining_focus_reloads_clean_files_and_reports_the_rest() {
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     for path in [&clean, &kept, &gone, &edited] {
         open(&mut r, path);
     }

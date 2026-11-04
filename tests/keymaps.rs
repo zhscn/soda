@@ -17,7 +17,7 @@ fn runtime() -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     r
 }
 /// Runs `map`, as a configuration does; its error, if any, is the message.

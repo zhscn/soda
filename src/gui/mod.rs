@@ -1096,7 +1096,7 @@ mod tests {
     fn an_edge_between_windows_is_found_and_dragged_by_whole_cells() {
         use crate::{application::Axis, interaction::Command, runtime::Runtime};
         let mut runtime = Runtime::new(std::path::PathBuf::from("/")).unwrap();
-        runtime.start(None);
+        runtime.command(crate::interaction::Command::New);
         runtime.command(Command::Named("vsplit".into()));
         let fonts = super::Fonts::new(super::text::Settings {
             size: 14.0,

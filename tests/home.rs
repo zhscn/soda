@@ -40,7 +40,7 @@ fn a_home_in_git_is_no_project_but_a_repository_inside_it_is() {
     // SAFETY: the only test here, before anything else reads the variable.
     unsafe { std::env::set_var("HOME", &home) };
     let mut runtime = Runtime::started_in(home.join("notes")).unwrap();
-    runtime.start(None);
+    runtime.command(soda::interaction::Command::New);
 
     open(&mut runtime, &home.join("notes/a.txt"));
     assert_eq!(runtime.app().project(), None);

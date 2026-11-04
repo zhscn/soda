@@ -12,7 +12,7 @@ fn runtime(text: &str) -> Runtime {
     let caret = text.find('|').expect("a caret");
     let plain = text.replacen('|', "", 1);
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     r.command(Command::Edit(Edit::InsertText(plain)));
     r.command(Command::Edit(Edit::SetSelection(Selection::caret(caret))));
     r

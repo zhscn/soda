@@ -204,7 +204,7 @@ mod tests {
     #[test]
     fn dragging_a_separator_or_a_title_moves_that_edge() {
         let mut runtime = Runtime::new(std::path::PathBuf::from("/")).unwrap();
-        runtime.start(None);
+        runtime.command(crate::interaction::Command::New);
         for key in KeyStroke::parse_sequence("C-x 3 C-x 2").unwrap() {
             runtime.input(UserInput::Key(key));
         }

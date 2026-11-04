@@ -96,7 +96,7 @@ fn path_completion_opens_existing_files_and_saves_new_names() {
     let path = directory.path().join("src/main.cpp");
     std::fs::write(&path, "int main() {}\n").unwrap();
     let mut runtime = Runtime::new(directory.path().to_owned()).unwrap();
-    runtime.start(None);
+    runtime.command(soda::interaction::Command::New);
     runtime.command(soda::interaction::Command::SetMode(
         soda::interaction::EditMode::Insert,
     ));
@@ -148,7 +148,7 @@ fn departure_asks_for_a_path_through_the_command_line() {
     let directory = tempfile::tempdir().unwrap();
     std::fs::create_dir(directory.path().join("dest")).unwrap();
     let mut runtime = Runtime::new(directory.path().to_owned()).unwrap();
-    runtime.start(None);
+    runtime.command(soda::interaction::Command::New);
     runtime.command(soda::interaction::Command::SetMode(
         soda::interaction::EditMode::Insert,
     ));
@@ -181,7 +181,7 @@ fn departure_asks_for_a_path_through_the_command_line() {
 #[test]
 fn suspend_is_handed_to_the_frontend_once() {
     let mut runtime = Runtime::new(std::path::PathBuf::from("/")).unwrap();
-    runtime.start(None);
+    runtime.command(soda::interaction::Command::New);
     assert!(!runtime.take_suspend());
     runtime.input(soda::interaction::UserInput::Key(
         soda::interaction::KeyStroke::parse_sequence("C-z").unwrap()[0],
@@ -202,7 +202,7 @@ fn the_fallback_style_is_an_option_and_a_broken_file_is_reported() {
     std::fs::write(broken.join("b.cpp"), "int b;\n").unwrap();
     std::fs::write(broken.join(".clang-format"), "IndentWidth: [broken\n").unwrap();
     let mut runtime = Runtime::new(directory.path().to_owned()).unwrap();
-    runtime.start(None);
+    runtime.command(soda::interaction::Command::New);
     runtime.command(Command::Named("set cpp-fallback-style WebKit".into()));
     let width = |r: &Runtime| {
         let view = r.app().view(r.app().active_view().unwrap()).unwrap();

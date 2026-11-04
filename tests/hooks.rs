@@ -56,7 +56,7 @@ fn hooks_from_configuration_shape_new_and_opened_documents() {
         "#,
     )
     .unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     let untitled = active(&r);
     assert_eq!(r.app().options().int(Some(untitled), "indent-width"), 2);
     assert_eq!(r.app().options().int(None, "indent-width"), 4);
@@ -77,7 +77,7 @@ fn hooks_follow_modes_focus_saves_and_closes() {
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     line(&mut r, "hook mode insert set scroll-lines 9");
     line(&mut r, "hook mode normal set scroll-lines 5");
     keys(&mut r, "i");
@@ -109,7 +109,7 @@ fn hooks_that_fire_themselves_stop() {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     line(&mut r, "hook new .* new");
     line(&mut r, "new");
     assert_eq!(r.message(), "Hooks stopped after 16 nested rounds");

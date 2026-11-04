@@ -188,24 +188,22 @@ impl Runtime {
             popup_page: Default::default(),
         })
     }
-    /// Opens the file given on the command line, or an untitled document.
+    /// Opens the file given on the command line; without one, no document
+    /// is open and the screen shows how to begin.
     pub fn start(&mut self, path: Option<PathBuf>) {
-        match path {
-            Some(path) => {
-                // As Emacs adds the files of its command line to
-                // `file-name-history`.
-                let home = std::env::var_os("HOME").map(PathBuf::from);
-                if let Ok(absolute) = std::path::absolute(&path)
-                    && let Some(entry) =
-                        crate::interaction::history::abbreviate(&absolute, home.as_deref())
-                {
-                    self.layers
-                        .record_history(crate::interaction::history::FILE, &entry);
-                }
-                self.dispatch(Event::Open(path));
-            }
-            None => self.command(Command::New),
+        let Some(path) = path else {
+            return;
+        };
+        // As Emacs adds the files of its command line to
+        // `file-name-history`.
+        let home = std::env::var_os("HOME").map(PathBuf::from);
+        if let Ok(absolute) = std::path::absolute(&path)
+            && let Some(entry) = crate::interaction::history::abbreviate(&absolute, home.as_deref())
+        {
+            self.layers
+                .record_history(crate::interaction::history::FILE, &entry);
         }
+        self.dispatch(Event::Open(path));
     }
     pub fn set_system_clipboard(&mut self, clipboard: Box<dyn SystemClipboard>) {
         self.clipboard = Some(clipboard);
@@ -264,6 +262,10 @@ impl Runtime {
     }
     pub fn pending_keys(&self) -> Option<String> {
         self.layers.pending()
+    }
+    /// The keys in force that run the command `name`, as `where-is`.
+    pub fn where_is(&self, name: &str) -> Option<String> {
+        self.layers.where_is(&self.app, name)
     }
     pub fn key_continuations(&self) -> Vec<(String, String)> {
         self.layers.continuations(&self.app)

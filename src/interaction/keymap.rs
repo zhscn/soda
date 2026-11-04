@@ -934,6 +934,27 @@ impl Keymap {
         }
         (Resolution::Pass, Table::Context(Context::Global))
     }
+    /// The shortest keys that run the binding shown as `label` from
+    /// `stack`, as Emacs's `where-is`: a binding an earlier table shadows,
+    /// by the same keys or by a prefix of them, is no way to run it.
+    pub(super) fn where_is(&self, stack: &[Table], label: &str) -> Option<Vec<KeyStroke>> {
+        stack
+            .iter()
+            .flat_map(|&table| {
+                self.layer(table)
+                    .effective()
+                    .filter(|binding| binding.label.trim() == label)
+                    .map(move |binding| (table, binding.keys.clone()))
+            })
+            .filter(|(table, keys)| {
+                matches!(
+                    self.resolve(stack, keys, &|_| false),
+                    (Resolution::Complete(_), found) if found == *table
+                )
+            })
+            .map(|(_, keys)| keys)
+            .min_by_key(Vec::len)
+    }
     /// Field keys are single strokes; printable characters insert text.
     pub(super) fn input(&self, key: KeyStroke) -> Input {
         let Ok(key) = canonical(key) else {

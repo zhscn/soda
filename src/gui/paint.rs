@@ -529,7 +529,7 @@ pub fn screen(
         tab_bar(painter, runtime, tabs);
     }
     if areas.windows.is_empty() {
-        splash(painter, areas.editor);
+        splash(painter, areas.editor, &content::splash(runtime));
     }
     let line = painter.fonts.line;
     let mut texts = vec![];
@@ -920,17 +920,21 @@ pub fn cursor(painter: &mut Painter, runtime: &Runtime, at: Rect, bar: bool) {
     painter.unclip();
 }
 
-fn splash(painter: &mut Painter, area: Rect) {
+fn splash(painter: &mut Painter, area: Rect, lines: &[(String, &str)]) {
     let theme = painter.theme;
-    let lines: [(&str, &str); 5] = [
-        ("M-x open", "Open a file"),
-        ("SPC f", "Find a project file"),
-        ("M-x enew", "New document"),
-        ("M-x", "Run any command"),
-        ("F1", "Help"),
-    ];
     let (cell, line) = (painter.fonts.cell, painter.fonts.line);
-    let (w, h) = (34.0 * cell, (lines.len() + 2) as f32 * line * 1.2);
+    let keys = lines
+        .iter()
+        .map(|(key, _)| painter.fonts.width(key, Face::TEXT))
+        .fold(10.0 * cell, f32::max);
+    let docs = lines
+        .iter()
+        .map(|(_, doc)| painter.fonts.width(doc, Face::UI))
+        .fold(0.0, f32::max);
+    let (w, h) = (
+        keys + 2.0 * cell + docs,
+        (lines.len() + 2) as f32 * line * 1.2,
+    );
     if area.h < h || area.w < w {
         return;
     }
@@ -942,16 +946,8 @@ fn splash(painter: &mut Painter, area: Rect) {
         let y = y + (2.0 + index as f32) * line * 1.2;
         let key_width = painter.fonts.width(key, Face::TEXT);
         let style = without_bg(theme.key);
-        painter.words(
-            x + 12.0 * cell - key_width,
-            y,
-            key,
-            style,
-            Kind::Text,
-            w,
-            false,
-        );
-        painter.ui(x + 14.0 * cell, y, doc, theme.dim, w);
+        painter.words(x + keys - key_width, y, key, style, Kind::Text, w, false);
+        painter.ui(x + keys + 2.0 * cell, y, doc, theme.dim, w);
     }
 }
 

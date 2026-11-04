@@ -49,7 +49,7 @@ fn tree() -> Tree {
 }
 fn started(tree: &Tree) -> Runtime {
     let mut r = Runtime::started_in(tree.base.join("elsewhere")).unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     r
 }
 fn wait(r: &mut Runtime, done: impl Fn(&Runtime) -> bool) {
@@ -187,7 +187,7 @@ fn a_directory_can_be_made_the_project() {
     assert_eq!(r.app().project(), Some(tree.base.join("outside")));
     // Files below it follow, and a new runtime names one from the start.
     let mut r = Runtime::new(tree.base.join("elsewhere")).unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     assert_eq!(r.app().project(), Some(tree.base.join("elsewhere")));
 }
 #[test]

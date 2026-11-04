@@ -11,7 +11,7 @@ fn runtime() -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     r.command(Command::SetMode(EditMode::Insert));
     r.input(UserInput::Paste("one\ntwo\nthree".into()));
     r.command(Command::SetMode(EditMode::Normal));
@@ -402,7 +402,7 @@ fn clang_format_extension_replaces_only_changed_lines() {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     r.command(Command::SetMode(EditMode::Insert));
     r.input(UserInput::Paste(
         "int  a;\nint b;\nint   c;\nint d;\n".into(),
@@ -435,7 +435,7 @@ fn clang_format_extension_formats_only_the_selected_lines() {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     r.command(Command::SetMode(EditMode::Insert));
     r.input(UserInput::Paste("int  a;\nint  b;\nint  c;\n".into()));
     r.command(Command::SetMode(EditMode::Normal));
@@ -457,7 +457,7 @@ fn clang_format_extension_drops_output_when_the_buffer_changed() {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     r.command(Command::SetMode(EditMode::Insert));
     r.input(UserInput::Paste("int  a;\n".into()));
     r.command(Command::SetMode(EditMode::Normal));
@@ -479,7 +479,7 @@ fn extension(lines: &str, source: &str) -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     r.command(Command::SetMode(EditMode::Insert));
     r.input(UserInput::Paste(lines.into()));
     r.command(Command::SetMode(EditMode::Normal));
@@ -601,7 +601,7 @@ fn lua_results_step_with_the_built_in_keys() {
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     lua(
         &mut r,
         r#"
@@ -632,7 +632,7 @@ fn lua_results_follow_the_shape_of_the_largest_window() {
         let mut r = Runtime::new(dir.path().to_owned()).unwrap();
         r.source_lua("modal", include_str!("fixtures/modal.lua"))
             .unwrap();
-        r.start(None);
+        r.command(soda::interaction::Command::New);
         r.set_editing_area(width, height);
         if !setup.is_empty() {
             r.command(Command::Named(setup.into()));
@@ -656,7 +656,7 @@ fn lua_results_use_the_side_window_already_open() {
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     r.set_editing_area(256, 26);
     lua(&mut r, r#"soda.results("lint", { "a.txt:1:1: first" })"#);
     r.set_editing_area(100, 26);
@@ -672,7 +672,7 @@ fn lua_results_keep_a_configured_placement() {
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     lua(
         &mut r,
         r#"
@@ -701,7 +701,7 @@ fn lua_opens_a_position_and_reports_a_bad_one() {
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     lua(&mut r, r#"soda.open("a.txt", 2, 3)"#);
     wait(&mut r, |r| active_name(r).ends_with("a.txt"));
     assert_eq!(caret(&r), 6);
@@ -737,7 +737,7 @@ fn git_changes_extension_lists_each_hunk() {
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.start(None);
+    r.command(soda::interaction::Command::New);
     lua(&mut r, include_str!("../lua/git-changes.lua"));
     r.command(Command::Named("git-changes".into()));
     wait(&mut r, |r| {
