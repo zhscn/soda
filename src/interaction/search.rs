@@ -25,6 +25,8 @@ pub struct SearchSession {
     input: TextInput,
     /// Present while replacing.
     replace: Option<Replace>,
+    /// Where `M-p` has recalled to in the search history.
+    recall: super::history::Recall,
 }
 /// Where a replacement stands: the query is being typed, then the
 /// replacement, then the matches are reviewed.
@@ -145,6 +147,7 @@ impl SearchSession {
             results: SearchResults::default(),
             input: TextInput::default(),
             replace: None,
+            recall: Default::default(),
         })
     }
     /// Returns false when the owning view closes. Missing revisions return an error.
@@ -327,22 +330,32 @@ impl SearchSession {
             ..Response::default()
         })
     }
-    /// Replaces the query with a line from the history.
+    /// Replaces the query with an older or newer search; None when there
+    /// is none that way.
     pub(super) fn recall(
         &mut self,
-        text: &str,
+        histories: &super::history::Histories,
+        backward: bool,
         app: &Application,
         time: Duration,
-    ) -> Result<Transition, EditError> {
+    ) -> Result<Option<Transition>, EditError> {
+        let name = super::history::SEARCH;
+        let entries = histories.entries(name);
+        let Some(text) = self
+            .recall
+            .step((name, 0), entries, self.input.text(), backward)
+        else {
+            return Ok(None);
+        };
         let end = self.input.text().len();
-        self.input.replace_range(0..end, text);
-        self.set_query(text);
-        Ok(Transition::Active(self.preview_response(
+        self.input.replace_range(0..end, &text);
+        self.set_query(&text);
+        Ok(Some(Transition::Active(self.preview_response(
             app,
             self.backward,
             false,
             time,
-        )?))
+        )?)))
     }
     pub(super) fn handle(
         &mut self,

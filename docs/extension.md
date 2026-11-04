@@ -133,8 +133,8 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 | `soda.note(group, items)` | 给当前文档的一组范围加注（诊断）：`{from, to, severity, text}` |
 | `soda.keys(notation)` | 按 Emacs 记法输入按键，如 `soda.keys("foo RET")`，走与键盘相同的路径；要原样输入一段文字时把字符用空格隔开，免得 `RET` 这样的词被读成键 |
 | `soda.prompt(text)` | 打开命令行并预填 `text` |
-| `soda.input(title, [initial], fn)` | 在命令行里要一行文字，回车后以它调用 `fn`；取消时不调用 |
-| `soda.choose(title, items, fn)` | 从 `items` 中选一项，输入过滤，以从 1 起的序号调用 `fn`；取消时不调用 |
+| `soda.input(title, [initial], fn, [history])` | 在命令行里要一行文字，回车后以它调用 `fn`；取消时不调用。给了 `history` 时，`M-p` / `M-n` 翻这份历史，回答记入其中，相当于 `read-string` 的 HIST 参数；没给时不翻也不记 |
+| `soda.choose(title, items, fn, [history])` | 从 `items` 中选一项，输入过滤，以从 1 起的序号调用 `fn`；取消时不调用。给了 `history` 时选中的项记入这份历史，较近选过的排在同分项之前，`M-p` 翻出它的文字 |
 | `soda.hook(event, filter, fn)` / `soda.unhook(id)` | 事件发生时以事件参数调用 `fn`，返回编号；`unhook` 只去掉这一个 |
 | `soda.define_command(name, [doc], fn, [options])` | 定义命令，参数文本整体传给 `fn`；`doc` 显示在按键提示、帮助和补全里，省略时显示命令名；`options.args` 见下文 |
 | `soda.tree(spec)` | 在 `*name*` 文档里显示一棵树，见[树](#树) |

@@ -89,6 +89,9 @@ pub struct Runtime {
     /// Caret positions of files closed earlier, and of files just opened
     /// that should go back to them.
     state: state::State,
+    /// The saved state as `restore` read it, to tell whether another
+    /// session has saved since.
+    restored: String,
     restores: Vec<(ViewId, usize, usize)>,
     /// The mode and focused view hooks last saw.
     seen: (crate::interaction::EditMode, Option<ViewId>),
@@ -166,6 +169,7 @@ impl Runtime {
             messages: Default::default(),
             logged: String::new(),
             state: Default::default(),
+            restored: String::new(),
             restores: vec![],
             seen: Default::default(),
             quit: false,
@@ -188,6 +192,16 @@ impl Runtime {
     pub fn start(&mut self, path: Option<PathBuf>) {
         match path {
             Some(path) => {
+                // As Emacs adds the files of its command line to
+                // `file-name-history`.
+                let home = std::env::var_os("HOME").map(PathBuf::from);
+                if let Ok(absolute) = std::path::absolute(&path)
+                    && let Some(entry) =
+                        crate::interaction::history::abbreviate(&absolute, home.as_deref())
+                {
+                    self.layers
+                        .record_history(crate::interaction::history::FILE, &entry);
+                }
                 self.dispatch(Event::Open(path));
             }
             None => self.command(Command::New),
@@ -239,6 +253,10 @@ impl Runtime {
     }
     pub fn search_history(&self) -> &[String] {
         self.layers.search_history()
+    }
+    /// A history by name, oldest first.
+    pub fn history(&self, name: &str) -> &[String] {
+        self.layers.histories().entries(name)
     }
     /// Whether a macro is being recorded.
     pub fn recording(&self) -> bool {
@@ -434,25 +452,43 @@ impl Runtime {
     /// Takes back what an earlier session left with `persist`.
     pub fn restore(&mut self, text: &str) {
         let mut state = state::State::parse(text);
-        self.layers.restore_history(
-            &std::mem::take(&mut state.commands),
-            &std::mem::take(&mut state.searches),
-        );
+        self.layers
+            .restore_histories(std::mem::take(&mut state.histories).into_iter().collect());
         self.state = state;
+        self.restored = text.to_owned();
         self.layers.set_recent_files(self.state.recent());
         self.layers.set_projects(self.state.projects());
     }
     /// What the next session should start from: histories and where the
     /// caret is in every file, the focused one most recent.
     pub fn persist(&mut self) -> String {
+        self.persist_over(None)
+    }
+    /// As `persist`, over the state saved now: when another session saved
+    /// it since `restore`, its histories merge with these, as savehist
+    /// merges a file another Emacs wrote, so neither loses its entries.
+    pub fn persist_over(&mut self, saved: Option<&str>) -> String {
         let mut views: Vec<_> = self.app.views().map(|view| view.id).collect();
         let active = self.app.active_view();
         views.sort_by_key(|view| Some(*view) == active);
         for view in views {
             self.remember(view);
         }
-        self.state.commands = self.layers.command_history().to_vec();
-        self.state.searches = self.layers.search_history().to_vec();
+        let theirs = saved
+            .filter(|saved| *saved != self.restored)
+            .map(|saved| state::State::parse(saved).histories)
+            .unwrap_or_default();
+        let mut histories: std::collections::BTreeMap<_, _> = self
+            .layers
+            .histories()
+            .all()
+            .map(|(name, entries)| (name.to_owned(), entries.to_vec()))
+            .collect();
+        for (name, entries) in theirs {
+            let ours = histories.entry(name).or_default();
+            *ours = crate::interaction::history::merge(ours, &entries);
+        }
+        self.state.histories = histories;
         self.state.text()
     }
     /// Notes where a view of a file has its caret.

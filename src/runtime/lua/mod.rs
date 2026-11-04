@@ -168,10 +168,10 @@ function soda.buffer(path)
   return id and setmetatable({ id = id }, Buffer)
 end
 local choose = soda.choose
-function soda.choose(title, items, answer)
+function soda.choose(title, items, answer, history)
   choose(title, items, function(index)
     answer(tonumber(index))
-  end)
+  end, history)
 end
 local tree_show, tree_children = soda.tree_show, soda.tree_children
 soda.tree_show, soda.tree_children = nil, nil

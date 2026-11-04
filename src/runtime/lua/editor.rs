@@ -41,12 +41,19 @@ pub(super) fn register<'scope, 'r: 'scope>(
     soda.set(
         "input",
         scope.create_function(
-            |_, (title, initial, function): (String, Option<String>, Function)| {
+            |_,
+             (title, initial, function, history): (
+                String,
+                Option<String>,
+                Function,
+                Option<String>,
+            )| {
                 let id = host.keep(function)?;
                 runtime.borrow_mut().command(Command::Question {
                     id,
                     title,
                     initial: initial.unwrap_or_default(),
+                    history,
                 });
                 Ok(())
             },
@@ -209,11 +216,20 @@ pub(super) fn register<'scope, 'r: 'scope>(
     soda.set(
         "choose",
         scope.create_function(
-            |_, (title, items, function): (String, Vec<String>, Function)| {
+            |_,
+             (title, items, function, history): (
+                String,
+                Vec<String>,
+                Function,
+                Option<String>,
+            )| {
                 let id = host.keep(function)?;
-                runtime
-                    .borrow_mut()
-                    .command(Command::Offer { id, title, items });
+                runtime.borrow_mut().command(Command::Offer {
+                    id,
+                    title,
+                    items,
+                    history,
+                });
                 Ok(())
             },
         )?,

@@ -179,7 +179,9 @@ pub struct Layers {
     /// The Lua function a line of text is asked for.
     question: Option<u64>,
     /// Command line and search histories.
-    history: [history::History; 2],
+    history: history::Histories,
+    /// The history named for the next question Lua asks.
+    asked_history: Option<String>,
     /// The results document `]q` and `[q` step through: the latest filled.
     results: String,
     /// `]q` has not stepped through these results yet.
@@ -427,7 +429,6 @@ impl Layers {
         let mut response = self.close(app, time)?;
         response.events.extend(self.end_insert_group(app, time));
         layer.resize(self.help_rows, self.picker_rows);
-        self.history.iter_mut().for_each(history::History::reset);
         self.active = Some(layer);
         response.redraw = true;
         Ok(response)
@@ -487,39 +488,36 @@ impl Layers {
         let Some(layer) = &mut self.active else {
             return Ok(InputResult::Pass);
         };
-        let field = layer.history().map(|(kind, text)| (kind, text.to_owned()));
-        if let Some((kind, text)) = &field {
-            let lines = &mut self.history[*kind];
-            // Search has no candidates, so Up and Down recall there; the
-            // command line keeps them for its candidates.
-            let backward = match input {
-                Input::History { backward } => Some(backward),
-                Input::Candidate {
-                    motion: motion @ (ListMotion::Previous | ListMotion::Next),
-                    ..
-                } if *kind == history::SEARCH => Some(matches!(motion, ListMotion::Previous)),
-                _ => None,
-            };
-            if let Some(entry) = backward.and_then(|backward| lines.recall(text, backward)) {
-                let transition = layer.recall(&entry, app, time)?;
-                return Ok(self
-                    .transition(transition)
-                    .map_or(InputResult::Blocked, InputResult::Handled));
-            }
-            if matches!(input, Input::History { .. }) {
-                return Ok(InputResult::Blocked);
-            }
+        // Search has no candidates, so Up and Down recall there; the
+        // command line keeps them for its candidates.
+        let backward = match input {
+            Input::History { backward } => Some(backward),
+            Input::Candidate {
+                motion: motion @ (ListMotion::Previous | ListMotion::Next),
+                ..
+            } if layer.searches() => Some(matches!(motion, ListMotion::Previous)),
+            _ => None,
+        };
+        if let Some(backward) = backward
+            && layer.has_history()
+            && let Some(transition) = layer.recall(&self.history, backward, app, time)?
+        {
+            return Ok(self
+                .transition(transition)
+                .map_or(InputResult::Blocked, InputResult::Handled));
+        }
+        if matches!(input, Input::History { .. }) {
+            return Ok(InputResult::Blocked);
         }
         let confirm = matches!(input, Input::Confirm);
         let asks = layer.asks();
         let searching = matches!(layer, Layer::Search(session) if !session.is_replacing());
         let labels = matches!(layer, Layer::Labels(_));
         let transition = layer.handle(input, app, time)?;
-        if confirm
-            && matches!(transition, Transition::Closed(_))
-            && let Some((kind, text)) = field
-        {
-            self.history[kind].record(&text);
+        if confirm && matches!(transition, Transition::Closed(_)) {
+            for (name, entry) in layer.records() {
+                self.history.record(&name, &entry);
+            }
         }
         let closed = matches!(transition, Transition::Closed(_));
         // A question put aside goes unanswered: its Lua function is not
@@ -558,18 +556,26 @@ impl Layers {
         self.projects = projects;
     }
     /// Takes back histories from an earlier session, oldest first.
-    pub fn restore_history(&mut self, commands: &[String], searches: &[String]) {
-        for (history, entries) in self.history.iter_mut().zip([commands, searches]) {
-            entries.iter().for_each(|entry| history.record(entry));
+    pub fn restore_histories(&mut self, histories: Vec<(String, Vec<String>)>) {
+        for (name, entries) in histories {
+            self.history.set(&name, entries);
         }
+    }
+    /// Every history, oldest first, by name.
+    pub fn histories(&self) -> &history::Histories {
+        &self.history
+    }
+    /// Adds an entry to a history, as `add-to-history`.
+    pub fn record_history(&mut self, name: &str, entry: &str) {
+        self.history.record(name, entry);
     }
     /// Lines entered at the command line, oldest first.
     pub fn command_history(&self) -> &[String] {
-        self.history[history::COMMAND].entries()
+        self.history.entries(history::COMMAND)
     }
     /// Searches entered, oldest first.
     pub fn search_history(&self) -> &[String] {
-        self.history[history::SEARCH].entries()
+        self.history.entries(history::SEARCH)
     }
     /// Observe every successful application update, including other views.
     pub fn observe(

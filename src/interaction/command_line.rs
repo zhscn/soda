@@ -3,12 +3,13 @@
 //! text on every change; focus never leaves the input.
 use super::{
     Command, Input, InputKey, Presentation, Response, TextInput,
+    history::{self, Histories, Recall},
     path::resolve_path,
     picker::{
         Candidate, CandidateKey, CandidateListState, ListMotion, MatchedCandidate,
         PickerCompletion, PickerEffect, PickerLimits, PickerSession, PickerStatus, fuzzy_match,
     },
-    registry::{self, CommandInfo, SlotKind},
+    registry::{self, CommandInfo, Slot, SlotKind},
     session::{Transition, edit_field, field_presentation},
 };
 use crate::{
@@ -17,8 +18,9 @@ use crate::{
 };
 use nucleo_matcher::{Config, Matcher};
 use std::{
+    collections::HashMap,
     ops::Range,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -46,6 +48,8 @@ struct Location {
     range: Range<usize>,
     /// Whether a slot follows the current one.
     more: bool,
+    /// Which slot of the command, when the target is one.
+    slot: Option<usize>,
 }
 #[derive(PartialEq)]
 struct Query {
@@ -98,6 +102,20 @@ pub struct CommandLine {
     /// answers this one, so the list does not blink at each key. They can
     /// be looked at and not chosen.
     stale: bool,
+    /// The histories as the line opened, for recalling and for ordering
+    /// candidates; they change only as a line closes.
+    histories: Histories,
+    /// Where `M-p` has recalled to.
+    recall: Recall,
+    /// The history and the range the last recall filled, until the text is
+    /// edited: walking on stays there even if the recalled line puts the
+    /// cursor in an argument with a history of its own.
+    recalled: Option<(String, Range<usize>)>,
+    /// The history a question names for its answer, as the HIST argument
+    /// of `read-string`; other questions have none.
+    asked_history: Option<String>,
+    /// What the line adds to the histories, once it has run.
+    records: Vec<(String, String)>,
 }
 fn row(
     key: u64,
@@ -182,6 +200,27 @@ fn name_match(name: &str, text: &str) -> Option<(bool, Vec<Range<usize>>)> {
     let leading = folded.starts_with(wanted.trim_start());
     Some((leading, ranges))
 }
+/// The arguments of a line after its command name, each with its slot,
+/// as `locate` divides them: one word each, and the last takes the rest.
+fn slot_texts<'a>(
+    line: &'a str,
+    from: usize,
+    slots: &'static [Slot],
+) -> Vec<(&'static Slot, &'a str)> {
+    let mut out = vec![];
+    let mut position = from;
+    for (index, slot) in slots.iter().enumerate() {
+        let begin = skip_space(line, position);
+        let finish = if index + 1 == slots.len() {
+            line.len()
+        } else {
+            word_end(line, begin)
+        };
+        out.push((slot, line[begin..finish].trim_end()));
+        position = finish;
+    }
+    out
+}
 fn printable(text: &str) -> String {
     text.chars()
         .map(|c| if c.is_control() { '�' } else { c })
@@ -220,7 +259,22 @@ impl CommandLine {
             keymaps: vec![],
             symbols: None,
             stale: false,
+            histories: Histories::default(),
+            recall: Recall::default(),
+            recalled: None,
+            asked_history: None,
+            records: vec![],
         }
+    }
+    /// The histories to recall from and order candidates by.
+    pub fn with_histories(mut self, histories: Histories) -> Self {
+        self.histories = histories;
+        self
+    }
+    /// The history a question's answer is recalled from and added to.
+    pub fn with_history(mut self, name: Option<String>) -> Self {
+        self.asked_history = name;
+        self
     }
     /// Recently used files for a `recent` slot, newest first.
     pub fn with_recent(mut self, recent: Vec<PathBuf>) -> Self {
@@ -310,12 +364,14 @@ impl CommandLine {
                 target: Some(Target::Name),
                 range: start..end,
                 more,
+                slot: None,
             };
         }
         let none = Location {
             target: None,
             range: cursor..cursor,
             more: false,
+            slot: None,
         };
         let Some(info) = self.info(&text[start..end]) else {
             return none;
@@ -339,6 +395,7 @@ impl CommandLine {
                     target: Some(Target::Slot(slot.kind)),
                     range,
                     more: !last,
+                    slot: Some(index),
                 };
             }
             position = finish;
@@ -471,6 +528,23 @@ impl CommandLine {
                 Target::Slot(SlotKind::Word | SlotKind::Rest) => vec![],
             },
         };
+        let mut rows = rows;
+        // Words that match alike come in the order they were last taken,
+        // as `minibuffer-sort-by-history` orders them.
+        if let Some(Target::Slot(
+            kind @ (SlotKind::Option
+            | SlotKind::Face
+            | SlotKind::Theme
+            | SlotKind::Language
+            | SlotKind::Keymap),
+        )) = query.as_ref().map(|q| q.target)
+            && let Some(name) = self.slot_history(kind)
+        {
+            let ranks = self.ranks(&name);
+            rows.sort_by_key(|row| {
+                history_rank(&ranks, row.candidate.payload.replacement.as_deref())
+            });
+        }
         let same_list = self.query.as_ref().map(|q| q.target) == query.as_ref().map(|q| q.target);
         if rows.is_empty() && !self.rows.is_empty() && same_list && self.waiting(&query) {
             // New input forgets the choice, as it does with fresh rows.
@@ -526,6 +600,10 @@ impl CommandLine {
     /// Items match fuzzily and answer with their number, so a title may
     /// hold any text.
     fn symbol_rows(&mut self, app: &Application, query: &str) -> Vec<MatchedCandidate<Completion>> {
+        let ranks = self
+            .slot_history(SlotKind::Symbol)
+            .map(|name| self.ranks(&name))
+            .unwrap_or_default();
         let symbols = self.symbols.get_or_insert_with(|| {
             let Some(view) = app.active_view().and_then(|view| app.view(view)) else {
                 return vec![];
@@ -540,9 +618,10 @@ impl CommandLine {
             symbols(editor.model().document().snapshot().text(), caret)
         });
         self.matcher.config = Config::DEFAULT;
-        // Equal scores keep the nearest first.
+        // Equal scores go by the history, then keep the nearest first.
         let shown = symbols.iter().cloned().enumerate();
-        ranked(&mut self.matcher, query, shown, |_| false)
+        let rank = |index: &usize| history_rank(&ranks, Some(&symbols[*index]));
+        ranked(&mut self.matcher, query, shown, rank)
             .map(|(index, symbol, highlights)| {
                 let row = row(index as u64, symbol.clone(), Some(symbol), false);
                 mark(row, highlights, None)
@@ -551,8 +630,15 @@ impl CommandLine {
     }
     fn item_rows(&mut self, query: &str) -> Vec<MatchedCandidate<Completion>> {
         self.matcher.config = Config::DEFAULT;
-        let shown = self.items.iter().map(|item| printable(item)).enumerate();
-        ranked(&mut self.matcher, query, shown, |_| false)
+        let ranks = self
+            .asked_history
+            .as_ref()
+            .map(|name| self.ranks(name))
+            .unwrap_or_default();
+        let items = &self.items;
+        let shown = items.iter().map(|item| printable(item)).enumerate();
+        let rank = |index: &usize| history_rank(&ranks, Some(&items[*index]));
+        ranked(&mut self.matcher, query, shown, rank)
             .map(|(index, shown, highlights)| {
                 let number = (index + 1).to_string();
                 mark(
@@ -568,6 +654,7 @@ impl CommandLine {
     fn names(&mut self, query: &str) -> Vec<MatchedCandidate<Completion>> {
         self.matcher.config = Config::DEFAULT;
         let lower = query.to_ascii_lowercase();
+        let used = self.ranks(history::COMMAND_NAME);
         let mut ranked = vec![];
         for (index, info) in self.catalog.iter().enumerate() {
             let name = format!("{} {}", info.name, info.synopsis());
@@ -586,11 +673,13 @@ impl CommandLine {
             } else {
                 continue;
             };
+            let used = history_rank(&used, Some(&info.name));
             let row = row(index as u64, label, Some(info.name.clone()), false);
-            ranked.push((rank, mark(row, highlights, Some(detail))));
+            ranked.push(((rank, used), mark(row, highlights, Some(detail))));
         }
-        // Stable: equal ranks keep catalog order.
-        ranked.sort_by_key(|(rank, _)| std::cmp::Reverse(*rank));
+        // Stable: equal ranks go by when the command was last taken, then
+        // keep catalog order.
+        ranked.sort_by_key(|((rank, used), _)| (std::cmp::Reverse(*rank), *used));
         ranked.into_iter().map(|(_, row)| row).collect()
     }
     fn paths(&mut self, text: &str, response: &mut Response) -> Vec<MatchedCandidate<Completion>> {
@@ -619,9 +708,14 @@ impl CommandLine {
             });
             return vec![];
         }
-        let Some(entries) = self.directory.as_ref().and_then(|d| d.entries.as_ref()) else {
+        let Some(directory) = self.directory.as_ref() else {
             return vec![];
         };
+        let Some(entries) = directory.entries.as_ref() else {
+            return vec![];
+        };
+        let ranks = self.ranks(history::FILE);
+        let home = self.home.as_deref();
         let mut matched: Vec<_> = entries
             .iter()
             .enumerate()
@@ -634,12 +728,15 @@ impl CommandLine {
                     .map(|name| format!("{parent}{name}{slash}"));
                 let label = format!("{}{slash}", printable(&entry.name.to_string_lossy()));
                 let (leading, typed) = name_match(&label, prefix)?;
+                let path = history::abbreviate(&directory.path.join(&entry.name), home);
+                let used = history_rank(&ranks, path.as_deref());
                 let row = row(index as u64, label, replacement, entry.directory);
-                Some((leading, mark(row, typed, None)))
+                Some(((!leading, used), mark(row, typed, None)))
             })
             .collect();
-        // Stable: names that begin with the text first, in directory order.
-        matched.sort_by_key(|(leading, _)| !*leading);
+        // Stable: names that begin with the text first, then files taken
+        // lately, in directory order.
+        matched.sort_by_key(|(key, _)| *key);
         matched.into_iter().map(|(_, row)| row).collect()
     }
     fn project_files(
@@ -649,7 +746,17 @@ impl CommandLine {
     ) -> Vec<MatchedCandidate<Completion>> {
         if self.files.is_none() {
             match PickerSession::new(self.root.clone(), PickerLimits::default()) {
-                Ok(mut session) => {
+                Ok(session) => {
+                    let home = self.home.as_deref();
+                    let ranks = self
+                        .histories
+                        .entries(history::FILE)
+                        .iter()
+                        .rev()
+                        .enumerate()
+                        .map(|(age, entry)| (history::expand(entry, home), age as u32))
+                        .collect();
+                    let mut session = session.with_history(ranks);
                     session.set_query(text);
                     response.effects.push(PickerEffect::Run(session.task()));
                     self.files = Some(session);
@@ -825,21 +932,173 @@ impl CommandLine {
         self.input.replace_range(location.range.clone(), &text);
         Ok(directory)
     }
-    pub(super) fn text(&self) -> &str {
-        self.input.text()
-    }
     /// Whether the line answers a question, such as a save decision, rather
     /// than being typed; those stay out of the history.
     pub(super) fn asking(&self) -> bool {
         self.note.is_some()
     }
-    pub(super) fn recall(&mut self, text: &str, app: &Application) -> Transition {
-        let end = self.input.text().len();
-        self.input.replace_range(0..end, text);
-        self.edited(app)
+    /// Whether `M-p` and `M-n` walk a history: a typed line always does,
+    /// a question only when it names one.
+    pub(super) fn has_history(&self) -> bool {
+        !self.asking() || self.asked_history.is_some()
+    }
+    /// The history of the text under the cursor and the range it fills: an
+    /// argument's own, or whole lines for the command name and arguments
+    /// that have none.
+    fn field_history(&self, location: &Location) -> Option<(String, Range<usize>)> {
+        if self.asking() {
+            let name = self.asked_history.clone()?;
+            return matches!(location.target, Some(Target::Slot(_)))
+                .then(|| (name, location.range.clone()));
+        }
+        let text = self.input.text();
+        let start = skip_space(text, 0);
+        let info = self.info(&text[start..word_end(text, start)]);
+        let slot = match (info, location.slot) {
+            (Some(info), Some(index)) => history::of_slot(&info.name, info.slots, index),
+            _ => None,
+        };
+        Some(match slot {
+            Some(name) => (name, location.range.clone()),
+            None => (history::COMMAND.to_owned(), 0..text.len()),
+        })
+    }
+    /// A history's entries as they are written into a slot of `kind`,
+    /// oldest first: files relative to the project where the candidates
+    /// show them so, and leaving out project files of other projects.
+    fn recallable(&self, name: &str, kind: Option<SlotKind>, histories: &Histories) -> Vec<String> {
+        let entries = histories.entries(name);
+        match kind {
+            Some(SlotKind::File | SlotKind::Recent) => entries
+                .iter()
+                .filter_map(|entry| {
+                    let path = history::expand(entry, self.home.as_deref());
+                    match path.strip_prefix(&self.root) {
+                        Ok(relative) => relative.to_str().map(str::to_owned),
+                        Err(_) if kind == Some(SlotKind::Recent) => {
+                            path.to_str().map(str::to_owned)
+                        }
+                        Err(_) => None,
+                    }
+                })
+                .collect(),
+            _ => entries.to_vec(),
+        }
+    }
+    /// Puts an older or newer entry of the field's history in the field;
+    /// None when there is none that way.
+    pub(super) fn recall(
+        &mut self,
+        histories: &Histories,
+        backward: bool,
+        app: &Application,
+    ) -> Option<Transition> {
+        let location = self.locate();
+        let (name, range) = match self.recalled.take() {
+            Some(field) => field,
+            None => self.field_history(&location)?,
+        };
+        let kind = match location.target {
+            Some(Target::Slot(kind)) if name != history::COMMAND => Some(kind),
+            _ => None,
+        };
+        let entries = self.recallable(&name, kind, histories);
+        let text = &self.input.text()[range.clone()];
+        let Some(entry) = self
+            .recall
+            .step((&name, range.start), &entries, text, backward)
+        else {
+            self.recalled = Some((name, range));
+            return None;
+        };
+        let start = range.start;
+        self.input.replace_range(range, &entry);
+        let transition = self.edited(app);
+        self.recalled = Some((name, start..start + entry.len()));
+        Some(transition)
+    }
+    /// What the line adds to the histories, once it has run.
+    pub(super) fn take_records(&mut self) -> Vec<(String, String)> {
+        std::mem::take(&mut self.records)
+    }
+    /// What a line about to run adds to the histories: the line, its
+    /// command name, and each argument that has a history, files as
+    /// absolute paths under `~` so that they recall anywhere. A question
+    /// adds its answer to the history it names, and nothing else.
+    fn records_of(&self, line: &str) -> Vec<(String, String)> {
+        let start = skip_space(line, 0);
+        let end = word_end(line, start);
+        let Some(info) = self.info(&line[start..end]) else {
+            return match self.asking() {
+                true => vec![],
+                false => vec![(history::COMMAND.to_owned(), line.to_owned())],
+            };
+        };
+        let slots = slot_texts(line, end, info.slots);
+        if self.asking() {
+            let Some(name) = &self.asked_history else {
+                return vec![];
+            };
+            return slots
+                .into_iter()
+                .take(1)
+                .filter_map(|(slot, text)| {
+                    let entry = match slot.kind {
+                        // An item answers with its number; its history
+                        // keeps the item.
+                        SlotKind::Item => text
+                            .parse::<usize>()
+                            .ok()
+                            .and_then(|n| self.items.get(n.checked_sub(1)?))?
+                            .clone(),
+                        _ => text.to_owned(),
+                    };
+                    Some((name.clone(), entry))
+                })
+                .collect();
+        }
+        let mut records = vec![
+            (history::COMMAND.to_owned(), line.to_owned()),
+            (history::COMMAND_NAME.to_owned(), info.name.clone()),
+        ];
+        for (index, (slot, text)) in slots.into_iter().enumerate() {
+            let Some(name) = history::of_slot(&info.name, info.slots, index) else {
+                continue;
+            };
+            let entry = match slot.kind {
+                _ if super::expand::has_expansions(text) => None,
+                SlotKind::Path | SlotKind::Project => {
+                    resolve_path(&self.base, self.home.as_deref(), Path::new(text))
+                        .ok()
+                        .and_then(|path| history::abbreviate(&path, self.home.as_deref()))
+                }
+                SlotKind::File | SlotKind::Recent => {
+                    history::abbreviate(&self.root.join(text), self.home.as_deref())
+                }
+                _ => Some(text.to_owned()),
+            };
+            if let Some(entry) = entry {
+                records.push((name, entry));
+            }
+        }
+        records
+    }
+    /// How recently each entry of a history was taken: 0 is the newest.
+    fn ranks(&self, name: &str) -> HashMap<String, u32> {
+        self.histories.ranks(name)
+    }
+    /// The history of a kind of slot that names no command.
+    fn slot_history(&self, kind: SlotKind) -> Option<String> {
+        let slot = Slot {
+            name: "",
+            kind,
+            required: true,
+        };
+        history::of_slot("", &[slot], 0)
     }
     fn edited(&mut self, app: &Application) -> Transition {
         self.error = None;
+        self.recalled = None;
         let mut response = self.refresh(app, false);
         response.redraw = true;
         Transition::Active(response)
@@ -903,7 +1162,10 @@ impl CommandLine {
             return Transition::Blocked;
         }
         match registry::check(&self.catalog, &text) {
-            Ok(()) => self.close(vec![Command::Named(text)]),
+            Ok(()) => {
+                self.records = self.records_of(&text);
+                self.close(vec![Command::Named(text)])
+            }
             Err(registry::CheckError::Missing(_))
                 if accepted || location.more || location.target == Some(Target::Name) =>
             {
@@ -1067,6 +1329,14 @@ pub(super) fn symbols(text: &str, caret: usize) -> Vec<String> {
 /// after the rest.
 /// Candidates that match the query, best first; `rank` orders equal
 /// scores, and all of them when the query is empty.
+/// Where an entry stands in a history, newest first; entries the history
+/// does not hold come after all.
+fn history_rank(ranks: &HashMap<String, u32>, entry: Option<&str>) -> u32 {
+    entry
+        .and_then(|entry| ranks.get(entry))
+        .copied()
+        .unwrap_or(u32::MAX)
+}
 fn ranked<T, K: Ord>(
     matcher: &mut Matcher,
     query: &str,

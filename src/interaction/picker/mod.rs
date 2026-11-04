@@ -62,6 +62,8 @@ struct Source {
     key: SourceKey,
     root: PathBuf,
     limits: PickerLimits,
+    /// How recently files were taken, 0 the newest: equal matches go by it.
+    history: Arc<std::collections::HashMap<PathBuf, u32>>,
     closed: AtomicBool,
     query_generation: AtomicU64,
     waker: Mutex<Option<Waker>>,
@@ -173,6 +175,7 @@ impl PickerSession {
                 key: key.source,
                 root,
                 limits,
+                history: Default::default(),
                 closed: AtomicBool::new(false),
                 query_generation: AtomicU64::new(0),
                 waker: Mutex::new(None),
@@ -182,6 +185,15 @@ impl PickerSession {
             answered: false,
             status: PickerStatus::Loading,
         })
+    }
+    /// Orders equal matches by how recently each file was taken, 0 the
+    /// newest, as vertico orders by the history; files left out come last.
+    /// Given before the first task, as the source is then not yet shared.
+    pub fn with_history(mut self, history: std::collections::HashMap<PathBuf, u32>) -> Self {
+        if let Some(source) = Arc::get_mut(&mut self.source) {
+            source.history = Arc::new(history);
+        }
+        self
     }
     pub fn id(&self) -> PickerId {
         self.key.source.session
@@ -245,6 +257,7 @@ impl PickerSession {
             key: self.key.source,
             root,
             limits: self.source.limits,
+            history: self.source.history.clone(),
             closed: AtomicBool::new(false),
             query_generation: AtomicU64::new(self.key.query_generation),
             waker: Mutex::new(None),

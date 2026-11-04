@@ -55,30 +55,44 @@ impl Layer {
     pub(super) fn asks(&self) -> bool {
         matches!(self, Self::CommandLine(session) if session.asking())
     }
-    /// The history a prompt uses and its text, for prompts that have one.
-    pub(super) fn history(&self) -> Option<(usize, &str)> {
+    /// Whether `M-p` and `M-n` walk a history here.
+    pub(super) fn has_history(&self) -> bool {
         match self {
-            Self::CommandLine(session) if !session.asking() => {
-                Some((super::history::COMMAND, session.text()))
-            }
-            Self::Search(session) if !session.is_replacing() => {
-                Some((super::history::SEARCH, session.input().text()))
-            }
-            _ => None,
+            Self::CommandLine(session) => session.has_history(),
+            Self::Search(session) => !session.is_replacing(),
+            _ => false,
         }
     }
-    /// Replaces the prompt's text with a recalled line.
+    /// Whether the prompt is a search, which has no candidates, so Up and
+    /// Down walk its history too.
+    pub(super) fn searches(&self) -> bool {
+        matches!(self, Self::Search(session) if !session.is_replacing())
+    }
+    /// Puts an older or newer entry of the field's history in the field;
+    /// None when there is none that way.
     pub(super) fn recall(
         &mut self,
-        text: &str,
+        histories: &super::history::Histories,
+        backward: bool,
         app: &Application,
         time: Duration,
-    ) -> Result<Transition, EditError> {
+    ) -> Result<Option<Transition>, EditError> {
         Ok(match self {
-            Self::CommandLine(session) => session.recall(text, app),
-            Self::Search(session) => session.recall(text, app, time)?,
-            _ => Transition::Blocked,
+            Self::CommandLine(session) => session.recall(histories, backward, app),
+            Self::Search(session) => session.recall(histories, backward, app, time)?,
+            _ => None,
         })
+    }
+    /// What a prompt that took its input adds to the histories, by name.
+    pub(super) fn records(&mut self) -> Vec<(String, String)> {
+        match self {
+            Self::CommandLine(session) => session.take_records(),
+            Self::Search(session) if !session.is_replacing() => vec![(
+                super::history::SEARCH.to_owned(),
+                session.input().text().to_owned(),
+            )],
+            _ => vec![],
+        }
     }
     pub(super) fn resize(&mut self, help_rows: usize, picker_rows: usize) {
         match self {

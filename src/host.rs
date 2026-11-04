@@ -174,7 +174,10 @@ pub fn finish(runtime: &mut Runtime, outcome: Result<io::Result<()>, Panic>) -> 
     match outcome {
         Ok(result) => {
             if let Some(path) = state_path()
-                && let Err(error) = save_state(&path, &runtime.persist())
+                && let Err(error) = save_state(
+                    &path,
+                    &runtime.persist_over(std::fs::read_to_string(&path).ok().as_deref()),
+                )
             {
                 let _ = writeln!(stderr, "soda: cannot save {}: {error}", path.display());
             }

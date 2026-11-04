@@ -135,6 +135,8 @@ pub enum Command {
         id: u64,
         title: String,
         items: Vec<String>,
+        /// The history the chosen item is recalled from and added to.
+        history: Option<String>,
     },
     /// Answers `Offer` with an item, from one.
     Choose(usize),
@@ -144,6 +146,8 @@ pub enum Command {
         id: u64,
         title: String,
         initial: String,
+        /// The history the answer is recalled from and added to.
+        history: Option<String>,
     },
     /// Answers `Question`.
     Answer(String),
@@ -607,6 +611,8 @@ impl Layers {
             // Only the runtime can do these; it takes them from the response.
             effect @ Command::Effect(_) => response.commands.push(effect),
             Command::Ex(_) | Command::Ask { .. } | Command::ProjectLine(_) => {
+                // Only the question Lua just put names a history.
+                let asked_history = self.asked_history.take();
                 let (text, note, project) = match command {
                     Command::Ask { line, note } => (line, Some(note), None),
                     Command::Ex(text) => (text, None, None),
@@ -627,7 +633,9 @@ impl Layers {
                 .with_recent(self.recent_files.clone())
                 .with_projects(self.projects.clone())
                 .with_keymaps(self.keymap.names())
-                .with_items(self.offer.as_ref().map_or(vec![], |(_, i)| i.clone()));
+                .with_items(self.offer.as_ref().map_or(vec![], |(_, i)| i.clone()))
+                .with_histories(self.history.clone())
+                .with_history(asked_history);
                 if let Some(note) = note {
                     line = line.with_note(note);
                 }
@@ -1045,7 +1053,7 @@ impl Layers {
                         crate::editor::search::SearchQuery::new(regex::escape(&text))
                     };
                     self.modal.set_search(query.clone());
-                    self.history[super::history::SEARCH].record(&text);
+                    self.history.record(super::history::SEARCH, &text);
                     let head = editor
                         .model()
                         .session(state.session_id)
@@ -1237,14 +1245,26 @@ impl Layers {
             Command::LuaCall { id, argument } => {
                 response.lua.push(super::LuaRequest::Call { id, argument })
             }
-            Command::Offer { id, title, items } => {
+            Command::Offer {
+                id,
+                title,
+                items,
+                history,
+            } => {
                 self.offer = Some((id, items));
+                self.asked_history = history;
                 let line = "choose ".to_owned();
                 let ask = Command::Ask { line, note: title };
                 return self.execute(ask, app, time, file_root);
             }
-            Command::Question { id, title, initial } => {
+            Command::Question {
+                id,
+                title,
+                initial,
+                history,
+            } => {
                 self.question = Some(id);
+                self.asked_history = history;
                 let line = format!("answer {initial}");
                 let ask = Command::Ask { line, note: title };
                 return self.execute(ask, app, time, file_root);

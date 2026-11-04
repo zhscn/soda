@@ -1,7 +1,11 @@
-//! What outlives a session: command line and search history, where the
-//! caret was in recently closed files, and the projects files were opened in. The text form has one tab-separated
+//! What outlives a session: the histories of the prompts, as savehist
+//! keeps Emacs's, where the caret was in recently closed files, and the
+//! projects files were opened in. The text form has one tab-separated
 //! record per line, so a damaged line loses only itself.
-use std::path::{Path, PathBuf};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+};
 
 /// Files whose caret position is remembered.
 const POSITION_LIMIT: usize = 200;
@@ -10,8 +14,8 @@ const PROJECT_LIMIT: usize = 100;
 
 #[derive(Default)]
 pub(super) struct State {
-    pub commands: Vec<String>,
-    pub searches: Vec<String>,
+    /// Each history by name, oldest first.
+    pub histories: BTreeMap<String, Vec<String>>,
     /// Paths with a zero-based line and logical column, oldest first.
     positions: Vec<(PathBuf, usize, usize)>,
     /// Project roots, oldest first.
@@ -44,8 +48,17 @@ impl State {
         for line in text.lines() {
             let fields: Vec<_> = line.split('\t').map(unescape).collect();
             match fields.as_slice() {
-                [kind, entry] if kind == "command" => state.commands.push(entry.clone()),
-                [kind, entry] if kind == "search" => state.searches.push(entry.clone()),
+                [kind, name, entry] if kind == "history" => state
+                    .histories
+                    .entry(name.clone())
+                    .or_default()
+                    .push(entry.clone()),
+                // Before histories had names, the two there were.
+                [kind, entry] if kind == "command" || kind == "search" => state
+                    .histories
+                    .entry(kind.clone())
+                    .or_default()
+                    .push(entry.clone()),
                 [kind, path] if kind == "project" => state.remember_project(PathBuf::from(path)),
                 [kind, path, line, column] if kind == "position" => {
                     if let (Ok(line), Ok(column)) = (line.parse(), column.parse()) {
@@ -59,11 +72,11 @@ impl State {
     }
     pub fn text(&self) -> String {
         let mut out = String::new();
-        for entry in &self.commands {
-            out.push_str(&format!("command\t{}\n", escape(entry)));
-        }
-        for entry in &self.searches {
-            out.push_str(&format!("search\t{}\n", escape(entry)));
+        for (name, entries) in &self.histories {
+            let name = escape(name);
+            for entry in entries {
+                out.push_str(&format!("history\t{name}\t{}\n", escape(entry)));
+            }
         }
         for path in &self.projects {
             let path = escape(&path.to_string_lossy());
@@ -121,11 +134,10 @@ mod tests {
     use std::path::{Path, PathBuf};
     #[test]
     fn state_survives_its_text_form() {
-        let mut state = State {
-            commands: vec!["shell printf 'a\\tb'".into(), "two\nlines".into()],
-            searches: vec!["foo".into()],
-            ..State::default()
-        };
+        let mut state = State::default();
+        let commands = vec!["shell printf 'a\\tb'".to_owned(), "two\nlines".into()];
+        state.histories.insert("command".into(), commands.clone());
+        state.histories.insert("search".into(), vec!["foo".into()]);
         state.remember(PathBuf::from("/a b/c"), 3, 4);
         state.remember(PathBuf::from("/d"), 1, 0);
         state.remember(PathBuf::from("/a b/c"), 5, 6);
@@ -134,8 +146,12 @@ mod tests {
         state.remember_project(PathBuf::from("/p"));
         let text = format!("{}garbage\nposition\t/e\tx\t1\n", state.text());
         let back = State::parse(&text);
-        assert_eq!(back.commands, state.commands);
-        assert_eq!(back.searches, ["foo"]);
+        assert_eq!(back.histories["command"], commands);
+        assert_eq!(back.histories["search"], ["foo"]);
+        // The records of before histories had names still read.
+        let old = State::parse("command\tclose\nsearch\ty\n");
+        assert_eq!(old.histories["command"], ["close"]);
+        assert_eq!(old.histories["search"], ["y"]);
         assert_eq!(
             back.projects(),
             [PathBuf::from("/p"), PathBuf::from("/q\tr")]

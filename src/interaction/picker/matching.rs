@@ -9,6 +9,8 @@ use unicode_segmentation::UnicodeSegmentation;
 
 struct Ranked {
     score: u16,
+    /// How recently the file was taken, 0 the newest.
+    used: u32,
     candidate: std::sync::Arc<super::Candidate<PathBuf>>,
 }
 impl PartialEq for Ranked {
@@ -28,6 +30,7 @@ impl Ord for Ranked {
         other
             .score
             .cmp(&self.score)
+            .then_with(|| self.used.cmp(&other.used))
             .then_with(|| self.candidate.label.cmp(&other.candidate.label))
             .then_with(|| self.candidate.payload.cmp(&other.candidate.payload))
             .then_with(|| self.candidate.key.cmp(&other.candidate.key))
@@ -104,8 +107,15 @@ pub(super) fn filter(
             continue;
         };
         matched += 1;
+        let used = catalog
+            .source
+            .history
+            .get(&candidate.payload)
+            .copied()
+            .unwrap_or(u32::MAX);
         heap.push(Ranked {
             score,
+            used,
             candidate: candidate.clone(),
         });
         if heap.len() > task.source.limits.max_results {
