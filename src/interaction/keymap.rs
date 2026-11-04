@@ -364,7 +364,7 @@ const GLOBAL: &[(&str, &str)] = &[
     ("C-x C-c", "quit"),
     ("C-x b", "buffer"),
     ("C-x C-b", "buffer"),
-    ("C-x k", "close"),
+    ("C-x k", "kill-buffer"),
     ("C-x 0", "close-window"),
     ("C-x 1", "only"),
     ("C-x 2", "split"),

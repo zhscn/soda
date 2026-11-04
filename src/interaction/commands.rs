@@ -71,6 +71,9 @@ pub enum Command {
     OpenPath(std::path::PathBuf),
     /// Switch to the open document with this buffer name.
     Buffer(String),
+    /// Close the open document with this buffer name, as `close` does the
+    /// current one.
+    KillBuffer(String),
     SavePath(std::path::PathBuf),
     WriteQuit,
     Clipboard(ClipboardAction),
@@ -580,6 +583,29 @@ impl Layers {
                     let first = line.refresh(app, true);
                     response.effects.extend(first.effects);
                     response.path_requests.extend(first.path_requests);
+                }
+            }
+            Command::KillBuffer(name) => {
+                let name = name.trim();
+                let document = app
+                    .workspace()
+                    .documents()
+                    .find(|id| app.document_name(*id) == name);
+                match document {
+                    None => response.message = Message::Set(format!("No buffer named {name}")),
+                    Some(document) if active(app).is_some_and(|v| v.document_id == document) => {
+                        return self.execute(Command::Close(None), app, time, file_root);
+                    }
+                    // Unsaved changes are decided where they can be seen:
+                    // the document comes forward, then `close` asks.
+                    Some(document)
+                        if app.workspace().is_dirty(document)
+                            && !app.workspace().is_saving(document) =>
+                    {
+                        response.events.push(show(app, document));
+                        response.commands.push(Command::Close(None));
+                    }
+                    Some(document) => response = self.leave(document, false, app),
                 }
             }
             Command::Buffer(name) => {

@@ -217,7 +217,7 @@ Insert 中按选项 `auto-pairs`（默认关）成对输入括号，与 Emacs �
 | 键 | 命令 |
 | --- | --- |
 | `C-x C-s`、`C-x C-w`、`C-x C-f`、`C-x C-r` | `write`、`saveas`、`open`、`recent` |
-| `C-x b`、`C-x C-b`、`C-x k`、`C-x C-c` | `buffer`、`buffer`、`close`、`quit` |
+| `C-x b`、`C-x C-b`、`C-x k`、`C-x C-c` | `buffer`、`buffer`、`kill-buffer`、`quit` |
 | `C-x 0`、`1`、`2`、`3`、`o` | `close-window`、`only`、`split`、`vsplit`、`window-next` |
 | `C-x ^` | `resize-window` |
 | `C-x p f`、`C-x p p`、`C-x p b`、`C-x p g` | `project`、`project-switch`、`buffer`、`grep` |
@@ -376,6 +376,7 @@ Normal 的模态命令（`left`、`next-word`、`block`、`kill`、`put`、`grab
 | `Recent` | 最近用过的文件 | 是 | `recent` |
 | `Project` | 记住的项目 | 否，可输入目录 | `project-switch` |
 | `Buffer` | 已打开的文档 | 是 | `buffer` |
+| `CurrentBuffer` | 已打开的文档，初始选中当前文档，回车即取它 | 是 | `kill-buffer` |
 | `Symbol` | 当前文档的符号 | 否 | `visit` |
 | `Choice` | 命令声明的固定词及说明，可带单键 | 是 | `map` 的 MODE，`close`、`reload`、`quit` 的 DECISION |
 | `Option`、`Face`、`Language` | 选项名、face 名、语言 id | 是 | `set`、`face`、`language-map` |
@@ -471,6 +472,8 @@ Enter 依次处理：
 2. `s` 或空输入回车得到 `close save`。未命名文档继续打开 `[… needs a PATH] :close save `，在 PATH 参数位补全目录。想存到别处时按 Tab 得到 `close save ` 并停在 PATH 参数位。
 3. 有路径时请求保存并进入等待层（`Saving …; Esc cancels close`）。保存成功后再执行一次 `close`：文档已经干净则关闭，保存期间有新编辑则再次询问。
 4. 保存失败（写入失败、磁盘内容已变化、路径预检失败、请求被取消）时打开 `[save failed: …] :close save PATH`，可以修改后重试或 Esc 放弃。
+
+`kill-buffer [NAME]` 同 Emacs 的 `kill-buffer`（`C-x k`）：不带参数时打开命令行，列出已打开的文档，初始选中当前文档，直接回车关闭当前文档，选别的则关闭那一个，当前窗口不动。所选文档有未保存修改时先把它显示出来，再按上面的 `close` 流程询问，决定在能看到内容的地方做。
 
 等待层只采用带自己 Operation 身份的保存结果。等待期间 Esc 只取消离开流程，已提交的保存继续完成。已有保存任务时不启动新的关闭、重新加载或退出；未命名文档不能重新加载。
 

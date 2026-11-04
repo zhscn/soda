@@ -452,7 +452,9 @@ impl CommandLine {
                         })
                         .collect()
                 }
-                Target::Slot(SlotKind::Buffer) => buffers(app, &query.text, &mut self.matcher),
+                Target::Slot(SlotKind::Buffer | SlotKind::CurrentBuffer) => {
+                    buffers(app, &query.text, &mut self.matcher)
+                }
                 Target::Slot(SlotKind::Recent) => {
                     recent(&self.recent, &self.root, &query.text, &mut self.matcher)
                 }
@@ -494,18 +496,27 @@ impl CommandLine {
         }
         response.redraw = restart || changed;
         self.rows = rows;
-        // A theme list opens on the theme in force, so moving through it
-        // starts from there.
+        // A theme list opens on the theme in force, and a buffer to kill
+        // on the current buffer, so Enter alone takes it.
         if let Some(query) = &query
-            && query.target == Target::Slot(SlotKind::Theme)
             && query.text.is_empty()
         {
-            let current = app.options().text(None, "theme");
-            let row = self
-                .rows
-                .iter()
-                .find(|row| row.candidate.payload.replacement.as_deref() == Some(current));
-            if let Some(key) = row.map(|row| row.candidate.key) {
+            let current = match query.target {
+                Target::Slot(SlotKind::Theme) => {
+                    let theme = app.options().text(None, "theme");
+                    let row = self
+                        .rows
+                        .iter()
+                        .find(|row| row.candidate.payload.replacement.as_deref() == Some(theme));
+                    row.map(|row| row.candidate.key)
+                }
+                Target::Slot(SlotKind::CurrentBuffer) => app
+                    .active_view()
+                    .and_then(|view| app.view(view))
+                    .map(|view| CandidateKey(view.document_id.number())),
+                _ => None,
+            };
+            if let Some(key) = current {
                 self.list.preselect(&self.rows, key);
             }
         }
@@ -989,10 +1000,12 @@ impl CommandLine {
         if app.active_view() != self.view {
             return self.close(vec![]);
         }
-        let buffers = self
-            .query
-            .as_ref()
-            .is_some_and(|q| q.target == Target::Slot(SlotKind::Buffer));
+        let buffers = self.query.as_ref().is_some_and(|q| {
+            matches!(
+                q.target,
+                Target::Slot(SlotKind::Buffer | SlotKind::CurrentBuffer)
+            )
+        });
         Transition::Active(if buffers {
             self.refresh(app, true)
         } else {

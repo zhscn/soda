@@ -101,3 +101,71 @@ fn multiple_views_produce_one_candidate_and_empty_updates_do_not_redraw() {
     assert_eq!(r.app().active_view(), Some(active));
     assert_eq!(r.app().views().count(), 2);
 }
+fn documents(r: &Runtime) -> Vec<soda::editor::DocumentId> {
+    r.app().workspace().documents().collect()
+}
+fn current(r: &Runtime) -> soda::editor::DocumentId {
+    r.app()
+        .view(r.app().active_view().unwrap())
+        .unwrap()
+        .document_id
+}
+#[test]
+fn kill_buffer_asks_which_and_enter_alone_takes_the_current_one() {
+    let mut r = runtime();
+    let first = current(&r);
+    r.command(Command::New);
+    assert_ne!(current(&r), first);
+    // C-x k, as Emacs: the list opens on the current buffer.
+    for key in KeyStroke::parse_sequence("C-x k").unwrap() {
+        r.input(UserInput::Key(key));
+    }
+    let Some(Layer::CommandLine(line)) = r.layer() else {
+        panic!("kill-buffer asks which buffer");
+    };
+    assert_eq!(line.input().text(), "kill-buffer ");
+    let selected = &line.rows()[line.list().index(line.rows()).unwrap()];
+    assert!(
+        selected.candidate.label.starts_with("* "),
+        "{}",
+        selected.candidate.label
+    );
+    key(&mut r, Key::Enter);
+    assert!(r.layer().is_none());
+    assert_eq!(documents(&r), [first]);
+
+    // Another buffer goes without the current one moving.
+    r.command(Command::New);
+    let third = current(&r);
+    r.command(Command::Named("kill-buffer".into()));
+    key(&mut r, Key::Up);
+    key(&mut r, Key::Enter);
+    assert_eq!(documents(&r), [third]);
+    assert_eq!(current(&r), third);
+}
+#[test]
+fn killing_an_unsaved_buffer_elsewhere_shows_it_and_asks() {
+    let mut r = runtime();
+    let first = current(&r);
+    r.input(UserInput::Paste("unsaved".into()));
+    r.command(Command::New);
+    let second = current(&r);
+    let name = r.app().document_name(first);
+    r.command(Command::Named(format!("kill-buffer {name}")));
+    assert_eq!(current(&r), first, "the unsaved document comes forward");
+    let Some(Layer::CommandLine(line)) = r.layer() else {
+        panic!("close asks about the unsaved changes");
+    };
+    assert_eq!(line.input().text(), "close ");
+    for key in KeyStroke::parse_sequence("d").unwrap() {
+        r.input(UserInput::Key(key));
+    }
+    assert_eq!(documents(&r), [second]);
+    // A saved one goes at once, from wherever it is.
+    r.command(Command::New);
+    let name = r.app().document_name(second);
+    let third = current(&r);
+    r.command(Command::Named(format!("kill-buffer {name}")));
+    assert!(r.layer().is_none());
+    assert_eq!(documents(&r), [third]);
+}

@@ -25,6 +25,9 @@ pub enum SlotKind {
     Choice(&'static [Choice]),
     /// The name of an option.
     Option,
+    /// An open document, starting on the current one, as Emacs's
+    /// `kill-buffer` offers it; `Buffer` starts on another.
+    CurrentBuffer,
     /// The name of a face.
     Face,
     /// The name of a theme, built in or defined.
@@ -50,6 +53,7 @@ impl SlotKind {
             self,
             Self::File
                 | Self::Buffer
+                | Self::CurrentBuffer
                 | Self::Choice(_)
                 | Self::Option
                 | Self::Face
@@ -474,6 +478,16 @@ pub static BUILTINS: &[Builtin] = &[
             interactive("buffer")
         } else {
             Command::Buffer(a.into())
+        })
+    ),
+    builtin!(
+        "kill-buffer",
+        [slot("NAME", SlotKind::CurrentBuffer)],
+        "Close an open document, the current one unless another is chosen",
+        |a| Ok(if a.is_empty() {
+            interactive("kill-buffer")
+        } else {
+            Command::KillBuffer(a.into())
         })
     ),
     builtin!("next-view", "Focus the next view", Command::NextView),
