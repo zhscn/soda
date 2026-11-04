@@ -95,17 +95,24 @@
 
 ## 主题
 
-主题都是真彩的。选项 `theme` 取内置主题名、`auto`（默认，`COLORFGBG` 报告浅色背景时用 `light`，否则 `dark`；图形界面总是 `dark`），或 `soda.theme` 定义的主题名。
+主题都是真彩的。选项 `theme` 取主题名：内置的，或 `soda.theme` 定义的，默认 `tokyonight`。深浅不是单独的设置，也不跟随终端背景；想要浅色就选一个浅色主题。
 
-内置主题：`dark`（Tokyo Night）、`light`（Tokyo Night Day）、`tokyonight-storm`、`catppuccin-mocha`、`catppuccin-latte`、`gruvbox-dark`、`gruvbox-light`、`dracula`、`nord`、`one-dark`、`one-light`、`solarized-dark`、`solarized-light`、`rose-pine`、`rose-pine-dawn`、`kanagawa`、`everforest-dark`、`everforest-light`、`github-dark`、`github-light`、`monokai`。每个主题是一份调色板加少量语法 face：界面部分都由调色板推出，语法 face 保留该主题原本的关键字、字符串、函数等配色。定义在 `src/application/themes.rs`。主题设置整屏背景，不依赖终端配色。终端前端在 `COLORTERM` 为 `truecolor` 或 `24bit` 时输出 24 位颜色，否则换算为最接近的 xterm 256 色。
+内置主题：
+
+- Tokyo Night：`tokyonight`、`tokyonight-day`、`tokyonight-storm`
+- Modus（取自 modus-themes 的调色板）：`modus-operandi`、`modus-vivendi`，及其 `-tinted`、`-deuteranopia`、`-tritanopia` 变体
+- JetBrains：`islands-dark`、`islands-light`（取自 IntelliJ Platform 的 Islands 主题与配色方案），`fleet-dark`、`fleet-dark-purple`、`fleet-light`（取自 zed-fleet-themes，半透明颜色已按背景混合）
+- 其他：`catppuccin-mocha`、`catppuccin-latte`、`gruvbox-dark`、`gruvbox-light`、`dracula`、`nord`、`one-dark`、`one-light`、`solarized-dark`、`solarized-light`、`rose-pine`、`rose-pine-dawn`、`kanagawa`、`everforest-dark`、`everforest-light`、`github-dark`、`github-light`、`monokai`
+
+每个主题是一份调色板加少量语法 face：界面部分都由调色板推出，语法 face 保留该主题原本的关键字、字符串、函数等配色。定义在 `src/application/themes.rs`。主题设置整屏背景，不依赖终端配色。终端前端在 `COLORTERM` 为 `truecolor` 或 `24bit` 时输出 24 位颜色，否则换算为最接近的 xterm 256 色。
 
 命令 `theme NAME` 随时切换主题，等同 `set theme NAME`，补全列出所有主题并标出当前的。名字未定义时报错，选项不变。补全时实时预览：用方向键移到某一行，或输入文字选出一行后，整屏立即按该主题绘制；Enter 采用，Esc 回到原来的主题。刚打开、还没有选择时不预览。预览只是前端按命令行的选中行绘制，不改选项，所以取消时没有要恢复的状态。
 
-`soda.theme(name, spec)` 定义主题，再次调用替换同名的定义；`auto`、`dark`、`light` 不能被占用。spec 的三部分都可省略：
+`soda.theme(name, spec)` 定义主题，再次调用替换同名的定义；内置主题的名字不能被占用。spec 的三部分都可省略：
 
 ```lua
 soda.theme("paper", {
-  base = "one-light",             -- 底下的内置主题，默认 dark
+  base = "one-light",             -- 底下的内置主题，默认 tokyonight
   palette = { bg = "#fafafa", fg = "#383a42", blue = "#4078f2" },
   faces = {
     ["syntax.keyword"] = { fg = "#a626a4", bold = true },
@@ -115,7 +122,7 @@ soda.theme("paper", {
 soda.set("theme", "paper")
 ```
 
-叠放顺序是：内置主题的调色板 → `palette` 替换其中的颜色，界面和语法的颜色都由调色板推出 → 内置主题自己的语法 face → `faces` 覆盖个别部分 → 用户的 `face` 覆盖最后生效。所以切换主题时 `face` 的设置保留。调色板的颜色名：`bg`、`bg-dark`、`bg-highlight`、`selection`、`fg`、`fg-dark`、`comment`、`gutter`、`gutter-current`、`blue`、`green`、`magenta`、`orange`、`yellow`、`red`、`cyan`、`teal`、`on-accent`（徽标上的文字）。`faces` 的值与 `soda.face` 相同。`soda.themes()` 返回所有主题名，内置的在前。重新定义正在使用的主题，下一帧生效。
+叠放顺序是：内置主题的调色板 → `palette` 替换其中的颜色，界面和语法的颜色都由调色板推出 → 内置主题自己的语法 face → `faces` 覆盖个别部分 → 用户的 `face` 覆盖最后生效。所以切换主题时 `face` 的设置保留。调色板的颜色名：`bg`、`bg-dark`、`bg-highlight`、`selection`、`fg`、`fg-dark`、`comment`、`gutter`、`gutter-current`、`blue`、`green`、`magenta`、`orange`、`yellow`、`red`、`cyan`、`teal`、`on-accent`（徽标上的文字）。`faces` 的值与 `soda.face` 相同。`soda.themes()` 返回所有主题名，内置的在前。`theme` 选项指向的定义主题若不再存在，用 `tokyonight`。重新定义正在使用的主题，下一帧生效。
 
 `face NAME [SPEC]`（Lua：`soda.face(name, spec)`）覆盖一个具名部分的颜色和属性。SPEC 是若干词：`fg:#rrggbb`、`bg:#rrggbb`（`default` 为终端自己的颜色），属性 `bold`、`italic`、`underline`、`dim`、`reverse`、`strikethrough`。没写的颜色沿用主题；写了任何属性就替换主题的属性，`plain` 表示无属性。不带 SPEC 时恢复。Lua 的 spec 也可以是表 `{ fg = "#ff0000", bold = true }`，`nil` 恢复。随时执行，下一帧生效。
 

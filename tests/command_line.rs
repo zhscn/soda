@@ -454,17 +454,32 @@ fn choosing_a_theme_previews_it_until_taken_or_cancelled() {
     };
     let option = |r: &Runtime| r.app().options().text(None, "theme").to_owned();
     r.command(Command::Ex("theme ".into()));
-    assert!(rows(&r)[0].starts_with("auto "), "{:?}", rows(&r));
+    assert!(rows(&r)[0].starts_with("tokyonight "), "{:?}", rows(&r));
     assert!(rows(&r).iter().any(|row| row.starts_with("gruvbox-dark ")));
+    assert!(!rows(&r).iter().any(|row| row.starts_with("auto ")));
     // The default row is not a choice yet.
     assert_eq!(previewed(&r), None);
     keys(&mut r, "<down>");
-    assert_eq!(previewed(&r).as_deref(), Some("dark"));
+    assert_eq!(previewed(&r).as_deref(), Some("tokyonight-day"));
     keys(&mut r, "<down>");
-    assert_eq!(previewed(&r).as_deref(), Some("light"));
+    assert_eq!(previewed(&r).as_deref(), Some("tokyonight-storm"));
     keys(&mut r, "ESC");
     assert!(r.layer().is_none());
-    assert_eq!(option(&r), "auto");
+    assert_eq!(option(&r), "tokyonight");
+
+    // The list opens on the theme in force, and moves on from it.
+    r.command(Command::Named("theme nord".into()));
+    r.command(Command::Ex("theme ".into()));
+    assert_eq!(previewed(&r), None);
+    let names: Vec<_> = rows(&r)
+        .iter()
+        .map(|row| row.split_whitespace().next().unwrap().to_owned())
+        .collect();
+    let nord = names.iter().position(|name| name == "nord").unwrap();
+    keys(&mut r, "<down>");
+    assert_eq!(previewed(&r).as_deref(), Some(names[nord + 1].as_str()));
+    keys(&mut r, "ESC");
+    assert_eq!(option(&r), "nord");
 
     r.command(Command::Ex("theme ".into()));
     keys(&mut r, "n o r");

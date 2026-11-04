@@ -430,6 +430,7 @@ impl CommandLine {
                     .collect(),
                 Target::Slot(SlotKind::Theme) => {
                     let current = app.options().text(None, "theme");
+                    let width = app.faces().theme_names().map(str::len).max().unwrap_or(0);
                     app.faces()
                         .theme_names()
                         .enumerate()
@@ -437,7 +438,6 @@ impl CommandLine {
                         .map(|(i, name)| {
                             use crate::application::themes;
                             let doc = match themes::builtin(name) {
-                                _ if name == themes::AUTO => themes::AUTO_DOC.to_owned(),
                                 Some(theme) => {
                                     let shade = if theme.light { "light" } else { "dark" };
                                     format!("{}, {shade}", theme.doc)
@@ -445,10 +445,10 @@ impl CommandLine {
                                 None => "defined by soda.theme".to_owned(),
                             };
                             let mark_current = if name == current { "● " } else { "" };
-                            let label = format!("{name:<18} {mark_current}{doc}");
+                            let label = format!("{name:<width$} {mark_current}{doc}");
                             let typed = (!query.text.is_empty()).then_some(0..query.text.len());
                             let row = row(i as u64, label, Some(name.to_owned()), false);
-                            mark(row, typed.into_iter().collect(), Some(19))
+                            mark(row, typed.into_iter().collect(), Some(width + 1))
                         })
                         .collect()
                 }
@@ -494,6 +494,21 @@ impl CommandLine {
         }
         response.redraw = restart || changed;
         self.rows = rows;
+        // A theme list opens on the theme in force, so moving through it
+        // starts from there.
+        if let Some(query) = &query
+            && query.target == Target::Slot(SlotKind::Theme)
+            && query.text.is_empty()
+        {
+            let current = app.options().text(None, "theme");
+            let row = self
+                .rows
+                .iter()
+                .find(|row| row.candidate.payload.replacement.as_deref() == Some(current));
+            if let Some(key) = row.map(|row| row.candidate.key) {
+                self.list.preselect(&self.rows, key);
+            }
+        }
         self.query = query;
         response
     }

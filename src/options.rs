@@ -224,8 +224,8 @@ pub const OPTIONS: &[OptionInfo] = &[
     OptionInfo {
         name: "theme",
         kind: Kind::Text,
-        default: Value::Text("auto"),
-        doc: "Colors: dark, light, auto to follow the terminal's background, or a theme soda.theme defined",
+        default: Value::Text("tokyonight"),
+        doc: "Color theme: a built-in one, or one soda.theme defined",
     },
     OptionInfo {
         name: "font",

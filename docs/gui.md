@@ -46,7 +46,7 @@ soda-gui [--no-config] [FILE | DIRECTORY]
 | `smooth-caret` | true | 光标滑动 |
 | `smooth-scroll` | true | 平滑滚动与触控板按像素滚动 |
 
-改了下一帧生效。颜色用 `face` 改，与终端版共用；图形界面另读 `scrollbar`。`theme auto` 取深色。`theme` 命令补全时的预览两个前端都有。
+改了下一帧生效。颜色用 `face` 改，与终端版共用；图形界面另读 `scrollbar`。`theme` 命令补全时的预览两个前端都有。
 
 ## 输入
 

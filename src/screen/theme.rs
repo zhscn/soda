@@ -1,9 +1,7 @@
 //! The color theme. Colors are 24-bit; a frontend that cannot show them
-//! converts them as it draws. The `theme` option picks the dark or light
-//! variant, `auto` the one the frontend reports for its background, or a
-//! theme `soda.theme` defined: its palette colors replace the variant's,
-//! and its faces go over what they make. Faces set with `face` go over
-//! the theme.
+//! converts them as it draws. The `theme` option names a built-in theme
+//! or one `soda.theme` defined over a built-in one. Faces set with `face`
+//! go over the theme.
 use crate::syntax::Category;
 use ratatui::style::{Color, Modifier, Style};
 
@@ -122,21 +120,20 @@ impl Palette {
 }
 
 impl Theme {
-    /// The theme a `theme` option value names, with the faces over it;
-    /// `auto`, and a name no longer defined, are light when the
-    /// frontend's background is.
+    /// The theme a `theme` option value names, with the faces over it; a
+    /// name no longer defined gives the default theme.
     ///
     /// The layers, each over the one before: a built-in theme's palette,
     /// the palette colors of a defined theme over it, the faces the
     /// palette makes, the built-in theme's faces, the defined theme's
     /// faces, and those set with `face`.
-    pub fn build(choice: &str, faces: &crate::application::faces::Faces, light: bool) -> Self {
+    pub fn build(choice: &str, faces: &crate::application::faces::Faces) -> Self {
         use crate::application::{faces::FaceSpec, themes};
         let defined = faces.theme(choice);
         let base = defined.map_or(choice, |defined| defined.base.as_str());
         let builtin = themes::builtin(base)
-            .or_else(|| themes::builtin(if light { "light" } else { "dark" }))
-            .expect("dark and light are built in");
+            .or_else(|| themes::builtin(themes::DEFAULT))
+            .expect("the default theme is built in");
         let mut palette = Palette::of(builtin);
         for (name, rgb) in defined.iter().flat_map(|defined| &defined.palette) {
             if let Some(slot) = palette.slot(name) {
@@ -442,17 +439,15 @@ mod tests {
         faces
             .set("key", Some(FaceSpec::parse("fg:#404040").unwrap()))
             .unwrap();
-        let theme = Theme::build("mine", &faces, false);
+        let theme = Theme::build("mine", &faces);
         assert_eq!(theme.text.bg, Some(color(0x101010)));
         assert_eq!(theme.text.fg, Some(color(0x3c3836)));
         // Gruvbox's own keyword color stays under the defined theme.
         assert_eq!(theme.category(Category::Keyword).fg, Some(color(0x9d0006)));
         assert_eq!(theme.title.fg, Some(color(0x202020)));
         assert_eq!(theme.key.fg, Some(color(0x404040)));
-        // A theme no longer named falls back as `auto` does.
-        let theme = Theme::build("gone", &faces, false);
+        // A theme no longer named gives the default.
+        let theme = Theme::build("gone", &faces);
         assert_eq!(theme.text.bg, Some(color(0x1a1b26)));
-        let theme = Theme::build("gone", &faces, true);
-        assert_eq!(theme.text.bg, Some(color(0xe1e2e7)));
     }
 }

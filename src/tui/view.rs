@@ -148,21 +148,16 @@ pub(super) struct Presenter {
     highlighter: Highlighter,
     theme: Theme,
     theme_key: Option<(String, u64)>,
-    /// What `theme auto` picks.
-    light: bool,
     geometry: Option<Geometry>,
 }
 impl Presenter {
-    /// `light` tells whether the terminal's background is light, for the
-    /// `auto` theme.
-    pub fn new(light: bool) -> Self {
+    pub fn new() -> Self {
         Self {
             // Highlighting a frame scans for at most this long, so a jump
             // deep into a large file stays responsive while it catches up.
             highlighter: Highlighter::with_budget(std::time::Duration::from_millis(12)),
-            theme: Theme::build("auto", &Default::default(), light),
+            theme: Theme::build(crate::application::themes::DEFAULT, &Default::default()),
             theme_key: None,
-            light,
             geometry: None,
         }
     }
@@ -210,7 +205,7 @@ impl Presenter {
             app.faces().revision(),
         );
         if self.theme_key.as_ref() != Some(&key) {
-            self.theme = Theme::build(&key.0, app.faces(), self.light);
+            self.theme = Theme::build(&key.0, app.faces());
             self.theme_key = Some(key);
         }
         Ok(())
@@ -1047,7 +1042,7 @@ mod tests {
 
     /// A frame as a frontend draws it: measured, prepared, then rendered.
     fn draw(runtime: &mut Runtime, width: u16, height: u16) -> Buffer {
-        let mut presenter = Presenter::new(false);
+        let mut presenter = Presenter::new();
         presenter.measure(runtime, width, height);
         presenter.prepare(runtime, width, height).unwrap();
         let mut buffer = Buffer::empty(Rect::new(0, 0, width, height));
@@ -1213,7 +1208,7 @@ mod tests {
         let plain = screen(&mut r, 60, 10);
         assert!(!plain.lines().nth(2).unwrap().contains("broken"), "{plain}");
         r.command(Command::Named("set inline-notes true".into()));
-        let theme = Theme::build("auto", &Default::default(), false);
+        let theme = Theme::build(crate::application::themes::DEFAULT, &Default::default());
         let cells = &draw(&mut r, 60, 10);
         let first = rows[1].split("one").next().unwrap().chars().count() as u16;
         let underlined = |x| cells[(x, 1)].modifier.contains(Modifier::UNDERLINED);

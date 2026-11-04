@@ -288,7 +288,7 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
         config,
         Box::new(crate::clipboard::Clipboard::terminal()),
     )?;
-    let mut presenter = Presenter::new(color::light_background());
+    let mut presenter = Presenter::new();
     let truecolor = color::truecolor();
     // From here the reader has the terminal's input.
     let (send, arrivals) = mpsc::channel();

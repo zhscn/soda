@@ -52,7 +52,7 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 | `completion`、`completion-min-prefix`、`completion-preview` | | | 见[补全](completion.md#键) |
 | `scroll-lines` | 1–100 | 3 | 鼠标滚轮每格滚动的行数 |
 | `idle-time` | 10–60000 | 500 | 最后一次按键之后多少毫秒运行 `idle` 钩子 |
-| `theme` | 内置主题名/auto/定义的主题名 | auto | 主题，auto 跟随终端背景，见[终端界面](ui.md#主题) |
+| `theme` | 内置或定义的主题名 | tokyonight | 配色主题，见[终端界面](ui.md#主题) |
 | `mouse` | true/false | true | 关闭后终端恢复自己的文本选择 |
 | `trim-trailing-whitespace` | true/false | true | 保存时去掉上次加载或保存以来编辑过的行的行尾空白 |
 | `final-newline` | true/false | true | 保存时给有内容的文件补上末尾换行 |

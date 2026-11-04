@@ -885,30 +885,30 @@ fn themes_are_defined_from_lua_and_switched_at_run_time() {
         &mut r,
         r##"
         soda.theme("paper", {
-          base = "light",
+          base = "tokyonight-day",
           palette = { bg = "#fafafa", blue = "#0000ff" },
           faces = { ["syntax.keyword"] = { fg = "#ff0000", bold = true }, title = "underline" },
         })
-        assert(not pcall(soda.theme, "dark", {}))
+        assert(not pcall(soda.theme, "tokyonight", {}))
         assert(not pcall(soda.theme, "bad", { base = "sepia" }))
         assert(not pcall(soda.theme, "bad", { palette = { purple = "#000000" } }))
         assert(not pcall(soda.theme, "bad", { faces = { nothing = "bold" } }))
         assert(not pcall(soda.set, "theme", "missing"))
         local names = table.concat(soda.themes(), " ")
-        assert(names:match("^auto dark light .* paper$"), names)
+        assert(names:match("^tokyonight tokyonight%-day .* paper$"), names)
         soda.theme("warm", { base = "gruvbox-dark" })
         soda.set("theme", "paper")
         "##,
     );
     assert_eq!(r.app().options().text(None, "theme"), "paper");
     let paper = r.app().faces().theme("paper").unwrap();
-    assert_eq!(paper.base, "light");
+    assert_eq!(paper.base, "tokyonight-day");
     assert_eq!(paper.palette["bg"], 0xfafafa);
     assert!(paper.faces["title"].attributes.unwrap().underline);
-    r.command(Command::Named("theme dark".into()));
-    assert_eq!(r.app().options().text(None, "theme"), "dark");
+    r.command(Command::Named("theme nord".into()));
+    assert_eq!(r.app().options().text(None, "theme"), "nord");
     r.command(Command::Named("theme nothing".into()));
-    assert_eq!(r.app().options().text(None, "theme"), "dark");
+    assert_eq!(r.app().options().text(None, "theme"), "nord");
 }
 #[test]
 fn hooks_see_changes_moves_and_idleness_and_timers_fire_once() {

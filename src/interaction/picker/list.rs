@@ -70,6 +70,16 @@ impl CandidateListState {
         }
         self.reveal(new);
     }
+    /// Starts the selection on the row of `key`, if there is one, as a
+    /// default rather than a choice: navigation goes on from it, but
+    /// `user_selected` stays false.
+    pub fn preselect<T>(&mut self, rows: &[MatchedCandidate<T>], key: CandidateKey) {
+        if self.user_selected || !rows.iter().any(|row| row.candidate.key == key) {
+            return;
+        }
+        self.selected = Some(key);
+        self.reveal(rows);
+    }
     pub fn resize<T>(&mut self, rows: &[MatchedCandidate<T>], page_size: usize) -> bool {
         let before = (self.page_size, self.first_visible);
         self.page_size = page_size;

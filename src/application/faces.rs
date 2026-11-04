@@ -160,7 +160,7 @@ pub struct ThemeSpec {
 impl Default for ThemeSpec {
     fn default() -> Self {
         Self {
-            base: "dark".into(),
+            base: themes::DEFAULT.into(),
             palette: BTreeMap::new(),
             faces: BTreeMap::new(),
         }
@@ -257,7 +257,7 @@ impl Faces {
                 "{name:?} is not a theme name: use letters, digits, - and _"
             ));
         }
-        if name == themes::AUTO || themes::builtin(name).is_some() {
+        if themes::builtin(name).is_some() {
             return Err(format!("{name} is a built-in theme"));
         }
         spec.check()?;
@@ -271,12 +271,11 @@ impl Faces {
     }
     /// Whether the `theme` option may name this.
     pub fn has_theme(&self, name: &str) -> bool {
-        name == themes::AUTO || themes::builtin(name).is_some() || self.themes.contains_key(name)
+        themes::builtin(name).is_some() || self.themes.contains_key(name)
     }
     /// Every theme name, the built-in ones first.
     pub fn theme_names(&self) -> impl Iterator<Item = &str> {
-        std::iter::once(themes::AUTO)
-            .chain(themes::BUILTINS.iter().map(|theme| theme.name))
+        (themes::BUILTINS.iter().map(|theme| theme.name))
             .chain(self.themes.keys().map(String::as_str))
     }
     /// Sets a face, or with `None` gives it back to the theme.
@@ -328,15 +327,15 @@ mod tests {
         spec.faces
             .insert("syntax.keyword".into(), FaceSpec::parse("bold").unwrap());
         faces.define_theme("mine", spec.clone()).unwrap();
-        assert!(faces.has_theme("mine") && faces.has_theme("auto") && !faces.has_theme("x"));
+        assert!(faces.has_theme("mine") && !faces.has_theme("auto") && !faces.has_theme("x"));
         assert!(faces.has_theme("gruvbox-dark"));
-        assert!(faces.define_theme("dark", spec.clone()).is_err());
+        assert!(faces.define_theme("tokyonight", spec.clone()).is_err());
         assert!(faces.define_theme("nord", spec.clone()).is_err());
         assert!(faces.define_theme("a b", spec.clone()).is_err());
         spec.palette.insert("purple".into(), 0);
         assert!(faces.define_theme("other", spec).is_err());
         let names: Vec<_> = faces.theme_names().collect();
-        assert_eq!(names[..3], ["auto", "dark", "light"]);
+        assert_eq!(names[..2], ["tokyonight", "tokyonight-day"]);
         assert_eq!(names.last(), Some(&"mine"));
         let based = ThemeSpec {
             base: "nope".into(),

@@ -4,8 +4,10 @@
 //! known by where its roles differ from the palette's: the palette gives
 //! keywords magenta, strings green, functions blue and types teal.
 //!
-//! `dark` and `light` are Tokyo Night and its day variant; `auto` is not
-//! a theme of its own but picks one of them by the background.
+//! The Modus palettes come from the modus-themes package, the Islands
+//! ones from the IntelliJ Platform's theme and color scheme files, and
+//! the Fleet ones from the zed-fleet-themes port, with translucent colors
+//! blended over their background.
 
 /// A theme the editor has.
 pub struct Builtin {
@@ -20,9 +22,8 @@ pub struct Builtin {
     pub faces: &'static [(&'static str, &'static str)],
 }
 
-/// The name that follows the background rather than naming a theme.
-pub const AUTO: &str = "auto";
-pub const AUTO_DOC: &str = "dark or light, following the terminal's background";
+/// The theme in force until the `theme` option names another.
+pub const DEFAULT: &str = "tokyonight";
 
 /// The built-in theme of a name.
 pub fn builtin(name: &str) -> Option<&'static Builtin> {
@@ -31,7 +32,7 @@ pub fn builtin(name: &str) -> Option<&'static Builtin> {
 
 pub const BUILTINS: &[Builtin] = &[
     Builtin {
-        name: "dark",
+        name: "tokyonight",
         doc: "Tokyo Night",
         light: false,
         palette: [
@@ -42,7 +43,7 @@ pub const BUILTINS: &[Builtin] = &[
         faces: &[],
     },
     Builtin {
-        name: "light",
+        name: "tokyonight-day",
         doc: "Tokyo Night Day",
         light: true,
         palette: [
@@ -405,6 +406,319 @@ pub const BUILTINS: &[Builtin] = &[
             ("syntax.namespace", "fg:#f8f8f2"),
         ],
     },
+    Builtin {
+        name: "modus-operandi",
+        doc: "Modus Operandi",
+        light: true,
+        palette: [
+            0xffffff, 0xf2f2f2, 0xdae5ec, 0xbdbdbd, 0x000000, 0x595959, 0x595959, 0x9f9f9f,
+            0x000000, 0x0031a9, 0x006800, 0x721045, 0x884900, 0x6f5500, 0xa60000, 0x005e8b,
+            0x005f5f, 0xffffff,
+        ],
+        faces: &[
+            ("status", "fg:#000000 bg:#c8c8c8"),
+            ("status-strong", "fg:#000000 bg:#c8c8c8 bold"),
+            ("syntax.keyword", "fg:#531ab6"),
+            ("syntax.string", "fg:#3548cf"),
+            ("syntax.function", "fg:#721045"),
+            ("syntax.type", "fg:#005f5f"),
+            ("syntax.constant", "fg:#0000b0"),
+            ("syntax.number", "fg:#0000b0"),
+            ("syntax.macro", "fg:#a0132f"),
+            ("syntax.parameter", "fg:#005e8b"),
+            ("syntax.operator", "fg:#000000"),
+            ("syntax.escape", "fg:#00663f"),
+        ],
+    },
+    Builtin {
+        name: "modus-operandi-tinted",
+        doc: "Modus Operandi Tinted",
+        light: true,
+        palette: [
+            0xfbf7f0, 0xefe9dd, 0xf1d5d0, 0xc2bcb5, 0x000000, 0x595959, 0x7f0000, 0x9f9690,
+            0x000000, 0x0031a9, 0x006300, 0x721045, 0x894000, 0x6d5000, 0xa60000, 0x00598b,
+            0x005f5f, 0xfbf7f0,
+        ],
+        faces: &[
+            ("status", "fg:#000000 bg:#cab9b2"),
+            ("status-strong", "fg:#000000 bg:#cab9b2 bold"),
+            ("syntax.keyword", "fg:#0031a9"),
+            ("syntax.string", "fg:#00598b"),
+            ("syntax.function", "fg:#602938"),
+            ("syntax.type", "fg:#306010"),
+            ("syntax.constant", "fg:#531ab6"),
+            ("syntax.number", "fg:#531ab6"),
+            ("syntax.macro", "fg:#894000"),
+            ("syntax.parameter", "fg:#00603f"),
+            ("syntax.operator", "fg:#000000"),
+            ("syntax.escape", "fg:#531ab6"),
+        ],
+    },
+    Builtin {
+        name: "modus-operandi-deuteranopia",
+        doc: "Modus Operandi Deuteranopia",
+        light: true,
+        palette: [
+            0xffffff, 0xf2f2f2, 0xdae5ec, 0xbdbdbd, 0x000000, 0x595959, 0x77492f, 0x9f9f9f,
+            0x000000, 0x0031a9, 0x006800, 0x721045, 0x973300, 0x695500, 0xa60000, 0x005e8b,
+            0x005f5f, 0xffffff,
+        ],
+        faces: &[
+            ("status", "fg:#000000 bg:#d0d6ff"),
+            ("status-strong", "fg:#000000 bg:#d0d6ff bold"),
+            ("syntax.keyword", "fg:#0000b0"),
+            ("syntax.string", "fg:#3548cf"),
+            ("syntax.function", "fg:#973300"),
+            ("syntax.type", "fg:#005f5f"),
+            ("syntax.constant", "fg:#003497"),
+            ("syntax.number", "fg:#003497"),
+            ("syntax.macro", "fg:#531ab6"),
+            ("syntax.parameter", "fg:#005e8b"),
+            ("syntax.operator", "fg:#000000"),
+            ("syntax.escape", "fg:#77492f"),
+        ],
+    },
+    Builtin {
+        name: "modus-operandi-tritanopia",
+        doc: "Modus Operandi Tritanopia",
+        light: true,
+        palette: [
+            0xffffff, 0xf2f2f2, 0xdfeaec, 0xbdbdbd, 0x000000, 0x595959, 0x702000, 0x9f9f9f,
+            0x000000, 0x0031a9, 0x006800, 0x721045, 0x973300, 0x695500, 0xa60000, 0x005e8b,
+            0x005f5f, 0xffffff,
+        ],
+        faces: &[
+            ("status", "fg:#000000 bg:#afe0f2"),
+            ("status-strong", "fg:#000000 bg:#afe0f2 bold"),
+            ("syntax.keyword", "fg:#a0132f"),
+            ("syntax.string", "fg:#005e8b"),
+            ("syntax.function", "fg:#3f578f"),
+            ("syntax.type", "fg:#3548cf"),
+            ("syntax.constant", "fg:#00663f"),
+            ("syntax.number", "fg:#00663f"),
+            ("syntax.macro", "fg:#b21100"),
+            ("syntax.parameter", "fg:#005f5f"),
+            ("syntax.operator", "fg:#000000"),
+            ("syntax.escape", "fg:#a60000"),
+        ],
+    },
+    Builtin {
+        name: "modus-vivendi",
+        doc: "Modus Vivendi",
+        light: false,
+        palette: [
+            0x000000, 0x1e1e1e, 0x2f3849, 0x5a5a5a, 0xffffff, 0x989898, 0x989898, 0x646464,
+            0xffffff, 0x2fafff, 0x44bc44, 0xfeacd0, 0xfec43f, 0xd0bc00, 0xff5f59, 0x00d3d0,
+            0x6ae4b9, 0x000000,
+        ],
+        faces: &[
+            ("status", "fg:#ffffff bg:#505050"),
+            ("status-strong", "fg:#ffffff bg:#505050 bold"),
+            ("syntax.keyword", "fg:#b6a0ff"),
+            ("syntax.string", "fg:#79a8ff"),
+            ("syntax.function", "fg:#feacd0"),
+            ("syntax.type", "fg:#6ae4b9"),
+            ("syntax.constant", "fg:#00bcff"),
+            ("syntax.number", "fg:#00bcff"),
+            ("syntax.macro", "fg:#ff7f86"),
+            ("syntax.parameter", "fg:#00d3d0"),
+            ("syntax.operator", "fg:#ffffff"),
+            ("syntax.escape", "fg:#00c06f"),
+        ],
+    },
+    Builtin {
+        name: "modus-vivendi-tinted",
+        doc: "Modus Vivendi Tinted",
+        light: false,
+        palette: [
+            0x0d0e1c, 0x1d2235, 0x303a6f, 0x555a66, 0xffffff, 0x989898, 0xef8386, 0x61647a,
+            0xffffff, 0x2fafff, 0x44bc44, 0xfeacd0, 0xfec43f, 0xd0bc00, 0xff5f59, 0x00d3d0,
+            0x6ae4b9, 0x0d0e1c,
+        ],
+        faces: &[
+            ("status", "fg:#ffffff bg:#484d67"),
+            ("status-strong", "fg:#ffffff bg:#484d67 bold"),
+            ("syntax.keyword", "fg:#79a8ff"),
+            ("syntax.string", "fg:#2fafff"),
+            ("syntax.function", "fg:#f78fe7"),
+            ("syntax.type", "fg:#11c777"),
+            ("syntax.constant", "fg:#b6a0ff"),
+            ("syntax.number", "fg:#b6a0ff"),
+            ("syntax.macro", "fg:#ff7f86"),
+            ("syntax.parameter", "fg:#4ae2f0"),
+            ("syntax.operator", "fg:#ffffff"),
+            ("syntax.escape", "fg:#b6a0ff"),
+        ],
+    },
+    Builtin {
+        name: "modus-vivendi-deuteranopia",
+        doc: "Modus Vivendi Deuteranopia",
+        light: false,
+        palette: [
+            0x000000, 0x1e1e1e, 0x2f3849, 0x5a5a5a, 0xffffff, 0x989898, 0xd8af7a, 0x646464,
+            0xffffff, 0x2fafff, 0x44bc44, 0xfeacd0, 0xffa00f, 0xcabf00, 0xff5f59, 0x00d3d0,
+            0x6ae4b9, 0x000000,
+        ],
+        faces: &[
+            ("status", "fg:#ffffff bg:#2a2a6a"),
+            ("status-strong", "fg:#ffffff bg:#2a2a6a bold"),
+            ("syntax.keyword", "fg:#00bcff"),
+            ("syntax.string", "fg:#79a8ff"),
+            ("syntax.function", "fg:#ffa00f"),
+            ("syntax.type", "fg:#6ae4b9"),
+            ("syntax.constant", "fg:#82b0ec"),
+            ("syntax.number", "fg:#82b0ec"),
+            ("syntax.macro", "fg:#b6a0ff"),
+            ("syntax.parameter", "fg:#00d3d0"),
+            ("syntax.operator", "fg:#ffffff"),
+            ("syntax.escape", "fg:#d8af7a"),
+        ],
+    },
+    Builtin {
+        name: "modus-vivendi-tritanopia",
+        doc: "Modus Vivendi Tritanopia",
+        light: false,
+        palette: [
+            0x000000, 0x1e1e1e, 0x2f3849, 0x5a5a5a, 0xffffff, 0x989898, 0xff9070, 0x646464,
+            0xffffff, 0x2fafff, 0x44bc44, 0xfeacd0, 0xffa00f, 0xcabf00, 0xff5f59, 0x00d3d0,
+            0x6ae4b9, 0x000000,
+        ],
+        faces: &[
+            ("status", "fg:#ffffff bg:#003c52"),
+            ("status-strong", "fg:#ffffff bg:#003c52 bold"),
+            ("syntax.keyword", "fg:#ff7f86"),
+            ("syntax.string", "fg:#00d3d0"),
+            ("syntax.function", "fg:#4ae2ff"),
+            ("syntax.type", "fg:#79a8ff"),
+            ("syntax.constant", "fg:#88ca9f"),
+            ("syntax.number", "fg:#88ca9f"),
+            ("syntax.macro", "fg:#ff6740"),
+            ("syntax.parameter", "fg:#6ae4b9"),
+            ("syntax.operator", "fg:#ffffff"),
+            ("syntax.escape", "fg:#ff5f59"),
+        ],
+    },
+    Builtin {
+        name: "fleet-dark",
+        doc: "Fleet Dark",
+        light: false,
+        palette: [
+            0x18191b, 0x090909, 0x162639, 0x225090, 0xe0e1e4, 0x898e94, 0x909194, 0x3e4147,
+            0xe0e1e4, 0x4b8dec, 0x69b090, 0xeb83e2, 0xb07203, 0xfad075, 0xeb4056, 0x2ccce6,
+            0x82d2ce, 0x090909,
+        ],
+        faces: &[
+            ("gutter", "fg:#6e747b"),
+            ("syntax.keyword", "fg:#82d2ce"),
+            ("syntax.string", "fg:#e394dc"),
+            ("syntax.function", "fg:#ebc88d"),
+            ("syntax.type", "fg:#87c3ff"),
+            ("syntax.constant", "fg:#af9cff"),
+            ("syntax.number", "fg:#ebc88d"),
+            ("syntax.operator", "fg:#e0e1e4"),
+            ("syntax.parameter", "fg:#e0e1e4"),
+            ("syntax.macro", "fg:#a8cc7c"),
+            ("syntax.escape", "fg:#82d2ce"),
+            ("syntax.attribute", "fg:#af9cff"),
+            ("syntax.namespace", "fg:#87c3ff"),
+        ],
+    },
+    Builtin {
+        name: "fleet-dark-purple",
+        doc: "Fleet Dark Purple",
+        light: false,
+        palette: [
+            0x1c1827, 0x13101b, 0x362349, 0x6a3d88, 0xe0e1e4, 0x7e7d86, 0x7e7d86, 0x3e3852,
+            0xe0e1e4, 0x4b8dec, 0x69b090, 0xeb83e2, 0xb07203, 0xfad075, 0xeb4056, 0x2ccce6,
+            0x88dbd7, 0x13101b,
+        ],
+        faces: &[
+            ("gutter", "fg:#575560"),
+            ("syntax.keyword", "fg:#e09b70"),
+            ("syntax.string", "fg:#62a362"),
+            ("syntax.function", "fg:#c7a65d"),
+            ("syntax.type", "fg:#e0e1e4"),
+            ("syntax.constant", "fg:#93a6f5"),
+            ("syntax.number", "fg:#4dacf0"),
+            ("syntax.operator", "fg:#e0e1e4"),
+            ("syntax.parameter", "fg:#e0e1e4"),
+            ("syntax.macro", "fg:#85a658"),
+            ("syntax.escape", "fg:#e09b70"),
+            ("syntax.namespace", "fg:#e0e1e4"),
+        ],
+    },
+    Builtin {
+        name: "fleet-light",
+        doc: "Fleet Light",
+        light: true,
+        palette: [
+            0xffffff, 0xeeeff0, 0xe6f0fc, 0xa8c6f4, 0x090909, 0x6e747b, 0x747576, 0xd1d1d1,
+            0x090909, 0x1d61ba, 0x14835e, 0xcc37fa, 0xb07203, 0xb0993c, 0xc72c49, 0x0a8282,
+            0x14646e, 0xffffff,
+        ],
+        faces: &[
+            ("gutter", "fg:#898e94"),
+            ("syntax.keyword", "fg:#14646e"),
+            ("syntax.string", "fg:#086e14"),
+            ("syntax.function", "fg:#5511bf"),
+            ("syntax.type", "fg:#1749bd"),
+            ("syntax.constant", "fg:#a31d8d"),
+            ("syntax.number", "fg:#a31d8d"),
+            ("syntax.operator", "fg:#090909"),
+            ("syntax.parameter", "fg:#090909"),
+            ("syntax.macro", "fg:#616605"),
+            ("syntax.escape", "fg:#a31d8d"),
+            ("syntax.namespace", "fg:#1749bd"),
+        ],
+    },
+    Builtin {
+        name: "islands-dark",
+        doc: "JetBrains Islands Dark",
+        light: false,
+        palette: [
+            0x191a1c, 0x26282c, 0x1f2024, 0x2a4371, 0xbcbec4, 0x9fa2a8, 0x7a7e85, 0x4b5059,
+            0xa1a3ab, 0x71a1fe, 0x6db083, 0xa894f6, 0xe18c71, 0xd59637, 0xf57e84, 0x56a8f5,
+            0x6aaea6, 0x191a1c,
+        ],
+        faces: &[
+            ("syntax.keyword", "fg:#cf8e6d"),
+            ("syntax.string", "fg:#6aab73"),
+            ("syntax.number", "fg:#2aacb8"),
+            ("syntax.function", "fg:#56a8f5"),
+            ("syntax.constant", "fg:#c77dbb italic"),
+            ("syntax.type", "fg:#bcbec4"),
+            ("syntax.operator", "fg:#bcbec4"),
+            ("syntax.parameter", "fg:#bcbec4"),
+            ("syntax.namespace", "fg:#bcbec4"),
+            ("syntax.macro", "fg:#b3ae60"),
+            ("syntax.attribute", "fg:#b3ae60"),
+            ("syntax.escape", "fg:#cf8e6d"),
+        ],
+    },
+    Builtin {
+        name: "islands-light",
+        doc: "JetBrains Islands Light",
+        light: true,
+        palette: [
+            0xffffff, 0xe9eaee, 0xfcfaed, 0xa6d2ff, 0x080808, 0x5f6269, 0x8c8c8c, 0xadadad,
+            0x5f6269, 0x3871e1, 0x338555, 0x8060db, 0xb45e43, 0xa56906, 0xc54e58, 0x31827b,
+            0x31827b, 0xffffff,
+        ],
+        faces: &[
+            ("syntax.keyword", "fg:#0033b3"),
+            ("syntax.string", "fg:#067d17"),
+            ("syntax.number", "fg:#1750eb"),
+            ("syntax.function", "fg:#00627a"),
+            ("syntax.constant", "fg:#871094 italic"),
+            ("syntax.type", "fg:#080808"),
+            ("syntax.operator", "fg:#080808"),
+            ("syntax.parameter", "fg:#080808"),
+            ("syntax.namespace", "fg:#080808"),
+            ("syntax.macro", "fg:#9e880d"),
+            ("syntax.attribute", "fg:#9e880d"),
+            ("syntax.escape", "fg:#0037a6"),
+        ],
+    },
 ];
 
 #[cfg(test)]
@@ -412,8 +726,8 @@ mod tests {
     use super::*;
     #[test]
     fn built_in_faces_parse_and_names_are_unique() {
+        assert!(builtin(DEFAULT).is_some());
         for (i, theme) in BUILTINS.iter().enumerate() {
-            assert!(theme.name != AUTO);
             assert!(BUILTINS[..i].iter().all(|other| other.name != theme.name));
             for (face, spec) in theme.faces {
                 assert!(super::super::faces::known(face), "{}: {face}", theme.name);

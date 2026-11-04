@@ -1,18 +1,10 @@
 //! Terminal colors. The theme is 24-bit; terminals that do not announce
-//! truecolor get the nearest xterm 256-color index instead, and `auto`
-//! takes the light theme when `COLORFGBG` reports a light background.
+//! truecolor get the nearest xterm 256-color index instead.
 use ratatui::{buffer::Buffer, style::Color};
 
 /// Whether `COLORTERM` announces 24-bit color.
 pub(super) fn truecolor() -> bool {
     std::env::var("COLORTERM").is_ok_and(|value| matches!(value.as_str(), "truecolor" | "24bit"))
-}
-/// Whether `COLORFGBG` reports a light background.
-pub(super) fn light_background() -> bool {
-    std::env::var("COLORFGBG")
-        .ok()
-        .and_then(|value| value.rsplit(';').next()?.parse::<u8>().ok())
-        .is_some_and(|bg| bg == 7 || bg >= 9)
 }
 /// Replaces the 24-bit colors of a frame with xterm 256-color indices.
 pub(super) fn downgrade(buffer: &mut Buffer) {

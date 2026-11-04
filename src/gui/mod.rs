@@ -393,7 +393,7 @@ impl Gui {
                 ui: String::new(),
             }),
             highlighter: Highlighter::with_budget(Duration::from_millis(12)),
-            theme: Theme::build("auto", &Default::default(), false),
+            theme: Theme::build(crate::application::themes::DEFAULT, &Default::default()),
             theme_key: None,
             modifiers: ModifiersState::default(),
             pointer: (0.0, 0.0),
@@ -475,8 +475,7 @@ impl Gui {
             app.faces().revision(),
         );
         if self.theme_key.as_ref() != Some(&key) {
-            // A window has no terminal background to follow; `auto` is dark.
-            self.theme = Theme::build(&key.0, app.faces(), false);
+            self.theme = Theme::build(&key.0, app.faces());
             self.theme_key = Some(key);
         }
         let scrolls = &self.scrolls;
