@@ -231,8 +231,11 @@ pub(crate) fn command_info(
     if line.loading() {
         info.push(("loading…".into(), theme.dim));
     }
+    // The input selected counts as `*`, as `vertico-count-format` shows it.
     if let Some(index) = line.list().index(line.rows()) {
         info.push((format!("{}/{}", index + 1, line.rows().len()), theme.dim));
+    } else if line.input_selected() {
+        info.push((format!("*/{}", line.rows().len()), theme.dim));
     }
     if line.error().is_none() {
         let heading = line.heading().unwrap_or_else(|| "command".into());

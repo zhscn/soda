@@ -129,22 +129,30 @@ fn automatic_and_user_selection_have_distinct_reordering_rules() {
     let rows = vec![a, b];
     let mut list = CandidateListState::default();
     list.resize(&rows, 1);
-    list.update(&[], &rows);
+    list.update(&rows, Some(CandidateKey(1)));
     assert_eq!(list.selected(), Some(CandidateKey(1)));
+    // A default follows the new rows' default.
     let reordered = vec![row(2, "b", "/b"), row(1, "a", "/a")];
-    list.update(&rows, &reordered);
+    list.update(&reordered, Some(CandidateKey(2)));
     assert_eq!(list.selected(), Some(CandidateKey(2)));
-    list.navigate(&reordered, ListMotion::Next, false);
+    // A row moved to by hand stays while it is there.
+    list.navigate(&reordered, ListMotion::Next, false, false);
     assert_eq!(list.selected(), Some(CandidateKey(1)));
-    list.update(&reordered, &rows);
+    list.update(&reordered, Some(CandidateKey(2)));
     assert_eq!(list.selected(), Some(CandidateKey(1)));
-    assert_eq!(list.first_visible(), 0);
+    assert_eq!(list.first_visible(), 1);
+    // Once it is gone, the selection is a default again.
     let removed = vec![row(2, "b", "/b")];
-    list.update(&rows, &removed);
+    list.update(&removed, Some(CandidateKey(2)));
     assert_eq!(list.selected(), Some(CandidateKey(2)));
-    list.update(&removed, &[]);
+    assert!(!list.user_selected());
+    list.update(&rows[..0], None);
     assert_eq!(list.selected(), None);
     assert_eq!(list.first_visible(), 0);
+    // The input chosen by hand stays chosen.
+    list.select_input();
+    list.update(&rows, Some(CandidateKey(1)));
+    assert_eq!(list.selected(), None);
 }
 
 #[test]
@@ -152,22 +160,50 @@ fn pagination_resize_and_wrap_preserve_valid_selection() {
     let rows: Vec<_> = (0..8).map(|key| row(key, "same", "/same")).collect();
     let mut list = CandidateListState::default();
     list.resize(&rows, 3);
-    list.update(&[], &rows);
-    list.navigate(&rows, ListMotion::PageNext, false);
+    list.update(&rows, Some(CandidateKey(0)));
+    list.navigate(&rows, ListMotion::PageNext, false, false);
     assert_eq!(list.index(&rows), Some(3));
     assert_eq!(list.first_visible(), 1);
-    list.navigate(&rows, ListMotion::Last, false);
+    list.navigate(&rows, ListMotion::Last, false, false);
     assert_eq!(list.first_visible(), 5);
     list.resize(&rows, 1);
     assert_eq!(list.first_visible(), 7);
-    list.navigate(&rows, ListMotion::Next, true);
+    list.navigate(&rows, ListMotion::Next, true, false);
     assert_eq!(list.index(&rows), Some(0));
-    list.navigate(&rows, ListMotion::Previous, true);
+    list.navigate(&rows, ListMotion::Previous, true, false);
     assert_eq!(list.index(&rows), Some(7));
-    list.navigate(&rows, ListMotion::First, false);
+    list.navigate(&rows, ListMotion::First, false, false);
     assert_eq!(list.index(&rows), Some(0));
     list.resize(&rows, 0);
     assert_eq!(list.first_visible(), 0);
+}
+
+#[test]
+fn the_input_is_a_place_before_the_first_row_where_it_may_be_taken() {
+    let rows: Vec<_> = (0..3).map(|key| row(key, "same", "/same")).collect();
+    let mut list = CandidateListState::default();
+    list.resize(&rows, 3);
+    list.update(&rows, Some(CandidateKey(0)));
+    // Round through the input, as vertico-cycle goes through the prompt.
+    list.navigate(&rows, ListMotion::Previous, true, true);
+    assert_eq!(list.selected(), None);
+    list.navigate(&rows, ListMotion::Previous, true, true);
+    assert_eq!(list.index(&rows), Some(2));
+    list.navigate(&rows, ListMotion::Next, true, true);
+    assert_eq!(list.selected(), None);
+    list.navigate(&rows, ListMotion::Next, true, true);
+    assert_eq!(list.index(&rows), Some(0));
+    // First goes to the first row, then to the input.
+    list.navigate(&rows, ListMotion::Last, false, true);
+    list.navigate(&rows, ListMotion::First, false, true);
+    assert_eq!(list.index(&rows), Some(0));
+    list.navigate(&rows, ListMotion::First, false, true);
+    assert_eq!(list.selected(), None);
+    // Where the input cannot be taken, it is not a place.
+    list.navigate(&rows, ListMotion::First, false, false);
+    assert_eq!(list.index(&rows), Some(0));
+    list.navigate(&rows, ListMotion::Previous, false, false);
+    assert_eq!(list.index(&rows), Some(0));
 }
 
 #[test]

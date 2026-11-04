@@ -244,15 +244,18 @@ impl LineEdit {
     }
 }
 
+/// Moving past either end goes round, as with `vertico-cycle`.
 const fn candidate(motion: ListMotion) -> Input {
-    Input::Candidate {
-        motion,
-        wrap: false,
-    }
+    Input::Candidate { motion, wrap: true }
 }
 /// Field actions available to `map prompt`.
 pub(super) const PROMPT_ACTIONS: &[(&str, Input, &str)] = &[
     ("confirm", Input::Confirm, "Accept the prompt"),
+    (
+        "confirm-input",
+        Input::ConfirmInput,
+        "Accept the input as typed, not the selected candidate",
+    ),
     ("cancel", Input::Cancel, "Close the prompt"),
     ("complete", Input::Complete { backward: false }, "Complete"),
     (
@@ -532,6 +535,7 @@ const PROMPT: &[(&str, &str)] = &[
     ("C-g", "cancel"),
     ("RET", "confirm"),
     ("C-j", "confirm"),
+    ("M-RET", "confirm-input"),
     ("C-RET", "replace-all"),
     ("<f4>", "replace-all"),
     ("TAB", "complete"),

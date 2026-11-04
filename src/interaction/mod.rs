@@ -72,6 +72,9 @@ pub enum Input {
     Text(InputKey),
     Paste(String),
     Confirm,
+    /// Confirms the input as typed, whatever row is selected, as
+    /// `vertico-exit-input`.
+    ConfirmInput,
     ReplaceAll,
     Complete {
         backward: bool,
@@ -466,6 +469,15 @@ impl Layers {
         app: &Application,
         time: Duration,
     ) -> Result<InputResult, EditError> {
+        let input = match input {
+            Input::ConfirmInput => {
+                if let Some(Layer::CommandLine(line)) = &mut self.active {
+                    line.select_input();
+                }
+                Input::Confirm
+            }
+            input => input,
+        };
         if matches!(input, Input::Confirm)
             && let Some(Layer::Search(session)) = &self.active
             && !session.is_replacing()

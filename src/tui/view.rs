@@ -933,13 +933,21 @@ fn command_line(
     let info_width = (info.width() as u16 + 1).min(area.width / 2);
     let field = Rect::new(area.x, area.y, area.width - info_width, 1);
     let (input, column) = screen::prompt_row(&line.field(), usize::from(field.width));
+    // Enter takes the input as typed: it shows selected, as vertico's
+    // prompt does.
+    let input_style = if line.input_selected() {
+        buf.set_style(field, theme.candidate_selected);
+        theme.text.patch(theme.candidate_selected)
+    } else {
+        theme.text
+    };
     spans(
         buf,
         field.x,
         field.y,
         field.width,
         &input,
-        theme.text,
+        input_style,
         theme,
     );
     info.right_aligned().render(
@@ -952,10 +960,7 @@ fn command_line(
         let Some(row) = rows.get(list.first_visible() + offset) else {
             break;
         };
-        let base = if selected == Some(row.candidate.key) && !line.enter_selects() {
-            buf.set_string(area.x, y, "▌", theme.dim);
-            theme.text
-        } else if selected == Some(row.candidate.key) {
+        let base = if selected == Some(row.candidate.key) {
             let band = Rect::new(area.x, y, area.width, 1);
             buf.set_style(band, theme.candidate_selected);
             buf.set_string(area.x, y, "▌", theme.marker.patch(theme.candidate_selected));

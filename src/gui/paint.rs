@@ -1135,7 +1135,17 @@ fn command_line(
     let field = (area.w - info_width - x).max(0.0);
     let columns = (field / cell) as usize;
     let (input, column) = screen::prompt_row(&line.field(), columns);
-    painter.cell_spans(x, input_top, x + field, &input, theme.text);
+    // Enter takes the input as typed: it shows selected, as vertico's
+    // prompt does.
+    let input_style = if line.input_selected() {
+        let (_, bg) = painter.colors(theme.candidate_selected);
+        let band = Rect::new(x - cell * 0.4, input_top, field, row_h);
+        painter.fill(band, bg.unwrap_or(painter.fg), 6.0);
+        without_bg(theme.text.patch(theme.candidate_selected))
+    } else {
+        theme.text
+    };
+    painter.cell_spans(x, input_top, x + field, &input, input_style);
     let mut ix = area.right() - info_width + cell;
     for (index, (words, style)) in info.iter().enumerate() {
         if index > 0 {
@@ -1157,7 +1167,7 @@ fn command_line(
             };
             let y = list_area.y + offset as f32 * row_h;
             let chosen = selected == Some(row.candidate.key);
-            let base = if chosen && line.enter_selects() {
+            let base = if chosen {
                 let (_, bg) = painter.colors(theme.candidate_selected);
                 let band = Rect::new(6.0, y, area.w - 12.0, row_h);
                 painter.fill(band, bg.unwrap_or(painter.fg), 6.0);

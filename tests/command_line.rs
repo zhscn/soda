@@ -127,24 +127,30 @@ fn a_row_chosen_by_hand_wins_over_an_exact_name() {
 }
 
 #[test]
-fn enter_selects_the_row_only_once_a_path_row_is_chosen() {
+fn the_input_is_selected_where_a_path_names_a_directory() {
     let root = tree();
     let mut r = runtime(root.path());
-    let selects = |r: &Runtime| match r.layer() {
-        Some(Layer::CommandLine(line)) => line.enter_selects(),
+    let input = |r: &Runtime| match r.layer() {
+        Some(Layer::CommandLine(line)) => line.input_selected(),
         _ => panic!("command line is not open"),
     };
-    assert!({
-        r.command(Command::Ex("buffer ".into()));
-        selects(&r)
-    });
+    // A buffer must be one of the rows: the first is selected.
+    r.command(Command::Ex("buffer ".into()));
+    assert!(!input(&r));
     keys(&mut r, "ESC");
+    // As vertico-preselect `directory`: a path naming a directory selects
+    // the input, a name being typed the first row.
     r.command(Command::Ex("open ".into()));
+    wait(&mut r, |r| rows(r) == ["src/"]);
+    assert!(input(&r));
     r.input(UserInput::Paste("s".into()));
     wait(&mut r, |r| rows(r) == ["src/"]);
-    assert!(!selects(&r));
-    keys(&mut r, "<down>");
-    assert!(selects(&r));
+    assert!(!input(&r));
+    // The input is a place before the first row.
+    keys(&mut r, "C-p");
+    assert!(input(&r));
+    keys(&mut r, "C-n");
+    assert!(!input(&r));
 }
 
 #[test]
@@ -270,13 +276,16 @@ fn path_slots_browse_directories_and_backspace_removes_one() {
     keys(&mut r, "TAB");
     assert_eq!(text(&r), "open src/");
     wait(&mut r, |r| rows(r) == ["sub/", "main.cpp"]);
-    // Enter on an explicitly selected directory descends instead of opening.
-    keys(&mut r, "<down> <up> RET");
+    // Enter on a directory row descends instead of opening; on the input
+    // naming a directory, it stays.
+    keys(&mut r, "RET");
+    assert_eq!(text(&r), "open src/");
+    keys(&mut r, "<down> RET");
     assert_eq!(text(&r), "open src/sub/");
     wait(&mut r, |r| rows(r).contains(&"a.h".to_owned()));
     keys(&mut r, "DEL");
     assert_eq!(text(&r), "open src/");
-    // Enter without navigation uses the typed text, so new names work.
+    // A name no row has is taken as typed, so new names work.
     r.input(UserInput::Paste("new.cpp".into()));
     keys(&mut r, "RET");
     assert!(r.layer().is_none());
@@ -490,4 +499,74 @@ fn choosing_a_theme_previews_it_until_taken_or_cancelled() {
     keys(&mut r, "RET");
     assert!(r.layer().is_none());
     assert_eq!(option(&r), "nord");
+}
+
+fn opened(r: &Runtime, path: &Path) -> bool {
+    r.app()
+        .views()
+        .any(|v| r.app().workspace().file(v.document_id).unwrap().path() == Some(path))
+}
+#[test]
+fn enter_takes_the_first_row_and_meta_enter_the_input_as_typed() {
+    let root = tree();
+    let mut r = runtime(root.path());
+    let src = format!("open {}/src/", root.path().display());
+    // As vertico: a typed prefix selects the first row, which Enter opens.
+    r.command(Command::Ex(src.clone()));
+    r.input(UserInput::Paste("ma".into()));
+    wait(&mut r, |r| rows(r) == ["main.cpp"]);
+    keys(&mut r, "RET");
+    wait(&mut r, |r| opened(r, &root.path().join("src/main.cpp")));
+    // M-RET takes the input though a row is selected.
+    r.command(Command::Ex(src));
+    r.input(UserInput::Paste("ma".into()));
+    wait(&mut r, |r| rows(r) == ["main.cpp"]);
+    keys(&mut r, "M-RET");
+    wait(&mut r, |r| opened(r, &root.path().join("src/ma")));
+}
+#[test]
+fn a_row_moved_to_stays_selected_while_typing_narrows() {
+    let root = tree();
+    std::fs::write(root.path().join("src/mbin.cpp"), "").unwrap();
+    let mut r = runtime(root.path());
+    r.command(Command::Ex("open src/".into()));
+    r.input(UserInput::Paste("m".into()));
+    wait(&mut r, |r| rows(r) == ["main.cpp", "mbin.cpp"]);
+    keys(&mut r, "C-n");
+    let selected = |r: &Runtime| match r.layer() {
+        Some(Layer::CommandLine(line)) => line.rows()[line.list().index(line.rows()).unwrap()]
+            .candidate
+            .label
+            .clone(),
+        _ => panic!("command line is not open"),
+    };
+    assert_eq!(selected(&r), "mbin.cpp");
+    // C-n goes round past the last row, through the input.
+    keys(&mut r, "C-n");
+    assert!(matches!(r.layer(), Some(Layer::CommandLine(l)) if l.input_selected()));
+    keys(&mut r, "C-n C-n");
+    // Typing keeps the row moved to, as vertico locks it.
+    r.input(UserInput::Paste(" cpp".into()));
+    wait(&mut r, |r| rows(r) == ["main.cpp", "mbin.cpp"]);
+    assert_eq!(selected(&r), "mbin.cpp");
+}
+#[test]
+fn paths_edit_as_vertico_directory_does() {
+    let root = tree();
+    let mut r = runtime(root.path());
+    let base = root.path().display().to_string();
+    r.command(Command::Ex(format!("open {base}/src/")));
+    // M-DEL after a slash deletes a directory, as Backspace does.
+    keys(&mut r, "M-DEL");
+    assert_eq!(text(&r), format!("open {base}/"));
+    // Typing `//` or `/~` starts the path over, dropping what it shadows.
+    keys(&mut r, "s r c / /");
+    assert_eq!(text(&r), "open /");
+    keys(&mut r, "t m p / ~");
+    assert_eq!(text(&r), "open ~");
+    // Backspace on `~/` goes up from the home directory.
+    keys(&mut r, "/ DEL");
+    let home = std::env::var("HOME").unwrap();
+    let parent = Path::new(&home).parent().unwrap().display().to_string();
+    assert_eq!(text(&r), format!("open {}/", parent.trim_end_matches('/')));
 }

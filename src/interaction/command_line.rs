@@ -562,12 +562,25 @@ impl CommandLine {
             let named = query.target != Target::Slot(SlotKind::Item);
             exact_first(&mut rows, &query.text, named);
         }
-        let same_list = self.query.as_ref().map(|q| q.target) == query.as_ref().map(|q| q.target);
-        if rows.is_empty() && !self.rows.is_empty() && same_list && self.waiting(&query) {
-            // New input forgets the choice, as it does with fresh rows.
-            if restart {
-                self.list.reset();
-                self.list.update(&[], &self.rows);
+        let same_target = self.query.as_ref().map(|q| q.target) == query.as_ref().map(|q| q.target);
+        // The same list, only filtered anew: a choice the user moved to
+        // stays on its row. A path in another directory is another list,
+        // whose rows only share numbers with these.
+        let same_list = !restart
+            || self
+                .query
+                .as_ref()
+                .zip(query.as_ref())
+                .is_some_and(|(old, new)| {
+                    old.target == new.target
+                        && old.start == new.start
+                        && (new.target != Target::Slot(SlotKind::Path)
+                            || split_path(&old.text).0 == split_path(&new.text).0)
+                });
+        if rows.is_empty() && !self.rows.is_empty() && same_target && self.waiting(&query) {
+            if !same_list {
+                let default = self.default_selection(app, query.as_ref(), &self.rows);
+                self.list.reset(&self.rows, default);
             }
             self.stale = true;
             self.query = query;
@@ -579,38 +592,14 @@ impl CommandLine {
             || self.rows.iter().zip(&rows).any(|(old, new)| {
                 old.candidate.key != new.candidate.key || old.candidate.label != new.candidate.label
             });
-        if restart {
-            self.list.reset();
-            self.list.update(&[], &rows);
+        let default = self.default_selection(app, query.as_ref(), &rows);
+        if same_list {
+            self.list.update(&rows, default);
         } else {
-            self.list.update(&self.rows, &rows);
+            self.list.reset(&rows, default);
         }
         response.redraw = restart || changed;
         self.rows = rows;
-        // A theme list opens on the theme in force, and a buffer to kill
-        // on the current buffer, so Enter alone takes it.
-        if let Some(query) = &query
-            && query.text.is_empty()
-        {
-            let current = match query.target {
-                Target::Slot(SlotKind::Theme) => {
-                    let theme = app.options().text(None, "theme");
-                    let row = self
-                        .rows
-                        .iter()
-                        .find(|row| row.candidate.payload.replacement.as_deref() == Some(theme));
-                    row.map(|row| row.candidate.key)
-                }
-                Target::Slot(SlotKind::CurrentBuffer) => app
-                    .active_view()
-                    .and_then(|view| app.view(view))
-                    .map(|view| CandidateKey(view.document_id.number())),
-                _ => None,
-            };
-            if let Some(key) = current {
-                self.list.preselect(&self.rows, key);
-            }
-        }
         self.query = query;
         response
     }
@@ -865,7 +854,9 @@ impl CommandLine {
             if let Some(query) = &self.query {
                 exact_first(&mut rows, &query.text, true);
             }
-            self.list.update(&self.rows, &rows);
+            // Project files must match, so the first row is the default.
+            let default = rows.first().map(|row| row.candidate.key);
+            self.list.update(&rows, default);
             self.rows = rows;
             self.stale = false;
         }
@@ -874,12 +865,58 @@ impl CommandLine {
     pub(super) fn picker_failed(&mut self, error: String) {
         self.error = Some(error);
     }
-    /// Whether the text being completed has candidates to choose from;
-    /// free text such as keys or a shell command has none.
-    /// Whether Enter would take the selected row. In a path slot it takes
-    /// the typed text until a row is chosen, and Tab alone uses the default.
-    pub fn enter_selects(&self) -> bool {
-        self.list.user_selected() || self.locate().target != Some(Target::Slot(SlotKind::Path))
+    /// Whether the input itself can be selected, so that Enter takes it as
+    /// typed, as vertico allows the prompt: where the text need not name a
+    /// candidate.
+    fn allows_input(&self) -> bool {
+        match self.query.as_ref().map(|q| q.target) {
+            None => true,
+            Some(Target::Name) => false,
+            Some(Target::Slot(kind)) => !kind.requires_match(),
+        }
+    }
+    /// Selects the input, so that Enter takes it as typed.
+    pub(super) fn select_input(&mut self) {
+        self.list.select_input();
+    }
+    /// Whether the input is selected over rows, so that Enter takes the
+    /// text as typed; the screen marks the input then.
+    pub fn input_selected(&self) -> bool {
+        !self.rows.is_empty() && self.list.index(&self.rows).is_none()
+    }
+    /// Where the selection starts on new rows, as `vertico-preselect` set
+    /// to `directory`: the first row, but the input when it names a
+    /// directory, or a project typed as a path; a theme list on the theme
+    /// in force and a buffer to kill on the current buffer, so that Enter
+    /// alone takes them. None is the input.
+    fn default_selection(
+        &self,
+        app: &Application,
+        query: Option<&Query>,
+        rows: &[MatchedCandidate<Completion>],
+    ) -> Option<CandidateKey> {
+        let first = rows.first().map(|row| row.candidate.key);
+        let Some(query) = query else {
+            return first;
+        };
+        match query.target {
+            Target::Slot(SlotKind::Path) if split_path(&query.text).1.is_empty() => None,
+            Target::Slot(SlotKind::Project) if query.text.starts_with(['/', '~', '.']) => None,
+            Target::Slot(SlotKind::Theme) if query.text.is_empty() => {
+                let theme = app.options().text(None, "theme");
+                rows.iter()
+                    .find(|row| row.candidate.payload.replacement.as_deref() == Some(theme))
+                    .map(|row| row.candidate.key)
+                    .or(first)
+            }
+            Target::Slot(SlotKind::CurrentBuffer) if query.text.is_empty() => app
+                .active_view()
+                .and_then(|view| app.view(view))
+                .map(|view| CandidateKey(view.document_id.number()))
+                .filter(|key| rows.iter().any(|row| row.candidate.key == *key))
+                .or(first),
+            _ => first,
+        }
     }
     /// The theme to show while a THEME slot is completed: the selected row
     /// once the user moves to one or types text that picks one. The screen
@@ -928,14 +965,15 @@ impl CommandLine {
             ..Response::default()
         })
     }
-    /// Puts the selected candidate into the slot under the cursor. Returns
+    /// Puts the candidate of a row into the slot under the cursor. Returns
     /// whether a directory was entered.
-    fn fill(&mut self, location: &Location) -> Result<bool, String> {
-        let index = self
-            .list
-            .index(&self.rows)
-            .ok_or_else(|| "no candidate".to_owned())?;
-        let completion = &self.rows[index].candidate.payload;
+    fn fill(&mut self, location: &Location, index: usize) -> Result<bool, String> {
+        let completion = &self
+            .rows
+            .get(index)
+            .ok_or_else(|| "no candidate".to_owned())?
+            .candidate
+            .payload;
         let directory = completion.directory;
         let mut text = completion
             .replacement
@@ -1149,49 +1187,44 @@ impl CommandLine {
         response.redraw = true;
         Transition::Active(response)
     }
+    /// Takes the selection, as `vertico-exit`: a row fills its slot, the
+    /// input stays as typed, which must then name a candidate where one is
+    /// required; then the line runs, or goes on to the next argument.
     fn confirm(&mut self, app: &Application) -> Transition {
         let location = self.locate();
         let slot_text = &self.input.text()[location.range.clone()];
-        // A row chosen by hand wins over whatever the text already names.
-        let chosen = self.list.user_selected();
-        // Only a typed path needs no row; the rest wait for the answer.
-        if self.stale && (chosen || location.target != Some(Target::Slot(SlotKind::Path))) {
+        let selected = self.list.index(&self.rows);
+        // Rows of the last input wait for this one's; only the input
+        // itself can be taken meanwhile.
+        if self.stale && selected.is_some() {
             return Transition::Blocked;
         }
-        let accept = match location.target {
-            Some(Target::Name) => chosen || self.info(slot_text).is_none(),
-            Some(Target::Slot(SlotKind::Path)) => chosen,
-            // A remembered project, unless a directory is being typed.
-            Some(Target::Slot(SlotKind::Project)) => {
-                if slot_text.trim().is_empty() && self.rows.is_empty() {
-                    self.error = Some("no remembered project; type a directory".into());
-                    return Transition::redraw();
-                }
-                chosen || !slot_text.starts_with(['/', '~', '.'])
-            }
-            Some(Target::Slot(kind)) if kind.requires_match() => {
-                chosen
-                    || !self
-                        .rows
-                        .iter()
-                        .any(|r| r.candidate.payload.replacement.as_deref() == Some(slot_text))
-            }
-            _ => false,
-        };
-        let mut accepted = false;
-        if accept
+        if location.target == Some(Target::Slot(SlotKind::Project))
+            && slot_text.trim().is_empty()
             && self.rows.is_empty()
-            && matches!(location.target, Some(Target::Slot(kind)) if kind.requires_match())
         {
-            self.error = Some("no matching candidate".into());
+            self.error = Some("no remembered project; type a directory".into());
             return Transition::redraw();
         }
-        if accept && !self.rows.is_empty() {
-            match self.fill(&location) {
+        let mut accepted = false;
+        match selected {
+            Some(index) => match self.fill(&location, index) {
                 Ok(true) => return self.edited(app),
                 Ok(false) => accepted = true,
                 Err(error) => {
                     self.error = Some(error);
+                    return Transition::redraw();
+                }
+            },
+            None => {
+                if let Some(Target::Slot(kind)) = location.target
+                    && kind.requires_match()
+                    && !self
+                        .rows
+                        .iter()
+                        .any(|r| r.candidate.payload.replacement.as_deref() == Some(slot_text))
+                {
+                    self.error = Some("no matching candidate".into());
                     return Transition::redraw();
                 }
             }
@@ -1228,21 +1261,56 @@ impl CommandLine {
             }
         }
     }
-    /// Backspace after a `/` in a path slot removes the last directory.
+    /// Backspace after a `/` in a path slot removes the directory before
+    /// it, as `vertico-directory-up`; `~/` first becomes the home
+    /// directory, so it goes up to the directory holding that. Without a
+    /// directory before the slash, Backspace deletes as usual.
     fn delete_directory(&mut self, location: &Location) -> bool {
-        let text = &self.input.text()[location.range.clone()];
+        let cursor = self.input.cursor();
         if location.target != Some(Target::Slot(SlotKind::Path))
-            || self.input.cursor() != location.range.end
             || !self.input.selection().range().is_empty()
-            || !text.ends_with('/')
-            || text.len() == 1
+            || cursor <= location.range.start
+            || cursor > location.range.end
+            || !self.input.text()[..cursor].ends_with('/')
         {
             return false;
         }
-        let keep = text[..text.len() - 1].rfind('/').map_or(0, |i| i + 1);
-        let start = location.range.start + keep;
-        self.input.replace_range(start..location.range.end, "");
+        let start = location.range.start;
+        if &self.input.text()[start..cursor] == "~/"
+            && let Some(home) = self.home.as_ref().and_then(|home| home.to_str())
+        {
+            let home = format!("{}/", home.trim_end_matches('/'));
+            self.input.replace_range(start..cursor, &home);
+        }
+        let cursor = self.input.cursor();
+        let before = &self.input.text()[start..cursor - 1];
+        let Some(slash) = before.rfind('/') else {
+            return false;
+        };
+        self.input.replace_range(start + slash + 1..cursor, "");
         true
+    }
+    /// Drops the part of a path that what was typed after it shadows, as
+    /// `vertico-directory-tidy` deletes what `file-name-shadow-mode` greys
+    /// out: after `//` the path starts over at the root, and after `/~` at
+    /// the home directory. Only typing at the end of the path does this.
+    fn tidy_shadowed(&mut self) {
+        let location = self.locate();
+        if location.target != Some(Target::Slot(SlotKind::Path))
+            || self.input.cursor() != location.range.end
+        {
+            return;
+        }
+        let text = &self.input.text()[location.range.clone()];
+        let from = [text.rfind("//"), text.rfind("/~")]
+            .into_iter()
+            .flatten()
+            .max();
+        if let Some(at) = from {
+            // The whole slot is replaced, so the caret stays at its end.
+            let kept = text[at + 1..].to_owned();
+            self.input.replace_range(location.range, &kept);
+        }
     }
     /// The slot keymap: a key of an empty `Choice` slot chooses its word.
     /// Only a line that asks a question answers with one key; a typed line
@@ -1273,13 +1341,18 @@ impl CommandLine {
             Input::Cancel => self.close(vec![]),
             Input::Confirm => self.confirm(app),
             Input::Complete { backward: true } => {
-                self.list.navigate(&self.rows, ListMotion::Previous, true);
+                let input = self.allows_input();
+                self.list
+                    .navigate(&self.rows, ListMotion::Previous, true, input);
                 Transition::redraw()
             }
             Input::Complete { backward: false } if self.stale => Transition::Blocked,
             Input::Complete { backward: false } => {
+                // As `vertico-insert`: the selected row, or the first one
+                // while the input is selected.
                 let location = self.locate();
-                match self.fill(&location) {
+                let index = self.list.index(&self.rows).unwrap_or(0);
+                match self.fill(&location, index) {
                     Ok(_) => self.edited(app),
                     Err(error) => {
                         self.error = Some(error);
@@ -1288,20 +1361,30 @@ impl CommandLine {
                 }
             }
             Input::Candidate { motion, wrap } => {
-                if self.list.navigate(&self.rows, motion, wrap) {
+                let input = self.allows_input();
+                if self.list.navigate(&self.rows, motion, wrap, input) {
                     Transition::redraw()
                 } else {
                     Transition::Blocked
                 }
             }
+            // As vertico-directory: after a slash, both delete a directory.
             Input::Text(InputKey::Delete {
                 backward: true,
-                word: false,
+                word: _,
             }) if self.delete_directory(&self.locate()) => self.edited(app),
-            input => match edit_field(&mut self.input, input) {
-                Some(update) if update.text_changed || update.selection_changed => self.edited(app),
-                _ => Transition::Blocked,
-            },
+            input => {
+                let typed = matches!(input, Input::Text(InputKey::Char(_)));
+                match edit_field(&mut self.input, input) {
+                    Some(update) if update.text_changed || update.selection_changed => {
+                        if typed {
+                            self.tidy_shadowed();
+                        }
+                        self.edited(app)
+                    }
+                    _ => Transition::Blocked,
+                }
+            }
         }
     }
     pub(super) fn observe(&mut self, app: &Application) -> Transition {

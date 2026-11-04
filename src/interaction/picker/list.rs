@@ -25,6 +25,11 @@ pub enum ListMotion {
     First,
     Last,
 }
+/// The selection over the rows and the input itself, as vertico's
+/// `vertico--index`: `None` is the input, which Enter then takes as typed;
+/// a key is a row, which Enter takes. A selection the user moved to is
+/// locked: it stays on its row while the rows change, as long as the row
+/// is there, as `vertico--lock-candidate` keeps it.
 #[derive(Default, Debug)]
 pub struct CandidateListState {
     selected: Option<CandidateKey>,
@@ -33,6 +38,7 @@ pub struct CandidateListState {
     page_size: usize,
 }
 impl CandidateListState {
+    /// The selected row; None when the input is selected.
     pub fn selected(&self) -> Option<CandidateKey> {
         self.selected
     }
@@ -47,38 +53,78 @@ impl CandidateListState {
         rows.iter()
             .position(|row| Some(row.candidate.key) == self.selected)
     }
-    pub fn reset(&mut self) {
-        self.selected = None;
+    /// Starts over on new rows at `default`: a row, or the input.
+    pub fn reset<T>(&mut self, rows: &[MatchedCandidate<T>], default: Option<CandidateKey>) {
         self.user_selected = false;
         self.first_visible = 0;
+        self.selected = default.filter(|key| rows.iter().any(|row| row.candidate.key == *key));
+        self.reveal(rows);
     }
-    pub fn update<T>(&mut self, old: &[MatchedCandidate<T>], new: &[MatchedCandidate<T>]) {
-        let index = if self.user_selected {
-            new.iter()
-                .position(|row| Some(row.candidate.key) == self.selected)
-                .unwrap_or_else(|| {
-                    self.index(old)
-                        .unwrap_or(0)
-                        .min(new.len().saturating_sub(1))
-                })
-        } else {
-            0
-        };
-        self.selected = new.get(index).map(|row| row.candidate.key);
-        if new.is_empty() {
+    /// Follows changed rows: a locked selection stays on its row, or on
+    /// the input; one whose row is gone, and one never moved, go to
+    /// `default`.
+    pub fn update<T>(&mut self, new: &[MatchedCandidate<T>], default: Option<CandidateKey>) {
+        let kept = self.user_selected
+            && self
+                .selected
+                .is_none_or(|key| new.iter().any(|row| row.candidate.key == key));
+        if !kept {
             self.user_selected = false;
+            self.selected = default.filter(|key| new.iter().any(|row| row.candidate.key == *key));
         }
         self.reveal(new);
     }
-    /// Starts the selection on the row of `key`, if there is one, as a
-    /// default rather than a choice: navigation goes on from it, but
-    /// `user_selected` stays false.
-    pub fn preselect<T>(&mut self, rows: &[MatchedCandidate<T>], key: CandidateKey) {
-        if self.user_selected || !rows.iter().any(|row| row.candidate.key == key) {
-            return;
+    /// Selects the input, as by hand.
+    pub fn select_input(&mut self) {
+        self.selected = None;
+        self.user_selected = true;
+        self.first_visible = 0;
+    }
+    /// Moves the selection, as `vertico-next` and its kin: the input is a
+    /// place before the first row when `prompt` allows it; `wrap` goes
+    /// round past either end, through the input. First goes to the first
+    /// row, and from there to the input.
+    pub fn navigate<T>(
+        &mut self,
+        rows: &[MatchedCandidate<T>],
+        motion: ListMotion,
+        wrap: bool,
+        prompt: bool,
+    ) -> bool {
+        if rows.is_empty() {
+            return false;
         }
-        self.selected = Some(key);
+        let before = (self.selected, self.first_visible);
+        let total = rows.len() as isize;
+        // -1 is the input.
+        let index = self.index(rows).map_or(-1, |i| i as isize);
+        let page = self.page_size.max(1) as isize;
+        let lowest = if prompt { -1 } else { 0 };
+        let next = match motion {
+            ListMotion::First if index > 0 => 0,
+            ListMotion::First => -1,
+            ListMotion::Last => total - 1,
+            ListMotion::Previous | ListMotion::Next => {
+                let step = if matches!(motion, ListMotion::Next) {
+                    1
+                } else {
+                    -1
+                };
+                let next = index + step;
+                match (wrap, prompt) {
+                    (false, _) => next,
+                    (true, true) => (next + 1).rem_euclid(total + 1) - 1,
+                    (true, false) => next.rem_euclid(total),
+                }
+            }
+            ListMotion::PagePrevious => (index - page).max(0),
+            ListMotion::PageNext => index + page,
+        };
+        let next = next.clamp(lowest, total - 1);
+        self.selected = usize::try_from(next).ok().map(|i| rows[i].candidate.key);
+        self.user_selected = true;
         self.reveal(rows);
+        before != (self.selected, self.first_visible)
     }
     pub fn resize<T>(&mut self, rows: &[MatchedCandidate<T>], page_size: usize) -> bool {
         let before = (self.page_size, self.first_visible);
@@ -98,37 +144,5 @@ impl CandidateListState {
         } else if index >= self.first_visible.saturating_add(page) {
             self.first_visible = index + 1 - page;
         }
-    }
-    pub fn navigate<T>(
-        &mut self,
-        rows: &[MatchedCandidate<T>],
-        motion: ListMotion,
-        wrap: bool,
-    ) -> bool {
-        if rows.is_empty() {
-            return false;
-        }
-        let before = (self.selected, self.first_visible);
-        let index = self.index(rows).unwrap_or(0);
-        let page = self.page_size.max(1);
-        let last = rows.len() - 1;
-        let next = match motion {
-            ListMotion::First => 0,
-            ListMotion::Last => last,
-            ListMotion::Previous if wrap => (index + last) % rows.len(),
-            ListMotion::Next if wrap => (index + 1) % rows.len(),
-            ListMotion::Previous => index.saturating_sub(1),
-            ListMotion::Next => (index + 1).min(last),
-            ListMotion::PagePrevious if wrap => {
-                (index + rows.len() - page % rows.len()) % rows.len()
-            }
-            ListMotion::PageNext if wrap => (index + page % rows.len()) % rows.len(),
-            ListMotion::PagePrevious => index.saturating_sub(page),
-            ListMotion::PageNext => index.saturating_add(page).min(last),
-        };
-        self.selected = Some(rows[next].candidate.key);
-        self.user_selected = true;
-        self.reveal(rows);
-        before != (self.selected, self.first_visible)
     }
 }
