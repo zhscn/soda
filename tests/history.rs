@@ -224,3 +224,29 @@ fn a_choice_keeps_its_items_in_the_history_it_names() {
     keys(&mut r, "M-p");
     assert_eq!(line(&r), "choose beta");
 }
+#[test]
+fn a_directory_ranks_by_the_files_taken_below_it() {
+    let root = tempfile::tempdir().unwrap();
+    for dir in ["a", "m", "z/sub"] {
+        std::fs::create_dir_all(root.path().join(dir)).unwrap();
+    }
+    std::fs::write(root.path().join("z/sub/f.txt"), "f\n").unwrap();
+    std::fs::write(root.path().join("m/g.txt"), "g\n").unwrap();
+    let mut r = project(root.path());
+    let is_open = |r: &Runtime, name: &str| {
+        let view = r.app().active_view().and_then(|v| r.app().view(v));
+        view.is_some_and(|v| r.app().document_name(v.document_id).ends_with(name))
+    };
+    let base = root.path().display().to_string();
+    for file in ["z/sub/f.txt", "m/g.txt"] {
+        let typed: Vec<_> = format!("{base}/{file}").chars().map(String::from).collect();
+        keys(&mut r, &format!("M-x open SPC {} RET", typed.join(" ")));
+        let name = file.rsplit('/').next().unwrap();
+        wait(&mut r, |r| is_open(r, name));
+    }
+    // From m/g.txt, the file before it leads; the current one does not count.
+    let typed: Vec<_> = format!("{base}/").chars().map(String::from).collect();
+    keys(&mut r, &format!("M-x open SPC {}", typed.join(" ")));
+    wait(&mut r, |r| rows(r).len() == 3);
+    assert_eq!(rows(&r), ["z/", "a/", "m/"]);
+}

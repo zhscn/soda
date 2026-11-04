@@ -129,6 +129,16 @@ pub fn of_slot(command: &str, slots: &[Slot], index: usize) -> Option<String> {
 /// A path as file histories keep it: under `~` when it is below it, with
 /// `.` and `..` resolved; None when it is not UTF-8.
 pub fn abbreviate(path: &Path, home: Option<&Path>) -> Option<String> {
+    let normal = normalize(path);
+    let text = match home.and_then(|home| normal.strip_prefix(home).ok()) {
+        Some(below) if below.as_os_str().is_empty() => "~".to_owned(),
+        Some(below) => format!("~/{}", below.to_str()?),
+        None => normal.to_str()?.to_owned(),
+    };
+    (!text.chars().any(char::is_control)).then_some(text)
+}
+/// A path with `.` and `..` resolved by its text alone.
+pub fn normalize(path: &Path) -> PathBuf {
     use std::path::Component;
     let mut normal = PathBuf::new();
     for component in path.components() {
@@ -140,12 +150,7 @@ pub fn abbreviate(path: &Path, home: Option<&Path>) -> Option<String> {
             component => normal.push(component),
         }
     }
-    let text = match home.and_then(|home| normal.strip_prefix(home).ok()) {
-        Some(below) if below.as_os_str().is_empty() => "~".to_owned(),
-        Some(below) => format!("~/{}", below.to_str()?),
-        None => normal.to_str()?.to_owned(),
-    };
-    (!text.chars().any(char::is_control)).then_some(text)
+    normal
 }
 /// The path a file history's entry names.
 pub fn expand(entry: &str, home: Option<&Path>) -> PathBuf {

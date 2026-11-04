@@ -78,6 +78,9 @@ pub struct CommandLine {
     base: PathBuf,
     home: Option<PathBuf>,
     view: Option<ViewId>,
+    /// The file of the current document, which does not count as taken
+    /// when files are ordered by the history: it would always come first.
+    current_file: Option<PathBuf>,
     rows: Vec<MatchedCandidate<Completion>>,
     list: CandidateListState,
     query: Option<Query>,
@@ -244,6 +247,12 @@ impl CommandLine {
                 .map(PathBuf::from)
                 .filter(|p| p.is_absolute()),
             view: app.active_view(),
+            current_file: app
+                .active_view()
+                .and_then(|view| app.view(view))
+                .and_then(|view| app.workspace().file(view.document_id))
+                .and_then(|file| file.path())
+                .map(Path::to_owned),
             rows: vec![],
             list: CandidateListState::default(),
             query: None,
@@ -714,8 +723,7 @@ impl CommandLine {
         let Some(entries) = directory.entries.as_ref() else {
             return vec![];
         };
-        let ranks = self.ranks(history::FILE);
-        let home = self.home.as_deref();
+        let ranks = self.directory_ranks(&directory.path);
         let mut matched: Vec<_> = entries
             .iter()
             .enumerate()
@@ -728,8 +736,7 @@ impl CommandLine {
                     .map(|name| format!("{parent}{name}{slash}"));
                 let label = format!("{}{slash}", printable(&entry.name.to_string_lossy()));
                 let (leading, typed) = name_match(&label, prefix)?;
-                let path = history::abbreviate(&directory.path.join(&entry.name), home);
-                let used = history_rank(&ranks, path.as_deref());
+                let used = ranks.get(&entry.name).copied().unwrap_or(u32::MAX);
                 let row = row(index as u64, label, replacement, entry.directory);
                 Some(((!leading, used), mark(row, typed, None)))
             })
@@ -1086,6 +1093,30 @@ impl CommandLine {
     /// How recently each entry of a history was taken: 0 is the newest.
     fn ranks(&self, name: &str) -> HashMap<String, u32> {
         self.histories.ranks(name)
+    }
+    /// How recently a file was taken in or below each entry of a directory,
+    /// 0 the newest, as vertico ranks the steps of a file name: a history
+    /// entry under the directory counts for its first component, so
+    /// `~/.config/` ranks by `~/.config/soda/init.lua`.
+    fn directory_ranks(&self, directory: &Path) -> HashMap<std::ffi::OsString, u32> {
+        let home = self.home.as_deref();
+        let directory = history::normalize(directory);
+        let mut ranks = HashMap::new();
+        let entries = self.histories.entries(history::FILE).iter().rev();
+        for (age, entry) in entries.enumerate() {
+            let path = history::expand(entry, home);
+            if self.current_file.as_ref() == Some(&path) {
+                continue;
+            }
+            if let Ok(below) = path.strip_prefix(&directory)
+                && let Some(first) = below.components().next()
+            {
+                ranks
+                    .entry(first.as_os_str().to_owned())
+                    .or_insert(age as u32);
+            }
+        }
+        ranks
     }
     /// The history of a kind of slot that names no command.
     fn slot_history(&self, kind: SlotKind) -> Option<String> {
