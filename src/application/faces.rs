@@ -45,6 +45,18 @@ pub const UI_FACES: &[(&str, &str)] = &[
     ("gutter-current", "The caret line's number"),
     ("cursor-line", "The caret line"),
     ("selection", "Selected text"),
+    (
+        "secondary-selection",
+        "The grab, as Emacs's secondary selection",
+    ),
+    (
+        "beacon-selection",
+        "Beacon's other selections; unset, a mix of selection and secondary-selection",
+    ),
+    (
+        "beacon-cursor",
+        "Beacon's other carets; unset, a mix of mode-beacon and secondary-selection",
+    ),
     ("status", "The status line"),
     ("status-strong", "The path on the status line"),
     ("modified", "Unsaved markers"),

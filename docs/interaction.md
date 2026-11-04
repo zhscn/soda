@@ -116,7 +116,9 @@ Backspace 退掉上一个键，Esc 取消，计数跨过 keypad 保留。与 meo
 
 ### Beacon
 
-`G` 把选区设为 grab 并进入 Beacon；没有选区时 `G` 留下标记，之后用 `S` 把选区与它交换。主选区在会话中，其余选区是跟随编辑的 `DocumentPosition`，不进入核心。Normal 和单选区 Insert 永远只有一个选区，所以只有下面的操作需要知道多选区。
+`G` 把选区设为 grab 并进入 Beacon；没有选区时 `G` 取消 grab、离开 Beacon，只留下标记（meow 的 `meow-grab` 也是这样取消第二选区），之后用 `S` 把选区与它交换。
+
+grab 是 Emacs 的第二选区，用 `secondary-selection` face 画出，范围越过行尾时行尾之后那一格也画上。其余选区用 `beacon-selection`，其余插入点用 `beacon-cursor`；这两个没设置时取 `selection`、`mode-beacon` 各与 `secondary-selection` 的背景对半混合，和 meow 的 `meow-beacon-fake-selection`、`meow-beacon-fake-cursor` 一样，所以主选区、其余选区和 grab 三者看得出区别。主选区在会话中，其余选区是跟随编辑的 `DocumentPosition`，不进入核心。Normal 和单选区 Insert 永远只有一个选区，所以只有下面的操作需要知道多选区。
 
 grab 在两端都包住新输入的文字：起点在输入之前，终点在输入之后，所以在 grab 开头输入的字符仍在 grab 里。主选区每次变化，其余选区按它的种类重新派生；和主选区重叠的不算（比如在词中间按 `b` 只选了半个词，那个词就不再派生一次）：
 

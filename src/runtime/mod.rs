@@ -220,6 +220,10 @@ impl Runtime {
         }
         self.layers.expand_hints(&self.app)
     }
+    /// The text `grab` set aside, as Emacs's secondary selection.
+    pub fn grab(&self) -> Option<std::ops::Range<usize>> {
+        self.layers.grabbed(&self.app)
+    }
     /// The other selections of Beacon.
     pub fn beacons(&self) -> Vec<std::ops::Range<usize>> {
         self.layers.beacons(&self.app)

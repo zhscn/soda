@@ -128,6 +128,8 @@ pub(crate) struct Span {
     pub width: usize,
     pub text: String,
     pub selected: bool,
+    /// Beacon's other selections and the grab, under the selection.
+    pub mark: Mark,
     pub matched: bool,
     /// Secondary text, such as a candidate's description.
     pub detail: bool,
@@ -140,6 +142,17 @@ pub(crate) struct Span {
     /// The font it was measured in; a terminal has only one.
     #[cfg_attr(not(feature = "gui"), allow(dead_code))]
     pub font: Font,
+}
+/// What else marks a span besides the selection, as meow draws it: the
+/// grab in Emacs's secondary selection face, Beacon's other selections and
+/// carets each in a mix of that with the selection or the cursor.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum Mark {
+    #[default]
+    None,
+    Grab,
+    BeaconSelection,
+    BeaconCursor,
 }
 /// One screen row: the zero-based line it shows and its clipped text.
 pub(crate) struct Row {
@@ -185,6 +198,7 @@ pub(crate) fn row(
 ) -> Vec<Span> {
     let marks = Marks {
         selection,
+        grab: None,
         beacons: &[],
         digits: &[],
         matches: &[],
@@ -199,6 +213,8 @@ pub(crate) fn row(
 /// What the modal layer shows over the text of the active window.
 #[derive(Default)]
 pub(crate) struct Overlay {
+    /// The grab, Emacs's secondary selection.
+    pub grab: Option<std::ops::Range<usize>>,
     /// The other selections of Beacon.
     pub beacons: Vec<std::ops::Range<usize>>,
     /// Digits that extend the selection, drawn over the character there.
@@ -211,6 +227,8 @@ pub(crate) struct Overlay {
 /// row text, categories ordered and disjoint.
 struct Marks<'a> {
     selection: std::ops::Range<usize>,
+    /// The grab, under everything else that marks the text.
+    grab: Option<std::ops::Range<usize>>,
     /// More selections, of Beacon; carets among them show as one cell.
     beacons: &'a [std::ops::Range<usize>],
     digits: &'a [(usize, char)],
@@ -283,6 +301,7 @@ fn styled_row(
 ) -> Vec<Span> {
     let Marks {
         selection,
+        grab,
         beacons,
         digits,
         matches,
@@ -293,6 +312,19 @@ fn styled_row(
         inlays,
     } = marks;
     let measure = walk.measure;
+    // Beacon's carets first: one stands on the character after it.
+    let mark_of = |start: usize, end: usize| {
+        let meets = |range: &std::ops::Range<usize>| start < range.end && end > range.start;
+        if beacons.iter().any(|b| b.is_empty() && b.start == start) {
+            Mark::BeaconCursor
+        } else if beacons.iter().any(|b| !b.is_empty() && meets(b)) {
+            Mark::BeaconSelection
+        } else if grab.as_ref().is_some_and(meets) {
+            Mark::Grab
+        } else {
+            Mark::None
+        }
+    };
     // Spaces and tabs from here to the end of the line trail.
     let trailing = text.trim_end_matches(['\n', '\r']);
     let trailing = trailing.trim_end_matches([' ', '\t']).len();
@@ -329,6 +361,7 @@ fn styled_row(
                 width: used,
                 text: shown,
                 selected: false,
+                mark: Mark::None,
                 matched: false,
                 detail: false,
                 category: None,
@@ -370,12 +403,10 @@ fn styled_row(
                 (cluster.to_owned(), true)
             };
             let start = byte_start + offset;
-            let selected = (!selection.is_empty()
+            let selected = !selection.is_empty()
                 && start < selection.end
-                && start + cluster.len() > selection.start)
-                || beacons.iter().any(|beacon| {
-                    start < beacon.end.max(beacon.start + 1) && start + cluster.len() > beacon.start
-                });
+                && start + cluster.len() > selection.start;
+            let mark = mark_of(start, start + cluster.len());
             let matched = matches
                 .iter()
                 .any(|range| offset < range.end && offset + cluster.len() > range.start);
@@ -400,6 +431,7 @@ fn styled_row(
             let blank = shown.is_empty();
             if let Some(last) = spans.last_mut().filter(|last| {
                 last.selected == selected
+                    && last.mark == mark
                     && last.matched == matched
                     && last.detail == secondary
                     && last.category == category
@@ -416,6 +448,7 @@ fn styled_row(
                     width: visible,
                     text: shown,
                     selected,
+                    mark,
                     matched,
                     detail: secondary,
                     category,
@@ -430,21 +463,19 @@ fn styled_row(
         }
         x = end;
     }
-    // A beacon caret at the end of the line has no character to stand on:
-    // it takes the cell after the text, where the main caret would be.
+    // The line break has no character to show: a beacon caret on it, or a
+    // grab or beacon selection that goes on past it, takes the cell after
+    // the text, as Emacs draws a face on the newline.
     let line_end = byte_start + text.trim_end_matches(['\n', '\r']).len();
-    if x >= left
-        && x < right
-        && beacons
-            .iter()
-            .any(|beacon| beacon.is_empty() && beacon.start == line_end)
-    {
+    let mark = mark_of(line_end, line_end + 1);
+    if x >= left && x < right && mark != Mark::None {
         let width = measure.column().min(right - x);
         spans.push(Span {
             x: at,
             width,
             text: String::new(),
-            selected: true,
+            selected: false,
+            mark,
             matched: false,
             detail: false,
             category: None,
@@ -478,6 +509,7 @@ pub(crate) fn candidate_row<T>(
     };
     let marks = Marks {
         selection,
+        grab: None,
         beacons: &[],
         digits: &[],
         matches: &row.highlights,
@@ -1163,6 +1195,7 @@ pub(crate) fn frame(
         }
         let marks = Marks {
             selection: state.selection().range(),
+            grab: modal.grab.clone(),
             beacons: &modal.beacons,
             digits: &modal.digits,
             matches: &[],

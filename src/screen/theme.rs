@@ -12,6 +12,13 @@ pub(crate) struct Theme {
     pub gutter_current: Style,
     pub cursor_line: Style,
     pub selection: Style,
+    /// The grab, as Emacs's `secondary-selection`.
+    pub secondary_selection: Style,
+    /// Beacon's other selections and carets. Unless set, their background
+    /// mixes the grab's with the selection's or the Beacon caret's, as
+    /// meow's `meow-beacon-fake-selection` and `meow-beacon-fake-cursor`.
+    pub beacon_selection: Style,
+    pub beacon_cursor: Style,
     pub status: Style,
     pub status_strong: Style,
     pub modified: Style,
@@ -173,6 +180,13 @@ impl Theme {
                     .fold(inherited, |style, spec| apply(style, spec));
             }
         }
+        let secondary = theme.secondary_selection.bg;
+        if theme.beacon_selection.bg.is_none() {
+            theme.beacon_selection.bg = mixed(theme.selection.bg, secondary);
+        }
+        if theme.beacon_cursor.bg.is_none() {
+            theme.beacon_cursor.bg = mixed(theme.mode_visual.bg, secondary);
+        }
         theme.named = crate::application::faces::names()
             .map(|name| theme.slot(&name).copied().unwrap_or_default())
             .collect();
@@ -181,6 +195,12 @@ impl Theme {
     /// The style of a span of laid out text over `base`.
     pub fn span(&self, span: &super::Span, base: Style) -> Style {
         let mut style = base;
+        style = style.patch(match span.mark {
+            super::Mark::None => Style::new(),
+            super::Mark::Grab => self.secondary_selection,
+            super::Mark::BeaconSelection => self.beacon_selection,
+            super::Mark::BeaconCursor => self.beacon_cursor,
+        });
         if span.selected {
             style = style.patch(self.selection);
         }
@@ -220,6 +240,9 @@ impl Theme {
             "gutter-current" => &mut self.gutter_current,
             "cursor-line" => &mut self.cursor_line,
             "selection" => &mut self.selection,
+            "secondary-selection" => &mut self.secondary_selection,
+            "beacon-selection" => &mut self.beacon_selection,
+            "beacon-cursor" => &mut self.beacon_cursor,
             "status" => &mut self.status,
             "status-strong" => &mut self.status_strong,
             "modified" => &mut self.modified,
@@ -271,6 +294,9 @@ impl Theme {
             gutter_current: on(p.gutter_current, p.bg_highlight),
             cursor_line: Style::new().bg(c(p.bg_highlight)),
             selection: Style::new().bg(c(p.selection)),
+            secondary_selection: Style::new().bg(c(mix(p.bg, p.yellow, 0.3))),
+            beacon_selection: Style::new(),
+            beacon_cursor: Style::new(),
             status: on(p.fg_dark, p.bg_dark),
             status_strong: on(p.fg, p.bg_dark).add_modifier(Modifier::BOLD),
             modified: Style::new().fg(c(p.yellow)),
@@ -441,6 +467,25 @@ fn apply(mut style: Style, spec: &crate::application::faces::FaceSpec) -> Style 
         style.sub_modifier = Modifier::empty();
     }
     style
+}
+/// `a` with `amount` of `b` in it.
+fn mix(a: u32, b: u32, amount: f32) -> u32 {
+    let channel = |shift: u32| {
+        let (a, b) = (((a >> shift) & 0xff) as f32, ((b >> shift) & 0xff) as f32);
+        ((a + (b - a) * amount).round() as u32) << shift
+    };
+    channel(16) | channel(8) | channel(0)
+}
+/// Two colors half and half, when both are known.
+fn mixed(a: Option<Color>, b: Option<Color>) -> Option<Color> {
+    match (a?, b?) {
+        (Color::Rgb(r1, g1, b1), Color::Rgb(r2, g2, b2)) => {
+            let rgb =
+                |r: u8, g: u8, b: u8| (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b);
+            Some(color(mix(rgb(r1, g1, b1), rgb(r2, g2, b2), 0.5)))
+        }
+        (a, _) => Some(a),
+    }
 }
 fn color(rgb: u32) -> Color {
     Color::Rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)

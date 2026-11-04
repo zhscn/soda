@@ -416,6 +416,7 @@ pub const BUILTINS: &[Builtin] = &[
             0x005f5f, 0xffffff,
         ],
         faces: &[
+            ("secondary-selection", "bg:#f5d0a0"),
             ("status", "fg:#000000 bg:#c8c8c8"),
             ("status-strong", "fg:#000000 bg:#c8c8c8 bold"),
             ("syntax.comment.doc", "fg:#2a5045"),
@@ -450,6 +451,7 @@ pub const BUILTINS: &[Builtin] = &[
             0x005f5f, 0xfbf7f0,
         ],
         faces: &[
+            ("secondary-selection", "bg:#dfe09f"),
             ("status", "fg:#000000 bg:#cab9b2"),
             ("status-strong", "fg:#000000 bg:#cab9b2 bold"),
             ("syntax.comment.doc", "fg:#304463"),
@@ -484,6 +486,7 @@ pub const BUILTINS: &[Builtin] = &[
             0x005f5f, 0xffffff,
         ],
         faces: &[
+            ("secondary-selection", "bg:#e5d7a0"),
             ("status", "fg:#000000 bg:#d0d6ff"),
             ("status-strong", "fg:#000000 bg:#d0d6ff bold"),
             ("syntax.comment.doc", "fg:#2a5045"),
@@ -518,6 +521,7 @@ pub const BUILTINS: &[Builtin] = &[
             0x005f5f, 0xffffff,
         ],
         faces: &[
+            ("secondary-selection", "bg:#abdfdd"),
             ("status", "fg:#000000 bg:#afe0f2"),
             ("status-strong", "fg:#000000 bg:#afe0f2 bold"),
             ("syntax.comment.doc", "fg:#224960"),
@@ -552,6 +556,7 @@ pub const BUILTINS: &[Builtin] = &[
             0x6ae4b9, 0x000000,
         ],
         faces: &[
+            ("secondary-selection", "bg:#654a39"),
             ("status", "fg:#ffffff bg:#505050"),
             ("status-strong", "fg:#ffffff bg:#505050 bold"),
             ("syntax.comment.doc", "fg:#9ac8e0"),
@@ -586,6 +591,7 @@ pub const BUILTINS: &[Builtin] = &[
             0x6ae4b9, 0x0d0e1c,
         ],
         faces: &[
+            ("secondary-selection", "bg:#64404f"),
             ("status", "fg:#ffffff bg:#484d67"),
             ("status-strong", "fg:#ffffff bg:#484d67 bold"),
             ("syntax.comment.doc", "fg:#9ac8e0"),
@@ -620,6 +626,7 @@ pub const BUILTINS: &[Builtin] = &[
             0x6ae4b9, 0x000000,
         ],
         faces: &[
+            ("secondary-selection", "bg:#604c30"),
             ("status", "fg:#ffffff bg:#2a2a6a"),
             ("status-strong", "fg:#ffffff bg:#2a2a6a bold"),
             ("syntax.comment.doc", "fg:#9ac8e0"),
@@ -654,6 +661,7 @@ pub const BUILTINS: &[Builtin] = &[
             0x6ae4b9, 0x000000,
         ],
         faces: &[
+            ("secondary-selection", "bg:#204853"),
             ("status", "fg:#ffffff bg:#003c52"),
             ("status-strong", "fg:#ffffff bg:#003c52 bold"),
             ("syntax.comment.doc", "fg:#a0d7f2"),

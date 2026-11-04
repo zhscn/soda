@@ -1039,6 +1039,13 @@ impl Layers {
         if !range.is_empty() {
             self.mode = EditMode::Beacon;
             self.derive_beacons(app, at.time);
+        } else {
+            // Without a selection the grab gives way to a marker, as meow
+            // cancels the secondary selection, and Beacon goes with it.
+            self.modal.beacons.clear();
+            if self.mode == EditMode::Beacon {
+                self.mode = EditMode::Normal;
+            }
         }
     }
     fn swap_grab(&mut self, at: &Place, mut response: Response) -> Response {

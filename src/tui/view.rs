@@ -1067,7 +1067,7 @@ mod tests {
     }
 
     #[test]
-    fn a_beacon_caret_at_the_end_of_a_line_takes_the_cell_after_it() {
+    fn the_grab_and_beacon_selections_each_have_their_face() {
         let root = tempfile::tempdir().unwrap();
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
         r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
@@ -1080,25 +1080,50 @@ mod tests {
             crate::core::Selection::caret(0),
         )));
         r.command(Command::SetMode(EditMode::Normal));
-        // The main caret ends the second line; the other ends the first.
+        // The backgrounds of the first line, and of the cell after it.
+        let first_line = |r: &mut Runtime| {
+            let buffer = draw(r, 30, 6);
+            let row = (0..6u16)
+                .find(|&y| {
+                    (0..30u16)
+                        .map(|x| buffer[(x, y)].symbol())
+                        .collect::<String>()
+                        .contains("foo bar")
+                })
+                .unwrap();
+            let x = (0..30u16)
+                .find(|&x| buffer[(x, row)].symbol() == "f")
+                .unwrap();
+            let cells: Vec<_> = (x..x + 9).map(|x| buffer[(x, row)].bg).collect();
+            (cells, buffer[(29, row)].bg)
+        };
+        let theme = Theme::build("tokyonight", &Default::default());
+        let (grab, cursor, beacon, selection) = (
+            theme.secondary_selection.bg.unwrap(),
+            theme.beacon_cursor.bg.unwrap(),
+            theme.beacon_selection.bg.unwrap(),
+            theme.selection.bg.unwrap(),
+        );
+        assert!(grab != cursor && grab != beacon && beacon != selection);
+        // The main caret ends the second line; the other ends the first,
+        // on the cell after the text. The grab covers the rest.
         keys(&mut r, "e e G");
         assert_eq!(r.beacons(), vec![7..7]);
-        let buffer = draw(&mut r, 30, 6);
-        let row = (0..6u16)
-            .find(|&y| {
-                (0..30u16)
-                    .map(|x| buffer[(x, y)].symbol())
-                    .collect::<String>()
-                    .contains("foo bar")
-            })
-            .unwrap();
-        let x = (0..30u16)
-            .find(|&x| buffer[(x, row)].symbol() == "f")
-            .unwrap();
-        let plain = buffer[(29, row)].bg;
-        let after = buffer[(x + 7, row)].bg;
-        assert_ne!(after, plain, "the cell after `foo bar` shows the caret");
-        assert_eq!(buffer[(x + 8, row)].bg, plain);
+        let (cells, plain) = first_line(&mut r);
+        assert_eq!(cells[..7], [grab; 7]);
+        assert_eq!(cells[7], cursor);
+        assert_eq!(cells[8], plain);
+        // Words: each is a selection of its own face, the grab between.
+        keys(&mut r, "C-a w");
+        let (cells, _) = first_line(&mut r);
+        assert_eq!(cells[..3], [beacon; 3]);
+        assert_eq!(cells[3], grab);
+        // `G` without a selection lets the grab go, and Beacon with it.
+        keys(&mut r, "ESC G");
+        assert_eq!(r.edit_mode(), EditMode::Normal);
+        assert!(r.beacons().is_empty());
+        let (cells, plain) = first_line(&mut r);
+        assert_eq!(cells, vec![plain; 9]);
     }
     #[test]
     fn options_choose_the_tab_bar_and_the_window_titles() {

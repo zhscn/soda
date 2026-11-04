@@ -25,6 +25,15 @@ impl Layers {
         self.modal.grab = None;
         self.modal.beacons.clear();
     }
+    /// The grab, as a range in the text of the active view; a marker,
+    /// empty, shows nothing.
+    pub fn grabbed(&self, app: &Application) -> Option<Range<usize>> {
+        let at = place(app, Default::default())?;
+        let grab = self.modal.grab?;
+        let start = grab.start.resolve(at.document).ok()?.0;
+        let end = grab.end.resolve(at.document).ok()?.0;
+        (start < end).then_some(start..end)
+    }
     /// The other selections, as ranges in the text.
     pub fn beacons(&self, app: &Application) -> Vec<Range<usize>> {
         let Some(at) = place(app, Default::default()) else {

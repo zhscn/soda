@@ -20,7 +20,7 @@ pub(crate) use highlight::Highlighter;
 pub(crate) use layout::text_width;
 pub use layout::{Cells, Font, Measure};
 pub(crate) use layout::{
-    Frame as TextFrame, Overlay, Span, candidate_row, offset_at, padded, plain, position_of,
+    Frame as TextFrame, Mark, Overlay, Span, candidate_row, offset_at, padded, plain, position_of,
     prompt_row, scroll, wrap,
 };
 pub(crate) use theme::Theme;
@@ -53,6 +53,7 @@ pub(crate) fn text(
 ) -> Result<Option<TextFrame>, crate::application::Error> {
     let overlay = if runtime.app().active_view() == Some(view) {
         Overlay {
+            grab: runtime.grab(),
             beacons: runtime.beacons(),
             digits: runtime.expand_hints(),
             preview: runtime
