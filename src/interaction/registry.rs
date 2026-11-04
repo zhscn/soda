@@ -970,11 +970,7 @@ pub static BUILTINS: &[Builtin] = &[
         "Swap the ends of the selection",
         modal(Action::Reverse)
     ),
-    builtin!(
-        "cancel",
-        "Drop the selection",
-        modal(Action::Cancel)
-    ),
+    builtin!("cancel", "Drop the selection", modal(Action::Cancel)),
     builtin!(
         "pop-selection",
         "Go back to the previous selection",

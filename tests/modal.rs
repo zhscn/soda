@@ -714,3 +714,24 @@ fn a_beacon_macro_runs_each_selection_the_way_the_main_one_ran() {
     keys(&mut r, "eeG M-< C-f C-f [ ; <f3> H d <f4>");
     assert_eq!(plain(&r), "x\ny\n");
 }
+#[test]
+fn an_idle_hook_leaves_the_carets_b_gave() {
+    // A command a hook runs is no command of the user's: the places stay
+    // as `b` left them, as meow derives them only after a command.
+    let mut r = runtime("|ab cd\nef gh\n");
+    r.source_lua(
+        "idle",
+        r#"
+        soda.hook("idle", ".*", function() soda.command("echo idle") end)
+        soda.command("set idle-time 10")
+        "#,
+    )
+    .unwrap();
+    keys(&mut r, "eeG C-e b");
+    assert_eq!(r.beacons(), vec![0..0, 3..3, 6..6]);
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    r.poll();
+    r.poll();
+    assert_eq!(r.message(), "idle");
+    assert_eq!(r.beacons(), vec![0..0, 3..3, 6..6]);
+}

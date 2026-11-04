@@ -390,12 +390,15 @@ impl Runtime {
     pub fn command(&mut self, command: Command) {
         self.command_at(command, self.epoch.elapsed());
     }
+    /// Runs a command for Lua, a hook or a frontend. Beacon's other places
+    /// stay as the last key left them: meow derives them only after a
+    /// command the user typed (`post-command-hook`), so an idle hook does
+    /// not take away the carets `b` left.
     pub fn command_at(&mut self, command: Command, time: Duration) {
         let result = self
             .layers
             .execute(command, &self.app, time, &self.app.root());
         self.input_result(result, time);
-        self.follow_grab(time);
         self.settle(time);
         self.complete();
     }
