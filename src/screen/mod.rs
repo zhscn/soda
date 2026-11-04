@@ -27,6 +27,16 @@ pub(crate) use theme::Theme;
 
 use crate::{application::ViewId, runtime::Runtime};
 
+/// The theme to draw: the one the command line previews while a theme is
+/// being chosen, else the `theme` option's.
+pub(crate) fn theme_name(runtime: &Runtime) -> &str {
+    match runtime.layer() {
+        Some(crate::interaction::Layer::CommandLine(line)) => line.previewed_theme(),
+        _ => None,
+    }
+    .unwrap_or_else(|| runtime.app().options().text(None, "theme"))
+}
+
 /// The text of a view in an area `width` across and `rows` down. The
 /// active view also shows Beacon's other selections, the digits that
 /// extend the selection, and the rest of the selected completion.

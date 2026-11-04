@@ -895,13 +895,14 @@ fn themes_are_defined_from_lua_and_switched_at_run_time() {
         assert(not pcall(soda.theme, "bad", { faces = { nothing = "bold" } }))
         assert(not pcall(soda.set, "theme", "missing"))
         local names = table.concat(soda.themes(), " ")
-        assert(names == "auto dark light paper", names)
+        assert(names:match("^auto dark light .* paper$"), names)
+        soda.theme("warm", { base = "gruvbox-dark" })
         soda.set("theme", "paper")
         "##,
     );
     assert_eq!(r.app().options().text(None, "theme"), "paper");
     let paper = r.app().faces().theme("paper").unwrap();
-    assert!(paper.light);
+    assert_eq!(paper.base, "light");
     assert_eq!(paper.palette["bg"], 0xfafafa);
     assert!(paper.faces["title"].attributes.unwrap().underline);
     r.command(Command::Named("theme dark".into()));

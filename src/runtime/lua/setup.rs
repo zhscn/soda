@@ -49,19 +49,10 @@ pub(super) fn register<'scope, 'r: 'scope>(
         "theme",
         scope.create_function(|_, (name, spec): (String, Table)| {
             use crate::application::faces::{ThemeSpec, rgb};
-            let light = match spec.get::<Option<String>>("base")?.as_deref() {
-                None | Some("dark") => false,
-                Some("light") => true,
-                Some(base) => {
-                    return Err(mlua::Error::runtime(format!(
-                        "base is dark or light, not {base}"
-                    )));
-                }
-            };
-            let mut theme = ThemeSpec {
-                light,
-                ..Default::default()
-            };
+            let mut theme = ThemeSpec::default();
+            if let Some(base) = spec.get::<Option<String>>("base")? {
+                theme.base = base;
+            }
             if let Some(palette) = spec.get::<Option<Table>>("palette")? {
                 for pair in palette.pairs::<String, String>() {
                     let (key, color) = pair?;

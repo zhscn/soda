@@ -25,6 +25,7 @@ mod highlights;
 mod inlays;
 mod notes;
 mod paints;
+pub mod themes;
 pub use paints::PaintSpan;
 mod tidy;
 mod tokens;

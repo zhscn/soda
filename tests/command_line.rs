@@ -443,3 +443,33 @@ fn every_key_context_is_offered_for_map() {
     keys(&mut r, "TAB");
     assert_eq!(text(&r), "map tree ");
 }
+
+#[test]
+fn choosing_a_theme_previews_it_until_taken_or_cancelled() {
+    let root = tree();
+    let mut r = runtime(root.path());
+    let previewed = |r: &Runtime| match r.layer() {
+        Some(Layer::CommandLine(line)) => line.previewed_theme().map(str::to_owned),
+        _ => None,
+    };
+    let option = |r: &Runtime| r.app().options().text(None, "theme").to_owned();
+    r.command(Command::Ex("theme ".into()));
+    assert!(rows(&r)[0].starts_with("auto "), "{:?}", rows(&r));
+    assert!(rows(&r).iter().any(|row| row.starts_with("gruvbox-dark ")));
+    // The default row is not a choice yet.
+    assert_eq!(previewed(&r), None);
+    keys(&mut r, "<down>");
+    assert_eq!(previewed(&r).as_deref(), Some("dark"));
+    keys(&mut r, "<down>");
+    assert_eq!(previewed(&r).as_deref(), Some("light"));
+    keys(&mut r, "ESC");
+    assert!(r.layer().is_none());
+    assert_eq!(option(&r), "auto");
+
+    r.command(Command::Ex("theme ".into()));
+    keys(&mut r, "n o r");
+    assert_eq!(previewed(&r).as_deref(), Some("nord"));
+    keys(&mut r, "RET");
+    assert!(r.layer().is_none());
+    assert_eq!(option(&r), "nord");
+}

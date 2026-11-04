@@ -65,7 +65,7 @@ pub(crate) struct Theme {
     named: Vec<Style>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct Palette {
     bg: u32,
     bg_dark: u32,
@@ -86,48 +86,15 @@ struct Palette {
     teal: u32,
     on_accent: u32,
 }
-const DARK: Palette = Palette {
-    bg: 0x1a1b26,
-    bg_dark: 0x16161e,
-    bg_highlight: 0x292e42,
-    selection: 0x33467c,
-    fg: 0xc0caf5,
-    fg_dark: 0xa9b1d6,
-    comment: 0x565f89,
-    gutter: 0x3b4261,
-    gutter_current: 0x737aa2,
-    blue: 0x7aa2f7,
-    green: 0x9ece6a,
-    magenta: 0xbb9af7,
-    orange: 0xff9e64,
-    yellow: 0xe0af68,
-    red: 0xf7768e,
-    cyan: 0x7dcfff,
-    teal: 0x73daca,
-    on_accent: 0x15161e,
-};
-const LIGHT: Palette = Palette {
-    bg: 0xe1e2e7,
-    bg_dark: 0xd0d5e3,
-    bg_highlight: 0xc4c8da,
-    selection: 0xb7c1e3,
-    fg: 0x3760bf,
-    fg_dark: 0x6172b0,
-    comment: 0x848cb5,
-    gutter: 0xa8aecb,
-    gutter_current: 0x6172b0,
-    blue: 0x2e7de9,
-    green: 0x587539,
-    magenta: 0x9854f1,
-    orange: 0xb15c00,
-    yellow: 0x8c6c3e,
-    red: 0xf52a65,
-    cyan: 0x007197,
-    teal: 0x387068,
-    on_accent: 0xe1e2e7,
-};
-
 impl Palette {
+    /// A built-in theme's colors, given in `faces::PALETTE` order.
+    fn of(theme: &crate::application::themes::Builtin) -> Self {
+        let mut palette = Self::default();
+        for (name, rgb) in crate::application::faces::PALETTE.iter().zip(theme.palette) {
+            *palette.slot(name).unwrap() = rgb;
+        }
+        palette
+    }
     /// A color by its name in `faces::PALETTE`.
     fn slot(&mut self, name: &str) -> Option<&mut u32> {
         Some(match name {
@@ -158,24 +125,34 @@ impl Theme {
     /// The theme a `theme` option value names, with the faces over it;
     /// `auto`, and a name no longer defined, are light when the
     /// frontend's background is.
+    ///
+    /// The layers, each over the one before: a built-in theme's palette,
+    /// the palette colors of a defined theme over it, the faces the
+    /// palette makes, the built-in theme's faces, the defined theme's
+    /// faces, and those set with `face`.
     pub fn build(choice: &str, faces: &crate::application::faces::Faces, light: bool) -> Self {
+        use crate::application::{faces::FaceSpec, themes};
         let defined = faces.theme(choice);
-        let light = match (choice, defined) {
-            (_, Some(defined)) => defined.light,
-            ("light", _) => true,
-            ("dark", _) => false,
-            _ => light,
-        };
-        let mut palette = if light { LIGHT } else { DARK };
+        let base = defined.map_or(choice, |defined| defined.base.as_str());
+        let builtin = themes::builtin(base)
+            .or_else(|| themes::builtin(if light { "light" } else { "dark" }))
+            .expect("dark and light are built in");
+        let mut palette = Palette::of(builtin);
         for (name, rgb) in defined.iter().flat_map(|defined| &defined.palette) {
             if let Some(slot) = palette.slot(name) {
                 *slot = *rgb;
             }
         }
         let mut theme = Self::new(&palette);
-        let theme_faces = defined.iter().flat_map(|defined| &defined.faces);
-        let theme_faces = theme_faces.map(|(name, spec)| (name.as_str(), spec));
-        for (name, spec) in theme_faces.chain(faces.iter()) {
+        let builtin_faces: Vec<_> = builtin
+            .faces
+            .iter()
+            .filter_map(|(name, spec)| Some((*name, FaceSpec::parse(spec).ok()?)))
+            .collect();
+        let builtin_faces = builtin_faces.iter().map(|(name, spec)| (*name, spec));
+        let defined_faces = defined.iter().flat_map(|defined| &defined.faces);
+        let defined_faces = defined_faces.map(|(name, spec)| (name.as_str(), spec));
+        for (name, spec) in builtin_faces.chain(defined_faces).chain(faces.iter()) {
             if let Some(style) = theme.slot(name) {
                 *style = apply(*style, spec);
             }
@@ -444,7 +421,7 @@ mod tests {
     use crate::application::faces::{FaceSpec, Faces, PALETTE, ThemeSpec};
     #[test]
     fn every_palette_name_has_a_color() {
-        let mut palette = DARK;
+        let mut palette = Palette::default();
         for name in PALETTE {
             assert!(palette.slot(name).is_some(), "{name}");
         }
@@ -453,7 +430,7 @@ mod tests {
     fn a_defined_theme_goes_over_its_variant_and_under_faces() {
         let mut faces = Faces::default();
         let mut spec = ThemeSpec {
-            light: true,
+            base: "gruvbox-light".into(),
             ..Default::default()
         };
         spec.palette.insert("bg".into(), 0x101010);
@@ -467,11 +444,15 @@ mod tests {
             .unwrap();
         let theme = Theme::build("mine", &faces, false);
         assert_eq!(theme.text.bg, Some(color(0x101010)));
-        assert_eq!(theme.text.fg, Some(color(LIGHT.fg)));
+        assert_eq!(theme.text.fg, Some(color(0x3c3836)));
+        // Gruvbox's own keyword color stays under the defined theme.
+        assert_eq!(theme.category(Category::Keyword).fg, Some(color(0x9d0006)));
         assert_eq!(theme.title.fg, Some(color(0x202020)));
         assert_eq!(theme.key.fg, Some(color(0x404040)));
         // A theme no longer named falls back as `auto` does.
         let theme = Theme::build("gone", &faces, false);
-        assert_eq!(theme.text.bg, Some(color(DARK.bg)));
+        assert_eq!(theme.text.bg, Some(color(0x1a1b26)));
+        let theme = Theme::build("gone", &faces, true);
+        assert_eq!(theme.text.bg, Some(color(0xe1e2e7)));
     }
 }

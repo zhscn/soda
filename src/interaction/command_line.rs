@@ -435,15 +435,20 @@ impl CommandLine {
                         .enumerate()
                         .filter(|(_, name)| name.starts_with(&query.text))
                         .map(|(i, name)| {
-                            let doc = crate::application::faces::BUILTIN_THEMES
-                                .iter()
-                                .find(|(builtin, _)| *builtin == name)
-                                .map_or("Defined by soda.theme", |(_, doc)| doc);
+                            use crate::application::themes;
+                            let doc = match themes::builtin(name) {
+                                _ if name == themes::AUTO => themes::AUTO_DOC.to_owned(),
+                                Some(theme) => {
+                                    let shade = if theme.light { "light" } else { "dark" };
+                                    format!("{}, {shade}", theme.doc)
+                                }
+                                None => "defined by soda.theme".to_owned(),
+                            };
                             let mark_current = if name == current { "● " } else { "" };
-                            let label = format!("{name:<12} {mark_current}{doc}");
+                            let label = format!("{name:<18} {mark_current}{doc}");
                             let typed = (!query.text.is_empty()).then_some(0..query.text.len());
                             let row = row(i as u64, label, Some(name.to_owned()), false);
-                            mark(row, typed.into_iter().collect(), Some(13))
+                            mark(row, typed.into_iter().collect(), Some(19))
                         })
                         .collect()
                 }
@@ -720,6 +725,21 @@ impl CommandLine {
     /// the typed text until a row is chosen, and Tab alone uses the default.
     pub fn enter_selects(&self) -> bool {
         self.list.user_selected() || self.locate().target != Some(Target::Slot(SlotKind::Path))
+    }
+    /// The theme to show while a THEME slot is completed: the selected row
+    /// once the user moves to one or types text that picks one. The screen
+    /// previews it; closing the line leaves the option's theme in force,
+    /// and taking the row sets the option.
+    pub fn previewed_theme(&self) -> Option<&str> {
+        let query = self.query.as_ref()?;
+        if query.target != Target::Slot(SlotKind::Theme)
+            || self.stale
+            || !(self.list.user_selected() || !query.text.is_empty())
+        {
+            return None;
+        }
+        let row = &self.rows[self.list.index(&self.rows)?];
+        row.candidate.payload.replacement.as_deref()
     }
     pub fn completes(&self) -> bool {
         self.query
