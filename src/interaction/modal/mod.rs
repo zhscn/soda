@@ -281,6 +281,10 @@ pub(in crate::interaction) struct State {
     /// The undo depth when recording began: a macro played on beacons
     /// undoes as one step with its recording.
     pub macro_depth: usize,
+    /// The main selection's shape when recording began in Beacon: whether
+    /// it ran backward, and its kind. The other selections take it when the
+    /// macro plays there.
+    pub macro_shape: Option<(bool, Option<(Kind, bool)>)>,
     /// The last command, for `repeat`.
     pub last: Option<super::Command>,
     /// The command the key being handled ran, and the one the key before

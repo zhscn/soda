@@ -406,14 +406,24 @@ impl Layers {
             Action::SwapGrab => return self.swap_grab(&at, response),
             Action::MacroStart => {
                 // Keys go to the main selection alone until they are played.
+                self.modal.macro_shape = None;
                 if self.mode == EditMode::Beacon {
                     self.mode = EditMode::Normal;
+                    let tag = self.modal.tag(at.selection);
+                    self.modal.macro_shape = Some((
+                        at.selection.head < at.selection.anchor,
+                        tag.map(|tag| (tag.kind, tag.expand)),
+                    ));
                 }
                 self.modal.macro_depth = at.document.history_depth();
                 self.modal.replay.start();
                 response.message = Message::Set("Recording a macro".into());
             }
-            Action::MacroEndCall if self.modal.replay.recording() => {
+            // Recorded in Beacon, the macro goes to the other selections,
+            // as `macro-end` sends it.
+            Action::MacroEndCall
+                if self.modal.replay.recording() && self.modal.beacons.is_empty() =>
+            {
                 self.modal.replay.stop();
                 response.message = Message::Set("Macro recorded".into());
                 let keys = self.modal.replay.last().to_vec();
@@ -1010,7 +1020,17 @@ impl Layers {
     }
     fn grab(&mut self, at: &Place, app: &Application, response: &mut Response) {
         let range = at.selection.range();
-        self.modal.grab = position(at.document, range.start)
+        // Text typed at either edge joins the grab: the start stays before
+        // it. A marker, empty, follows what is typed there.
+        let start = if range.is_empty() {
+            Association::After
+        } else {
+            Association::Before
+        };
+        self.modal.grab = at
+            .document
+            .position(ByteOffset(range.start), start)
+            .ok()
             .zip(position(at.document, range.end))
             .map(|(start, end)| Grab { start, end });
         self.modal.tag = None;

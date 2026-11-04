@@ -1067,6 +1067,40 @@ mod tests {
     }
 
     #[test]
+    fn a_beacon_caret_at_the_end_of_a_line_takes_the_cell_after_it() {
+        let root = tempfile::tempdir().unwrap();
+        let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
+            .unwrap();
+        r.start(None);
+        r.command(Command::Edit(crate::editor::Command::InsertText(
+            "foo bar\nbaz qux\n".into(),
+        )));
+        r.command(Command::Edit(crate::editor::Command::SetSelection(
+            crate::core::Selection::caret(0),
+        )));
+        r.command(Command::SetMode(EditMode::Normal));
+        // The main caret ends the second line; the other ends the first.
+        keys(&mut r, "e e G");
+        assert_eq!(r.beacons(), vec![7..7]);
+        let buffer = draw(&mut r, 30, 6);
+        let row = (0..6u16)
+            .find(|&y| {
+                (0..30u16)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+                    .contains("foo bar")
+            })
+            .unwrap();
+        let x = (0..30u16)
+            .find(|&x| buffer[(x, row)].symbol() == "f")
+            .unwrap();
+        let plain = buffer[(29, row)].bg;
+        let after = buffer[(x + 7, row)].bg;
+        assert_ne!(after, plain, "the cell after `foo bar` shows the caret");
+        assert_eq!(buffer[(x + 8, row)].bg, plain);
+    }
+    #[test]
     fn options_choose_the_tab_bar_and_the_window_titles() {
         let root = tempfile::tempdir().unwrap();
         let mut r = Runtime::new(root.path().to_owned()).unwrap();

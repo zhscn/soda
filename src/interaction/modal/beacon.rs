@@ -49,8 +49,13 @@ impl Layers {
         let ranges = self.derived(&at, start.0..end.0);
         self.modal.beacons = ranges
             .into_iter()
+            // The main selection stands for its own place: a word it covers
+            // only part of, as after `b` from inside it, is not another.
             .filter(|range| {
-                *range != main && !(range.is_empty() && range.start == at.selection.head)
+                let overlaps = range.start < main.end && main.start < range.end;
+                *range != main
+                    && !overlaps
+                    && !(range.is_empty() && range.start == at.selection.head)
             })
             .filter_map(|range| {
                 Some(Grab {
@@ -335,15 +340,27 @@ impl Layers {
     pub(super) fn apply_macro(&mut self, at: &Place, response: &mut Response) {
         let keys: Vec<UserInput> = self.modal.replay.last().to_vec();
         let targets: Vec<_> = resolved(&self.modal.beacons, at);
-        let selections = targets.into_iter().map(|range| Selection {
-            anchor: range.start,
-            head: range.end,
+        // Each selection runs the way the main one did when recording began.
+        let (backward, kind) = self.modal.macro_shape.take().unwrap_or((false, None));
+        let selections = targets.into_iter().map(|range| {
+            if backward {
+                Selection {
+                    anchor: range.end,
+                    head: range.start,
+                }
+            } else {
+                Selection {
+                    anchor: range.start,
+                    head: range.end,
+                }
+            }
         });
         self.leave_beacon();
         response
             .commands
             .extend(crate::interaction::commands::replay_each(
                 selections,
+                kind,
                 &keys,
                 self.modal.macro_depth,
             ));

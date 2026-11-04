@@ -631,3 +631,30 @@ fn saving_copies_the_selection_and_drops_it() {
     assert_eq!(r.app().clipboard(), "two");
     assert_eq!(shown(&r), "one |two\n");
 }
+#[test]
+fn text_typed_at_the_start_of_a_grab_stays_in_it() {
+    // X typed before the first word belongs to it, as to the others.
+    let mut r = runtime("|foo bar\nbaz qux\n");
+    keys(&mut r, "eeG C-e b iX ESC C-e b");
+    assert_eq!(r.beacons(), vec![0..4, 5..9, 10..14]);
+}
+#[test]
+fn beacons_leave_out_what_the_main_selection_covers() {
+    // `b` from inside `cd` takes part of it; the word is not another.
+    let mut r = runtime("|ab cd\nef gh\n");
+    keys(&mut r, "eeG M-< C-f C-f C-f C-f b");
+    assert_eq!(shown(&r), "ab |[c]d\nef gh\n");
+    assert_eq!(r.beacons(), vec![0..2, 6..8, 9..11]);
+}
+#[test]
+fn a_beacon_macro_runs_each_selection_the_way_the_main_one_ran() {
+    // The main word runs backward from `b`, so `H` takes the space before
+    // each word, or the line break; at the start of the text it can't.
+    let mut r = runtime("|foo bar\nbaz qux\n");
+    keys(&mut r, "eeG C-e b <f3> H d <f4>");
+    assert_eq!(shown(&r).replace('|', ""), "\n");
+    // `C-x e` ends it the same way.
+    let mut r = runtime("|ab x\nab y\n");
+    keys(&mut r, "eeG M-< [ <f3> aQ ESC C-x e");
+    assert_eq!(shown(&r).replace(['|', '[', ']'], ""), "abQ x\nabQ y\n");
+}

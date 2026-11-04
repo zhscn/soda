@@ -430,6 +430,33 @@ fn styled_row(
         }
         x = end;
     }
+    // A beacon caret at the end of the line has no character to stand on:
+    // it takes the cell after the text, where the main caret would be.
+    let line_end = byte_start + text.trim_end_matches(['\n', '\r']).len();
+    if x >= left
+        && x < right
+        && beacons
+            .iter()
+            .any(|beacon| beacon.is_empty() && beacon.start == line_end)
+    {
+        let width = measure.column().min(right - x);
+        spans.push(Span {
+            x: at,
+            width,
+            text: String::new(),
+            selected: true,
+            matched: false,
+            detail: false,
+            category: None,
+            whitespace: false,
+            face: None,
+            inlay: false,
+            font: Font::Text,
+        });
+        at += width;
+        x += width;
+        filled = false;
+    }
     if x < right {
         hint(usize::MAX, x, &mut right, &mut at, &mut spans, &mut filled);
     }

@@ -282,17 +282,28 @@ pub enum Departure {
 }
 
 /// Replays keys in Normal at each selection, last first so that earlier
-/// places hold, as one undoable step.
+/// places hold, as one undoable step. With `kind`, each selection is of
+/// that kind, so that keys which extend it extend it the same way.
 pub(super) fn replay_each(
     selections: impl DoubleEndedIterator<Item = crate::core::Selection>,
+    kind: Option<(super::modal::Kind, bool)>,
     keys: &[super::UserInput],
     depth: usize,
 ) -> Vec<Command> {
     let mut commands = vec![];
     for selection in selections.rev() {
+        let select = match kind {
+            Some((kind, expand)) => Command::Modal(super::modal::Action::Found {
+                anchor: selection.anchor,
+                head: selection.head,
+                kind,
+                expand,
+            }),
+            None => Command::Edit(EditCommand::SetSelection(selection)),
+        };
         commands.extend([
             Command::SetMode(super::EditMode::Normal),
-            Command::Edit(EditCommand::SetSelection(selection)),
+            select,
             Command::Replay(keys.to_vec()),
         ]);
     }
@@ -1414,7 +1425,7 @@ impl Layers {
         let skip = targets.len().saturating_sub(10_000);
         let carets = targets.into_iter().skip(skip);
         let carets = carets.map(crate::core::Selection::caret);
-        replay_each(carets, &keys, document.history_depth())
+        replay_each(carets, None, &keys, document.history_depth())
     }
     /// Makes a results document the one `]q` and `[q` step through.
     fn set_results(&mut self, name: String) {
