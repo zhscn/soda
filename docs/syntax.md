@@ -19,18 +19,33 @@ C++ 和 Rust 有自己的词法与结构分析；其他语言参照 IntelliJ，�
 
 高亮结果是字节范围加一个固定分类。主题只为分类配色（face `syntax.NAME`），不认识作用域名或 token 类型。
 
-| 分类 | TextMate 作用域前缀 | C++ 来源 |
-| --- | --- | --- |
-| comment | `comment` | 注释 |
-| string | `string`、`markup.raw`、`markup.inline.raw` | 字符串、字符字面量、`#include` 的头文件名 |
-| escape | `constant.character.escape` | — |
-| number | `constant.numeric` | 数字 |
-| constant | `constant.language`、`constant.other`、`support.constant`、`variable.other.constant`、`variable.language` | `true`、`false`、`nullptr`、`this` |
-| keyword | `keyword`、`storage` | 关键字 |
-| operator | `keyword.operator` | 运算符 |
-| type | `entity.name.type`、`.class`、`.struct`、`.enum`、`.interface`、`.trait`、`entity.other.inherited-class`、`support.type`、`support.class`、`storage.type.primitive`、`.numeric`、`.boolean`、`.string` | 内建类型关键字 |
-| function | `entity.name.function`、`support.function` | — |
-| parameter | `variable.parameter` | — |
+带点的分类细化点前面的那个，并继承它的样式，如同 Emacs face 的 `:inherit`：主题没给 `function.call` 配色时它与 `function` 相同；给了时，写出的颜色和属性盖在 `function` 的最终样式上，没写的沿用。所以只认识 `function` 的主题照常工作，像 Modus、Islands 这样区分定义与调用的主题可以分开配。`variable`、`property` 和 `punctuation` 默认无样式（显示为正文），由主题决定是否着色。
+
+| 分类 | TextMate 作用域前缀 | C++ 来源 | 语义 token |
+| --- | --- | --- | --- |
+| comment | `comment` | 注释 | `comment` |
+| comment.doc | `comment.line.documentation`、`comment.block.documentation` | `///`、`//!`、`/** */`、`/*! */` | — |
+| string | `string`、`markup.raw`、`markup.inline.raw` | 字符串、字符字面量、`#include` 的头文件名 | — |
+| escape | `constant.character.escape` | — | — |
+| number | `constant.numeric` | 数字 | — |
+| constant | `constant.other`、`support.constant`、`variable.other.constant`、`variable.language` | — | `enumMember`、`constant`，`readonly` 的变量和成员 |
+| constant.builtin | `constant.language` | `true`、`false`、`nullptr`、`this` | — |
+| keyword | `keyword`、`storage` | 关键字 | — |
+| operator | `keyword.operator` | 运算符 | — |
+| punctuation | — | — | — |
+| punctuation.bracket | — | 圆、方、花括号 | `bracket` |
+| punctuation.delimiter | — | `,`、`;`、`:` | — |
+| type | `entity.name.type`、`.class`、`.struct`、`.enum`、`.interface`、`.trait`、`entity.other.inherited-class`、`support.type`、`support.class` | — | `class`、`struct`、`enum`、`type` 等 |
+| type.builtin | `storage.type.primitive`、`.numeric`、`.boolean`、`.string`、`support.type.primitive`、`support.type.builtin` | 内建类型关键字 | 带 `defaultLibrary` 的类型 |
+| function | `entity.name.function`、`support.function` | — | — |
+| function.definition | — | — | 带 `declaration` 或 `definition` 的函数、方法 |
+| function.call | `entity.name.function.call`、`meta.function-call.generic` | — | 其余函数、方法 |
+| function.builtin | `support.function.builtin`、`entity.name.function.support.builtin` | — | 带 `defaultLibrary` 的函数 |
+| variable | — | — | `variable` |
+| variable.definition | — | — | 带 `declaration` 或 `definition` 的变量 |
+| property | `variable.other.property`、`.member`、`variable.other.object.property`、`support.variable.property` | — | `property`、`field` |
+| property.definition | — | — | 带 `declaration` 或 `definition` 的成员 |
+| parameter | `variable.parameter` | — | `parameter` |
 | namespace | `entity.name.namespace`、`entity.name.module` | — |
 | macro | `meta.preprocessor`、`meta.attribute`、`entity.name.function.preprocessor`、`entity.name.function.macro`、`support.function.macro` | 预处理指令 |
 | tag | `entity.name.tag` | — |
@@ -41,6 +56,8 @@ C++ 和 Rust 有自己的词法与结构分析；其他语言参照 IntelliJ，�
 | inserted / deleted / changed | `markup.inserted` / `.deleted` / `.changed` | — |
 | invalid | `invalid` | 无法识别的字符 |
 | match | — | 搜索结果文档中的匹配 |
+
+多数 TextMate 语法对定义和调用用同一个 `entity.name.function`，区分不了，函数名停在 `function`；区分要靠语义高亮。标点作用域在不同语法里用法不一（有的把数字分隔符、正则括号也叫 punctuation），所以 TextMate 不产生 punctuation。
 
 TextMate token 的作用域从内到外取第一个能映射的；每个作用域按最长点分前缀匹配（`keyword.operator.assignment` 先试 `keyword.operator`，再退回 `keyword`），与 IntelliJ `TextMateDefaultColorsProvider` 相同。C++ 只有词法层：`#` 和指令名标为 macro，`#include`/`import` 之后标为 string，其他指令的其余部分按普通代码；函数、类型等名字靠语义高亮。
 

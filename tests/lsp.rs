@@ -232,11 +232,15 @@ fn tokens_and_hints_arrive_after_the_diagnostics_and_move_with_the_text() {
     wait(&mut f.r, |r| {
         !r.app().inlays(document).is_empty() && !r.app().tokens(document, 0..99).is_empty()
     });
-    // Columns are UTF-16 units: the é takes two bytes and one unit. The
-    // variable has no category of its own, so it keeps its highlighting.
+    // Columns are UTF-16 units: the é takes two bytes and one unit. A
+    // function named without declaring it is a call.
     assert_eq!(
         f.r.app().tokens(document, 0..99),
-        [(2..4, Category::Function), (11..12, Category::Parameter)]
+        [
+            (2..4, Category::FunctionCall),
+            (7..10, Category::Variable),
+            (11..12, Category::Parameter)
+        ]
     );
     let hints: Vec<_> =
         f.r.app()
@@ -652,11 +656,11 @@ fn tokens_after_an_edit_come_as_changes_to_the_last() {
     });
     // Column 2 for one unit of "xxé one" is the é.
     wait(&mut f.r, |r| {
-        r.app().tokens(document, 0..99).first() == Some(&(2..4, Category::Function))
+        r.app().tokens(document, 0..99).first() == Some(&(2..4, Category::FunctionCall))
     });
     assert_eq!(
-        f.r.app().tokens(document, 0..99)[1],
-        (13..14, Category::Parameter),
+        f.r.app().tokens(document, 0..99).last(),
+        Some(&(13..14, Category::Parameter)),
         "the rest stays as it was"
     );
 }
@@ -1123,7 +1127,11 @@ fn token_modifiers_make_read_only_variables_constants_and_strike_deprecated_ones
     wait(&mut f.r, |r| !r.app().tokens(document, 0..99).is_empty());
     assert_eq!(
         f.r.app().tokens(document, 0..99),
-        [(0..3, Category::Constant), (4..7, Category::Function)]
+        [
+            (0..3, Category::Constant),
+            (4..7, Category::FunctionCall),
+            (8..9, Category::Variable)
+        ]
     );
     let deprecated = soda::application::faces::index("deprecated")
         .map(soda::application::Face::Named)

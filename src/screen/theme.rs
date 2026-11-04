@@ -149,9 +149,28 @@ impl Theme {
         let builtin_faces = builtin_faces.iter().map(|(name, spec)| (*name, spec));
         let defined_faces = defined.iter().flat_map(|defined| &defined.faces);
         let defined_faces = defined_faces.map(|(name, spec)| (name.as_str(), spec));
+        // A refined syntax category starts from its parent's final style,
+        // so its specs wait until every parent has all of its own.
+        let mut refined: Vec<Vec<&FaceSpec>> = vec![vec![]; CATEGORIES];
         for (name, spec) in builtin_faces.chain(defined_faces).chain(faces.iter()) {
-            if let Some(style) = theme.slot(name) {
-                *style = apply(*style, spec);
+            let category = name.strip_prefix("syntax.").and_then(Category::named);
+            match category {
+                Some(category) if category.parent().is_some() => {
+                    refined[index_of(category)].push(spec);
+                }
+                _ => {
+                    if let Some(style) = theme.slot(name) {
+                        *style = apply(*style, spec);
+                    }
+                }
+            }
+        }
+        for (index, category) in CATEGORY_ORDER.iter().enumerate() {
+            if let Some(parent) = category.parent() {
+                let inherited = theme.syntax[index_of(parent)];
+                theme.syntax[index] = refined[index]
+                    .iter()
+                    .fold(inherited, |style, spec| apply(style, spec));
             }
         }
         theme.named = crate::application::faces::names()
@@ -188,8 +207,7 @@ impl Theme {
     /// The style a face name stands for.
     fn slot(&mut self, name: &str) -> Option<&mut Style> {
         if let Some(category) = name.strip_prefix("syntax.") {
-            let index = CATEGORY_ORDER.iter().position(|c| c.name() == category)?;
-            return Some(&mut self.syntax[index]);
+            return Some(&mut self.syntax[index_of(Category::named(category)?)]);
         }
         if let Some(n) = name.strip_prefix("mark") {
             let n: usize = n.parse().ok()?;
@@ -317,6 +335,19 @@ impl Theme {
                     Category::Changed => fg(p.yellow),
                     Category::Invalid => fg(p.red).add_modifier(Modifier::UNDERLINED),
                     Category::Match => fg(p.red).add_modifier(Modifier::BOLD),
+                    // Plain until a theme colors them.
+                    Category::Variable | Category::Property | Category::Punctuation => Style::new(),
+                    // Inherited from the parent when the theme is built.
+                    Category::CommentDoc
+                    | Category::ConstantBuiltin
+                    | Category::PunctuationBracket
+                    | Category::PunctuationDelimiter
+                    | Category::TypeBuiltin
+                    | Category::FunctionDefinition
+                    | Category::FunctionCall
+                    | Category::FunctionBuiltin
+                    | Category::VariableDefinition
+                    | Category::PropertyDefinition => Style::new(),
                 })
             },
             key: Style::new().fg(c(p.magenta)).add_modifier(Modifier::BOLD),
@@ -370,8 +401,11 @@ impl Theme {
             .add_modifier(Modifier::BOLD)
     }
     pub fn category(&self, category: Category) -> Style {
-        self.syntax[CATEGORY_ORDER.iter().position(|c| *c == category).unwrap()]
+        self.syntax[index_of(category)]
     }
+}
+fn index_of(category: Category) -> usize {
+    CATEGORY_ORDER.iter().position(|c| *c == category).unwrap()
 }
 const CATEGORIES: usize = Category::ALL.len();
 const CATEGORY_ORDER: [Category; CATEGORIES] = Category::ALL;
@@ -449,5 +483,45 @@ mod tests {
         // A theme no longer named gives the default.
         let theme = Theme::build("gone", &faces);
         assert_eq!(theme.text.bg, Some(color(0x1a1b26)));
+    }
+    #[test]
+    fn refined_categories_inherit_their_parent_as_emacs_faces_do() {
+        let mut faces = Faces::default();
+        faces
+            .set(
+                "syntax.function",
+                Some(FaceSpec::parse("fg:#111111").unwrap()),
+            )
+            .unwrap();
+        faces
+            .set(
+                "syntax.function.definition",
+                Some(FaceSpec::parse("bold").unwrap()),
+            )
+            .unwrap();
+        let theme = Theme::build("tokyonight", &faces);
+        let call = theme.category(Category::FunctionCall);
+        let definition = theme.category(Category::FunctionDefinition);
+        assert_eq!(call, theme.category(Category::Function));
+        assert_eq!(definition.fg, Some(color(0x111111)));
+        assert!(definition.add_modifier.contains(Modifier::BOLD));
+        faces
+            .set(
+                "syntax.property",
+                Some(FaceSpec::parse("fg:#222222").unwrap()),
+            )
+            .unwrap();
+        let theme = Theme::build("tokyonight", &faces);
+        assert_eq!(
+            theme.category(Category::PropertyDefinition).fg,
+            Some(color(0x222222))
+        );
+        // Variables stay plain by default.
+        let theme = Theme::build("tokyonight", &Faces::default());
+        assert_eq!(theme.category(Category::Variable), Style::new());
+        assert_eq!(
+            theme.category(Category::CommentDoc),
+            theme.category(Category::Comment)
+        );
     }
 }

@@ -160,7 +160,7 @@ impl Lines {
         let column = position - line_start;
         let literal = |category: &Category| {
             matches!(
-                category,
+                category.root(),
                 Category::Comment | Category::String | Category::Escape
             )
         };

@@ -73,8 +73,22 @@ const TYPES: &[&str] = &[
 ];
 const CONSTANTS: &[&str] = &["true", "false", "nullptr", "this"];
 
+/// Whether a comment documents what follows or encloses it, as Doxygen
+/// reads them: `///`, `//!`, `/**` and `/*!`, but not a rule of slashes or
+/// an empty `/**/`.
+fn documentation(text: &str) -> bool {
+    let doc_line = |rest: &str| !rest.starts_with('/');
+    match text.get(..3) {
+        Some("///") => doc_line(&text[3..]),
+        Some("//!") => true,
+        Some("/**") => text != "/**/" && !text[3..].starts_with('*'),
+        Some("/*!") => true,
+        _ => false,
+    }
+}
 fn token_category(kind: K, text: &str) -> Option<Category> {
     Some(match kind {
+        K::LineComment | K::BlockComment if documentation(text) => Category::CommentDoc,
         K::LineComment | K::BlockComment => Category::Comment,
         K::StringLiteral | K::RawStringLiteral | K::CharacterLiteral => Category::String,
         K::Number => Category::Number,
@@ -98,21 +112,15 @@ fn token_category(kind: K, text: &str) -> Option<Category> {
         | K::TemplateKw
         | K::OperatorKw => Category::Keyword,
         K::Identifier if KEYWORDS.contains(&text) => Category::Keyword,
-        K::Identifier if TYPES.contains(&text) => Category::Type,
-        K::Identifier if CONSTANTS.contains(&text) => Category::Constant,
+        K::Identifier if TYPES.contains(&text) => Category::TypeBuiltin,
+        K::Identifier if CONSTANTS.contains(&text) => Category::ConstantBuiltin,
         K::Invalid => Category::Invalid,
         K::Whitespace | K::Newline | K::Identifier | K::EndOfFile => return None,
-        K::LBrace
-        | K::RBrace
-        | K::LParen
-        | K::RParen
-        | K::LBracket
-        | K::RBracket
-        | K::Comma
-        | K::Semicolon
-        | K::Colon
-        | K::ColonColon
-        | K::Period => return None,
+        K::LBrace | K::RBrace | K::LParen | K::RParen | K::LBracket | K::RBracket => {
+            Category::PunctuationBracket
+        }
+        K::Comma | K::Semicolon | K::Colon => Category::PunctuationDelimiter,
+        K::ColonColon | K::Period => return None,
         K::PreprocessorHash => Category::Macro,
         _ => Category::Operator,
     })
@@ -210,9 +218,10 @@ mod tests {
             categories(source, 18..41),
             [
                 ("const", Category::Keyword),
-                ("int", Category::Type),
+                ("int", Category::TypeBuiltin),
                 ("=", Category::Operator),
                 ("42", Category::Number),
+                (";", Category::PunctuationDelimiter),
                 ("// hi", Category::Comment),
             ]
         );
@@ -222,9 +231,18 @@ mod tests {
         let mut lexed = Lexed::new("/* a\nb */ int\n".into());
         assert_eq!(
             lexed.line(5..13),
-            [(0..4, Category::Comment), (5..8, Category::Type)]
+            [(0..4, Category::Comment), (5..8, Category::TypeBuiltin)]
         );
         lexed.update(&Arc::from("/  a\nb */ int\n"));
         assert_eq!(lexed.line(5..13)[0].1, Category::Operator);
+    }
+    #[test]
+    fn doc_comments_are_told_from_plain_ones() {
+        for doc in ["/// a", "//! a", "/** a */", "/*! a */", "///"] {
+            assert!(documentation(doc), "{doc}");
+        }
+        for plain in ["// a", "//// rule", "/* a */", "/**/", "/*** rule ***/"] {
+            assert!(!documentation(plain), "{plain}");
+        }
     }
 }

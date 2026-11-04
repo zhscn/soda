@@ -444,20 +444,38 @@ local function flag_current()
   end
 end
 -- How a server's token types show; the rest keep their highlighting.
+-- clangd's names and ccls's (field, staticMethod, typeAlias, ...) both.
 local token_categories = {
   namespace = "namespace", type = "type", class = "type", enum = "type", interface = "type",
-  struct = "type", typeParameter = "type", concept = "type", parameter = "parameter",
-  enumMember = "constant", ["function"] = "function", method = "function", macro = "macro",
-  comment = "comment",
+  struct = "type", typeParameter = "type", concept = "type", typeAlias = "type",
+  parameter = "parameter", enumMember = "constant", constant = "constant",
+  ["function"] = "function", method = "function", staticMethod = "function",
+  constructor = "function", macro = "macro", comment = "comment",
+  variable = "variable", property = "property", field = "property",
+  bracket = "punctuation.bracket",
 }
 -- The category a token shows in, from its type and the set of its
--- modifiers; nil keeps the highlighting it has. A read-only variable reads
--- as a constant.
+-- modifiers; nil keeps the highlighting it has. Names where they are
+-- declared or defined take the `.definition` category, other functions
+-- `.call`; what the standard library gives is `.builtin`, and a read-only
+-- variable reads as a constant.
 function module.token_category(type, modifiers)
-  if modifiers.readonly and (type == "variable" or type == "property") then
-    return "constant"
+  local category = token_categories[type]
+  local defines = modifiers.declaration or modifiers.definition
+  if category == "function" then
+    if defines then
+      return "function.definition"
+    end
+    return modifiers.defaultLibrary and "function.builtin" or "function.call"
+  elseif category == "variable" or category == "property" then
+    if modifiers.readonly then
+      return "constant"
+    end
+    return defines and category .. ".definition" or category
+  elseif category == "type" and modifiers.defaultLibrary then
+    return "type.builtin"
   end
-  return token_categories[type]
+  return category
 end
 -- Tokens and hints for a whole document are many: Rust decodes them from
 -- the raw answer, and Lua only names each kind of token once.

@@ -83,7 +83,7 @@ impl Tokens {
         let (runs, _) = self.lines(snapshot, line..line + 1, Some(QUERY_BUDGET));
         let mut spans: Vec<(Range<usize>, ItemKind)> = vec![];
         for (range, category) in runs.into_iter().flatten() {
-            let kind = match category {
+            let kind = match category.root() {
                 Category::Comment => ItemKind::Comment,
                 Category::String | Category::Escape => ItemKind::Literal,
                 _ => continue,

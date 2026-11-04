@@ -1478,3 +1478,31 @@ fn a_question_put_aside_is_not_answered_later() {
     r.command(Command::Named("answer x".into()));
     assert_eq!(r.message(), "Nothing to answer");
 }
+#[test]
+fn semantic_tokens_tell_definitions_from_calls_and_builtins() {
+    let mut r = runtime();
+    lua(
+        &mut r,
+        r#"
+        local category = require("lsp").token_category
+        local function is(want, type, modifiers)
+          local got = category(type, modifiers or {})
+          assert(got == want, type .. ": " .. tostring(got))
+        end
+        is("function.definition", "function", { declaration = true })
+        is("function.definition", "method", { definition = true })
+        is("function.call", "method")
+        is("function.call", "staticMethod")
+        is("function.builtin", "function", { defaultLibrary = true })
+        is("variable.definition", "variable", { definition = true })
+        is("variable", "variable")
+        is("property.definition", "field", { definition = true })
+        is("property", "property")
+        is("constant", "property", { readonly = true })
+        is("type.builtin", "class", { defaultLibrary = true })
+        is("type", "typeAlias")
+        is("punctuation.bracket", "bracket")
+        is(nil, "operator")
+        "#,
+    );
+}

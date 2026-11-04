@@ -101,7 +101,7 @@
 
 - Tokyo Night：`tokyonight`、`tokyonight-day`、`tokyonight-storm`
 - Modus（取自 modus-themes 的调色板）：`modus-operandi`、`modus-vivendi`，及其 `-tinted`、`-deuteranopia`、`-tritanopia` 变体
-- JetBrains：`islands-dark`、`islands-light`（取自 IntelliJ Platform 的 Islands 主题与配色方案），`fleet-dark`、`fleet-dark-purple`、`fleet-light`（取自 zed-fleet-themes，半透明颜色已按背景混合）
+- JetBrains：`islands-dark`、`islands-light`（取自 IntelliJ Platform 的 Islands 主题与配色方案；调用用正文色，声明用函数色，内建类型和常量用关键字色，同 CLion），`fleet-dark`、`fleet-dark-purple`、`fleet-light`（取自 zed-fleet-themes，半透明颜色已按背景混合）
 - 其他：`catppuccin-mocha`、`catppuccin-latte`、`gruvbox-dark`、`gruvbox-light`、`dracula`、`nord`、`one-dark`、`one-light`、`solarized-dark`、`solarized-light`、`rose-pine`、`rose-pine-dawn`、`kanagawa`、`everforest-dark`、`everforest-light`、`github-dark`、`github-light`、`monokai`
 
 每个主题是一份调色板加少量语法 face：界面部分都由调色板推出，语法 face 保留该主题原本的关键字、字符串、函数等配色。定义在 `src/application/themes.rs`。主题设置整屏背景，不依赖终端配色。终端前端在 `COLORTERM` 为 `truecolor` 或 `24bit` 时输出 24 位颜色，否则换算为最接近的 xterm 256 色。
@@ -126,7 +126,7 @@ soda.set("theme", "paper")
 
 `face NAME [SPEC]`（Lua：`soda.face(name, spec)`）覆盖一个具名部分的颜色和属性。SPEC 是若干词：`fg:#rrggbb`、`bg:#rrggbb`（`default` 为终端自己的颜色），属性 `bold`、`italic`、`underline`、`dim`、`reverse`、`strikethrough`。没写的颜色沿用主题；写了任何属性就替换主题的属性，`plain` 表示无属性。不带 SPEC 时恢复。Lua 的 spec 也可以是表 `{ fg = "#ff0000", bold = true }`，`nil` 恢复。随时执行，下一帧生效。
 
-名字有界面部分（`text`、`selection`、`cursor-line`、`gutter`、`gutter-current`、`status`、`mode-normal`、`mode-insert`、`mode-beacon`、`mode-prompt`、`title`、`border`、`float`、`float-border`、`label`、`todo`、`note-error`、`note-warning`、`note-info`、`reference`、`reference-write`、`snippet`、`unnecessary`、`deprecated`、`mark1`…`mark8` 等，完整列表和说明见 `src/application/faces.rs`，命令行可补全）和语法分类 `syntax.comment`、`syntax.keyword` 等。
+名字有界面部分（`text`、`selection`、`cursor-line`、`gutter`、`gutter-current`、`status`、`mode-normal`、`mode-insert`、`mode-beacon`、`mode-prompt`、`title`、`border`、`float`、`float-border`、`label`、`todo`、`note-error`、`note-warning`、`note-info`、`reference`、`reference-write`、`snippet`、`unnecessary`、`deprecated`、`mark1`…`mark8` 等，完整列表和说明见 `src/application/faces.rs`，命令行可补全）和语法分类 `syntax.comment`、`syntax.keyword`、`syntax.function.definition` 等。带点的语法 face 继承点前面的那个（见[语法分类](syntax.md#分类)）：`face syntax.function bold` 也作用于没单独设置的 `syntax.function.call`。
 
 光标形状跟随模式：Normal 和 Beacon 为方块，Insert 和输入框为竖线。
 

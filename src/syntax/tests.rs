@@ -376,7 +376,7 @@ fn rules_entered_without_advancing_nest_until_one_repeats() {
     // begins with `\G`, which holds only where the previous one ended.
     let shell = "cargo run --release\n";
     let expected = [
-        ("cargo", Category::Function),
+        ("cargo", Category::FunctionCall),
         ("run", Category::String),
         ("--release", Category::Constant),
     ]
@@ -384,4 +384,23 @@ fn rules_entered_without_advancing_nest_until_one_repeats() {
     assert_eq!(fragments("source.shell", shell)[0], expected);
     let markdown = fragments("text.html.markdown", &format!("```sh\n{shell}```\n"));
     assert_eq!(markdown[1], expected);
+}
+
+#[test]
+fn categories_list_parents_first_and_names_follow_the_line() {
+    for (index, category) in Category::ALL.iter().enumerate() {
+        if let Some(parent) = category.parent() {
+            let at = Category::ALL.iter().position(|c| *c == parent).unwrap();
+            assert!(at < index, "{category:?} comes before its parent");
+            let name = category.name();
+            assert_eq!(&name[..name.rfind('.').unwrap()], parent.name());
+        } else {
+            assert!(!category.name().contains('.'), "{category:?}");
+        }
+    }
+    assert_eq!(Category::PropertyDefinition.root(), Category::Property);
+    assert_eq!(
+        Category::named("function.call"),
+        Some(Category::FunctionCall)
+    );
 }

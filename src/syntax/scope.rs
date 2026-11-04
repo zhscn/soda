@@ -5,12 +5,14 @@ use super::Category;
 
 const TABLE: &[(&str, Category)] = &[
     ("comment", Category::Comment),
+    ("comment.line.documentation", Category::CommentDoc),
+    ("comment.block.documentation", Category::CommentDoc),
     ("string", Category::String),
     ("markup.raw", Category::String),
     ("markup.inline.raw", Category::String),
     ("constant.character.escape", Category::Escape),
     ("constant.numeric", Category::Number),
-    ("constant.language", Category::Constant),
+    ("constant.language", Category::ConstantBuiltin),
     ("constant.other", Category::Constant),
     ("support.constant", Category::Constant),
     ("variable.other.constant", Category::Constant),
@@ -26,13 +28,28 @@ const TABLE: &[(&str, Category)] = &[
     ("entity.name.trait", Category::Type),
     ("entity.other.inherited-class", Category::Type),
     ("support.type", Category::Type),
+    ("support.type.primitive", Category::TypeBuiltin),
+    ("support.type.builtin", Category::TypeBuiltin),
     ("support.class", Category::Type),
-    ("storage.type.primitive", Category::Type),
-    ("storage.type.numeric", Category::Type),
-    ("storage.type.boolean", Category::Type),
-    ("storage.type.string", Category::Type),
+    ("storage.type.primitive", Category::TypeBuiltin),
+    ("storage.type.numeric", Category::TypeBuiltin),
+    ("storage.type.boolean", Category::TypeBuiltin),
+    ("storage.type.string", Category::TypeBuiltin),
+    // Most grammars name calls and definitions alike; semantic tokens
+    // tell them apart where a server gives them.
     ("entity.name.function", Category::Function),
+    ("entity.name.function.call", Category::FunctionCall),
+    ("meta.function-call.generic", Category::FunctionCall),
     ("support.function", Category::Function),
+    ("support.function.builtin", Category::FunctionBuiltin),
+    (
+        "entity.name.function.support.builtin",
+        Category::FunctionBuiltin,
+    ),
+    ("variable.other.property", Category::Property),
+    ("variable.other.member", Category::Property),
+    ("variable.other.object.property", Category::Property),
+    ("support.variable.property", Category::Property),
     ("variable.parameter", Category::Parameter),
     ("entity.name.namespace", Category::Namespace),
     ("entity.name.module", Category::Namespace),
@@ -84,7 +101,11 @@ mod tests {
         assert_eq!(category("keyword.control.rust"), Some(Category::Keyword));
         assert_eq!(
             category("storage.type.primitive.rust"),
-            Some(Category::Type)
+            Some(Category::TypeBuiltin)
+        );
+        assert_eq!(
+            category("comment.line.documentation.rust"),
+            Some(Category::CommentDoc)
         );
         assert_eq!(category("punctuation.definition.string"), None);
         assert_eq!(
