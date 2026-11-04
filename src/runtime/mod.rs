@@ -326,19 +326,15 @@ impl Runtime {
             );
             self.input_result(result, time);
         }
-        self.follow_grab(time);
+        // The input ended a command of the user's: what follows a command
+        // runs, after the macros it played.
+        if self.layers.command_ended() {
+            for event in self.layers.post_command(&self.app, time) {
+                self.reduce(event, time);
+            }
+        }
         self.settle(time);
         self.complete();
-    }
-    /// Beacon after a command: in or out of the grab, and its other places
-    /// derived again, as meow does after each command.
-    fn follow_grab(&mut self, time: Duration) {
-        if self.replaying {
-            return;
-        }
-        for event in self.layers.follow_grab(&self.app, time) {
-            self.reduce(event, time);
-        }
     }
     fn complete(&mut self) {
         let (request, changed) = self.layers.completion_sync(&self.app);

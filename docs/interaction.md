@@ -10,6 +10,15 @@
 
 结果是 `InputResult`：`Pass`（没有绑定，Runtime 忽略）、`Blocked`（被模态层阻止）或 `Handled(Response)`。`Response` 包含有序的 Application 事件、picker 任务、重绘、退出和消息操作（保留、清除、替换）。Runtime 每执行一个事件，先把更新交给 `Layers::observe` 并处理后续响应，再执行下一个事件或读下一次输入；文件和 picker 的完成事件同样如此。模态层内部转换为 `Blocked`、`Active(Response)`、`Closed(Response)`，`enter`、`close` 和确认都统一处理前一会话的恢复事件与任务取消。
 
+**命令循环**（`interaction/command_loop.rs`）对应 Emacs 的 `command_loop_1`：输入读成一条条命令，每条命令有开始和结束。前缀参数或按键序列还没输完时，命令在读取中；不留下这两者的那个输入结束这条命令。
+
+- **开始时**：这条命令的按键从头记；正在录的键盘宏记下命令从哪里开始，所以结束录制的那条命令连同它的前缀参数都不进宏（`finalize_kbd_macro_chars`）；上一条命令设的临时键表接这一个键（`set-transient-map`，如 `C-x e` 之后的 `e`）；`C-g` 放弃正在录的宏（`keyboard-quit`）。
+- **结束时**：`last-command` 变成这条命令；用户输入的命令还要做命令后的工作（`post-command-hook`），现在是 Beacon 跟随光标。
+- **不经过命令循环的**：Lua、钩子、定时器和前端直接执行的命令不是用户的命令，同 Emacs 里定时器在命令循环之外运行，不触发命令后的工作。宏回放的输入经过命令循环，标为执行中（`executing-kbd-macro`），也不触发命令后的工作。
+- **焦点等事件**：不算命令，同 Emacs 的 special event。
+
+新的"每条命令之前或之后"的行为都挂在这里，不要另找入口。
+
 命令在执行时解析活动视图；活动视图变化时命令行和保存等待结束，所以另存为、跳转不会落到另一个视图上。没有活动视图时，需要视图的命令不产生事件。前端显式提供项目根目录，交互层不读取进程工作目录。
 
 输入组件 `TextInput` 持有单行文字和有方向的 UTF-8 字节选区，操作维持 grapheme 边界，按词操作使用 Unicode word 边界，插入和粘贴过滤控制字符。文字变化触发查询，只有选区变化时只重绘。
@@ -24,7 +33,8 @@
 | `text.rs` | 文本中的位置，纯函数 |
 | `execute.rs` | 每个动作如何改变或使用选区 |
 | `beacon.rs` | Beacon 的多选区 |
-| `replay.rs` | 键盘宏 |
+| `replay.rs` | 键盘宏的录制、宏环和计数器 |
+| `kmacro.rs` | 键盘宏命令，同 kmacro.el |
 
 `modal` 打开时模式有三个；关掉时只有 Insert，`SetMode` 和离开 Insert 都不会到别的模式，Esc、`C-g` 只清除选区和待完成的键，与 Emacs 的 `keyboard-quit` 相同：
 
@@ -181,7 +191,7 @@ Beacon 照 meow 的 `meow-beacon.el` 做，键也按 meow 的 beacon 键表分�
 - **进出 Beacon 跟着光标走**：同 `meow--maybe-toggle-beacon-state`，每条命令结束时看光标在不在 grab 里（含两端），在就是 Beacon，不在就是 Normal。grab 一直留着并显示，光标回来时再进入。
 - **离开的方式**：Esc 只取消选区，不离开 Beacon；离开 Beacon 靠把光标移出 grab，或无选区时按 `G`。
 - **不切换的时候**：录制和回放宏、按键序列没输完、搜索等交互层打开时。
-- **grab 跟着编辑**：两端都包住新输入的文字，在 grab 开头输入的字符仍在 grab 里。
+- **grab 跟着编辑**：同 Emacs 的第二选区（`make-overlay` 默认参数建的 overlay），在开头输入的文字算在 grab 里，在末尾输入的不算。
 
 **显示**
 

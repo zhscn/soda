@@ -936,7 +936,7 @@ impl Layers {
             }
             Command::CycleBuffer { backward } => {
                 let current = active(app).map(|view| view.document_id);
-                let again = self.modal.after(
+                let again = self.command.after(
                     |c| matches!(c, Command::CycleBuffer { .. }),
                     &["previous-buffer", "next-buffer"],
                 );
@@ -1325,7 +1325,7 @@ impl Layers {
                 let replay = &mut self.modal.replay;
                 replay.format = format;
                 // Outside a macro it holds for those defined from now on.
-                if !replay.recording() && !self.replaying {
+                if !replay.recording() && !self.command.executing {
                     replay.default_format = replay.format.clone();
                 }
             }

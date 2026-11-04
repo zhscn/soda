@@ -312,6 +312,9 @@ impl Layers {
         stack.push(Context::Global.into());
         stack
     }
+    /// Routes one input through the command loop: the input that begins a
+    /// command marks its beginning, the one that leaves no prefix argument
+    /// or key sequence pending ends it. See `command_loop`.
     fn route_recorded(
         &mut self,
         input: UserInput,
@@ -320,24 +323,83 @@ impl Layers {
         time: Duration,
         file_root: &Path,
     ) -> Result<InputResult, EditError> {
-        let typed = match &input {
+        // Focus and other events are no commands, as Emacs's special
+        // events; a released key is part of the press.
+        let command = match &input {
             UserInput::Key(key) => !key.release,
-            UserInput::Paste(_) => true,
-            UserInput::Pointer(_)
-            | UserInput::Snippet(_)
+            UserInput::Paste(_) | UserInput::Pointer(_) => true,
+            UserInput::Snippet(_)
             | UserInput::Unrecognized
             | UserInput::FocusLost
             | UserInput::FocusGained => false,
         };
-        if typed && !replayed {
-            // The prefix argument belongs to the command after it, so the
-            // keys ending a macro take theirs with them, as `C-u 3 <f4>`.
-            let fresh =
-                !self.sequence.active() && !self.modal.active() && self.modal.universal.is_none();
-            self.modal.replay.typed(&input, fresh);
+        if !command {
+            return self.route(input, app, time, file_root);
         }
-        self.replaying = replayed;
-        self.route(input, app, time, file_root)
+        self.command.executing = replayed;
+        let begins = !self.reading_command();
+        if begins {
+            self.command.begin();
+        }
+        let mut result = None;
+        if begins && !replayed {
+            self.modal.replay.command_starts();
+            if let UserInput::Key(key) = &input {
+                // `C-g` drops a macro being recorded, as `keyboard-quit`
+                // does, and goes on to cancel what it cancels.
+                if key.control
+                    && !key.alt
+                    && key.code == Key::Char('g')
+                    && self.modal.replay.recording()
+                {
+                    self.modal.replay.abort();
+                    self.modal.beacon_insert = None;
+                }
+                result = self.transient_key(*key, app, time, file_root);
+            }
+        }
+        if !replayed && !matches!(input, UserInput::Pointer(_)) {
+            self.modal.replay.typed(&input);
+        }
+        let result = match result {
+            Some(result) => result,
+            None => self.route(input, app, time, file_root),
+        };
+        if !self.reading_command() {
+            self.command.end();
+            if !replayed {
+                self.command.ended = true;
+            }
+        }
+        result
+    }
+    /// A prefix argument or a key sequence is pending.
+    fn reading_command(&self) -> bool {
+        self.sequence.active() || self.modal.active() || self.modal.universal.is_some()
+    }
+    /// The key the transient keymap of the command before takes, as
+    /// kmacro's repeat key; any other key ends the map.
+    fn transient_key(
+        &mut self,
+        key: KeyStroke,
+        app: &Application,
+        time: Duration,
+        file_root: &Path,
+    ) -> Option<Result<InputResult, EditError>> {
+        let transient = self.command.transient.take()?;
+        let mut again = transient.keys[..transient.keys.len() - 1].to_vec();
+        again.push(keymap::canonical(key).unwrap_or(key));
+        let stack = self.stack(app);
+        let Resolution::Complete(command) = self.keymap.resolve(&stack, &again, &|_| false).0
+        else {
+            return None;
+        };
+        if !self.names_one_of(&command, transient.commands) {
+            return None;
+        }
+        self.command.keys = again;
+        self.command.this_command = Some(command.clone());
+        Some(self.execute(command, app, time, file_root))
     }
     fn route(
         &mut self,
@@ -425,34 +487,6 @@ impl Layers {
                 }
             };
             return Ok(InputResult::Handled(self.modal_read(read, ch, app, time)));
-        }
-        // After a macro key sequence, its last key alone runs it again, as
-        // kmacro's repeat keys; any other key ends that.
-        if !self.replaying
-            && let Some((keys, commands)) = self.modal.macro_repeat.take()
-            && !self.sequence.active()
-            && !self.modal.active()
-        {
-            let mut again = keys[..keys.len() - 1].to_vec();
-            again.push(keymap::canonical(key).unwrap_or(key));
-            let stack = self.stack(app);
-            if let Resolution::Complete(command) = self.keymap.resolve(&stack, &again, &|_| false).0
-                && self.names_one_of(&command, commands)
-            {
-                self.modal.command_keys = again;
-                return self.execute(command, app, time, file_root);
-            }
-        }
-        // `C-g` drops a macro being recorded, as `keyboard-quit` does, and
-        // goes on to cancel what it cancels.
-        if key.control
-            && !key.alt
-            && key.code == Key::Char('g')
-            && !self.sequence.active()
-            && self.modal.replay.recording()
-        {
-            self.modal.replay.abort();
-            self.modal.beacon_insert = None;
         }
         // After C-u, digits and `-` make its count rather than text or keys.
         if let Some(universal) = self.modal.universal
@@ -573,14 +607,14 @@ impl Layers {
         };
         match resolution {
             Resolution::Complete(command) => {
-                self.modal.command_keys = sequence;
-                self.modal.last_key = self.modal.this_key.replace(command.clone());
+                self.command.keys = sequence;
+                self.command.this_command = Some(command.clone());
                 // `repeat` runs again what a key ran, not what that went on
                 // to run, nor itself.
                 let repeat = matches!(&command, Command::Named(line) if line.trim() == "repeat");
                 // Keys a macro replays are not what was typed.
                 if !repeat
-                    && !self.replaying
+                    && !self.command.executing
                     && !matches!(
                         command,
                         Command::Keypad(_)
@@ -601,10 +635,9 @@ impl Layers {
             }
             Resolution::Prefix => return Ok(pending(Message::Clear)),
             Resolution::Invalid => {
-                self.modal.last_key = self.modal.this_key.take();
                 return Ok(pending(Message::Set(format!("{typed} is undefined"))));
             }
-            Resolution::Pass => self.modal.last_key = self.modal.this_key.take(),
+            Resolution::Pass => {}
         }
         if self.mode != EditMode::Insert {
             if cancel {
@@ -618,7 +651,7 @@ impl Layers {
         let plain = !key.alt && !key.control && !key.unsupported_modifiers;
         match key.code {
             Key::Char(ch) if plain => {
-                self.completion.typed = !self.replaying;
+                self.completion.typed = !self.command.executing;
                 let typed = Command::Edit(EditCommand::TypeChar(ch));
                 if let Some(repeated) = self.repeat_by_prefix(&typed, app) {
                     return Ok(InputResult::Handled(repeated));

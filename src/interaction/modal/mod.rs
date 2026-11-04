@@ -290,19 +290,8 @@ pub(in crate::interaction) struct State {
     pub play: Option<BeaconPlay>,
     /// The main selection while keys play at the other places.
     pub held: Option<Grab>,
-    /// The keys of the sequence that ran the command being run.
-    pub command_keys: Vec<crate::interaction::KeyStroke>,
-    /// After a macro key sequence, its last key alone runs again whichever
-    /// of these commands the sequence ending in it is bound to.
-    pub macro_repeat: Option<(Vec<crate::interaction::KeyStroke>, &'static [&'static str])>,
     /// The last command, for `repeat`.
     pub last: Option<super::Command>,
-    /// The command the key being handled ran, and the one the key before
-    /// ran, as Emacs's `this-command` and `last-command`: typing text in
-    /// between leaves none, so `C-l C-l` goes on and `C-l a C-l` starts
-    /// over.
-    pub this_key: Option<super::Command>,
-    pub last_key: Option<super::Command>,
     /// `C-u` was typed and its count is still open: digits and `-` typed
     /// next are the count's, and the first digit replaces the 4.
     pub universal: Option<UniversalArgument>,
@@ -313,18 +302,6 @@ pub(in crate::interaction) struct State {
     pub buffer_cycle: Option<(Vec<crate::editor::DocumentId>, usize)>,
 }
 impl State {
-    /// Whether the key before this one ran a command `test` accepts.
-    /// Keys hold commands parsed already; a line not yet parsed is tried
-    /// against `names`.
-    pub fn after(&self, test: impl Fn(&super::Command) -> bool, names: &[&str]) -> bool {
-        match &self.last_key {
-            Some(super::Command::Named(line)) => {
-                names.contains(&line.split_whitespace().next().unwrap_or(""))
-            }
-            Some(command) => test(command),
-            None => false,
-        }
-    }
     /// Forgets what was typed toward a command.
     pub fn clear(&mut self) {
         self.count = None;

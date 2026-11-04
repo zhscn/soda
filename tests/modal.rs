@@ -629,11 +629,16 @@ fn words_give_carets_at_their_ends_and_the_selection_shrinks() {
     assert_eq!(plain(&r), "Xab Xcd\nXef Xgh\n");
 }
 #[test]
-fn text_typed_at_the_start_of_a_grab_stays_in_it() {
+fn text_typed_at_the_start_of_a_grab_joins_it_and_at_the_end_does_not() {
     let mut r = runtime("|foo bar\nbaz qux\n");
     keys(&mut r, "eeG C-e b iX ESC");
     assert_eq!(plain(&r), "Xfoo Xbar\nXbaz Xqux\n");
     assert_eq!(r.grab(), Some(0..19));
+    // As an Emacs overlay made with the defaults: the end stays before.
+    let mut r = runtime("|ab cd\nxy\n");
+    keys(&mut r, "eG C-e iZ ESC");
+    assert_eq!(plain(&r), "ab cdZ\nxy\n");
+    assert_eq!(r.grab(), Some(0..5));
 }
 #[test]
 fn typing_plays_at_each_place_and_the_main_selection_stays() {

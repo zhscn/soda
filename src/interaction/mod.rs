@@ -3,6 +3,7 @@
 //! feature reducers return transitions and Runtime executes their responses.
 mod command_line;
 pub use command_line::{CommandLine, Completion};
+mod command_loop;
 mod commands;
 pub mod completion;
 pub mod modal;
@@ -164,8 +165,8 @@ pub struct Layers {
     completion: completion::State,
     retype: Option<KeyStroke>,
     snippet: snippet::State,
-    /// The input being routed comes from a macro.
-    replaying: bool,
+    /// The command being read and run, and the one before.
+    command: command_loop::CommandLoop,
     jumps: jumps::Jumps,
     registry: Registry,
     hooks: hooks::Hooks,
@@ -243,6 +244,20 @@ impl Layers {
             root: file_root,
             hook: self.hook.as_deref(),
         }
+    }
+    /// Whether the user's last input ended a command, so that the work
+    /// after a command is due; asking takes the answer.
+    pub fn command_ended(&mut self) -> bool {
+        std::mem::take(&mut self.command.ended)
+    }
+    /// The work after a command the user typed, as `post-command-hook`:
+    /// Beacon follows the caret. Returns events the runtime applies.
+    pub fn post_command(
+        &mut self,
+        app: &crate::application::Application,
+        time: std::time::Duration,
+    ) -> Vec<Event> {
+        self.follow_grab(app, time)
     }
     pub fn clear_failed(&mut self) {
         self.failed = false;

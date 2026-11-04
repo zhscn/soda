@@ -25,7 +25,8 @@ pub(in crate::interaction) struct Replay {
     last: Vec<UserInput>,
     /// Earlier macros, the most recent first.
     ring: VecDeque<Macro>,
-    /// Keys held before the sequence being typed, which may end recording.
+    /// Where the command being read began: the keys from there on are the
+    /// command that ends recording, and are left out.
     settled: usize,
     /// `kmacro-counter`, the value before the last change, and the value
     /// when the macro started.
@@ -118,12 +119,16 @@ impl Replay {
     pub fn second(&self) -> Option<&[UserInput]> {
         self.ring.front().map(|earlier| earlier.keys.as_slice())
     }
-    /// Records typed input; `fresh` says no key sequence was pending.
-    pub fn typed(&mut self, input: &UserInput, fresh: bool) {
+    /// A command begins, as the command loop says: the keys recorded so
+    /// far are the macro's, whatever this command does.
+    pub fn command_starts(&mut self) {
+        if let Some(keys) = &self.recording {
+            self.settled = keys.len();
+        }
+    }
+    /// Records typed input.
+    pub fn typed(&mut self, input: &UserInput) {
         if let Some(keys) = &mut self.recording {
-            if fresh {
-                self.settled = keys.len();
-            }
             keys.push(input.clone());
         }
     }
@@ -305,9 +310,11 @@ mod tests {
         let record = |replay: &mut Replay, keys: &[char]| {
             replay.start(None, false);
             for &ch in keys {
-                replay.typed(&key(ch), true);
+                replay.command_starts();
+                replay.typed(&key(ch));
             }
-            replay.typed(&key('z'), true);
+            replay.command_starts();
+            replay.typed(&key('z'));
             replay.stop()
         };
         assert!(record(&mut replay, &['a']));
@@ -323,7 +330,7 @@ mod tests {
         assert_eq!(text(Some(replay.last())), "b");
         // Dropped while recording: the same.
         replay.start(None, false);
-        replay.typed(&key('c'), true);
+        replay.typed(&key('c'));
         replay.abort();
         assert_eq!(text(Some(replay.last())), "b");
         replay.delete_head().unwrap();

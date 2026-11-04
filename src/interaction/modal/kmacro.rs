@@ -71,7 +71,7 @@ impl Layers {
         mut response: Response,
     ) -> Response {
         let recording = self.modal.replay.recording();
-        let executing = self.replaying;
+        let executing = self.command.executing;
         match action {
             MacroAction::StartOrCounter if recording || executing => {
                 self.insert_counter(at, &prefix, &mut response);
@@ -102,7 +102,7 @@ impl Layers {
             }
             MacroAction::EndOrCall | MacroAction::EndOrCallRepeat => {
                 if action == MacroAction::EndOrCallRepeat {
-                    self.repeat_on_last_key(RING_REPEATS);
+                    self.command.repeat_on_last_key(RING_REPEATS);
                 }
                 if recording {
                     return self.end_macro(&prefix, response);
@@ -138,31 +138,26 @@ impl Layers {
                         return response;
                     }
                 }
-                self.repeat_on_last_key(&["macro-end-and-call"]);
+                self.command.repeat_on_last_key(&["macro-end-and-call"]);
                 let before = std::mem::replace(&mut response.message, Message::Clear);
                 response = self.call_macro(prefix.count, response);
                 // A failure says so; else what ending said; else the hint,
                 // as Emacs gives it when the echo area is free.
                 if matches!(response.message, Message::Set(_)) {
-                    self.modal.macro_repeat = None;
+                    self.command.transient = None;
                 } else if matches!(before, Message::Set(_)) {
                     response.message = before;
-                } else if let Some(key) = self
-                    .modal
-                    .macro_repeat
-                    .as_ref()
-                    .and_then(|(keys, _)| keys.last())
-                {
+                } else if let Some(key) = self.command.repeat_key() {
                     response.message =
                         Message::Set(format!("(Type {} to repeat macro)", key.emacs()));
                 }
             }
             MacroAction::CallSecond => {
-                self.repeat_on_last_key(RING_REPEATS);
+                self.command.repeat_on_last_key(RING_REPEATS);
                 return self.call_second(prefix.count, response);
             }
             MacroAction::RingNext | MacroAction::RingPrevious => {
-                self.repeat_on_last_key(RING_REPEATS);
+                self.command.repeat_on_last_key(RING_REPEATS);
                 let previous = action == MacroAction::RingPrevious;
                 if let Err(message) = self.modal.replay.cycle(previous) {
                     return self.fail(response, message);
@@ -176,7 +171,7 @@ impl Layers {
                 response.message = Message::Set(self.describe_macro("Macro"));
             }
             MacroAction::RingDelete => {
-                self.repeat_on_last_key(RING_REPEATS);
+                self.command.repeat_on_last_key(RING_REPEATS);
                 if let Err(message) = self.modal.replay.delete_head() {
                     return self.fail(response, message);
                 }
@@ -187,7 +182,7 @@ impl Layers {
                 });
             }
             MacroAction::View => {
-                self.repeat_on_last_key(RING_REPEATS);
+                self.command.repeat_on_last_key(RING_REPEATS);
                 response.message = Message::Set(if self.modal.replay.last().is_empty() {
                     "No keyboard macros defined".into()
                 } else {
@@ -326,12 +321,6 @@ impl Layers {
             replay.counter += if prefix.given { prefix.count as i64 } else { 1 };
         }
         response.events.push(at.event(Edit::InsertText(text)));
-    }
-    /// The next key alone runs again whichever of `commands` the sequence
-    /// ending in it is bound to, as kmacro's repeat keys.
-    fn repeat_on_last_key(&mut self, commands: &'static [&'static str]) {
-        let keys = &self.modal.command_keys;
-        self.modal.macro_repeat = (keys.len() > 1).then(|| (keys.clone(), commands));
     }
     /// The last macro as `kmacro-display` shows it.
     fn describe_macro(&self, what: &str) -> String {

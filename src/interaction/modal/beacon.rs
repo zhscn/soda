@@ -62,19 +62,21 @@ impl Layers {
         let end = grab.end.resolve(at.document).ok()?.0;
         (start < end).then_some(start..end)
     }
-    /// After each command, as meow's `meow--maybe-toggle-beacon-state`:
-    /// the caret inside the grab is Beacon, outside it Normal, and in
-    /// Beacon the other places are derived again. Some kinds leave carets
-    /// at the other places and the main selection shrinks to its caret; the
-    /// event for that is returned. Nothing changes while a macro is
-    /// recorded, while keys toward a command are pending, or while a layer
-    /// such as search is open.
-    pub fn follow_grab(&mut self, app: &Application, time: Duration) -> Vec<Event> {
+    /// After each command the user typed, as meow's
+    /// `meow--maybe-toggle-beacon-state` on `post-command-hook`: the caret
+    /// inside the grab is Beacon, outside it Normal, and in Beacon the
+    /// other places are derived again. Some kinds leave carets at the other
+    /// places and the main selection shrinks to its caret; the event for
+    /// that is returned. Nothing changes while a macro is recorded, as meow
+    /// skips while one is defined, nor while a layer such as search is
+    /// open. The command loop calls it; see `command_loop`.
+    pub(in crate::interaction) fn follow_grab(
+        &mut self,
+        app: &Application,
+        time: Duration,
+    ) -> Vec<Event> {
         if self.active.is_some()
             || self.modal.replay.recording()
-            || self.sequence.active()
-            || self.modal.active()
-            || self.modal.universal.is_some()
             || !crate::interaction::modal_on(app)
             || !matches!(self.mode, EditMode::Normal | EditMode::Beacon)
         {

@@ -378,7 +378,7 @@ impl Layers {
             Action::Recenter => {
                 // As recenter-top-bottom: again and again, the line goes to
                 // the middle, the top and the bottom.
-                let again = self.modal.after(
+                let again = self.command.after(
                     |c| matches!(c, Command::Modal(Action::Recenter)),
                     &["recenter"],
                 );
@@ -989,18 +989,18 @@ impl Layers {
     }
     fn grab(&mut self, at: &Place, response: &mut Response) {
         let range = at.selection.range();
-        // Text typed at either edge joins the grab: the start stays before
-        // it. A marker, empty, follows what is typed there.
-        let start = if range.is_empty() {
+        // As Emacs's secondary selection, an overlay made with
+        // `make-overlay`'s defaults: text typed at its start joins it, text
+        // typed at its end does not; both ends stay before what is typed.
+        // A marker, empty, follows what is typed there.
+        let edge = if range.is_empty() {
             Association::After
         } else {
             Association::Before
         };
-        self.modal.grab = at
-            .document
-            .position(ByteOffset(range.start), start)
-            .ok()
-            .zip(position(at.document, range.end))
+        let at_edge = |offset| at.document.position(ByteOffset(offset), edge).ok();
+        self.modal.grab = at_edge(range.start)
+            .zip(at_edge(range.end))
             .map(|(start, end)| Grab { start, end });
         self.modal.tag = None;
         let caret = Selection::caret(at.selection.head);
