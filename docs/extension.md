@@ -45,7 +45,8 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 | `tab-bar` | auto/on/off | auto | 文档标签行；auto 只在单窗口时显示 |
 | `window-title` | true/false | true | 有多个窗口时在每个窗口顶部显示标题 |
 | `wrap` | true/false | false | 长行折到下一屏幕行，尽量在空格后断开 |
-| `show-whitespace` | true/false | false | 用 `»` 标出制表符，`·` 标出行尾空格 |
+| `show-tabs` | true/false | false | 用 `»` 标出制表符 |
+| `show-trailing-whitespace` | true/false | false | 用 `·` 标出行尾空格 |
 | `ruler` | 0–1000 | 0 | 标出这一列之后的一列，0 不标；见[终端界面](ui.md) |
 | `cpp-fallback-style` | LLVM/Google/Chromium/Mozilla/WebKit/GNU/Microsoft | LLVM | 没有可用的 `.clang-format` 时的 C++ 风格；只对之后打开的文档生效 |
 | `inlay-hints`、`inline-notes` | true/false | true | 显示语言服务器的 inlay hint、行尾的诊断，见[语言服务器](lsp.md) |

@@ -76,7 +76,8 @@
 | 选项 | 默认 | 作用 |
 | --- | --- | --- |
 | `wrap` | 关 | 长行折行，不再水平滚动 |
-| `show-whitespace` | 关 | 制表符第一格显示 `»`、行尾空格显示 `·`，暗色 |
+| `show-tabs` | 关 | 制表符第一格显示 `»`，暗色 |
+| `show-trailing-whitespace` | 关 | 行尾空格显示 `·`，暗色（同 Emacs 的同名变量） |
 | `ruler` | 0 | 给第 `ruler` 列之后的一列加底色（同 Emacs `display-fill-column-indicator`），0 不显示 |
 
 `%val{column-limit}` 是 clang-format 的 `ColumnLimit`（没有配置时为 0），例如 `hook open .*\.(cpp|h) set-local ruler %val{column-limit}`。

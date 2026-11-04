@@ -204,7 +204,8 @@ pub(crate) fn row(
         matches: &[],
         detail: text.len(),
         categories: &[],
-        whitespace: false,
+        tabs: false,
+        trailing: false,
         faces: &[],
         inlays: &[],
     };
@@ -235,8 +236,10 @@ struct Marks<'a> {
     matches: &'a [std::ops::Range<usize>],
     detail: usize,
     categories: &'a [(std::ops::Range<usize>, Category)],
-    /// Mark tabs and trailing spaces.
-    whitespace: bool,
+    /// Mark tabs.
+    tabs: bool,
+    /// Mark spaces at the end of a line.
+    trailing: bool,
     /// Highlighted ranges in the row, ordered by start.
     faces: &'a [(std::ops::Range<usize>, crate::application::Face)],
     /// Hints in order of where they stand. They take room from the row.
@@ -307,7 +310,8 @@ fn styled_row(
         matches,
         detail,
         categories,
-        whitespace,
+        tabs,
+        trailing,
         faces,
         inlays,
     } = marks;
@@ -326,8 +330,8 @@ fn styled_row(
         }
     };
     // Spaces and tabs from here to the end of the line trail.
-    let trailing = text.trim_end_matches(['\n', '\r']);
-    let trailing = trailing.trim_end_matches([' ', '\t']).len();
+    let trailing_from = text.trim_end_matches(['\n', '\r']);
+    let trailing_from = trailing_from.trim_end_matches([' ', '\t']).len();
     let mut spans = Vec::<Span>::new();
     // Whether the last span's text fills it, so that more text can follow
     // in it.
@@ -383,7 +387,8 @@ fn styled_row(
         if end > left && end > x {
             let visible = end.min(right).saturating_sub(x.max(left));
             let whole = x >= left && end <= right;
-            let marked = whitespace && (cluster == "\t" || (cluster == " " && offset >= trailing));
+            let marked = (tabs && cluster == "\t")
+                || (trailing && cluster == " " && offset >= trailing_from);
             let digit = digits
                 .iter()
                 .find(|(place, _)| *place == byte_start + offset)
@@ -515,7 +520,8 @@ pub(crate) fn candidate_row<T>(
         matches: &row.highlights,
         detail: detail.unwrap_or(text.len()),
         categories: &[],
-        whitespace: false,
+        tabs: false,
+        trailing: false,
         faces: &[],
         inlays: &[],
     };
@@ -1079,7 +1085,8 @@ pub(crate) fn frame(
     let bottom = shown.last().map_or(top, |((line, _), _)| line + 1);
     let highlights = highlighter.lines(app, view.document_id, top..bottom);
     let options = app.options();
-    let show_whitespace = options.bool(Some(view.document_id), "show-whitespace");
+    let show_tabs = options.bool(Some(view.document_id), "show-tabs");
+    let show_trailing = options.bool(Some(view.document_id), "show-trailing-whitespace");
     // The ruler marks the first column past the limit.
     let ruler = match options.int(Some(view.document_id), "ruler") as usize {
         0 => None,
@@ -1201,7 +1208,8 @@ pub(crate) fn frame(
             matches: &[],
             detail: text.len(),
             categories: &categories,
-            whitespace: show_whitespace,
+            tabs: show_tabs,
+            trailing: show_trailing,
             faces: &faces,
             inlays: &hints,
         };
@@ -1425,11 +1433,19 @@ mod tests {
         let mut plain = frame(&mut app, 20, 3).unwrap();
         assert_eq!(joined(first(&mut plain)), "a   b c  ");
         assert_eq!(plain.ruler, None);
+        // Each kind of whitespace has its own switch.
+        set(&mut app, "show-tabs", crate::options::Value::Bool(true));
+        let mut tabs = frame(&mut app, 20, 3).unwrap();
+        assert_eq!(joined(first(&mut tabs)), "a»  b c  ");
+        set(&mut app, "show-tabs", crate::options::Value::Bool(false));
         set(
             &mut app,
-            "show-whitespace",
+            "show-trailing-whitespace",
             crate::options::Value::Bool(true),
         );
+        let mut trailing = frame(&mut app, 20, 3).unwrap();
+        assert_eq!(joined(first(&mut trailing)), "a   b c··");
+        set(&mut app, "show-tabs", crate::options::Value::Bool(true));
         set(&mut app, "ruler", crate::options::Value::Int(6));
         let mut marked = frame(&mut app, 20, 3).unwrap();
         let spans = first(&mut marked);

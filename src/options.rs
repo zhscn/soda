@@ -195,10 +195,16 @@ pub const OPTIONS: &[OptionInfo] = &[
         doc: "Wrap long lines onto further rows, after a space where one fits",
     },
     OptionInfo {
-        name: "show-whitespace",
+        name: "show-tabs",
         kind: Kind::Bool,
         default: Value::Bool(false),
-        doc: "Mark tabs with » and trailing spaces with ·",
+        doc: "Mark tabs with »",
+    },
+    OptionInfo {
+        name: "show-trailing-whitespace",
+        kind: Kind::Bool,
+        default: Value::Bool(false),
+        doc: "Mark spaces at the end of a line with ·",
     },
     OptionInfo {
         name: "ruler",
