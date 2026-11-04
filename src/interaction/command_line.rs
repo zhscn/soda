@@ -554,6 +554,14 @@ impl CommandLine {
                 history_rank(&ranks, row.candidate.payload.replacement.as_deref())
             });
         }
+        // Paths order their own; command names put an exact one first.
+        if let Some(query) = &query
+            && matches!(query.target, Target::Slot(kind) if kind != SlotKind::Path)
+        {
+            // An item answers with its number, which is not its name.
+            let named = query.target != Target::Slot(SlotKind::Item);
+            exact_first(&mut rows, &query.text, named);
+        }
         let same_list = self.query.as_ref().map(|q| q.target) == query.as_ref().map(|q| q.target);
         if rows.is_empty() && !self.rows.is_empty() && same_list && self.waiting(&query) {
             // New input forgets the choice, as it does with fresh rows.
@@ -609,10 +617,6 @@ impl CommandLine {
     /// Items match fuzzily and answer with their number, so a title may
     /// hold any text.
     fn symbol_rows(&mut self, app: &Application, query: &str) -> Vec<MatchedCandidate<Completion>> {
-        let ranks = self
-            .slot_history(SlotKind::Symbol)
-            .map(|name| self.ranks(&name))
-            .unwrap_or_default();
         let symbols = self.symbols.get_or_insert_with(|| {
             let Some(view) = app.active_view().and_then(|view| app.view(view)) else {
                 return vec![];
@@ -627,10 +631,10 @@ impl CommandLine {
             symbols(editor.model().document().snapshot().text(), caret)
         });
         self.matcher.config = Config::DEFAULT;
-        // Equal scores go by the history, then keep the nearest first.
+        // Equal scores keep the nearest first; the history does not order
+        // them, as `consult-imenu` keeps the order of the document.
         let shown = symbols.iter().cloned().enumerate();
-        let rank = |index: &usize| history_rank(&ranks, Some(&symbols[*index]));
-        ranked(&mut self.matcher, query, shown, rank)
+        ranked(&mut self.matcher, query, shown, |_| false)
             .map(|(index, symbol, highlights)| {
                 let row = row(index as u64, symbol.clone(), Some(symbol), false);
                 mark(row, highlights, None)
@@ -737,12 +741,20 @@ impl CommandLine {
                 let label = format!("{}{slash}", printable(&entry.name.to_string_lossy()));
                 let (leading, typed) = name_match(&label, prefix)?;
                 let used = ranks.get(&entry.name).copied().unwrap_or(u32::MAX);
+                // As vertico puts the typed name first, then the directory
+                // of that name.
+                let exact = match label.strip_prefix(prefix) {
+                    _ if prefix.is_empty() => 2,
+                    Some("") => 0,
+                    Some("/") => 1,
+                    _ => 2,
+                };
                 let row = row(index as u64, label, replacement, entry.directory);
-                Some(((!leading, used), mark(row, typed, None)))
+                Some(((exact, !leading, used), mark(row, typed, None)))
             })
             .collect();
-        // Stable: names that begin with the text first, then files taken
-        // lately, in directory order.
+        // Stable: the typed name first, then names that begin with the
+        // text, then files taken lately, in directory order.
         matched.sort_by_key(|(key, _)| *key);
         matched.into_iter().map(|(_, row)| row).collect()
     }
@@ -849,7 +861,10 @@ impl CommandLine {
             .as_ref()
             .is_some_and(|q| q.target == Target::Slot(SlotKind::File))
         {
-            let rows = self.file_rows();
+            let mut rows = self.file_rows();
+            if let Some(query) = &self.query {
+                exact_first(&mut rows, &query.text, true);
+            }
             self.list.update(&self.rows, &rows);
             self.rows = rows;
             self.stale = false;
@@ -1360,6 +1375,21 @@ pub(super) fn symbols(text: &str, caret: usize) -> Vec<String> {
 /// after the rest.
 /// Candidates that match the query, best first; `rank` orders equal
 /// scores, and all of them when the query is empty.
+/// Moves the row the typed text names exactly to the front, as vertico
+/// does after sorting, so that what is typed in full is the first row: by
+/// its label, or by the text it fills in when that is its name.
+fn exact_first(rows: &mut [MatchedCandidate<Completion>], text: &str, named: bool) {
+    if text.is_empty() {
+        return;
+    }
+    let exact = rows.iter().position(|row| {
+        row.candidate.label == text
+            || (named && row.candidate.payload.replacement.as_deref() == Some(text))
+    });
+    if let Some(index) = exact {
+        rows[..=index].rotate_right(1);
+    }
+}
 /// Where an entry stands in a history, newest first; entries the history
 /// does not hold come after all.
 fn history_rank(ranks: &HashMap<String, u32>, entry: Option<&str>) -> u32 {

@@ -250,3 +250,33 @@ fn a_directory_ranks_by_the_files_taken_below_it() {
     wait(&mut r, |r| rows(r).len() == 3);
     assert_eq!(rows(&r), ["z/", "a/", "m/"]);
 }
+#[test]
+fn a_name_typed_in_full_comes_first() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(root.path().join("x")).unwrap();
+    std::fs::write(root.path().join("x.txt"), "x\n").unwrap();
+    let mut r = project(root.path());
+    keys(&mut r, "M-x set SPC font-size SPC 12 RET");
+    keys(&mut r, "M-x set SPC font");
+    assert!(rows(&r)[0].starts_with("font "), "{:?}", rows(&r));
+    assert!(rows(&r)[1].starts_with("font-size "), "{:?}", rows(&r));
+    // A path takes the typed name, then the directory of that name, even
+    // before files taken lately.
+    let typed: Vec<_> = format!("{}/x.txt", root.path().display())
+        .chars()
+        .map(String::from)
+        .collect();
+    keys(&mut r, &format!("ESC M-x open SPC {} RET", typed.join(" ")));
+    wait(&mut r, |r| {
+        let view = r.app().active_view().and_then(|v| r.app().view(v));
+        view.is_some_and(|v| r.app().document_name(v.document_id).ends_with("x.txt"))
+    });
+    keys(&mut r, "M-x new RET");
+    let typed: Vec<_> = format!("{}/x", root.path().display())
+        .chars()
+        .map(String::from)
+        .collect();
+    keys(&mut r, &format!("M-x open SPC {}", typed.join(" ")));
+    wait(&mut r, |r| rows(r).len() == 2);
+    assert_eq!(rows(&r), ["x/", "x.txt"]);
+}
