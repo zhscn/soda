@@ -43,7 +43,7 @@ impl Place<'_> {
     fn caret(&self) -> Event {
         self.event(Edit::SetSelection(Selection::caret(self.selection.head)))
     }
-    fn clipboard(&self, action: ClipboardAction) -> Event {
+    pub(super) fn clipboard(&self, action: ClipboardAction) -> Event {
         Event::Clipboard {
             view: self.view,
             action,
@@ -256,13 +256,11 @@ impl Layers {
                     .events
                     .push(at.event(Edit::SetSelection(selection)));
             }
+            // Beacon is left by leaving the grab, or by `G` without a
+            // selection; Esc only cancels the selection, as in meow.
             Action::Cancel => {
-                let leave = self.mode == EditMode::Beacon && at.selection.range().is_empty();
                 self.modal.history.clear();
                 self.modal.tag = None;
-                if leave {
-                    self.leave_beacon();
-                }
                 if !at.selection.range().is_empty() {
                     response.events.push(at.caret());
                 }
@@ -282,41 +280,46 @@ impl Layers {
                     .push(at.event(Edit::SetSelection(selection)));
             }
             Action::Expand(digit) => return self.expand_selection(&at, digit, response),
+            // `meow-open-below` and `meow-open-above` do nothing in Beacon.
+            Action::Insert(Entry::Below | Entry::Above) if self.mode == EditMode::Beacon => {
+                return response;
+            }
             Action::Insert(entry) => self.enter_insert(&at, entry, &mut response),
             // Without modal editing, leaving Insert is Emacs's C-g.
             Action::Leave if !crate::interaction::modal_on(app) => {
                 return self.modal_execute(Action::Cancel, app, time);
             }
+            // `meow-insert-exit` does nothing in Beacon.
+            Action::Leave if self.mode == EditMode::Beacon => return response,
             Action::Leave => {
-                if self.mode == EditMode::Beacon {
-                    self.leave_beacon();
-                    return response;
-                }
-                let beacon = std::mem::take(&mut self.modal.beacon_insert);
                 self.modal.insert_view = None;
-                self.mode = if beacon {
-                    EditMode::Beacon
-                } else {
-                    EditMode::Normal
-                };
+                self.mode = EditMode::Normal;
                 response
                     .events
                     .push(at.event(Edit::EndUndoGroup(Selection::caret(at.selection.head))));
+                if let Some(entry) = self.modal.beacon_insert.take() {
+                    self.end_beacon_insert(entry, &mut response);
+                }
             }
             Action::KillRegion | Action::KillRingSave if at.selection.range().is_empty() => {
                 return self.fail(response, NO_REGION);
             }
             Action::KillRegion => return self.modal_execute(Action::Kill, app, time),
             Action::KillRingSave => return self.modal_execute(Action::Save, app, time),
-            Action::Kill | Action::Delete if self.beacon_active() => {
-                self.beacon_delete(&at, matches!(action, Action::Kill), &mut response);
+            // What meow's Beacon keymap makes `meow-beacon-noop`.
+            Action::Delete | Action::Save | Action::SwapGrab if self.mode == EditMode::Beacon => {
+                return response;
+            }
+            Action::Kill if self.beacon_active() && !at.selection.range().is_empty() => {
+                self.beacon_kill(&at, &mut response);
             }
             Action::Kill => self.kill(&at, &mut response),
             Action::Change => {
                 let range = changed(&at);
+                // Without a selection it changes a character at each place,
+                // as `meow-beacon-change-char`.
                 if self.beacon_active() {
-                    self.beacon_change(&at, &mut response);
-                    return response;
+                    self.begin_beacon_insert(super::BeaconEntry::Change);
                 }
                 self.modal.insert_view = Some(at.view);
                 self.mode = EditMode::Insert;
@@ -402,18 +405,13 @@ impl Layers {
                     &mut response,
                 );
             }
-            Action::Grab => self.grab(&at, app, &mut response),
+            Action::Grab => self.grab(&at, &mut response),
             Action::SwapGrab => return self.swap_grab(&at, response),
             Action::MacroStart => {
-                // Keys go to the main selection alone until they are played.
-                self.modal.macro_shape = None;
+                // As `meow-beacon-start`: keys go to the main selection
+                // alone, in Normal, the other places held until it ends.
                 if self.mode == EditMode::Beacon {
                     self.mode = EditMode::Normal;
-                    let tag = self.modal.tag(at.selection);
-                    self.modal.macro_shape = Some((
-                        at.selection.head < at.selection.anchor,
-                        tag.map(|tag| (tag.kind, tag.expand)),
-                    ));
                 }
                 self.modal.macro_depth = at.document.history_depth();
                 self.modal.replay.start();
@@ -436,10 +434,12 @@ impl Layers {
                     self.modal.replay.stop();
                     response.message = Message::Set("Macro recorded".into());
                     if !self.modal.beacons.is_empty() {
-                        self.apply_macro(&at, &mut response);
+                        self.beacon_end_macro(&mut response);
                     }
                 } else if self.modal.replay.last().is_empty() {
                     return self.fail(response, "No macro");
+                } else if matches!(action, Action::MacroEnd) && self.beacon_active() {
+                    self.beacon_call_macro(count, &mut response);
                 } else {
                     let keys = self.modal.replay.last().to_vec();
                     for _ in 0..count {
@@ -447,6 +447,8 @@ impl Layers {
                     }
                 }
             }
+            Action::PlayAtBeacons => self.play_at_beacons(&at, &mut response),
+            Action::ReturnFromBeacons => self.return_from_beacons(&at, &mut response),
             Action::MacroLines | Action::MacroMatches => {
                 let keys = self.modal.replay.last().to_vec();
                 if keys.is_empty() {
@@ -813,8 +815,7 @@ impl Layers {
     }
     fn enter_insert(&mut self, at: &Place, entry: Entry, response: &mut Response) {
         if self.beacon_active() && matches!(entry, Entry::Before | Entry::After) {
-            self.beacon_insert(at, entry, response);
-            return;
+            self.begin_beacon_insert(super::BeaconEntry::Insert(entry));
         }
         let text = at.text;
         let line = text
@@ -1018,7 +1019,7 @@ impl Layers {
         self.select(at, caret, None, &mut response);
         response
     }
-    fn grab(&mut self, at: &Place, app: &Application, response: &mut Response) {
+    fn grab(&mut self, at: &Place, response: &mut Response) {
         let range = at.selection.range();
         // Text typed at either edge joins the grab: the start stays before
         // it. A marker, empty, follows what is typed there.
@@ -1036,10 +1037,8 @@ impl Layers {
         self.modal.tag = None;
         let caret = Selection::caret(at.selection.head);
         response.events.push(at.event(Edit::SetSelection(caret)));
-        if !range.is_empty() {
-            self.mode = EditMode::Beacon;
-            self.derive_beacons(app, at.time);
-        } else {
+        // Beacon follows at the end of the command, the caret being inside.
+        if range.is_empty() {
             // Without a selection the grab gives way to a marker, as meow
             // cancels the secondary selection, and Beacon goes with it.
             self.modal.beacons.clear();

@@ -11,7 +11,7 @@ use crate::{
     core::{LogicalColumn, Selection},
     editor::{DocumentPosition, search::SearchQuery},
 };
-pub(super) use beacon::BeaconEdit;
+pub(super) use beacon::{BeaconEntry, BeaconPlay, BeaconShape};
 /// The selection of the active view, if there is one.
 pub(super) fn execute_place(app: &crate::application::Application) -> Option<Selection> {
     execute::place(app, Default::default()).map(|at| at.selection)
@@ -134,6 +134,12 @@ pub enum Action {
     MacroEnd,
     /// Ends recording and plays the macro, or plays it, as `C-x e`.
     MacroEndCall,
+    /// Plays the keys Beacon set aside at each of its other places; queued
+    /// after the edits at the main selection, so that it finds them done.
+    PlayAtBeacons,
+    /// The main selection back where it was before the keys played at the
+    /// other places, as `save-mark-and-excursion` keeps it in meow.
+    ReturnFromBeacons,
     /// The last macro on each selected line.
     MacroLines,
     /// The last macro on each match of the search.
@@ -276,15 +282,18 @@ pub(in crate::interaction) struct State {
     pub grab: Option<Grab>,
     /// The other selections of Beacon; the session holds the main one.
     pub beacons: Vec<Grab>,
-    /// Insert was entered from Beacon, and goes back there.
-    pub beacon_insert: bool,
+    /// Insert was entered from Beacon: what is typed is recorded, to play
+    /// at the other places when Esc ends it.
+    pub beacon_insert: Option<BeaconEntry>,
+    /// The shape of the other selections when they were derived.
+    pub beacon_shape: BeaconShape,
+    /// Keys waiting to play at the other places.
+    pub play: Option<BeaconPlay>,
+    /// The main selection while keys play at the other places.
+    pub held: Option<Grab>,
     /// The undo depth when recording began: a macro played on beacons
     /// undoes as one step with its recording.
     pub macro_depth: usize,
-    /// The main selection's shape when recording began in Beacon: whether
-    /// it ran backward, and its kind. The other selections take it when the
-    /// macro plays there.
-    pub macro_shape: Option<(bool, Option<(Kind, bool)>)>,
     /// The last command, for `repeat`.
     pub last: Option<super::Command>,
     /// The command the key being handled ran, and the one the key before

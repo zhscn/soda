@@ -1074,7 +1074,7 @@ mod tests {
             .unwrap();
         r.start(None);
         r.command(Command::Edit(crate::editor::Command::InsertText(
-            "foo bar\nbaz qux\n".into(),
+            "foo bar\nfoo qux\n".into(),
         )));
         r.command(Command::Edit(crate::editor::Command::SetSelection(
             crate::core::Selection::caret(0),
@@ -1113,13 +1113,18 @@ mod tests {
         assert_eq!(cells[..7], [grab; 7]);
         assert_eq!(cells[7], cursor);
         assert_eq!(cells[8], plain);
-        // Words: each is a selection of its own face, the grab between.
-        keys(&mut r, "C-a w");
+        // A marked word: its other match is a selection of its own face.
+        keys(&mut r, "C-a [");
         let (cells, _) = first_line(&mut r);
         assert_eq!(cells[..3], [beacon; 3]);
         assert_eq!(cells[3], grab);
+        // Words: a caret at the end of each, on the cell after it.
+        keys(&mut r, "ESC C-a w");
+        let (cells, _) = first_line(&mut r);
+        assert_eq!(cells[..3], [grab; 3]);
+        assert_eq!(cells[3], cursor);
         // `G` without a selection lets the grab go, and Beacon with it.
-        keys(&mut r, "ESC G");
+        keys(&mut r, "G");
         assert_eq!(r.edit_mode(), EditMode::Normal);
         assert!(r.beacons().is_empty());
         let (cells, plain) = first_line(&mut r);

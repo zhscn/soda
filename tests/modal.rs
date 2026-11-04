@@ -314,47 +314,6 @@ fn repeat_runs_the_last_command_again() {
     cases(&[("|a b c\n", "L`", "[a ]|b c\n"), ("|abc\n", "d`", "|c\n")]);
 }
 #[test]
-fn grabbing_enters_beacon_and_typing_edits_every_line() {
-    let mut r = runtime("|one\ntwo\nthree\n");
-    keys(&mut r, "ee");
-    keys(&mut r, "e");
-    keys(&mut r, "G");
-    assert_eq!(r.edit_mode(), EditMode::Beacon);
-    // The caret goes to the top line; each line below gets one in its column.
-    keys(&mut r, "C-a");
-    keys(&mut r, "iX ESC");
-    assert_eq!(r.edit_mode(), EditMode::Beacon);
-    assert_eq!(shown(&r).replace('|', ""), "Xone\nXtwo\nXthree\n");
-    keys(&mut r, "ESC ESC");
-    assert_eq!(r.edit_mode(), EditMode::Normal);
-    assert!(r.beacons().is_empty());
-}
-#[test]
-fn beacon_typing_is_one_undo_step_and_enter_does_not_indent() {
-    let mut r = runtime("|one\n  two\n");
-    keys(&mut r, "eeG C-a i");
-    keys(&mut r, "RET");
-    keys(&mut r, "ESC u");
-    assert_eq!(shown(&r).replace('|', ""), "one\n  two\n");
-}
-#[test]
-fn beacon_derives_every_match_of_a_marked_word() {
-    let mut r = runtime("|ab x\ncd ab\nab\n");
-    keys(&mut r, "eeeG");
-    keys(&mut r, "[");
-    assert_eq!(r.beacons().len(), 2);
-    keys(&mut r, "sZ ESC");
-    assert_eq!(shown(&r).replace('|', ""), "Z x\ncd Z\nZ\n",);
-}
-#[test]
-fn a_macro_recorded_in_beacon_runs_at_every_selection_as_one_step() {
-    let mut r = runtime("|ab x\nab y\n");
-    keys(&mut r, "eeG M-< [ <f3> aQ ESC <f4>");
-    assert_eq!(shown(&r).replace(['|', '[', ']'], ""), "abQ x\nabQ y\n");
-    keys(&mut r, "u");
-    assert_eq!(shown(&r).replace(['|', '[', ']'], ""), "ab x\nab y\n");
-}
-#[test]
 fn swap_grab_exchanges_two_ranges() {
     cases(&[
         ("|ab cd\n", "wG C-e bS", "cd ab|\n"),
@@ -473,21 +432,6 @@ fn repeat_runs_what_the_key_ran() {
 #[test]
 fn block_after_inner_takes_the_brackets() {
     cases(&[("(a |b)\n", ",ro", "[(a b)]|\n")]);
-}
-#[test]
-fn beacon_words_are_ranges_like_the_main_one() {
-    let mut r = runtime("|ab cd\nef gh\n");
-    keys(&mut r, "eeG M-< wiX ESC");
-    assert_eq!(shown(&r).replace('|', ""), "Xab Xcd\nXef Xgh\n");
-}
-#[test]
-fn beacon_delete_and_change_reach_every_selection() {
-    let mut r = runtime("|ab x\nab y\n");
-    keys(&mut r, "eeG M-< [d");
-    assert_eq!(shown(&r).replace('|', ""), " x\n y\n");
-    let mut r = runtime("|abc\ndef\n");
-    keys(&mut r, "eeG C-a sX ESC");
-    assert_eq!(shown(&r).replace('|', ""), "Xbc\nXef\n");
 }
 #[test]
 fn keypad_hints_list_what_m_and_g_reach() {
@@ -631,39 +575,18 @@ fn saving_copies_the_selection_and_drops_it() {
     assert_eq!(r.app().clipboard(), "two");
     assert_eq!(shown(&r), "one |two\n");
 }
-#[test]
-fn text_typed_at_the_start_of_a_grab_stays_in_it() {
-    // X typed before the first word belongs to it, as to the others.
-    let mut r = runtime("|foo bar\nbaz qux\n");
-    keys(&mut r, "eeG C-e b iX ESC C-e b");
-    assert_eq!(r.beacons(), vec![0..4, 5..9, 10..14]);
-}
-#[test]
-fn beacons_leave_out_what_the_main_selection_covers() {
-    // `b` from inside `cd` takes part of it; the word is not another.
-    let mut r = runtime("|ab cd\nef gh\n");
-    keys(&mut r, "eeG M-< C-f C-f C-f C-f b");
-    assert_eq!(shown(&r), "ab |[c]d\nef gh\n");
-    assert_eq!(r.beacons(), vec![0..2, 6..8, 9..11]);
-}
-#[test]
-fn a_beacon_macro_runs_each_selection_the_way_the_main_one_ran() {
-    // The main word runs backward from `b`, so `H` takes the space before
-    // each word, or the line break; at the start of the text it can't.
-    let mut r = runtime("|foo bar\nbaz qux\n");
-    keys(&mut r, "eeG C-e b <f3> H d <f4>");
-    assert_eq!(shown(&r).replace('|', ""), "\n");
-    // `C-x e` ends it the same way.
-    let mut r = runtime("|ab x\nab y\n");
-    keys(&mut r, "eeG M-< [ <f3> aQ ESC C-x e");
-    assert_eq!(shown(&r).replace(['|', '[', ']'], ""), "abQ x\nabQ y\n");
+
+// Beacon, as meow's: the tests follow meow-beacon.el.
+fn plain(r: &Runtime) -> String {
+    shown(r).replace(['|', '[', ']'], "")
 }
 #[test]
 fn beacon_follows_the_caret_in_and_out_of_the_grab() {
     let mut r = runtime("|foo bar\nbaz qux\nend\n");
     keys(&mut r, "eeG");
     assert_eq!(r.edit_mode(), EditMode::Beacon);
-    // Out of the grab is Normal; the grab stays, drawn, for coming back.
+    assert_eq!(r.grab(), Some(0..15));
+    // Out of the grab is Normal; the grab stays for coming back.
     keys(&mut r, "M->");
     assert_eq!(r.edit_mode(), EditMode::Normal);
     assert!(r.beacons().is_empty());
@@ -671,8 +594,123 @@ fn beacon_follows_the_caret_in_and_out_of_the_grab() {
     keys(&mut r, "M-< C-e");
     assert_eq!(r.edit_mode(), EditMode::Beacon);
     assert_eq!(r.beacons(), vec![15..15]);
-    // Recording keeps to Normal wherever the caret goes.
-    keys(&mut r, "<f3> M-> M-<");
+    // Esc only cancels the selection; `G` without one lets the grab go.
+    keys(&mut r, "ESC");
+    assert_eq!(r.edit_mode(), EditMode::Beacon);
+    keys(&mut r, "G");
     assert_eq!(r.edit_mode(), EditMode::Normal);
-    keys(&mut r, "<f4>");
+    assert_eq!(r.grab(), None);
+    // Recording keeps to Normal wherever the caret goes.
+    let mut r = runtime("|foo bar\nbaz qux\nend\n");
+    keys(&mut r, "eeG <f3> M-> M-<");
+    assert_eq!(r.edit_mode(), EditMode::Normal);
+}
+#[test]
+fn a_caret_gives_carets_in_the_same_character_column() {
+    // Columns count characters, so a tab is one; short lines have none.
+    let mut r = runtime("|abc\n\tbc\nx\nabcd\n");
+    keys(&mut r, "eeeeG M-< C-f C-f");
+    assert_eq!(r.beacons(), vec![6..6, 12..12]);
+}
+#[test]
+fn words_give_carets_at_their_ends_and_the_selection_shrinks() {
+    // Forward: the end of each word, the main selection a caret.
+    let mut r = runtime("|ab cd\nef gh\n");
+    keys(&mut r, "eeG M-< w");
+    assert_eq!(shown(&r), "ab| cd\nef gh\n");
+    assert_eq!(r.beacons(), vec![5..5, 8..8, 11..11]);
+    keys(&mut r, "iX ESC");
+    assert_eq!(plain(&r), "abX cdX\nefX ghX\n");
+    // Backward: the start of each word.
+    let mut r = runtime("|ab cd\nef gh\n");
+    keys(&mut r, "eeG C-e b");
+    assert_eq!(r.beacons(), vec![0..0, 3..3, 6..6]);
+    keys(&mut r, "iX ESC");
+    assert_eq!(plain(&r), "Xab Xcd\nXef Xgh\n");
+}
+#[test]
+fn text_typed_at_the_start_of_a_grab_stays_in_it() {
+    let mut r = runtime("|foo bar\nbaz qux\n");
+    keys(&mut r, "eeG C-e b iX ESC");
+    assert_eq!(plain(&r), "Xfoo Xbar\nXbaz Xqux\n");
+    assert_eq!(r.grab(), Some(0..19));
+}
+#[test]
+fn typing_plays_at_each_place_and_the_main_selection_stays() {
+    // Everything typed plays, keys bound to commands such as `C-b` too.
+    // The main caret ends where its typing did.
+    let mut r = runtime("|one\n  two\n");
+    keys(&mut r, "eeG C-a i - C-b > ESC");
+    assert_eq!(plain(&r), ">-one\n>-  two\n");
+    assert_eq!(shown(&r).find('|'), Some(7));
+    // The other places undo as one step; the main one undoes as typing
+    // there does, `C-b` parting it in two.
+    keys(&mut r, "u");
+    assert_eq!(plain(&r), "one\n>-  two\n");
+    keys(&mut r, "u u");
+    assert_eq!(plain(&r), "one\n  two\n");
+}
+#[test]
+fn a_marked_word_gives_its_other_matches() {
+    let mut r = runtime("|ab x\ncd ab\nab\n");
+    keys(&mut r, "eeeG M-< [");
+    assert_eq!(r.beacons(), vec![8..10, 11..13]);
+    keys(&mut r, "sZ ESC");
+    assert_eq!(plain(&r), "Z x\ncd Z\nZ\n");
+}
+#[test]
+fn kill_takes_the_main_selection_and_deletes_the_others() {
+    let mut r = runtime("|ab x\nab y\n");
+    keys(&mut r, "eeG M-< [r");
+    assert_eq!(plain(&r), " x\n y\n");
+    keys(&mut r, "u");
+    assert_eq!(plain(&r), "ab x\nab y\n");
+    // `d`, `y`, `A`, `I` and `S` do nothing in Beacon.
+    let mut r = runtime("|ab x\nab y\n");
+    keys(&mut r, "eeG M-< [ d y A I S");
+    assert_eq!(plain(&r), "ab x\nab y\n");
+    assert_eq!(r.edit_mode(), EditMode::Beacon);
+}
+#[test]
+fn change_without_a_selection_changes_a_character_at_each_caret() {
+    let mut r = runtime("|abc\ndef\n");
+    keys(&mut r, "eeG C-a sX ESC");
+    assert_eq!(plain(&r), "Xbc\nXef\n");
+}
+#[test]
+fn lines_go_in_groups_as_tall_as_the_main_selection_around_it() {
+    let mut r = runtime("|a\nb\nc\nd\ne\nf\ng\n");
+    keys(&mut r, "eeeeeeeG M-< C-n C-n C-n e e");
+    // Rows 4-5 are the main; rows 1-2 above it and 6-7 below; row 3 is
+    // too few for a group.
+    assert_eq!(r.beacons(), vec![0..3, 10..13]);
+}
+#[test]
+fn a_macro_recorded_in_beacon_plays_at_each_place_when_it_ends() {
+    let mut r = runtime("|ab x\nab y\n");
+    keys(&mut r, "eeG M-< [ <f3> aQ ESC <f4>");
+    assert_eq!(plain(&r), "abQ x\nabQ y\n");
+    // The places played at undo as one step, the main one apart.
+    keys(&mut r, "u");
+    assert_eq!(plain(&r), "abQ x\nab y\n");
+    // `C-x e` ends it the same way.
+    let mut r = runtime("|ab x\nab y\n");
+    keys(&mut r, "eeG M-< [ <f3> aQ ESC C-x e");
+    assert_eq!(plain(&r), "abQ x\nabQ y\n");
+}
+#[test]
+fn f4_in_beacon_plays_the_macro_at_the_main_place_and_each_other() {
+    let mut r = runtime("|ab x\nab y\nab z\n");
+    keys(&mut r, "<f3> aQ ESC <f4> u");
+    assert_eq!(plain(&r), "ab x\nab y\nab z\n");
+    keys(&mut r, "eeeG M-< [ <f4>");
+    assert_eq!(plain(&r), "abQ x\nabQ y\nabQ z\n");
+}
+#[test]
+fn a_beacon_macro_runs_each_selection_the_way_the_main_one_ran() {
+    // The main word runs backward after `;`, so `H` takes the space
+    // before each, not a letter of it.
+    let mut r = runtime("|x ab\ny ab\n");
+    keys(&mut r, "eeG M-< C-f C-f [ ; <f3> H d <f4>");
+    assert_eq!(plain(&r), "x\ny\n");
 }

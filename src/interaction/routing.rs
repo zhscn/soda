@@ -2,7 +2,7 @@
 use super::{
     Command, EditMode, Input, InputResult, Layers, Message,
     keymap::{self, Resolution},
-    modal::{Action, BeaconEdit},
+    modal::Action,
 };
 use crate::{application::Application, core::EditError, editor::Command as EditCommand};
 use std::{path::Path, time::Duration};
@@ -463,25 +463,6 @@ impl Layers {
                 time,
                 file_root,
             );
-        }
-        // Typing with beacons is the same edit at every caret; bindings that
-        // know one caret, as auto-pairs do, stay out of it.
-        if self.mode == EditMode::Insert
-            && self.modal.beacon_insert
-            && !self.sequence.active()
-            && !key.alt
-            && !key.control
-        {
-            let edit = match key.code {
-                Key::Char(ch) => Some(BeaconEdit::Text(ch.to_string())),
-                Key::Enter => Some(BeaconEdit::Text("\n".into())),
-                Key::Backspace => Some(BeaconEdit::Backward),
-                Key::Delete => Some(BeaconEdit::Forward),
-                _ => None,
-            };
-            if let Some(edit) = edit {
-                return Ok(InputResult::Handled(self.beacon_type(edit, app, time)));
-            }
         }
         // A commit character takes the chosen candidate, then goes in as
         // typed, unless the list itself binds it.

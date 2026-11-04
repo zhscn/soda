@@ -286,6 +286,7 @@ impl Layers {
             if self.mode == EditMode::Beacon {
                 self.leave_beacon();
             }
+            self.modal.grab = None;
             self.mode = EditMode::Insert;
         }
     }
@@ -590,6 +591,11 @@ impl Layers {
             if self.mode == EditMode::Beacon {
                 self.leave_beacon();
             }
+            // Typing for the other places of Beacon ends with the view it
+            // was in, played nowhere.
+            if self.modal.beacon_insert.take().is_some() {
+                self.modal.replay.stop();
+            }
         }
         if let Some(edit) = update.edit.as_ref().and_then(|edit| edit.document.as_ref()) {
             let keep = |position: &mut crate::editor::DocumentPosition| {
@@ -607,14 +613,11 @@ impl Layers {
             {
                 self.modal.grab = None;
             }
-        }
-        if self.mode == EditMode::Beacon
-            && update
-                .edit
-                .as_ref()
-                .is_some_and(|edit| edit.selection_changed)
-        {
-            self.derive_beacons(app, time);
+            if let Some(held) = &mut self.modal.held
+                && keep(&mut held.start).and(keep(&mut held.end)).is_none()
+            {
+                self.modal.held = None;
+            }
         }
         let Some(layer) = &mut self.active else {
             return Ok(Response {

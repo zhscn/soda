@@ -1,28 +1,56 @@
-//! Beacon: many selections inside a grabbed range. The session holds the
-//! main one; the others are positions that follow the text. Every other
-//! selection is derived from the kind of the main one, so that moving it
-//! moves all of them. Typing edits all of them at once, in one transaction.
+//! Beacon, as meow's: the grab is Emacs's secondary selection, and while
+//! the caret is inside it the other places of what the main selection
+//! covers show as fake carets and selections. Edits reach them by keyboard
+//! macro: `i`, `a` and `s` record what is typed until Esc and play it at
+//! each; a macro recorded in Beacon plays at each when it ends; `<f4>` in
+//! Beacon plays the last one at the main selection and then at each.
+//!
+//! The session holds the main selection; the others are positions that
+//! follow the text, derived again after each command from the kind of the
+//! main one (`meow--beacon-update-overlays`).
 use super::{
-    Entry, Grab, Kind,
+    Action, Entry, Grab, Kind,
     execute::{Place, place, position},
     text,
 };
 use crate::{
-    application::Application,
-    core::{Change, Selection, Transaction, offset_at_logical_column},
+    application::ClipboardAction,
+    application::{Application, Event},
+    core::{Change, Selection, Transaction},
     editor::Command as Edit,
-    interaction::{EditMode, Layers, Response, UserInput},
+    interaction::{Command, EditMode, Layers, Response, UserInput},
 };
 use std::{ops::Range, time::Duration};
+
+/// How Insert was entered from Beacon, to enter it the same way at each
+/// other place when the typing is played there.
+#[derive(Clone, Copy, Debug)]
+pub(in crate::interaction) enum BeaconEntry {
+    Insert(Entry),
+    Change,
+}
+/// Keys to play at the other places, and how to enter Insert first.
+#[derive(Clone, Debug)]
+pub(in crate::interaction) struct BeaconPlay {
+    pub entry: Option<BeaconEntry>,
+    pub keys: Vec<UserInput>,
+}
+/// The shape of the other selections that are ranges: their kind, and
+/// whether they run backward, as the main one did. Carets are carets.
+#[derive(Clone, Copy, Debug, Default)]
+pub(in crate::interaction) struct BeaconShape {
+    pub kind: Option<(Kind, bool)>,
+    pub backward: bool,
+}
 
 impl Layers {
     /// Whether commands act on more than the main selection.
     pub(super) fn beacon_active(&self) -> bool {
-        self.mode == EditMode::Beacon && self.modal.grab.is_some()
+        self.mode == EditMode::Beacon && !self.modal.beacons.is_empty()
     }
+    /// Back to Normal; the grab stays, for the caret to come back to.
     pub(in crate::interaction) fn leave_beacon(&mut self) {
         self.mode = EditMode::Normal;
-        self.modal.grab = None;
         self.modal.beacons.clear();
     }
     /// The grab, as a range in the text of the active view; a marker,
@@ -34,36 +62,54 @@ impl Layers {
         let end = grab.end.resolve(at.document).ok()?.0;
         (start < end).then_some(start..end)
     }
-    /// Beacon is where the grab is, as meow's
-    /// `meow--maybe-toggle-beacon-state`: after each operation, the caret
-    /// inside the grab enters it from Normal, and outside leaves it, the
-    /// grab staying for the caret to come back. Not while a macro is
-    /// recorded or played, nor while a layer such as search is open.
-    pub fn follow_grab(&mut self, app: &Application, time: Duration) {
+    /// After each command, as meow's `meow--maybe-toggle-beacon-state`:
+    /// the caret inside the grab is Beacon, outside it Normal, and in
+    /// Beacon the other places are derived again. Some kinds leave carets
+    /// at the other places and the main selection shrinks to its caret; the
+    /// event for that is returned. Nothing changes while a macro is
+    /// recorded, while keys toward a command are pending, or while a layer
+    /// such as search is open.
+    pub fn follow_grab(&mut self, app: &Application, time: Duration) -> Vec<Event> {
         if self.active.is_some()
             || self.modal.replay.recording()
+            || self.sequence.active()
+            || self.modal.active()
+            || self.modal.universal.is_some()
             || !crate::interaction::modal_on(app)
+            || !matches!(self.mode, EditMode::Normal | EditMode::Beacon)
         {
-            return;
+            return vec![];
         }
         let Some(at) = place(app, time) else {
-            return;
+            return vec![];
         };
         let head = at.selection.head;
-        let inside = self
+        let Some(grab) = self
             .grabbed(app)
-            .is_some_and(|grab| grab.start <= head && head <= grab.end);
-        match self.mode {
-            EditMode::Normal if inside => {
-                self.mode = EditMode::Beacon;
-                self.derive_beacons(app, time);
+            .filter(|grab| grab.start <= head && head <= grab.end)
+        else {
+            if self.mode == EditMode::Beacon {
+                self.leave_beacon();
             }
-            EditMode::Beacon if !inside => {
-                self.mode = EditMode::Normal;
-                self.modal.beacons.clear();
-            }
-            _ => {}
+            return vec![];
+        };
+        self.mode = EditMode::Beacon;
+        let (ranges, shape, shrink) = self.derived(&at, grab);
+        self.modal.beacon_shape = shape;
+        self.modal.beacons = ranges
+            .into_iter()
+            .filter_map(|range| {
+                Some(Grab {
+                    start: position(at.document, range.start)?,
+                    end: position(at.document, range.end)?,
+                })
+            })
+            .collect();
+        if shrink && !at.selection.range().is_empty() {
+            self.modal.tag = None;
+            return vec![at.event(Edit::SetSelection(Selection::caret(head)))];
         }
+        vec![]
     }
     /// The other selections, as ranges in the text.
     pub fn beacons(&self, app: &Application) -> Vec<Range<usize>> {
@@ -72,345 +118,367 @@ impl Layers {
         };
         resolved(&self.modal.beacons, &at)
     }
-    pub(in crate::interaction) fn derive_beacons(&mut self, app: &Application, time: Duration) {
-        let Some(at) = place(app, time) else {
-            return;
-        };
-        let Some(grab) = self.modal.grab else {
-            return;
-        };
-        let (Ok(start), Ok(end)) = (
-            grab.start.resolve(at.document),
-            grab.end.resolve(at.document),
-        ) else {
-            return;
-        };
+    /// The other places, by the kind of the main selection, as
+    /// `meow--beacon-update-overlays`; and whether the main selection
+    /// shrinks to its caret, as it does where the others are carets.
+    fn derived(&self, at: &Place, grab: Range<usize>) -> (Vec<Range<usize>>, BeaconShape, bool) {
+        let text = at.text;
         let main = at.selection.range();
-        let ranges = self.derived(&at, start.0..end.0);
-        self.modal.beacons = ranges
+        let head = at.selection.head;
+        let backward = at.selection.head < at.selection.anchor;
+        let shape = |kind| BeaconShape {
+            kind: Some(kind),
+            backward,
+        };
+        let carets = |offsets: Vec<usize>| {
+            let ranges = offsets
+                .into_iter()
+                .filter(|&offset| offset != head)
+                .map(|offset| offset..offset)
+                .collect();
+            (ranges, BeaconShape::default(), true)
+        };
+        let lines = Lines::new(text, &grab);
+        match self
+            .modal
+            .tag(at.selection)
+            .map(|tag| (tag.kind, tag.expand))
+        {
+            // A caret, or a selection of no kind: carets in the same column,
+            // counted in characters, of the other lines.
+            None => {
+                let column = char_column(text, head);
+                let line = text.line_of(head).unwrap();
+                let offsets = lines
+                    .around(line)
+                    .filter_map(|other| at_column(text, other, column))
+                    .filter(|offset| grab.start <= *offset && *offset <= grab.end)
+                    .collect();
+                carets(offsets)
+            }
+            Some((Kind::Char, true)) => {
+                let (from, to) = (char_column(text, main.start), char_column(text, main.end));
+                let line = text.line_of(head).unwrap();
+                let ranges = lines
+                    .around(line)
+                    .filter_map(|other| {
+                        Some(at_column(text, other, from)?..at_column(text, other, to)?)
+                    })
+                    .filter(|range| grab.start <= range.start && range.end <= grab.end)
+                    .collect();
+                (ranges, shape((Kind::Char, true)), false)
+            }
+            Some((kind @ (Kind::Word | Kind::Symbol), false)) => {
+                // A caret at the end of each word going forward, at the start
+                // going backward.
+                let symbol = kind == Kind::Symbol;
+                let mut offsets = vec![];
+                if backward {
+                    let mut from = grab.end;
+                    while let Some(start) = text::thing_start(text, from, symbol) {
+                        if start < grab.start {
+                            break;
+                        }
+                        offsets.push(start);
+                        from = start;
+                    }
+                    offsets.reverse();
+                } else {
+                    let mut from = grab.start;
+                    while let Some(end) = text::thing_end(text, from, symbol) {
+                        if end > grab.end {
+                            break;
+                        }
+                        offsets.push(end);
+                        from = end;
+                    }
+                }
+                carets(offsets)
+            }
+            Some((kind @ (Kind::Word | Kind::Symbol), true)) => {
+                use crate::editor::search::SearchQuery;
+                let selected = text.byte_slice(main.clone()).unwrap().to_string();
+                let query = if kind == Kind::Symbol {
+                    SearchQuery::symbol(selected)
+                } else {
+                    SearchQuery::word(selected)
+                };
+                let ranges = matches(at, &grab, &query, &main);
+                (ranges, shape((Kind::Visit, false)), false)
+            }
+            Some((Kind::Visit, _)) => {
+                let ranges = self
+                    .modal
+                    .search()
+                    .map_or(vec![], |query| matches(at, &grab, query, &main));
+                (ranges, shape((Kind::Visit, false)), false)
+            }
+            Some((Kind::Line, _)) => {
+                // Groups of as many lines as the main selection has, below it
+                // and above it.
+                let (top, bottom) = (
+                    text.line_of(main.start).unwrap(),
+                    text.line_of(main.end).unwrap(),
+                );
+                let height = bottom - top + 1;
+                let group = |line: usize| {
+                    let start = text.line_start(line).unwrap().max(grab.start);
+                    let end = text.line_content_range(line + height - 1).unwrap().end;
+                    start..end.min(grab.end)
+                };
+                let mut ranges = vec![];
+                let mut line = lines.first;
+                while line + height <= top {
+                    ranges.push(group(line));
+                    line += height;
+                }
+                let mut line = bottom + 1;
+                while line + height - 1 <= lines.last {
+                    ranges.push(group(line));
+                    line += height;
+                }
+                (ranges, shape((Kind::Line, true)), false)
+            }
+            Some((Kind::Join, _)) => {
+                let offsets = (lines.first..=lines.last)
+                    .map(|line| text::first(text, line).max(grab.start))
+                    .collect();
+                carets(offsets)
+            }
+            Some((kind @ (Kind::Find | Kind::Till), _)) => {
+                let Some(find) = self.modal.last_find else {
+                    return (vec![], BeaconShape::default(), false);
+                };
+                let width = find.ch.len_utf8();
+                let mut offsets = vec![];
+                let mut from = grab.start;
+                while let Some(found) = text::find(text, from, find.ch, 1, false) {
+                    if found + width > grab.end {
+                        break;
+                    }
+                    // Past the character going forward, on it going back; a
+                    // till stops short of it from either side.
+                    offsets.push(match (kind == Kind::Till, backward) {
+                        (false, false) => found + width,
+                        (false, true) => found,
+                        (true, false) => found,
+                        (true, true) => found + width,
+                    });
+                    from = found + width;
+                }
+                carets(offsets)
+            }
+            Some(_) => (vec![], BeaconShape::default(), false),
+        }
+    }
+    /// `i`, `a` and `s` in Beacon, as `meow-beacon-insert` and its kin: the
+    /// main selection enters Insert alone and what is typed is recorded,
+    /// to play at each other place when Esc ends it.
+    pub(super) fn begin_beacon_insert(&mut self, entry: BeaconEntry) {
+        self.modal.beacon_insert = Some(entry);
+        self.modal.replay.start();
+    }
+    /// Esc after `begin_beacon_insert`: what was typed goes to the others.
+    pub(super) fn end_beacon_insert(&mut self, entry: BeaconEntry, response: &mut Response) {
+        self.modal.replay.stop();
+        self.modal.play = Some(BeaconPlay {
+            entry: Some(entry),
+            keys: self.modal.replay.last().to_vec(),
+        });
+        response
+            .commands
+            .push(Command::Modal(Action::PlayAtBeacons));
+    }
+    /// `r` in Beacon, as `meow-beacon-kill-delete`: the main selection is
+    /// killed, the other selections deleted; carets stay. One undo step.
+    pub(super) fn beacon_kill(&mut self, at: &Place, response: &mut Response) {
+        let tag = self.modal.tag(at.selection);
+        self.modal.tag = None;
+        let mut main = at.selection.range();
+        // A forward line selection takes its line break with it.
+        if tag.is_some_and(|tag| tag.kind == Kind::Line)
+            && at.selection.head > at.selection.anchor
+            && main.end < at.text.len_bytes()
+        {
+            main.end = text::next(at.text, main.end);
+        }
+        let mut others: Vec<_> = resolved(&self.modal.beacons, at)
             .into_iter()
-            // The main selection stands for its own place: a word it covers
-            // only part of, as after `b` from inside it, is not another.
             .filter(|range| {
-                let overlaps = range.start < main.end && main.start < range.end;
-                *range != main
-                    && !overlaps
-                    && !(range.is_empty() && range.start == at.selection.head)
-            })
-            .filter_map(|range| {
-                Some(Grab {
-                    start: position(at.document, range.start)?,
-                    end: position(at.document, range.end)?,
-                })
+                !range.is_empty() && (range.end <= main.start || range.start >= main.end)
             })
             .collect();
+        others.sort_by_key(|range| range.start);
+        others.dedup_by(|b, a| b.start < a.end);
+        let depth = at.document.history_depth();
+        let before: usize = others
+            .iter()
+            .filter(|range| range.end <= main.start)
+            .map(Range::len)
+            .sum();
+        if !others.is_empty() {
+            let changes = others
+                .into_iter()
+                .map(|range| Change::new(range, ""))
+                .collect();
+            let mut tx = Transaction::new(at.text.version(), changes);
+            tx.selection = Some(Selection {
+                anchor: at.selection.anchor - before,
+                head: at.selection.head - before,
+            });
+            response.events.push(at.event(Edit::Apply(tx)));
+        }
+        let main = main.start - before..main.end - before;
+        response.events.push(at.clipboard(ClipboardAction::Operate {
+            range: main.clone(),
+            edit: Change::new(main.clone(), ""),
+            selection: Selection::caret(main.start),
+        }));
+        response.events.push(at.event(Edit::SquashHistory(depth)));
     }
-    /// Where selections go, by the kind of the main one.
-    fn derived(&self, at: &Place, grab: Range<usize>) -> Vec<Range<usize>> {
-        let text = at.text;
-        let tag = self.modal.tag(at.selection);
-        let width = at.document.whitespace().tab_width;
+    /// `<f4>` in Beacon, as `meow-beacon-apply-kmacro`: the last macro at the
+    /// main selection, then at each other place.
+    pub(super) fn beacon_call_macro(&mut self, count: usize, response: &mut Response) {
+        let keys = self.modal.replay.last().to_vec();
+        self.mode = EditMode::Normal;
+        for _ in 0..count {
+            response.commands.push(Command::Replay(keys.clone()));
+        }
+        self.modal.play = Some(BeaconPlay { entry: None, keys });
+        response
+            .commands
+            .push(Command::Modal(Action::PlayAtBeacons));
+    }
+    /// A macro recorded in Beacon ends: it plays at each other place.
+    pub(super) fn beacon_end_macro(&mut self, response: &mut Response) {
+        self.modal.play = Some(BeaconPlay {
+            entry: None,
+            keys: self.modal.replay.last().to_vec(),
+        });
+        response
+            .commands
+            .push(Command::Modal(Action::PlayAtBeacons));
+    }
+    /// Plays the keys at each other place, last first so that earlier ones
+    /// hold, as one undo step, as `meow--beacon-apply-command`. A caret is
+    /// a caret; a selection has the shape the main one had.
+    pub(super) fn play_at_beacons(&mut self, at: &Place, response: &mut Response) {
+        let Some(play) = self.modal.play.take() else {
+            return;
+        };
+        let shape = self.modal.beacon_shape;
+        let targets = resolved(&self.modal.beacons, at);
+        // The anchor goes in `start`, the head in `end`, whichever is first.
+        self.modal.held = position(at.document, at.selection.anchor)
+            .zip(position(at.document, at.selection.head))
+            .map(|(start, end)| Grab { start, end });
+        self.leave_beacon();
+        for range in targets.into_iter().rev() {
+            response.commands.push(Command::SetMode(EditMode::Normal));
+            response.commands.push(match shape.kind {
+                Some((kind, expand)) if !range.is_empty() => {
+                    let (anchor, head) = if shape.backward {
+                        (range.end, range.start)
+                    } else {
+                        (range.start, range.end)
+                    };
+                    Command::Modal(Action::Found {
+                        anchor,
+                        head,
+                        kind,
+                        expand,
+                    })
+                }
+                _ => Command::Edit(Edit::SetSelection(Selection::caret(range.start))),
+            });
+            match play.entry {
+                Some(BeaconEntry::Insert(entry)) => {
+                    response
+                        .commands
+                        .push(Command::Modal(Action::Insert(entry)));
+                }
+                Some(BeaconEntry::Change) => {
+                    response.commands.push(Command::Modal(Action::Change));
+                }
+                None => {}
+            }
+            response.commands.push(Command::Replay(play.keys.clone()));
+            if play.entry.is_some() {
+                response.commands.push(Command::Modal(Action::Leave));
+            }
+        }
+        response.commands.extend([
+            Command::SetMode(EditMode::Normal),
+            Command::Edit(Edit::SquashHistory(at.document.history_depth())),
+            Command::Modal(Action::ReturnFromBeacons),
+        ]);
+    }
+    pub(super) fn return_from_beacons(&mut self, at: &Place, response: &mut Response) {
+        let Some(held) = self.modal.held.take() else {
+            return;
+        };
+        if let (Ok(anchor), Ok(head)) = (
+            held.start.resolve(at.document),
+            held.end.resolve(at.document),
+        ) {
+            response.events.push(at.event(Edit::SetSelection(Selection {
+                anchor: anchor.0,
+                head: head.0,
+            })));
+        }
+    }
+}
+/// The lines a grab touches, and the order meow goes through them around
+/// the caret's line: those below it, then those above.
+struct Lines {
+    first: usize,
+    last: usize,
+}
+impl Lines {
+    fn new(text: &crate::core::Snapshot, grab: &Range<usize>) -> Self {
+        // A grab that ends at a line's start does not reach that line.
         let first = text.line_of(grab.start).unwrap();
         let last = text
             .line_of(grab.end.saturating_sub(1).max(grab.start))
             .unwrap();
-        let lines = first..=last;
-        let column = |offset: usize| {
-            crate::core::logical_column_at(text, crate::core::ByteOffset(offset), width).unwrap()
-        };
-        let matches = |query: &crate::editor::search::SearchQuery| {
-            query
-                .cursor(text)
-                .filter(|found| found.start >= grab.start && found.end <= grab.end)
-                .collect::<Vec<_>>()
-        };
-        match tag.map(|tag| (tag.kind, tag.expand)) {
-            None => {
-                // Carets in the same column of the other lines; shorter
-                // lines are skipped.
-                let goal = column(at.selection.head);
-                lines
-                    .filter_map(|line| {
-                        let offset = offset_at_logical_column(text, line, goal, width).ok()?.0;
-                        (column(offset) == goal).then_some(offset..offset)
-                    })
-                    .collect()
-            }
-            Some((Kind::Char, _)) => {
-                let (from, to) = (column(at.selection.anchor), column(at.selection.head));
-                lines
-                    .filter_map(|line| {
-                        let start = offset_at_logical_column(text, line, from, width).ok()?.0;
-                        let end = offset_at_logical_column(text, line, to, width).ok()?.0;
-                        (column(start) == from && column(end) == to).then_some(start..end)
-                    })
-                    .collect()
-            }
-            Some((kind @ (Kind::Word | Kind::Symbol), false)) => {
-                // Every word, selected as the main one is, so that `i` and
-                // `a` go to the same end of each.
-                let symbol = kind == Kind::Symbol;
-                let mut words = vec![];
-                let mut from = grab.start;
-                while let Some(end) = text::thing_end(text, from, symbol) {
-                    if end > grab.end {
-                        break;
-                    }
-                    let start = text::thing_start(text, end, symbol).unwrap_or(from);
-                    words.push(start.max(grab.start)..end);
-                    from = end;
-                }
-                words
-            }
-            Some((kind @ (Kind::Word | Kind::Symbol), true)) => {
-                use crate::editor::search::SearchQuery;
-                let selected = text.byte_slice(at.selection.range()).unwrap().to_string();
-                matches(&if kind == Kind::Symbol {
-                    SearchQuery::symbol(selected)
-                } else {
-                    SearchQuery::word(selected)
-                })
-            }
-            Some((Kind::Visit, _)) => self.modal.search().map_or(vec![], matches),
-            Some((Kind::Line, _)) => {
-                let selected = at.selection.range();
-                let height =
-                    text.line_of(selected.end).unwrap() - text.line_of(selected.start).unwrap() + 1;
-                let mut ranges = vec![];
-                let mut line = first;
-                while line + height - 1 <= last {
-                    ranges.push(
-                        text.line_start(line).unwrap()
-                            ..text.line_content_range(line + height - 1).unwrap().end,
-                    );
-                    line += height;
-                }
-                ranges
-            }
-            Some((Kind::Join, _)) => lines
-                .map(|line| {
-                    let caret = text::first(text, line);
-                    caret..caret
-                })
-                .collect(),
-            Some((kind @ (Kind::Find | Kind::Till), _)) => {
-                let Some(find) = self.modal.last_find else {
-                    return vec![];
-                };
-                let mut carets = vec![];
-                let mut from = grab.start;
-                while let Some(found) = text::find(text, from, find.ch, 1, false) {
-                    if found >= grab.end {
-                        break;
-                    }
-                    let caret = if kind == Kind::Find {
-                        found + find.ch.len_utf8()
-                    } else {
-                        found
-                    };
-                    carets.push(caret..caret);
-                    from = found + find.ch.len_utf8();
-                }
-                carets
-            }
-            Some(_) => vec![],
-        }
+        Self { first, last }
     }
-    /// `i` and `a` with beacons: a caret at the same end of each selection.
-    pub(super) fn beacon_insert(&mut self, at: &Place, entry: Entry, response: &mut Response) {
-        let before = entry == Entry::Before;
-        let end = |range: &Range<usize>| if before { range.start } else { range.end };
-        let carets: Vec<_> = resolved(&self.modal.beacons, at)
-            .iter()
-            .map(end)
-            .filter_map(|caret| {
-                let place = position(at.document, caret)?;
-                Some(Grab {
-                    start: place,
-                    end: place,
-                })
-            })
-            .collect();
-        self.modal.beacons = carets;
-        self.start_typing(at, end(&at.selection.range()), response);
-    }
-    fn start_typing(&mut self, at: &Place, caret: usize, response: &mut Response) {
-        self.modal.tag = None;
-        self.modal.insert_view = Some(at.view);
-        self.modal.beacon_insert = true;
-        self.mode = EditMode::Insert;
-        response
-            .events
-            .push(at.event(Edit::SetSelection(Selection::caret(caret))));
-        response
-            .events
-            .push(at.event(Edit::BeginUndoGroup(at.selection)));
-    }
-    /// `s` with beacons: every selection goes, and typing starts there.
-    pub(super) fn beacon_change(&mut self, at: &Place, response: &mut Response) {
-        self.modal.tag = None;
-        self.modal.insert_view = Some(at.view);
-        self.modal.beacon_insert = true;
-        self.mode = EditMode::Insert;
-        response
-            .events
-            .push(at.event(Edit::BeginUndoGroup(at.selection)));
-        if let Some(tx) = self.removal(at) {
-            response.events.push(at.event(Edit::Apply(tx)));
-        }
-    }
-    /// `d` and `r` with beacons: every selection goes; `r` puts their text
-    /// on the clipboard, a line each.
-    pub(super) fn beacon_delete(&mut self, at: &Place, kill: bool, response: &mut Response) {
-        self.modal.tag = None;
-        if kill {
-            let mut ranges = self.selections(at);
-            ranges.retain(|range| !range.is_empty());
-            let taken: Vec<_> = ranges
-                .iter()
-                .map(|range| at.text.byte_slice(range.clone()).unwrap().to_string())
-                .collect();
-            response
-                .events
-                .push(crate::application::Event::SetClipboard(taken.join("\n")));
-        }
-        if let Some(tx) = self.removal(at) {
-            response.events.push(at.event(Edit::Apply(tx)));
-        }
-    }
-    /// Every selection, the main one too, in order; a caret stands for the
-    /// character after it.
-    fn selections(&self, at: &Place) -> Vec<Range<usize>> {
-        let mut ranges = resolved(&self.modal.beacons, at);
-        ranges.push(at.selection.range());
-        for range in &mut ranges {
-            if range.start == range.end && range.end < at.text.len_bytes() {
-                range.end = text::next(at.text, range.end);
-            }
-        }
-        ranges.sort_by_key(|range| range.start);
-        // Selections that meet become one, as a transaction wants.
-        let mut merged: Vec<Range<usize>> = vec![];
-        for range in ranges {
-            match merged.last_mut() {
-                Some(last) if range.start < last.end || range == *last => {
-                    last.end = last.end.max(range.end);
-                }
-                _ => merged.push(range),
-            }
-        }
-        merged
-    }
-    /// Takes away every selection, with the caret where the main one was.
-    fn removal(&self, at: &Place) -> Option<Transaction> {
-        let start = at.selection.range().start;
-        let ranges: Vec<_> = self
-            .selections(at)
-            .into_iter()
-            .filter(|range| !range.is_empty())
-            .collect();
-        if ranges.is_empty() {
-            return None;
-        }
-        let moved: usize = ranges
-            .iter()
-            .filter(|range| range.start < start)
-            .map(|range| range.len().min(start - range.start))
-            .sum();
-        let changes = ranges
-            .into_iter()
-            .map(|range| Change::new(range, ""))
-            .collect();
-        let mut tx = Transaction::new(at.text.version(), changes);
-        tx.selection = Some(Selection::caret(start - moved));
-        Some(tx)
-    }
-    /// Typing with beacons: `edit` says what happens at each caret.
-    pub(in crate::interaction) fn beacon_type(
-        &mut self,
-        edit: BeaconEdit,
-        app: &Application,
-        time: Duration,
-    ) -> Response {
-        let mut response = Response {
-            redraw: true,
-            ..Response::default()
-        };
-        let Some(at) = place(app, time) else {
-            return response;
-        };
-        let main = at.selection.head;
-        let mut carets: Vec<_> = resolved(&self.modal.beacons, &at)
-            .into_iter()
-            .map(|range| range.end)
-            .collect();
-        carets.push(main);
-        carets.sort_unstable();
-        carets.dedup();
-        let mut after = main;
-        let changes: Vec<_> = carets
-            .iter()
-            .filter_map(|&caret| {
-                let change = match &edit {
-                    BeaconEdit::Text(text) => Change::new(caret..caret, text.clone()),
-                    BeaconEdit::Backward if caret > 0 => {
-                        Change::new(text::prev(at.text, caret)..caret, "")
-                    }
-                    BeaconEdit::Forward if caret < at.text.len_bytes() => {
-                        Change::new(caret..text::next(at.text, caret), "")
-                    }
-                    _ => return None,
-                };
-                let delta = change.insert.len() as isize - change.range.len() as isize;
-                if caret <= main {
-                    after = after.wrapping_add_signed(delta);
-                }
-                Some(change)
-            })
-            .collect();
-        if changes.is_empty() {
-            return response;
-        }
-        let mut tx = Transaction::new(at.text.version(), changes);
-        tx.selection = Some(Selection::caret(after));
-        response.events.push(at.event(Edit::Apply(tx)));
-        response
-    }
-    /// The last macro at the other selections, after the main one saw it.
-    pub(super) fn apply_macro(&mut self, at: &Place, response: &mut Response) {
-        let keys: Vec<UserInput> = self.modal.replay.last().to_vec();
-        let targets: Vec<_> = resolved(&self.modal.beacons, at);
-        // Each selection runs the way the main one did when recording began.
-        let (backward, kind) = self.modal.macro_shape.take().unwrap_or((false, None));
-        let selections = targets.into_iter().map(|range| {
-            if backward {
-                Selection {
-                    anchor: range.end,
-                    head: range.start,
-                }
-            } else {
-                Selection {
-                    anchor: range.start,
-                    head: range.end,
-                }
-            }
-        });
-        self.leave_beacon();
-        response
-            .commands
-            .extend(crate::interaction::commands::replay_each(
-                selections,
-                kind,
-                &keys,
-                self.modal.macro_depth,
-            ));
+    fn around(&self, line: usize) -> impl Iterator<Item = usize> {
+        (line + 1..=self.last).chain(self.first..line.min(self.last + 1))
     }
 }
-/// What a key does at every caret.
-pub(in crate::interaction) enum BeaconEdit {
-    Text(String),
-    Backward,
-    Forward,
+/// The characters from the start of the line to `offset`.
+fn char_column(text: &crate::core::Snapshot, offset: usize) -> usize {
+    let line = text.line_of(offset).unwrap();
+    let start = text.line_start(line).unwrap();
+    text.byte_slice(start..offset)
+        .unwrap()
+        .to_string()
+        .chars()
+        .count()
+}
+/// The place `column` characters into `line`, if the line is that long.
+fn at_column(text: &crate::core::Snapshot, line: usize, column: usize) -> Option<usize> {
+    let range = text.line_content_range(line)?;
+    let content = text.byte_slice(range.clone())?.to_string();
+    let mut chars = content
+        .char_indices()
+        .map(|(at, _)| at)
+        .chain([content.len()]);
+    chars.nth(column).map(|at| range.start + at)
+}
+/// The matches of `query` in the grab but the main selection's.
+fn matches(
+    at: &Place,
+    grab: &Range<usize>,
+    query: &crate::editor::search::SearchQuery,
+    main: &Range<usize>,
+) -> Vec<Range<usize>> {
+    query
+        .cursor(at.text)
+        .filter(|found| found.start >= grab.start && found.end <= grab.end)
+        .filter(|found| found.end != main.end && found.end != main.start)
+        .collect()
 }
 fn resolved(beacons: &[Grab], at: &Place) -> Vec<Range<usize>> {
     beacons

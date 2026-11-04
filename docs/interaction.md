@@ -116,28 +116,50 @@ Backspace 退掉上一个键，Esc 取消，计数跨过 keypad 保留。与 meo
 
 ### Beacon
 
-`G` 把选区设为 grab 并进入 Beacon；没有选区时 `G` 取消 grab、离开 Beacon，只留下标记（meow 的 `meow-grab` 也是这样取消第二选区），之后用 `S` 把选区与它交换。
+Beacon 照 meow 的 `meow-beacon.el` 做，键也按 meow 的 beacon 键表分派。
 
-Beacon 跟着 grab 走，同 meow 的 `meow--maybe-toggle-beacon-state`：每次操作结束时，Normal 下光标在 grab 里（含两端）就进入 Beacon，Beacon 下光标移出 grab 就回到 Normal，grab 留着并继续显示，光标回来时再进入。录制和回放宏时、搜索等交互层打开时不切换。Esc 在没有选区时离开 Beacon 并取消 grab。
+**grab 与进出**
 
-grab 是 Emacs 的第二选区，用 `secondary-selection` face 画出，范围越过行尾时行尾之后那一格也画上。其余选区用 `beacon-selection`，其余插入点用 `beacon-cursor`；这两个没设置时取 `selection`、`mode-beacon` 各与 `secondary-selection` 的背景对半混合，和 meow 的 `meow-beacon-fake-selection`、`meow-beacon-fake-cursor` 一样，所以主选区、其余选区和 grab 三者看得出区别。主选区在会话中，其余选区是跟随编辑的 `DocumentPosition`，不进入核心。Normal 和单选区 Insert 永远只有一个选区，所以只有下面的操作需要知道多选区。
+- **`G`**：把选区设为 grab，也就是 Emacs 的第二选区。没有选区时 `G` 取消 grab，只留下标记，之后用 `S` 把选区与它交换（同 `meow-grab`）。
+- **进出 Beacon 跟着光标走**：同 `meow--maybe-toggle-beacon-state`，每条命令结束时看光标在不在 grab 里（含两端），在就是 Beacon，不在就是 Normal。grab 一直留着并显示，光标回来时再进入。
+- **离开的方式**：Esc 只取消选区，不离开 Beacon；离开 Beacon 靠把光标移出 grab，或无选区时按 `G`。
+- **不切换的时候**：录制和回放宏、按键序列没输完、搜索等交互层打开时。
+- **grab 跟着编辑**：两端都包住新输入的文字，在 grab 开头输入的字符仍在 grab 里。
 
-grab 在两端都包住新输入的文字：起点在输入之前，终点在输入之后，所以在 grab 开头输入的字符仍在 grab 里。主选区每次变化，其余选区按它的种类重新派生；和主选区重叠的不算（比如在词中间按 `b` 只选了半个词，那个词就不再派生一次）：
+**显示**
 
-| 主选区 | 派生 |
-| --- | --- |
-| 无 | 其他行的同一显示列，较短的行跳过 |
-| 字符 | 其他行相同列范围的选区 |
-| 词、符号（`w`） | 每个词，选法同主选区 |
-| 词、符号（`[`、`]`） | 同一个词的每处匹配 |
-| visit | 搜索的每处匹配 |
-| 行 | 同样高度的每组行 |
-| 查找 | 每处该字符 |
-| join | 每行的缩进处 |
+- **grab**：用 `secondary-selection` face 画出，范围越过行尾时，行尾之后那一格也画上。
+- **其余选区与插入点**：其余选区用 `beacon-selection`，其余插入点用 `beacon-cursor`。没设置时，取 `selection`、`mode-beacon` 各与 `secondary-selection` 的背景对半混合，同 meow 的 `meow-beacon-fake-selection`、`meow-beacon-fake-cursor`。
+- **行尾的插入点**：没有字符可以落脚，画在行尾之后那一格。
 
-`d`、`r` 删除所有选区，`r` 把它们的文字逐行放进剪贴板。`i`、`a`、`s` 在所有选区上进入 Insert，输入、Enter、Backspace 和 Delete 是同一事务中的多处修改；这时自动配对、缩进和补全不参与，Enter 只插入换行。Esc 回到 Beacon。录制宏时先回到主选区单独编辑；结束录制（`<f4>`、`C-x e`）时对其余选区逐个回放，连同录制的修改合成一次撤销，然后离开 Beacon。回放时每个选区取开始录制时主选区的方向和种类：`b` 之后主选区向后，其余选区也向后，宏里的 `H`、`;`、数字扩展在每处的效果和主选区一致。
+**派生**
 
-插入点在行尾的选区没有字符可以落脚，显示在行尾之后的那一格，和主光标一样。
+每条命令之后，其余位置按主选区的种类重新派生（`meow--beacon-update-overlays`）。主选区在会话中，其余位置是跟随编辑的 `DocumentPosition`，不进入核心。派生出插入点的种类，主选区随之缩成光标。
+
+| 主选区 | 其余位置 | 主选区 |
+| --- | --- | --- |
+| 无（只有光标） | 其他行同一字符列的插入点（按字符计，tab 算一个）；较短的行跳过 | 缩成光标 |
+| 字符（`H`/`L`、mark） | 其他行同样字符列范围的选区 | 不变 |
+| 词、符号（`w`/`b`） | 向前时每个词尾、向后时每个词首的插入点 | 缩成光标 |
+| 词、符号（`[`、`]`） | 同一个词的其余匹配，作为 visit 选区 | 不变 |
+| visit | 搜索的其余匹配 | 不变 |
+| 行 | 与主选区同样高的每组行，在它上下各自对齐；凑不满一组的行跳过 | 不变 |
+| join | 每行缩进处的插入点 | 缩成光标 |
+| 查找、到达（`f`/`t`） | 每处该字符的插入点：查找时向前落在字符之后、向后落在字符上；到达时相反 | 缩成光标 |
+
+**编辑**
+
+- **`i`、`a`、`s`**：主选区单独进入 Insert，同时录宏。Esc 结束录制，然后在每个其余位置用同样的方式进入 Insert、回放输入、再按 Esc（`meow-beacon-insert`、`meow-beacon-change`）。所以 Insert 里任何键都会到达每一处，包括补全、自动配对和回车缩进。
+  - 没有选区时 `s` 改光标处的一个字符，同 `meow-beacon-change-char`。
+- **`r`**：把主选区剪下放进剪贴板，删除其余选区，插入点不动，一次撤销（`meow-beacon-kill-delete`）。
+- **什么也不做的键**：`d`、`y`、`A`、`I`、`S`，同 meow 键表里的 `meow-beacon-noop`。
+
+**宏**
+
+- **在 Beacon 里录宏**：`<f3>` 先回到 Normal，只编辑主选区，其余位置留着。`<f4>` 或 `C-x e` 结束录制，在每个其余位置回放（同 `meow-end-or-call-kmacro`）。
+- **在 Beacon 里按 `<f4>`**：先在主选区上播放上一个宏，再在每个其余位置播放（`meow-beacon-apply-kmacro`）。
+- **回放的起点**：插入点处是光标，选区处是派生时主选区的种类和方向。
+- **撤销与主光标**：在其余位置的回放合成一次撤销，主选区的修改是各自的步骤。回放完主选区回到原处（`save-mark-and-excursion`），然后照常按光标位置进出 Beacon。
 
 ## 命令、键位与配置
 

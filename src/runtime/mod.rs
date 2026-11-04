@@ -323,8 +323,19 @@ impl Runtime {
             );
             self.input_result(result, time);
         }
+        self.follow_grab(time);
         self.settle(time);
         self.complete();
+    }
+    /// Beacon after a command: in or out of the grab, and its other places
+    /// derived again, as meow does after each command.
+    fn follow_grab(&mut self, time: Duration) {
+        if self.replaying {
+            return;
+        }
+        for event in self.layers.follow_grab(&self.app, time) {
+            self.reduce(event, time);
+        }
     }
     fn complete(&mut self) {
         let (request, changed) = self.layers.completion_sync(&self.app);
@@ -381,6 +392,7 @@ impl Runtime {
             .layers
             .execute(command, &self.app, time, &self.app.root());
         self.input_result(result, time);
+        self.follow_grab(time);
         self.settle(time);
         self.complete();
     }
@@ -474,9 +486,7 @@ impl Runtime {
         if self.hooking {
             return;
         }
-        if !self.replaying {
-            self.layers.follow_grab(&self.app, time);
-        }
+
         for (view, line, column) in std::mem::take(&mut self.restores) {
             self.reduce(
                 Event::Edit {
