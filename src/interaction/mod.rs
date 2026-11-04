@@ -193,6 +193,9 @@ pub struct Layers {
     servers: HashMap<crate::editor::DocumentId, Vec<String>>,
     /// The `modal` option as last seen.
     modal_seen: bool,
+    /// The documents `save-some-buffers` has yet to ask about; the first is
+    /// the one being asked.
+    save_some: Vec<crate::editor::DocumentId>,
 }
 impl Layers {
     /// Whether a command failed since `clear_failed`.

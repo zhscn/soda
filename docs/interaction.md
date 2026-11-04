@@ -110,7 +110,9 @@ Backspace 退掉上一个键，Esc 取消，计数跨过 keypad 保留。与 meo
 
 ### 宏
 
-`F3`、`C-x (` 开始录制；`F4`、`C-x )`、`C-x e` 结束录制，没在录制时播放上一个宏。录的是按键，回放走同一条路由，补全列表中的选择录成结果文字。`E` 在选中的每一行行首播放，`V` 在搜索的每处匹配播放，都合成一次撤销；任一命令失败时停止。
+`F3`、`C-x (` 开始录制；`F4`、`C-x )` 结束录制，没在录制时播放上一个宏；`C-x e`（`macro-end-and-call`）同 Emacs 的 `kmacro-end-and-call-macro`，录制中按下时结束录制并立即播放一次。
+
+"连按"同 Emacs 的 `last-command`：看上一个键执行的命令，中间输入了文字也算打断。`recenter` 的循环、`previous-buffer`/`next-buffer` 的继续走都按这个判断。录的是按键，回放走同一条路由，补全列表中的选择录成结果文字。`E` 在选中的每一行行首播放，`V` 在搜索的每处匹配播放，都合成一次撤销；任一命令失败时停止。
 
 ### Beacon
 
@@ -218,18 +220,22 @@ Insert 中按选项 `auto-pairs`（默认关）成对输入括号，与 Emacs �
 | --- | --- |
 | `C-x C-s`、`C-x C-w`、`C-x C-f`、`C-x C-r` | `write`、`saveas`、`open`、`recent` |
 | `C-x b`、`C-x C-b`、`C-x k`、`C-x C-c` | `buffer`、`buffer`、`kill-buffer`、`quit` |
+| `C-x ←`、`C-x C-←`；`C-x →`、`C-x C-→` | `previous-buffer`；`next-buffer`：按使用顺序往前 / 往后，连按继续走，不来回跳 |
+| `C-x s` | `save-some-buffers`：逐个询问未保存的文件，`y` 保存、`n` 跳过、`!` 保存这个和之后的全部、`q` 不再保存；未命名文档不问 |
 | `C-x 0`、`1`、`2`、`3`、`o` | `close-window`、`only`、`split`、`vsplit`、`window-next` |
 | `C-x ^` | `resize-window` |
 | `C-x p f`、`C-x p p`、`C-x p b`、`C-x p g` | `project`、`project-switch`、`buffer`、`grep` |
 | `M-x`、`M-!`、`M-\|`、`M-%` | `commands`、`shell`、`pipe`、`replace` |
+| `M-s .` | `search-symbol`：搜索光标处的符号（整个符号匹配），从符号开头开始，第一处就是它，`C-s` 往下 |
+| `C-x z` | `repeat`：再执行一次上一个键的命令 |
 | `M-g g`、`M-g M-g` | `goto` |
 | `M-g n`、`M-g p`、``C-x ` `` | `next-result`、`previous-result`、`next-result` |
 | `M-,`、`C-M-,` | `jump-back`、`jump-forward` |
-| `C-v`、`M-v`、`C-l` | `half-page-down`、`half-page-up`、`recenter`（居中，不循环） |
+| `C-v`、`M-v`、`C-l` | `half-page-down`、`half-page-up`、`recenter`（同 `recenter-top-bottom`：连按依次居中、置顶、置底，中间按过别的键就从居中重新开始） |
 | `C-/`、`C-_`、`C-x u`；`C-M-/`、`C-M-_` | `undo`；`redo` |
 | `C-z` | `suspend` |
 | `C-c C-c` | `stop` |
-| `F3`、`C-x (`；`F4`、`C-x )`、`C-x e` | `macro-start`；`macro-end` |
+| `F3`、`C-x (`；`F4`、`C-x )`；`C-x e` | `macro-start`；`macro-end`；`macro-end-and-call` |
 
 `C-c` 是前缀，不离开 Insert；模态编辑时离开 Insert 用 Esc、`C-[` 或 `C-g`。
 

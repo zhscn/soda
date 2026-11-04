@@ -365,6 +365,13 @@ const GLOBAL: &[(&str, &str)] = &[
     ("C-x b", "buffer"),
     ("C-x C-b", "buffer"),
     ("C-x k", "kill-buffer"),
+    ("C-x <left>", "previous-buffer"),
+    ("C-x C-<left>", "previous-buffer"),
+    ("C-x <right>", "next-buffer"),
+    ("C-x C-<right>", "next-buffer"),
+    ("C-x s", "save-some-buffers"),
+    ("C-x z", "repeat"),
+    ("M-s .", "search-symbol"),
     ("C-x 0", "close-window"),
     ("C-x 1", "only"),
     ("C-x 2", "split"),
@@ -406,7 +413,7 @@ const GLOBAL: &[(&str, &str)] = &[
     ("<f4>", "macro-end"),
     ("C-x (", "macro-start"),
     ("C-x )", "macro-end"),
-    ("C-x e", "macro-end"),
+    ("C-x e", "macro-end-and-call"),
 ];
 /// Normal's keys that type no character: Emacs's, for the same moves and
 /// edits as in Insert. The keys of characters come from a layout, such as

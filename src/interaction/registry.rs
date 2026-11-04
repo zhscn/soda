@@ -123,6 +123,29 @@ const DEPARTURE: &[Slot] = &[
     OPTIONAL_PATH,
 ];
 const KEYS: Slot = slot("KEYS", SlotKind::Word);
+/// save-some-buffers's question, with the keys of Emacs's.
+const SAVE_ANSWER: Slot = Slot {
+    name: "ANSWER",
+    kind: SlotKind::Choice(&[
+        Choice {
+            key: Some('y'),
+            ..word("yes", "Save this file")
+        },
+        Choice {
+            key: Some('n'),
+            ..word("no", "Leave it unsaved")
+        },
+        Choice {
+            key: Some('!'),
+            ..word("all", "Save it and every one after it")
+        },
+        Choice {
+            key: Some('q'),
+            ..word("quit", "Save no more")
+        },
+    ]),
+    required: false,
+};
 const FACE: Slot = slot(
     "FACE",
     SlotKind::Choice(&[
@@ -491,6 +514,37 @@ pub static BUILTINS: &[Builtin] = &[
         })
     ),
     builtin!("next-view", "Focus the next view", Command::NextView),
+    builtin!(
+        "save-some-buffers",
+        [SAVE_ANSWER],
+        "Ask about each unsaved file whether to save it",
+        |a| {
+            use super::commands::SaveAnswer;
+            Ok(Command::SaveSome(match a.trim() {
+                "" => None,
+                "yes" => Some(SaveAnswer::Yes),
+                "no" => Some(SaveAnswer::No),
+                "all" => Some(SaveAnswer::All),
+                "quit" => Some(SaveAnswer::Quit),
+                other => return Err(format!("expected yes, no, all or quit, not {other}")),
+            }))
+        }
+    ),
+    builtin!(
+        "previous-buffer",
+        "Show the buffer used before this one; again, the one before that",
+        Command::CycleBuffer { backward: true }
+    ),
+    builtin!(
+        "next-buffer",
+        "Show the buffer used least recently; after previous-buffer, go back",
+        Command::CycleBuffer { backward: false }
+    ),
+    builtin!(
+        "search-symbol",
+        "Search for the symbol at the caret, from its start",
+        Command::SearchSymbol
+    ),
     builtin!("new", "Create an untitled document", Command::New),
     builtin!(
         "split",
@@ -684,7 +738,7 @@ pub static BUILTINS: &[Builtin] = &[
     ),
     builtin!(
         "recenter",
-        "Scroll so the caret's line is in the middle of the window",
+        "Scroll the caret's line to the middle; again, to the top, then the bottom",
         modal(Action::Recenter)
     ),
     builtin!(
@@ -1013,6 +1067,11 @@ pub static BUILTINS: &[Builtin] = &[
         "macro-end",
         "End recording, or play the last macro",
         modal(Action::MacroEnd)
+    ),
+    builtin!(
+        "macro-end-and-call",
+        "End recording and play the macro, or play the last macro",
+        modal(Action::MacroEndCall)
     ),
     builtin!(
         "macro-lines",

@@ -522,6 +522,7 @@ impl Layers {
         };
         match resolution {
             Resolution::Complete(command) => {
+                self.modal.last_key = self.modal.this_key.replace(command.clone());
                 // `repeat` runs again what a key ran, not what that went on
                 // to run, nor itself.
                 let repeat = matches!(&command, Command::Named(line) if line.trim() == "repeat");
@@ -545,9 +546,10 @@ impl Layers {
             }
             Resolution::Prefix => return Ok(pending(Message::Clear)),
             Resolution::Invalid => {
+                self.modal.last_key = self.modal.this_key.take();
                 return Ok(pending(Message::Set(format!("{typed} is undefined"))));
             }
-            Resolution::Pass => {}
+            Resolution::Pass => self.modal.last_key = self.modal.this_key.take(),
         }
         if self.mode != EditMode::Insert {
             if cancel {

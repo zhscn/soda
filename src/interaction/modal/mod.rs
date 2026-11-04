@@ -129,6 +129,8 @@ pub enum Action {
     MacroStart,
     /// Ends recording, or plays the last macro.
     MacroEnd,
+    /// Ends recording and plays the macro, or plays it, as `C-x e`.
+    MacroEndCall,
     /// The last macro on each selected line.
     MacroLines,
     /// The last macro on each match of the search.
@@ -272,8 +274,31 @@ pub(in crate::interaction) struct State {
     pub macro_depth: usize,
     /// The last command, for `repeat`.
     pub last: Option<super::Command>,
+    /// The command the key being handled ran, and the one the key before
+    /// ran, as Emacs's `this-command` and `last-command`: typing text in
+    /// between leaves none, so `C-l C-l` goes on and `C-l a C-l` starts
+    /// over.
+    pub this_key: Option<super::Command>,
+    pub last_key: Option<super::Command>,
+    /// Where `recenter` put the caret's line last: middle, top, bottom.
+    pub recenter_step: u8,
+    /// The buffers `previous-buffer` and `next-buffer` go through, in the
+    /// order of use when the first of them ran, and the place among them.
+    pub buffer_cycle: Option<(Vec<crate::editor::DocumentId>, usize)>,
 }
 impl State {
+    /// Whether the key before this one ran a command `test` accepts.
+    /// Keys hold commands parsed already; a line not yet parsed is tried
+    /// against `names`.
+    pub fn after(&self, test: impl Fn(&super::Command) -> bool, names: &[&str]) -> bool {
+        match &self.last_key {
+            Some(super::Command::Named(line)) => {
+                names.contains(&line.split_whitespace().next().unwrap_or(""))
+            }
+            Some(command) => test(command),
+            None => false,
+        }
+    }
     /// Forgets what was typed toward a command.
     pub fn clear(&mut self) {
         self.count = None;

@@ -358,9 +358,24 @@ impl Layers {
                 }
             }
             Action::Recenter => {
+                // As recenter-top-bottom: again and again, the line goes to
+                // the middle, the top and the bottom.
+                let again = self.modal.after(
+                    |c| matches!(c, Command::Modal(Action::Recenter)),
+                    &["recenter"],
+                );
+                self.modal.recenter_step = if again {
+                    (self.modal.recenter_step + 1) % 3
+                } else {
+                    0
+                };
                 let line = at.text.line_of(at.selection.head).unwrap();
                 let view = app.view(at.view).unwrap();
-                let top = line.saturating_sub(self.page_rows / 2);
+                let top = match self.modal.recenter_step {
+                    0 => line.saturating_sub(self.page_rows / 2),
+                    1 => line,
+                    _ => line.saturating_sub(self.page_rows.saturating_sub(1)),
+                };
                 response.events.push(Event::SetViewport {
                     view: at.view,
                     anchor: ByteOffset(at.text.line_start(top).unwrap()),
@@ -387,7 +402,15 @@ impl Layers {
                 self.modal.replay.start();
                 response.message = Message::Set("Recording a macro".into());
             }
-            Action::MacroEnd => {
+            Action::MacroEndCall if self.modal.replay.recording() => {
+                self.modal.replay.stop();
+                response.message = Message::Set("Macro recorded".into());
+                let keys = self.modal.replay.last().to_vec();
+                for _ in 0..count {
+                    response.replay.extend(keys.iter().cloned());
+                }
+            }
+            Action::MacroEnd | Action::MacroEndCall => {
                 if self.modal.replay.recording() {
                     self.modal.replay.stop();
                     response.message = Message::Set("Macro recorded".into());

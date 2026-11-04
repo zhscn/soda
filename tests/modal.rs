@@ -411,8 +411,8 @@ fn keypad_sequences_are_said_and_cancelled_and_step_back() {
     assert!(r.key_continuations().iter().any(|(key, _)| key == "C-s"));
     keys(&mut r, "ESC ESC");
     assert_eq!(r.pending_keys(), None);
-    keys(&mut r, "xz");
-    assert_eq!(r.message(), "C-x z is undefined");
+    keys(&mut r, "xy");
+    assert_eq!(r.message(), "C-x y is undefined");
     keys(&mut r, "x DEL");
     assert_eq!(r.pending_keys(), None);
     keys(&mut r, "l");

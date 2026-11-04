@@ -225,6 +225,17 @@ pub enum Command {
     },
     Search,
     SearchBackward,
+    /// Searches for the symbol at the caret, from its start, as Emacs's
+    /// `isearch-forward-symbol-at-point`.
+    SearchSymbol,
+    /// Asks about each unsaved file whether to save it, as Emacs's
+    /// `save-some-buffers`; the answer is for the one being asked.
+    SaveSome(Option<SaveAnswer>),
+    /// Shows the buffer used before, or after, in the order of use, as
+    /// Emacs's `previous-buffer` and `next-buffer`.
+    CycleBuffer {
+        backward: bool,
+    },
     Completion(super::completion::Action),
     /// Inserts a snippet at the caret.
     Snippet(String),
@@ -234,6 +245,16 @@ pub enum Command {
         backward: bool,
     },
     Replace,
+}
+/// An answer to `save-some-buffers` about one file.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SaveAnswer {
+    Yes,
+    No,
+    /// This one and every one after it.
+    All,
+    /// None of them any more.
+    Quit,
 }
 #[derive(Clone, Debug)]
 pub enum WindowCommand {
@@ -803,6 +824,108 @@ impl Layers {
                         horizontal_scroll: view.viewport.horizontal_scroll,
                     });
                 }
+            }
+            Command::SearchSymbol => {
+                let Some(view) = active(app) else {
+                    return Ok(super::InputResult::Handled(response));
+                };
+                let editor = app.workspace().editor(view.document_id).unwrap();
+                let session = editor.model().session(view.session_id).unwrap();
+                let snapshot = editor.model().document().snapshot();
+                let head = session.selection().head;
+                let Some(range) = super::modal::text::thing_at(snapshot, head, true) else {
+                    response.message = Message::Set("No symbol at point".into());
+                    return Ok(super::InputResult::Handled(response));
+                };
+                let word = snapshot.byte_slice(range.clone()).unwrap().to_string();
+                let query = crate::editor::search::SearchQuery::symbol(word);
+                // As in Emacs the search starts at the symbol's start, so its
+                // first match is this one, and cancelling comes back there.
+                let session = SearchSession::starting_at(app, view.id, range.start)?;
+                let (session, seeded) = session.seeded(query, app, time)?;
+                response = self.enter(Layer::Search(Box::new(session)), app, time)?;
+                response.events.splice(0..0, seeded.events);
+            }
+            Command::SaveSome(answer) => {
+                let unsaved = |id: &crate::editor::DocumentId| {
+                    app.workspace().is_dirty(*id)
+                        && !app.workspace().is_saving(*id)
+                        && app
+                            .workspace()
+                            .file(*id)
+                            .is_some_and(|f| f.path().is_some())
+                };
+                match answer {
+                    None => self.save_some = app.workspace().documents().filter(unsaved).collect(),
+                    Some(answer) => {
+                        let asked = self.save_some.first().copied();
+                        let rest = match answer {
+                            SaveAnswer::Yes => asked.into_iter().collect(),
+                            SaveAnswer::All => std::mem::take(&mut self.save_some),
+                            SaveAnswer::No | SaveAnswer::Quit => vec![],
+                        };
+                        for document in rest.into_iter().filter(unsaved) {
+                            response.events.push(Event::Save {
+                                document,
+                                target: None,
+                            });
+                        }
+                        if answer == SaveAnswer::Quit {
+                            self.save_some.clear();
+                        } else if !self.save_some.is_empty() {
+                            self.save_some.remove(0);
+                        }
+                    }
+                }
+                self.save_some.retain(unsaved);
+                match self.save_some.first() {
+                    Some(document) => {
+                        let ask = Command::Ask {
+                            line: "save-some-buffers ".into(),
+                            note: format!("save {}?", app.document_name(*document)),
+                        };
+                        let asked = self.execute(ask, app, time, file_root)?;
+                        if let super::InputResult::Handled(mut asked) = asked {
+                            asked.events.splice(0..0, response.events);
+                            return Ok(super::InputResult::Handled(asked));
+                        }
+                        return Ok(asked);
+                    }
+                    None if answer.is_none() => {
+                        response.message = Message::Set("(No files need saving)".into());
+                    }
+                    None => {}
+                }
+            }
+            Command::CycleBuffer { backward } => {
+                let current = active(app).map(|view| view.document_id);
+                let again = self.modal.after(
+                    |c| matches!(c, Command::CycleBuffer { .. }),
+                    &["previous-buffer", "next-buffer"],
+                );
+                let fresh = !again || self.modal.buffer_cycle.is_none();
+                if fresh {
+                    let mut order: Vec<_> = current.into_iter().collect();
+                    for document in app.documents_by_use().chain(app.workspace().documents()) {
+                        if !order.contains(&document) {
+                            order.push(document);
+                        }
+                    }
+                    self.modal.buffer_cycle = Some((order, 0));
+                }
+                let (order, at) = self.modal.buffer_cycle.as_mut().unwrap();
+                order.retain(|document| app.workspace().editor(*document).is_some());
+                if order.len() < 2 {
+                    response.message = Message::Set("No other buffer".into());
+                    return Ok(super::InputResult::Handled(response));
+                }
+                let n = order.len();
+                *at = if backward {
+                    (*at + 1) % n
+                } else {
+                    (*at + n - 1) % n
+                };
+                response.events.push(show(app, order[*at]));
             }
             Command::Search | Command::SearchBackward | Command::Replace => {
                 if let Some(view) = app.active_view() {

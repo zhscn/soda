@@ -87,6 +87,35 @@ impl SearchSession {
         }
     }
 
+    /// A session whose origin, and the place cancelling restores, is the
+    /// caret at `offset`.
+    pub fn starting_at(app: &Application, view: ViewId, offset: usize) -> Result<Self, EditError> {
+        let mut session = Self::new(app, view)?;
+        let editor = app
+            .workspace()
+            .editor(app.view(view).ok_or(EditError::UnknownSession)?.document_id)
+            .unwrap();
+        let position = editor
+            .model()
+            .document()
+            .position(ByteOffset(offset), Association::After)?;
+        session.anchor = position;
+        session.head = position;
+        Ok(session)
+    }
+    /// Starts with a query given rather than typed, and the response that
+    /// previews its first match.
+    pub fn seeded(
+        mut self,
+        query: SearchQuery,
+        app: &Application,
+        time: Duration,
+    ) -> Result<(Self, Response), EditError> {
+        self.input = TextInput::new(query.text());
+        self.query = query;
+        let response = self.preview_response(app, self.backward, false, time)?;
+        Ok((self, response))
+    }
     pub fn new(app: &Application, view: ViewId) -> Result<Self, EditError> {
         let view_state = app.view(view).ok_or(EditError::UnknownSession)?;
         let editor = app.workspace().editor(view_state.document_id).unwrap();
