@@ -330,7 +330,10 @@ impl Layers {
             | UserInput::FocusGained => false,
         };
         if typed && !replayed {
-            let fresh = !self.sequence.active();
+            // The prefix argument belongs to the command after it, so the
+            // keys ending a macro take theirs with them, as `C-u 3 <f4>`.
+            let fresh =
+                !self.sequence.active() && !self.modal.active() && self.modal.universal.is_none();
             self.modal.replay.typed(&input, fresh);
         }
         self.replaying = replayed;
@@ -422,6 +425,34 @@ impl Layers {
                 }
             };
             return Ok(InputResult::Handled(self.modal_read(read, ch, app, time)));
+        }
+        // After a macro key sequence, its last key alone runs it again, as
+        // kmacro's repeat keys; any other key ends that.
+        if !self.replaying
+            && let Some((keys, commands)) = self.modal.macro_repeat.take()
+            && !self.sequence.active()
+            && !self.modal.active()
+        {
+            let mut again = keys[..keys.len() - 1].to_vec();
+            again.push(keymap::canonical(key).unwrap_or(key));
+            let stack = self.stack(app);
+            if let Resolution::Complete(command) = self.keymap.resolve(&stack, &again, &|_| false).0
+                && self.names_one_of(&command, commands)
+            {
+                self.modal.command_keys = again;
+                return self.execute(command, app, time, file_root);
+            }
+        }
+        // `C-g` drops a macro being recorded, as `keyboard-quit` does, and
+        // goes on to cancel what it cancels.
+        if key.control
+            && !key.alt
+            && key.code == Key::Char('g')
+            && !self.sequence.active()
+            && self.modal.replay.recording()
+        {
+            self.modal.replay.abort();
+            self.modal.beacon_insert = None;
         }
         // After C-u, digits and `-` make its count rather than text or keys.
         if let Some(universal) = self.modal.universal
@@ -533,6 +564,8 @@ impl Layers {
                 format!("{keys} {key}")
             }
         };
+        let mut sequence = self.sequence.keys().to_vec();
+        sequence.push(keymap::canonical(key).unwrap_or(key));
         let resolution = if self.sequence.in_keypad() {
             self.sequence.push_keypad(key, &stack, &self.keymap)
         } else {
@@ -540,6 +573,7 @@ impl Layers {
         };
         match resolution {
             Resolution::Complete(command) => {
+                self.modal.command_keys = sequence;
                 self.modal.last_key = self.modal.this_key.replace(command.clone());
                 // `repeat` runs again what a key ran, not what that went on
                 // to run, nor itself.
@@ -598,6 +632,19 @@ impl Layers {
             }
             _ => Ok(InputResult::Blocked),
         }
+    }
+    /// Whether `command` is one of the commands `names` name, bound by name
+    /// or as the command a name stands for.
+    fn names_one_of(&self, command: &Command, names: &[&str]) -> bool {
+        if let Command::Named(line) = command {
+            return names.contains(&line.split_whitespace().next().unwrap_or(""));
+        }
+        let shown = format!("{command:?}");
+        names.iter().any(|name| {
+            self.registry
+                .expand(name)
+                .is_ok_and(|commands| commands.iter().any(|c| format!("{c:?}") == shown))
+        })
     }
     /// A count given to a command that does not read one runs it that many
     /// times, as one step to undo: `C-u 8 C-n`, `C-u 3 C-k`, `C-u 5 a`.

@@ -4,6 +4,7 @@
 //! kind of thing it covers, so that the next command can extend it.
 mod beacon;
 mod execute;
+mod kmacro;
 mod replay;
 pub mod text;
 use crate::{
@@ -12,6 +13,7 @@ use crate::{
     editor::{DocumentPosition, search::SearchQuery},
 };
 pub(super) use beacon::{BeaconEntry, BeaconPlay, BeaconShape};
+pub use kmacro::MacroAction;
 /// The selection of the active view, if there is one.
 pub(super) fn execute_place(app: &crate::application::Application) -> Option<Selection> {
     execute::place(app, Default::default()).map(|at| at.selection)
@@ -129,11 +131,8 @@ pub enum Action {
     /// Enters Beacon inside the selection, or leaves a marker to swap with.
     Grab,
     SwapGrab,
-    MacroStart,
-    /// Ends recording, or plays the last macro.
-    MacroEnd,
-    /// Ends recording and plays the macro, or plays it, as `C-x e`.
-    MacroEndCall,
+    /// Keyboard macros, as Emacs's kmacro.
+    Macro(MacroAction),
     /// Plays the keys Beacon set aside at each of its other places; queued
     /// after the edits at the main selection, so that it finds them done.
     PlayAtBeacons,
@@ -291,9 +290,11 @@ pub(in crate::interaction) struct State {
     pub play: Option<BeaconPlay>,
     /// The main selection while keys play at the other places.
     pub held: Option<Grab>,
-    /// The undo depth when recording began: a macro played on beacons
-    /// undoes as one step with its recording.
-    pub macro_depth: usize,
+    /// The keys of the sequence that ran the command being run.
+    pub command_keys: Vec<crate::interaction::KeyStroke>,
+    /// After a macro key sequence, its last key alone runs again whichever
+    /// of these commands the sequence ending in it is bound to.
+    pub macro_repeat: Option<(Vec<crate::interaction::KeyStroke>, &'static [&'static str])>,
     /// The last command, for `repeat`.
     pub last: Option<super::Command>,
     /// The command the key being handled ran, and the one the key before

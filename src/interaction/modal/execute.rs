@@ -192,6 +192,10 @@ impl Layers {
             }
             _ => {}
         }
+        // What a kmacro command reads in the prefix: whether there is one,
+        // and whether it is only `C-u`s, which Emacs passes as a list.
+        let given = self.modal.count.is_some() || self.modal.negative;
+        let raw = self.modal.count.is_some() && self.modal.universal.is_some_and(|u| !u.digits);
         let (count, negative) = self.modal.take_prefix();
         if !matches!(
             action,
@@ -407,45 +411,9 @@ impl Layers {
             }
             Action::Grab => self.grab(&at, &mut response),
             Action::SwapGrab => return self.swap_grab(&at, response),
-            Action::MacroStart => {
-                // As `meow-beacon-start`: keys go to the main selection
-                // alone, in Normal, the other places held until it ends.
-                if self.mode == EditMode::Beacon {
-                    self.mode = EditMode::Normal;
-                }
-                self.modal.macro_depth = at.document.history_depth();
-                self.modal.replay.start();
-                response.message = Message::Set("Recording a macro".into());
-            }
-            // Recorded in Beacon, the macro goes to the other selections,
-            // as `macro-end` sends it.
-            Action::MacroEndCall
-                if self.modal.replay.recording() && self.modal.beacons.is_empty() =>
-            {
-                self.modal.replay.stop();
-                response.message = Message::Set("Macro recorded".into());
-                let keys = self.modal.replay.last().to_vec();
-                for _ in 0..count {
-                    response.replay.extend(keys.iter().cloned());
-                }
-            }
-            Action::MacroEnd | Action::MacroEndCall => {
-                if self.modal.replay.recording() {
-                    self.modal.replay.stop();
-                    response.message = Message::Set("Macro recorded".into());
-                    if !self.modal.beacons.is_empty() {
-                        self.beacon_end_macro(&mut response);
-                    }
-                } else if self.modal.replay.last().is_empty() {
-                    return self.fail(response, "No macro");
-                } else if matches!(action, Action::MacroEnd) && self.beacon_active() {
-                    self.beacon_call_macro(count, &mut response);
-                } else {
-                    let keys = self.modal.replay.last().to_vec();
-                    for _ in 0..count {
-                        response.replay.extend(keys.iter().cloned());
-                    }
-                }
+            Action::Macro(macro_action) => {
+                let prefix = super::kmacro::Prefix { count, given, raw };
+                return self.macro_action(macro_action, &at, prefix, response);
             }
             Action::PlayAtBeacons => self.play_at_beacons(&at, &mut response),
             Action::ReturnFromBeacons => self.return_from_beacons(&at, &mut response),

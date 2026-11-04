@@ -75,6 +75,8 @@ pub struct Runtime {
     /// Lua functions nothing calls any more, to drop when Lua next runs.
     released: Vec<u64>,
     replaying: bool,
+    /// Input a replay starts over with until a command fails.
+    replay_loop: Option<Vec<UserInput>>,
     /// Hook events waiting to run: the event, its parameter and the view
     /// its commands act on.
     notices: Vec<(&'static str, String, Option<ViewId>)>,
@@ -157,6 +159,7 @@ impl Runtime {
             trees: Default::default(),
             released: vec![],
             replaying: false,
+            replay_loop: None,
             notices: vec![],
             hooking: false,
             idle: None,
@@ -885,6 +888,9 @@ impl Runtime {
             );
             self.run_lua();
         }
+        if response.replay_until_failure && !response.replay.is_empty() {
+            self.replay_loop = Some(response.replay.clone());
+        }
         for input in response.replay.into_iter().rev() {
             self.replay.push_front(input);
         }
@@ -923,9 +929,17 @@ impl Runtime {
     /// ends one that never fails.
     fn replay(&mut self, time: Duration) {
         self.replaying = true;
+        // What the command that started it said stays, unless a replayed
+        // command says something, as a failure does.
+        let message = self.message.clone();
         self.layers.clear_failed();
         let mut budget = 1_000_000usize;
-        while let Some(input) = self.replay.pop_front() {
+        // A macro called with 0 starts over until something fails.
+        while let Some(input) = self.replay.pop_front().or_else(|| {
+            let keys = self.replay_loop.as_ref()?;
+            self.replay.extend(keys.iter().cloned());
+            self.replay.pop_front()
+        }) {
             if budget == 0 {
                 self.replay.clear();
                 self.message = "Replay stopped after a million keys".into();
@@ -938,9 +952,14 @@ impl Runtime {
             self.input_result(result, time);
             if self.layers.failed() {
                 self.replay.clear();
+                self.replay_loop = None;
             }
         }
+        self.replay_loop = None;
         self.replaying = false;
+        if self.message.is_empty() {
+            self.message = message;
+        }
     }
     /// Whether copies and pastes go through the system clipboard.
     fn system_clipboard(&self) -> bool {

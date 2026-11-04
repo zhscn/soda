@@ -276,11 +276,14 @@ impl Layers {
     /// to play at each other place when Esc ends it.
     pub(super) fn begin_beacon_insert(&mut self, entry: BeaconEntry) {
         self.modal.beacon_insert = Some(entry);
-        self.modal.replay.start();
+        self.modal.replay.start(None, false);
     }
     /// Esc after `begin_beacon_insert`: what was typed goes to the others.
     pub(super) fn end_beacon_insert(&mut self, entry: BeaconEntry, response: &mut Response) {
-        self.modal.replay.stop();
+        // Nothing typed, or the recording dropped by `C-g`: nothing plays.
+        if !self.modal.replay.stop() {
+            return;
+        }
         self.modal.play = Some(BeaconPlay {
             entry: Some(entry),
             keys: self.modal.replay.last().to_vec(),

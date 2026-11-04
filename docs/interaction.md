@@ -110,7 +110,64 @@ Backspace 退掉上一个键，Esc 取消，计数跨过 keypad 保留。与 meo
 
 ### 宏
 
-`F3`、`C-x (` 开始录制；`F4`、`C-x )` 结束录制，没在录制时播放上一个宏；`C-x e`（`macro-end-and-call`）同 Emacs 的 `kmacro-end-and-call-macro`，录制中按下时结束录制并立即播放一次。
+照 Emacs 的 kmacro.el 做，键位和行为都对应：
+
+**录制与播放**
+
+| 键 | 命令 | 对应 | 行为 |
+| --- | --- | --- | --- |
+| `F3` | `macro-start` | `kmacro-start-macro-or-insert-counter` | 开始录制；录制或播放中插入计数器 |
+| `C-x (`、`C-x C-k s` | `macro-record` | `kmacro-start-macro` | 开始录制；已在录制时提示 |
+| `F4` | `macro-end` | `kmacro-end-or-call-macro` | 结束录制，否则播放上一个宏 |
+| `C-x )` | `macro-stop` | `kmacro-end-macro` | 只结束录制，没在录制时提示 |
+| `C-x e` | `macro-end-and-call` | `kmacro-end-and-call-macro` | 结束录制并播放；之后单按 `e` 再播放 |
+| `C-x C-k C-k` | `macro-end-repeat` | `kmacro-end-or-call-macro-repeat` | 同 `F4`；之后单按 `C-k` 再来 |
+
+**前缀参数**
+
+- **次数**：播放的次数；结束录制时带次数，录制本身算第一次。`0` 表示一直播放到某个命令失败，比如 `C-n` 到了最后一行。
+- **用作计数器初值**：`C-u 5 F3` 让计数器从 5 开始。
+- **追加**：`C-u F3` 先把上一个宏再播放一遍，然后接着往后录；`C-u C-u F3` 不播放直接追加。
+- **播放第二个**：`C-u F4` 播放宏环里的第二个宏。
+- **不录进宏里**：前缀参数属于后面那条命令，结束录制时的 `C-u 3` 不会录进去。
+
+**放弃与空宏**
+
+- **`C-g`**：放弃正在录的宏，上一个宏保留（同 `kmacro-keyboard-quit`）。
+- **空宏**：什么也没录时提示 "Ignore empty macro"，上一个宏保留。
+
+**宏环**
+
+最近 8 个宏组成宏环（`kmacro-ring-max`），每个带着自己的计数器：
+
+| 键 | 作用 |
+| --- | --- |
+| `C-x C-k C-n` / `C-x C-k C-p` | 轮换 |
+| `C-x C-k C-l` | 播放第二个 |
+| `C-x C-k C-t` | 交换前两个 |
+| `C-x C-k C-d` | 删除当前的 |
+| `C-x C-k C-v` | 显示当前宏的按键 |
+
+这几个之后单按最后一个键继续，同 kmacro 的 repeat key。
+
+**计数器**
+
+| 键 | 命令 | 作用 |
+| --- | --- | --- |
+| `C-x C-k C-i` | `macro-insert-counter` | 插入计数器后加一；带次数时加该数，`C-u` 插入上一个值 |
+| `C-x C-k C-c` | `macro-set-counter` | 设定计数器 |
+| `C-x C-k C-a` | `macro-add-counter` | 加到计数器上 |
+| `C-x C-k C-f` | `macro-set-format` | 设定格式：`%d`、`%x`、`%o`、`%c`，带 `0`、`-`、`+` 和宽度，如 `%03d` |
+
+没给参数时在命令行里问。
+
+**命名**
+
+`C-x C-k n`（`macro-name NAME`）给上一个宏起名，它就成为命令 `NAME`，可以从 `M-x` 运行，也可以绑键。命令内部是 `macro-call NAME`。
+
+**没有做的**
+
+`C-x q` 查询、宏编辑（`C-x C-k e`、`RET`、`SPC`）、`C-x C-k b` 绑键、寄存器相关命令。
 
 录的是按键，回放走同一条路由，补全列表中的选择录成结果文字。`E` 在选中的每一行行首播放，`V` 在搜索的每处匹配播放，都合成一次撤销；任一命令失败时停止。
 
@@ -264,7 +321,8 @@ Insert 中按选项 `auto-pairs`（默认关）成对输入括号，与 Emacs �
 | `C-/`、`C-_`、`C-x u`；`C-M-/`、`C-M-_` | `undo`；`redo` |
 | `C-z` | `suspend` |
 | `C-c C-c` | `stop` |
-| `F3`、`C-x (`；`F4`、`C-x )`；`C-x e` | `macro-start`；`macro-end`；`macro-end-and-call` |
+| `F3`、`C-x (`；`F4`、`C-x )`；`C-x e` | `macro-start`；`macro-record`；`macro-end`；`macro-stop`；`macro-end-and-call` |
+| `C-x C-k` 下的键 | 宏环、计数器和命名，见[宏](#宏) |
 
 `C-u` 同 Emacs 的 `universal-argument`：给下一个命令一个次数，默认 4，再按 `C-u` 乘 4（`C-u C-u` 为 16）；之后输入的数字替换 4（`C-u 8` 是 8，`C-u 1 2` 是 12），`-` 取负。模态命令自己读次数（Normal 的移动、宏等）；编辑命令、剪切和 Lua 命令不读次数，执行这么多遍，合成一次撤销：`C-u 8 C-n` 下移 8 行，`C-u 5 a` 输入 5 个 a，`C-u 3 M-u` 大写 3 个词。`kill-line`（`C-k`）带次数时同 Emacs，剪掉整行连同换行：`C-u 2 C-k` 剪两行，`C-u 0 C-k` 剪到行首。其他命令（打开命令行、列表、窗口操作等）只执行一次，次数丢弃。负数按绝对值重复，不反转方向；`C-u C-SPC`、`C-u M-!` 这类原始前缀的特殊含义没有实现。`C-u C-g` 取消；`C-c` 开头的绑定照常接收次数（`C-u 3 C-c z`）。
 

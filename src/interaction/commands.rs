@@ -196,6 +196,12 @@ pub enum Command {
     },
     /// Routes input as if typed, for `each-line` and `each-match`.
     Replay(Vec<super::UserInput>),
+    /// Names the last keyboard macro, making it a command.
+    MacroName(String),
+    /// Sets the format the macro counter is inserted in.
+    MacroFormat(String),
+    /// Plays a macro by its name.
+    MacroCall(String),
     /// Focuses a window chosen by its label.
     WindowPick,
     /// Shows recent messages in `*messages*`.
@@ -322,6 +328,26 @@ fn leaving(app: &Application, document: DocumentId, reload: bool, discard: bool)
         }
     } else {
         Event::CloseDocument { document, discard }
+    }
+}
+/// Why a move cannot go: the caret is at the first or last line, or the
+/// start or end of the text, already.
+fn past_the_end(app: &Application, command: &EditCommand) -> Option<&'static str> {
+    use crate::editor::Motion;
+    let EditCommand::Move { motion, .. } = command else {
+        return None;
+    };
+    let view = active(app)?;
+    let editor = app.workspace().editor(view.document_id)?;
+    let text = editor.model().document().snapshot();
+    let head = editor.model().session(view.session_id)?.selection().head;
+    let line = text.line_of(head)?;
+    match motion {
+        Motion::Up if line == 0 => Some("Beginning of buffer"),
+        Motion::Backward if head == 0 => Some("Beginning of buffer"),
+        Motion::Down if line + 1 >= text.line_count() => Some("End of buffer"),
+        Motion::Forward if head >= text.len_bytes() => Some("End of buffer"),
+        _ => None,
     }
 }
 fn active(app: &Application) -> Option<&crate::application::View> {
@@ -1063,6 +1089,12 @@ impl Layers {
                 }
             }
             Command::Edit(command) => {
+                // Moving past either end of the text fails, as Emacs's
+                // `next-line` and `forward-char` signal, which ends a macro
+                // played until something fails.
+                if let Some(message) = past_the_end(app, &command) {
+                    return Ok(super::InputResult::Handled(self.fail(response, message)));
+                }
                 if let Some(view) = app.active_view() {
                     response.events.push(Event::Edit {
                         view,
@@ -1277,6 +1309,27 @@ impl Layers {
             Command::Replay(keys) => {
                 response.replay = keys;
             }
+            Command::MacroName(name) => {
+                if let Err(message) = self.modal.replay.name(&name) {
+                    response = self.fail(response, message);
+                } else {
+                    response.commands.push(Command::Define {
+                        body: format!("macro-call {name}"),
+                        name,
+                        doc: Some("A keyboard macro".into()),
+                        slots: None,
+                    });
+                }
+            }
+            Command::MacroFormat(format) => {
+                let replay = &mut self.modal.replay;
+                replay.format = format;
+                // Outside a macro it holds for those defined from now on.
+                if !replay.recording() && !self.replaying {
+                    replay.default_format = replay.format.clone();
+                }
+            }
+            Command::MacroCall(name) => response = self.call_named(&name, response),
             Command::JumpTo => {
                 if let Some(view) = app.active_view() {
                     let rows = |id: crate::application::ViewId| {

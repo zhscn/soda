@@ -125,6 +125,9 @@ pub struct Response {
     pub messages: bool,
     /// Input to route again, after the rest of the response, for macros.
     pub replay: Vec<UserInput>,
+    /// The replay goes on again and again until a command fails, as a
+    /// macro called with a count of 0.
+    pub replay_until_failure: bool,
     /// Lua to run once the rest of the response is done.
     pub lua: Vec<LuaRequest>,
     pub quit: bool,
@@ -594,7 +597,7 @@ impl Layers {
             // Typing for the other places of Beacon ends with the view it
             // was in, played nowhere.
             if self.modal.beacon_insert.take().is_some() {
-                self.modal.replay.stop();
+                self.modal.replay.abort();
             }
         }
         if let Some(edit) = update.edit.as_ref().and_then(|edit| edit.document.as_ref()) {
