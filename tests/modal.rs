@@ -658,3 +658,21 @@ fn a_beacon_macro_runs_each_selection_the_way_the_main_one_ran() {
     keys(&mut r, "eeG M-< [ <f3> aQ ESC C-x e");
     assert_eq!(shown(&r).replace(['|', '[', ']'], ""), "abQ x\nabQ y\n");
 }
+#[test]
+fn beacon_follows_the_caret_in_and_out_of_the_grab() {
+    let mut r = runtime("|foo bar\nbaz qux\nend\n");
+    keys(&mut r, "eeG");
+    assert_eq!(r.edit_mode(), EditMode::Beacon);
+    // Out of the grab is Normal; the grab stays, drawn, for coming back.
+    keys(&mut r, "M->");
+    assert_eq!(r.edit_mode(), EditMode::Normal);
+    assert!(r.beacons().is_empty());
+    assert_eq!(r.grab(), Some(0..15));
+    keys(&mut r, "M-< C-e");
+    assert_eq!(r.edit_mode(), EditMode::Beacon);
+    assert_eq!(r.beacons(), vec![15..15]);
+    // Recording keeps to Normal wherever the caret goes.
+    keys(&mut r, "<f3> M-> M-<");
+    assert_eq!(r.edit_mode(), EditMode::Normal);
+    keys(&mut r, "<f4>");
+}

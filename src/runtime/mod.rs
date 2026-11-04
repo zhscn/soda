@@ -474,6 +474,9 @@ impl Runtime {
         if self.hooking {
             return;
         }
+        if !self.replaying {
+            self.layers.follow_grab(&self.app, time);
+        }
         for (view, line, column) in std::mem::take(&mut self.restores) {
             self.reduce(
                 Event::Edit {

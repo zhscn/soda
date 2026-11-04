@@ -34,6 +34,37 @@ impl Layers {
         let end = grab.end.resolve(at.document).ok()?.0;
         (start < end).then_some(start..end)
     }
+    /// Beacon is where the grab is, as meow's
+    /// `meow--maybe-toggle-beacon-state`: after each operation, the caret
+    /// inside the grab enters it from Normal, and outside leaves it, the
+    /// grab staying for the caret to come back. Not while a macro is
+    /// recorded or played, nor while a layer such as search is open.
+    pub fn follow_grab(&mut self, app: &Application, time: Duration) {
+        if self.active.is_some()
+            || self.modal.replay.recording()
+            || !crate::interaction::modal_on(app)
+        {
+            return;
+        }
+        let Some(at) = place(app, time) else {
+            return;
+        };
+        let head = at.selection.head;
+        let inside = self
+            .grabbed(app)
+            .is_some_and(|grab| grab.start <= head && head <= grab.end);
+        match self.mode {
+            EditMode::Normal if inside => {
+                self.mode = EditMode::Beacon;
+                self.derive_beacons(app, time);
+            }
+            EditMode::Beacon if !inside => {
+                self.mode = EditMode::Normal;
+                self.modal.beacons.clear();
+            }
+            _ => {}
+        }
+    }
     /// The other selections, as ranges in the text.
     pub fn beacons(&self, app: &Application) -> Vec<Range<usize>> {
         let Some(at) = place(app, Default::default()) else {
