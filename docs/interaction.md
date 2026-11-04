@@ -277,7 +277,7 @@ Insert 和输入框共享一组 readline 风格的命令。名字只定义一次
 
 Shift 加方向键、Home、End 扩展选区，对应 `extend-` 前缀的同名命令。Insert 中 `kill-*` 写入 kill ring，连续剪切合并成一条（见[剪贴板](#剪贴板)），与 Emacs 的 `kill-line`、`kill-word` 一样从光标算起，不管选区。输入框使用组件自己的剪切缓冲。`pairs` 模块在 Insert 中替换了其中几个键，见[结构化编辑](#结构化编辑)。
 
-Insert 中 Tab 是 `insert-tab`：有选区时缩进所选行（选区终点恰在下一行开头时不含该行），否则按文档的 tab/space 策略插入缩进；Shift-Tab 是 `outdent`；Enter 是语言感知的 `newline`。
+Insert 中 Tab 是 `indent-for-tab`，同 Emacs 的 TAB（`indent-for-tab-command`，`tab-always-indent` 为默认的 t）：不管光标在行中哪里，都按语言重新缩进本行，光标在前导空白中时移到第一个非空字符；有选区时重新缩进所选各行（选区终点恰在下一行开头时不含该行）。语言没有缩进分析时（C++ 和 Rust 之外的大多数语言）退回 `insert-tab`：有选区时缩进所选行，否则按文档的 tab/space 策略插入缩进。Shift-Tab 是 `outdent`；Enter 是语言感知的 `newline`。详见[缩进](indentation.md#输入重新缩进与其他来源)。
 
 ### 配置文件
 
@@ -348,7 +348,7 @@ end)
 | `commands`、`help`、`suspend`、`nop` | 命令面板、帮助、挂起、什么也不做（屏蔽默认键） |
 | `undo` / `redo`、`copy` / `cut` / `paste` / `yank-pop` | 历史与剪贴板 |
 | `move-up` / `move-down`、`document-start` / `document-end`、`select-all`、`normal-mode` | 移动、全选、切换模式；`extend-` 前缀扩展选区 |
-| `indent` / `outdent`、`insert-tab` / `insert-literal-tab`、`newline` | 缩进、Tab、语言感知换行 |
+| `indent` / `outdent`、`indent-for-tab`、`insert-tab` / `insert-literal-tab`、`newline` | 缩进、Tab、语言感知换行 |
 
 Normal 的模态命令（`left`、`next-word`、`block`、`kill`、`put`、`grab`、`expand N`、`keypad START` 等）对应 [Normal 键](#normal-键)。相对路径以当前文档的目录解析，支持 `~/`。
 

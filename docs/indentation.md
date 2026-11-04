@@ -122,7 +122,8 @@ C++ 的空白策略来自 `CppRules`；其他语言来自选项 `indent-width`�
 | 输入字符 | 先插入字符；语言的 `triggers(ch)` 为真时查询当前行，空白调整与字符同一事务、一次撤销 |
 | 重新缩进 | `Set` 修改前导空白和辅助空白；`Preserve`、`Unavailable` 不修改 |
 | 粘贴 | 按原字节插入，不缩进 |
-| Tab | 有选区时缩进选定行；否则按 tab 策略插入 tab，或插入补到下一 tab stop 的空格 |
+| Tab（`indent-for-tab`） | 同 Emacs 的 `indent-for-tab-command`：按 `Reindent` 查询光标所在行并修改前导空白，光标在前导空白中时移到第一个非空字符，在正文中时随正文移动；有选区时逐行重新缩进（`indent-region`），每行在前面各行改好后的文本上查询，所以续行跟着开头行的新位置对齐，整体一次撤销。所有行都得到 `Unavailable`（语言没有缩进分析）时退回 `insert-tab` |
+| `insert-tab` | 有选区时缩进选定行；否则按 tab 策略插入 tab，或插入补到下一 tab stop 的空格 |
 | 字面 tab | 插入 `\t` |
 | 缩进增减 | `IndentSelection` 按缩进宽度修改选定行，不等同于插入 tab |
 | Beacon 多选区 | 按原文插入，回车不缩进 |

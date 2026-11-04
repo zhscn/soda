@@ -298,6 +298,85 @@ pub(super) fn prepare_reindent(
     )?;
     Ok(Transaction::new(state.snapshot().version(), changes))
 }
+/// Emacs's TAB, `indent-for-tab-command`: indents the caret's line as the
+/// language would, wherever the caret is in it, or with a selection each
+/// selected line, as `indent-region`. A caret in the leading whitespace
+/// goes to the first non-blank; one in the text moves with it. Where the
+/// language has no indentation to give, TAB inserts indentation, or with a
+/// selection shifts the lines, as before.
+pub(super) fn prepare_indent_for_tab(
+    state: &EditorState,
+    language: &mut LanguageSession,
+) -> Result<Transaction, EditError> {
+    let snapshot = state.snapshot();
+    let range = state.selection().range();
+    let first = snapshot
+        .line_of(range.start)
+        .ok_or(EditError::InvalidRange)?;
+    let mut last = snapshot.line_of(range.end).ok_or(EditError::InvalidRange)?;
+    if !range.is_empty() && last > first && snapshot.line_start(last) == Some(range.end) {
+        last -= 1;
+    }
+    // Each line is placed in the text as the lines before it left it, so a
+    // continuation follows its opening line's new place.
+    let mut current = state.clone();
+    let mut known = false;
+    for line in first..=last {
+        let start = current
+            .snapshot()
+            .line_start(line)
+            .ok_or(EditError::InvalidRange)?;
+        let query = IndentRequest {
+            line,
+            position: start,
+            trigger: IndentTrigger::Reindent,
+        };
+        let advice = language.indent(current.snapshot(), query)?;
+        known |= !matches!(advice, IndentAdvice::Unavailable);
+        let changes = advice_changes(current.snapshot(), line, advice, false)?;
+        if !changes.is_empty() {
+            let tx = Transaction::new(current.snapshot().version(), changes);
+            current = current.apply(tx)?.0;
+        }
+    }
+    if !known {
+        return Ok(if range.is_empty() {
+            super::commands::insert_tab(state, false, language)?
+        } else {
+            super::commands::indent_selection(state, false, language)
+        });
+    }
+    // One change a line, in the text as it was, so the edit is one step
+    // and what is anchored elsewhere on the lines stays put.
+    let after = current.snapshot();
+    if after.line_count() != snapshot.line_count() {
+        return Err(EditError::InvalidRange);
+    }
+    let mut changes = vec![];
+    for line in first..=last {
+        let old = snapshot.line_content_range(line).unwrap();
+        let new = after.line_content_range(line).unwrap();
+        let old_text = snapshot.byte_slice(old.clone()).unwrap().to_string();
+        let new_text = after.byte_slice(new).unwrap().to_string();
+        if old_text != new_text {
+            changes.push(Change::new(old, new_text));
+        }
+    }
+    let mut tx = Transaction::new(snapshot.version(), changes);
+    if range.is_empty() {
+        let leading = snapshot.leading_whitespace(first).unwrap().len_bytes();
+        let line_start = snapshot.line_start(first).unwrap();
+        let line_start_after = after.line_start(first).unwrap();
+        let leading_after = after.leading_whitespace(first).unwrap().len_bytes();
+        let head = if range.start <= line_start + leading {
+            line_start_after + leading_after
+        } else {
+            range.start - (line_start + leading) + line_start_after + leading_after
+        };
+        tx.selection = Some(Selection::caret(head));
+    }
+    Ok(tx)
+}
 pub(super) fn caret_at(snapshot: &Snapshot, position: usize) -> Result<Selection, EditError> {
     Ok(Selection::caret(
         crate::core::clip_grapheme_offset(

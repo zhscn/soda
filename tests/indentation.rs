@@ -170,3 +170,49 @@ fn plain_text_only_inherits() {
         &[("  see (|\n", "  see (\n  |\n"), ("a {|}\n", "a {\n|}\n")],
     );
 }
+
+#[test]
+fn tab_indents_the_line_wherever_the_caret_is_as_emacs_does() {
+    press(
+        "a.cpp",
+        "TAB",
+        &[
+            // In the text the caret moves with it.
+            ("int f() {\nret|urn 1;\n}\n", "int f() {\n  ret|urn 1;\n}\n"),
+            // In the leading whitespace it goes to the first non-blank.
+            (
+                "int f() {\n|    return 1;\n}\n",
+                "int f() {\n  |return 1;\n}\n",
+            ),
+            // Already placed (LLVM style, two columns): nothing moves.
+            (
+                "int f() {\n  return 1;|\n}\n",
+                "int f() {\n  return 1;|\n}\n",
+            ),
+            // A line indented too far comes back.
+            ("int f() {\n          x|;\n}\n", "int f() {\n  x|;\n}\n"),
+        ],
+    );
+    press(
+        "a.rs",
+        "TAB",
+        &[(
+            "fn f() {\nlet| x = 1;\n}\n",
+            "fn f() {\n    let| x = 1;\n}\n",
+        )],
+    );
+    // Where the language has no indentation to give, TAB inserts it.
+    press("a.txt", "TAB", &[("ab|c\n", "ab  |c\n")]);
+}
+#[test]
+fn tab_over_a_selection_indents_each_line_after_the_ones_before() {
+    // The continuation lines up with the call's new place, not its old one.
+    press(
+        "a.cpp",
+        "C-x h TAB",
+        &[(
+            "void g() {\nfoo(a,\n    b);\n}\n|",
+            "void g() {\n  foo(a,\n      b);\n}\n|",
+        )],
+    );
+}

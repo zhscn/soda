@@ -773,6 +773,11 @@ pub static BUILTINS: &[Builtin] = &[
         Command::Edit(Edit::InsertTab)
     ),
     builtin!(
+        "indent-for-tab",
+        "Indent the line, or the selected lines, as the language would; else insert indentation",
+        Command::Edit(Edit::IndentForTab)
+    ),
+    builtin!(
         "insert-literal-tab",
         "Insert a tab character",
         Command::Edit(Edit::InsertLiteralTab)

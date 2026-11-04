@@ -494,7 +494,7 @@ const INSERT: &[(&str, &str)] = &[
     ("C-r", "search-backward"),
     ("RET", "newline"),
     ("C-j", "newline"),
-    ("TAB", "insert-tab"),
+    ("TAB", "indent-for-tab"),
     ("<backtab>", "outdent"),
     ("S-<backtab>", "outdent"),
     ("<f1>", "help"),

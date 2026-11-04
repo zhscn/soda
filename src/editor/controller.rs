@@ -45,6 +45,9 @@ pub enum Command {
         column: usize,
     },
     InsertTab,
+    /// Emacs's TAB: indents the line or the selected lines as the language
+    /// would, else inserts indentation.
+    IndentForTab,
     InsertLiteralTab,
     IndentSelection {
         outdent: bool,
@@ -77,6 +80,7 @@ impl Command {
                 | Self::Delete { .. }
                 | Self::DeleteWord(_)
                 | Self::InsertTab
+                | Self::IndentForTab
                 | Self::InsertLiteralTab
                 | Self::IndentSelection { .. }
                 | Self::ReplaceCurrent(_)
@@ -448,6 +452,10 @@ impl Editor {
             }
             Command::InsertTab => edit(
                 commands::insert_tab(state, false, &document.language)?,
+                EditOrigin::Indent,
+            ),
+            Command::IndentForTab => edit(
+                operations::prepare_indent_for_tab(state, &mut document.language)?,
                 EditOrigin::Indent,
             ),
             Command::InsertLiteralTab => edit(
