@@ -9,8 +9,8 @@
 -- Options: `command` (default { "ccls" }, which may be a wrapper),
 -- `init` (initializationOptions),
 -- `settings`, `roots` (default .ccls-root, .ccls, compile_commands.json),
--- `auto` (default "marked": only where one of the roots is; lsp-start
--- starts it anywhere),
+-- `auto` (default false: only lsp-start starts it, as eglot; "marked"
+-- starts it where one of the roots is),
 -- and `languages` (default { "cpp" }).
 --
 -- The commands are there without setup: ccls-callers and ccls-callees
@@ -257,8 +257,7 @@ function M.setup(options)
       init = options.init,
       settings = options.settings,
       roots = options.roots or { ".ccls-root", ".ccls", "compile_commands.json" },
-      -- It indexes the whole root: not a directory merely around a file.
-      auto = options.auto == nil and "marked" or options.auto,
+      auto = options.auto,
       -- The `ccls` keymap holds in its documents, whatever runs it.
       name = "ccls",
     })

@@ -4,7 +4,9 @@
 --   soda.lsp.server("cpp", { "clangd" })
 --   soda.lsp.server("rust", { "rust-analyzer" }, { auto = "marked" })
 --
--- or a module does, as ccls's setup does.
+-- or a module does, as ccls's setup does. As eglot, a named server starts
+-- only by lsp-start, then serves the documents of its language under its
+-- root, open and opened later; `auto` starts it on opening a document.
 --
 -- Keys, in the `lsp` keymap, which holds in documents a server serves:
 -- M-. goes to the definition, M-? lists references, M-, comes back,

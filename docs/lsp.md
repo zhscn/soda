@@ -9,10 +9,9 @@ Rust 只管协议：启动进程、JSON-RPC、让服务器手里的文档保持�
 ```lua
 soda.lsp.server("cpp", { "clangd", "--function-arg-placeholders=1" })
 soda.lsp.server("cpp", nil)  -- 去掉
-soda.lsp.server("go", { "gopls" }, { roots = { "go.mod" }, auto = "marked" })
+soda.lsp.server("go", { "gopls" }, { roots = { "go.mod" } })
 -- cargo workspace 的根不是最近的 Cargo.toml，问 cargo
 soda.lsp.server("rust", { "rust-analyzer" }, {
-  auto = "marked",
   roots = function(path, done)
     local dir = path:match("^(.*)/[^/]*$")
     soda.spawn({ "cargo", "metadata", "--no-deps", "--format-version", "1" }, function(code, out)
@@ -28,9 +27,9 @@ soda.lsp.server("rust", { "rust-analyzer" }, {
 | `settings` | 回答 `workspace/configuration`：按 `section` 的点分路径取，没有的回答 null，不带 `section` 时给整张表；启动后也用 `workspace/didChangeConfiguration` 发一次 |
 | `roots` | 根目录标记：从文档所在目录往上，最近的含有其中任一文件或目录的目录；`"git"` 指 git 工作树顶层（`.git` 是文件的 submodule、linked worktree 也算）。也可以是函数 `function(path, done)`：返回目录，返回 `false` 表示没有，或返回 nil 之后调用 `done(目录或 false)`；回答之前这个文档不启动服务器。只影响服务器，`grep` 等仍按项目 |
 | `name` | 服务器的名字，默认是程序的文件名；`soda.keymap(..., { server = NAME })` 声明的键位表按它生效，所以经包装脚本启动时要写明 |
-| `auto` | 打开文档时是否自动启动：`true`（默认）总是；`"marked"` 只在根目录是找到的（标记、函数、跳转来源或 `lsp-start`）时；`false` 只由 `lsp-start` 启动 |
+| `auto` | 打开文档时是否自动启动：`false`（默认）只由 `lsp-start` 启动；`"marked"` 在根目录是找到的（标记、函数或跳转来源）时；`true` 总是 |
 
-单文件也能工作的服务器（clangd、pyright、lua-language-server）用默认值即可；要按项目建索引的适合 `"marked"`。rust-analyzer 会运行构建脚本，clangd 可能写 `.cache/clangd`，ccls 写 `.ccls-cache`，所以在哪里启动由配置决定。
+默认和 eglot 一样，配置只说明用哪个服务器，打开文档不启动任何进程：在文档里执行 `lsp-start`（像 `M-x eglot`）才在它的根目录启动，之后这个根目录下这种语言的文档都归它，已经打开的和之后打开的都是。rust-analyzer 会运行构建脚本，clangd 可能写 `.cache/clangd`，ccls 写 `.ccls-cache`，所以要不要自动启动由配置决定：想打开即启动的（像 `eglot-ensure`）设 `auto`，按项目建索引的适合 `"marked"`。
 
 ## 命令
 
@@ -53,7 +52,7 @@ soda.lsp.server("rust", { "rust-analyzer" }, {
 | | `lsp-diagnostics` | 列出所有诊断 |
 | | `lsp-restart` | 重启当前语言的服务器，失败后也用它重试 |
 | | `lsp-start [DIR]` | 像 eglot：在 `DIR`（默认按规则得到的根目录）启动，之后这个目录下这种语言的文档都归它；也解除 `lsp-stop` |
-| | `lsp-stop` | 停掉当前文档的服务器，清掉它的诊断、语义高亮和 inlay hint；在 `lsp-start` 之前不再自动启动 |
+| | `lsp-stop` | 停掉当前文档的服务器，清掉它的诊断、语义高亮和 inlay hint；设了 `auto` 的在 `lsp-start` 之前也不再自动启动 |
 | | `lsp-servers` | 在 `*servers*` 里列出服务器（语言、根目录、程序、状态）及各自的文档，回车打开 |
 
 层级显示成[树](extension.md#树)：根是光标处的函数或类型，展开一个节点时才问那一层。列表是普通的结果文档，`]q` / `[q` 和回车都能用。服务器没有声明对应能力或回答方法不存在时，命令直接说明，不发请求；补全、签名提示这类自动请求静默跳过。
@@ -95,7 +94,7 @@ end
 
 ## 同步
 
-- 文档第一次需要服务器时启动它；无头 Runtime 不调用 `enable_lsp` 就不启动。
+- 服务器由 `lsp-start` 启动，设了 `auto` 的在文档第一次需要它时启动；无头 Runtime 不调用 `enable_lsp` 就不启动。文档的 `(语言, 根目录)` 已有服务器在跑时，文档直接交给它，不看 `auto`。
 - 文档总是发全文：停止输入 150 ms 后发，发请求之前也先发，所以服务器不会回答旧文本。JSON 在写线程上生成，大文档不影响按键。
 - 同一用途的新请求发出时取消旧的（发 `$/cancelRequest`，迟到的回答丢弃）：同一命令再执行、补全会话换了、文档改了以后的语义高亮和 inlay hint。
 - 启动失败时报告一次，不再尝试。运行中退出时报告并重启，重新打开它的文档；3 分钟内第 4 次退出后等 `lsp-restart`。编辑器退出时结束服务器；被 SIGKILL 时服务器读到 stdin 结束自己退出。
@@ -167,7 +166,7 @@ require("ccls").setup({
 })
 ```
 
-`setup` 让 C++ 使用 ccls：`command` 换程序，`languages` 默认 `{ "cpp" }`，`init`、`settings` 原样传给 `soda.lsp.server`，`roots` 默认 `.ccls-root`、`.ccls`、`compile_commands.json`，`auto` 默认 `"marked"`（ccls 会给整个根目录建索引）。标准功能走 `lsp` 模块；ccls 没有的（如 `lsp-switch`）直接说明。`setup` 声明 `ccls` 键位表，只在 ccls 服务的文档中生效，同一个键优先于 `lsp` 表。下表的命令没有键，绑到这张表（在 `setup` 之后）：`soda.map("ccls", "C-c v c", "ccls-callers")`。
+`setup` 让 C++ 使用 ccls：`command` 换程序，`languages` 默认 `{ "cpp" }`，`init`、`settings` 原样传给 `soda.lsp.server`，`roots` 默认 `.ccls-root`、`.ccls`、`compile_commands.json`，`auto` 原样传给 `soda.lsp.server`，所以默认由 `lsp-start` 启动；ccls 会给整个根目录建索引，要自动启动时适合 `"marked"`。标准功能走 `lsp` 模块；ccls 没有的（如 `lsp-switch`）直接说明。`setup` 声明 `ccls` 键位表，只在 ccls 服务的文档中生效，同一个键优先于 `lsp` 表。下表的命令没有键，绑到这张表（在 `setup` 之后）：`soda.map("ccls", "C-c v c", "ccls-callers")`。
 
 | 键 | 命令 | 作用 |
 | --- | --- | --- |

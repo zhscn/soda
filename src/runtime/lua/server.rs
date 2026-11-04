@@ -29,8 +29,9 @@ pub(super) fn register<'scope, 'r: 'scope>(
                     .map(|o| o.get::<Value>("auto"))
                     .transpose()?
                 {
-                    None | Some(Value::Nil | Value::Boolean(true)) => Auto::Always,
-                    Some(Value::Boolean(false)) => Auto::Never,
+                    // As eglot: none starts until `lsp-start`.
+                    None | Some(Value::Nil | Value::Boolean(false)) => Auto::Never,
+                    Some(Value::Boolean(true)) => Auto::Always,
                     Some(Value::String(s)) if s.to_str()? == "marked" => Auto::Marked,
                     Some(_) => {
                         return Err(mlua::Error::runtime("auto is true, false or \"marked\""));

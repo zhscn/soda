@@ -130,7 +130,7 @@ pub(super) enum Auto {
     /// Only where its root was found: a marker, a jump or a function, not
     /// a project taken for want of one.
     Marked,
-    /// Only by `lsp-start`.
+    /// Only by `lsp-start`, as eglot; the default.
     Never,
 }
 /// A server as `soda.lsp.servers` lists it.

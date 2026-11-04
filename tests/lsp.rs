@@ -43,6 +43,18 @@ impl Fixture {
         std::fs::read_to_string(&self.log).unwrap_or_default()
     }
 }
+/// `options` for `soda.lsp.server` that start the server on opening a
+/// document, as these tests expect; the default waits for `lsp-start`.
+fn auto(options: &str) -> String {
+    let options = options.trim();
+    if options.is_empty() || options == "nil" {
+        "{ auto = true }".into()
+    } else if options.contains("auto") {
+        options.into()
+    } else {
+        format!("{{ auto = true, {}", options.strip_prefix('{').unwrap())
+    }
+}
 /// A C++ file open with the fake server as its language server, or `None`
 /// without Python to run it.
 fn open(source: &str) -> Option<Fixture> {
@@ -66,7 +78,7 @@ fn open_with(source: &str, options: &str, first: &str) -> Option<Fixture> {
         .unwrap();
     r.enable_lsp();
     r.source_lua("first", first).unwrap();
-    let options = if options.is_empty() { "nil" } else { options };
+    let options = auto(options);
     r.source_lua(
         "test",
         &format!(
@@ -512,8 +524,11 @@ fn a_missing_server_is_said_once() {
     r.source_lua("plugins", include_str!("fixtures/plugins.lua"))
         .unwrap();
     r.enable_lsp();
-    r.source_lua("t", r#"soda.lsp.server("cpp", { "/no/such/server" })"#)
-        .unwrap();
+    r.source_lua(
+        "t",
+        r#"soda.lsp.server("cpp", { "/no/such/server" }, { auto = true })"#,
+    )
+    .unwrap();
     r.start(Some(path));
     wait(&mut r, |r| r.message().contains("/no/such/server"));
     r.command(Command::Named("echo quiet".into()));
@@ -572,7 +587,7 @@ fn each_project_has_a_server_and_a_jump_stays_with_its_own() {
     r.source_lua(
         "test",
         &format!(
-            r#"soda.lsp.server("cpp", {{ "env", "FAKE_LSP_LOG={}", "python3", "{}" }})"#,
+            r#"soda.lsp.server("cpp", {{ "env", "FAKE_LSP_LOG={}", "python3", "{}" }}, {{ auto = true }})"#,
             log.display(),
             script.display()
         ),
@@ -836,7 +851,7 @@ fn root_markers_choose_the_server_root() {
         "test",
         &format!(
             r#"soda.lsp.server("cpp", {{ "env", "FAKE_LSP_LOG={}", "python3", "{}" }},
-               {{ roots = {{ ".ccls", "compile_commands.json" }} }})"#,
+               {{ roots = {{ ".ccls", "compile_commands.json" }}, auto = true }})"#,
             log.display(),
             script.display()
         ),
@@ -1170,6 +1185,7 @@ fn a_code_action_without_its_edit_is_resolved_when_chosen() {
 /// A runtime started on `file` under `base`, its C++ server the fake one
 /// with `options`; the log of what the server was told.
 fn server_in(base: &std::path::Path, file: &str, options: &str) -> (Runtime, PathBuf) {
+    let options = auto(options);
     let log = base.join("log");
     let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/fake_lsp.py");
     let mut r = Runtime::started_in(base.to_owned()).unwrap();
@@ -1203,6 +1219,50 @@ fn settle(r: &mut Runtime) {
         r.poll();
         std::thread::sleep(Duration::from_millis(2));
     }
+}
+#[test]
+fn by_default_a_server_waits_for_lsp_start_then_serves_its_root_as_eglot() {
+    if Process::new("python3").arg("--version").output().is_err() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().canonicalize().unwrap();
+    for repo in ["repo", "other"] {
+        std::fs::create_dir_all(base.join(repo).join(".git")).unwrap();
+    }
+    for file in ["repo/a.cpp", "repo/b.cpp", "repo/c.cpp", "other/d.cpp"] {
+        std::fs::write(base.join(file), "x\n").unwrap();
+    }
+    // `auto` left out: the default.
+    let (mut r, log) = server_in(&base, "repo/a.cpp", "{ auto = nil }");
+    r.command(Command::OpenPath(base.join("repo/b.cpp")));
+    r.command(Command::OpenPath(base.join("other/d.cpp")));
+    settle(&mut r);
+    assert!(initialized(&log).is_empty(), "nothing starts on opening");
+    r.command(Command::OpenPath(base.join("repo/a.cpp")));
+    r.command(Command::Named("lsp-start".into()));
+    let opened = |log: &std::path::Path| -> Vec<String> {
+        let mut names: Vec<_> = std::fs::read_to_string(log)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| line.strip_prefix("opened "))
+            .map(str::to_owned)
+            .collect();
+        names.sort();
+        names
+    };
+    let seen = log.clone();
+    wait(&mut r, move |_| opened(&seen).len() == 2);
+    assert_eq!(initialized(&log), [base.join("repo").display().to_string()]);
+    // The documents of its root already open join it; another root's not.
+    assert_eq!(opened(&log), ["a.cpp", "b.cpp"]);
+    // Nor does one opened later under its root wait for another start.
+    r.command(Command::OpenPath(base.join("repo/c.cpp")));
+    let seen = log.clone();
+    wait(&mut r, move |_| opened(&seen).len() == 3);
+    settle(&mut r);
+    assert_eq!(opened(&log), ["a.cpp", "b.cpp", "c.cpp"]);
+    assert_eq!(initialized(&log).len(), 1);
 }
 #[test]
 fn a_server_waits_for_its_markers_or_lsp_start_and_lsp_stop_holds() {
