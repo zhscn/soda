@@ -455,6 +455,10 @@ pub struct Application {
     windows: Windows,
     /// Views by when they were last focused, most recent last.
     recent: Vec<ViewId>,
+    /// Documents by when a view of them was last focused, most recent
+    /// last. Unlike `recent` it outlives the views, as Emacs's buffer list
+    /// does; closed documents drop out when read.
+    used: Vec<DocumentId>,
     rules: display::Rules,
     area: windows::Area,
     contexts: BTreeMap<DocumentId, context::Context>,
@@ -522,6 +526,15 @@ impl Application {
     }
     pub fn views(&self) -> impl Iterator<Item = &View> {
         self.views.values()
+    }
+    /// Open documents a view has shown, most recently focused first; those
+    /// never shown are not among them.
+    pub fn documents_by_use(&self) -> impl Iterator<Item = DocumentId> + '_ {
+        self.used
+            .iter()
+            .rev()
+            .copied()
+            .filter(|id| self.workspace.editor(*id).is_some())
     }
     pub fn view(&self, id: ViewId) -> Option<&View> {
         self.views.get(&id)
@@ -696,6 +709,10 @@ impl Application {
             }
             self.recent.retain(|id| *id != view);
             self.recent.push(view);
+            if let Some(document) = self.views.get(&view).map(|state| state.document_id) {
+                self.used.retain(|id| *id != document);
+                self.used.push(document);
+            }
         }
         self.active = view;
     }

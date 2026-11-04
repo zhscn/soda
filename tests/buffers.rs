@@ -169,3 +169,35 @@ fn killing_an_unsaved_buffer_elsewhere_shows_it_and_asks() {
     assert!(r.layer().is_none());
     assert_eq!(documents(&r), [third]);
 }
+#[test]
+fn switching_buffers_offers_the_one_used_last_first() {
+    let mut r = runtime();
+    let a = current(&r);
+    r.command(Command::New);
+    let b = current(&r);
+    r.command(Command::New);
+    let c = current(&r);
+    for document in [b, a, c] {
+        let name = r.app().document_name(document);
+        r.command(Command::Named(format!("buffer {name}")));
+    }
+    // Used last before c was a, then b; c itself comes last.
+    r.command(Command::Named("buffer".into()));
+    let Some(Layer::CommandLine(line)) = r.layer() else {
+        panic!("buffer asks which");
+    };
+    let names: Vec<_> = [a, b, c].map(|d| r.app().document_name(d)).into();
+    let rows: Vec<_> = line
+        .rows()
+        .iter()
+        .map(|row| row.candidate.payload.replacement.clone().unwrap())
+        .collect();
+    assert_eq!(rows, names);
+    // Enter alone goes back and forth, as C-x b RET does in Emacs.
+    key(&mut r, Key::Enter);
+    assert_eq!(current(&r), a);
+    for key in KeyStroke::parse_sequence("C-x b RET").unwrap() {
+        r.input(UserInput::Key(key));
+    }
+    assert_eq!(current(&r), c);
+}

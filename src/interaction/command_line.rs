@@ -1065,11 +1065,13 @@ pub(super) fn symbols(text: &str, caret: usize) -> Vec<String> {
 /// shows and the ranges that matched; everything matches an empty query.
 /// Equal scores keep the given order, except that those `last` picks go
 /// after the rest.
-fn ranked<T>(
+/// Candidates that match the query, best first; `rank` orders equal
+/// scores, and all of them when the query is empty.
+fn ranked<T, K: Ord>(
     matcher: &mut Matcher,
     query: &str,
     candidates: impl IntoIterator<Item = (T, String)>,
-    last: impl Fn(&T) -> bool,
+    rank: impl Fn(&T) -> K,
 ) -> impl Iterator<Item = (T, String, Vec<Range<usize>>)> {
     let mut found: Vec<_> = candidates
         .into_iter()
@@ -1082,7 +1084,7 @@ fn ranked<T>(
             Some((score, item, shown, highlights))
         })
         .collect();
-    found.sort_by_key(|(score, item, ..)| (std::cmp::Reverse(*score), last(item)));
+    found.sort_by_key(|(score, item, ..)| (std::cmp::Reverse(*score), rank(item)));
     found
         .into_iter()
         .map(|(_, item, shown, highlights)| (item, shown, highlights))
@@ -1158,7 +1160,17 @@ fn buffers(
         let shown = printable(&name);
         ((id, name), shown)
     });
-    ranked(matcher, query, shown, |(id, _)| active == Some(*id))
+    // As Emacs's other-buffer: the buffer used last before this one comes
+    // first, so Enter alone goes back to it; the current one comes last.
+    let used: Vec<_> = app.documents_by_use().collect();
+    let rank = |(id, _): &(crate::editor::DocumentId, String)| {
+        let by_use = used
+            .iter()
+            .position(|used| used == id)
+            .unwrap_or(usize::MAX);
+        (active == Some(*id), by_use)
+    };
+    ranked(matcher, query, shown, rank)
         .map(|((id, name), shown, highlights)| {
             let marker = if active == Some(id) { "* " } else { "  " };
             let dirty = if app.workspace().is_dirty(id) {

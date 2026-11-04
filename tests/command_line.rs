@@ -114,9 +114,12 @@ fn a_row_chosen_by_hand_wins_over_an_exact_name() {
         });
     }
     // Buffers are named by their paths; the exact name is that of `a`.
+    // ab was used after a, so it comes first; choosing it by hand still
+    // wins over the exact name.
     r.command(Command::Ex(format!("buffer {}", a.display())));
     assert_eq!(rows(&r).len(), 2, "{:?}", rows(&r));
-    keys(&mut r, "<down> RET");
+    assert!(rows(&r)[0].ends_with("/ab"), "{:?}", rows(&r));
+    keys(&mut r, "<down> <up> RET");
     wait(&mut r, |r| {
         let view = r.app().view(r.app().active_view().unwrap()).unwrap();
         r.app().workspace().file(view.document_id).unwrap().path() == Some(ab.as_path())
