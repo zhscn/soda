@@ -471,7 +471,7 @@ impl Gui {
         self.highlighter.retain(runtime.app());
         let app = runtime.app();
         let key = (
-            app.options().choice(None, "theme").to_owned(),
+            app.options().text(None, "theme").to_owned(),
             app.faces().revision(),
         );
         if self.theme_key.as_ref() != Some(&key) {

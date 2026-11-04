@@ -58,6 +58,8 @@ const FUNCTIONS: &[&str] = &[
     "unmap",
     "keymap",
     "face",
+    "theme",
+    "themes",
     "language",
     "thing",
     "bindings",

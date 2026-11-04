@@ -95,7 +95,25 @@
 
 ## 主题
 
-内置一套真彩主题，深浅两个变体。选项 `theme`：`dark`、`light` 或 `auto`（默认，`COLORFGBG` 报告浅色背景时用浅色）。主题设置整屏背景，不依赖终端配色。终端前端在 `COLORTERM` 为 `truecolor` 或 `24bit` 时输出 24 位颜色，否则换算为最接近的 xterm 256 色。
+内置一套真彩主题，深浅两个变体。选项 `theme`：`dark`、`light`、`auto`（默认，`COLORFGBG` 报告浅色背景时用浅色），或 `soda.theme` 定义的主题名。主题设置整屏背景，不依赖终端配色。终端前端在 `COLORTERM` 为 `truecolor` 或 `24bit` 时输出 24 位颜色，否则换算为最接近的 xterm 256 色。
+
+命令 `theme NAME` 随时切换主题，等同 `set theme NAME`，补全列出所有主题并标出当前的。名字未定义时报错，选项不变。
+
+`soda.theme(name, spec)` 定义主题，再次调用替换同名的定义；`auto`、`dark`、`light` 不能被占用。spec 的三部分都可省略：
+
+```lua
+soda.theme("paper", {
+  base = "light",                 -- 底下的内置变体：dark（默认）或 light
+  palette = { bg = "#fafafa", fg = "#383a42", blue = "#4078f2" },
+  faces = {
+    ["syntax.keyword"] = { fg = "#a626a4", bold = true },
+    status = "fg:#383a42 bg:#e5e5e6",
+  },
+})
+soda.set("theme", "paper")
+```
+
+叠放顺序是：内置变体的调色板 → `palette` 替换其中的颜色，界面和语法的颜色都由调色板推出 → `faces` 覆盖个别部分 → 用户的 `face` 覆盖最后生效。所以切换主题时 `face` 的设置保留。调色板的颜色名：`bg`、`bg-dark`、`bg-highlight`、`selection`、`fg`、`fg-dark`、`comment`、`gutter`、`gutter-current`、`blue`、`green`、`magenta`、`orange`、`yellow`、`red`、`cyan`、`teal`、`on-accent`（徽标上的文字）。`faces` 的值与 `soda.face` 相同。`soda.themes()` 返回所有主题名，内置的在前。重新定义正在使用的主题，下一帧生效。
 
 `face NAME [SPEC]`（Lua：`soda.face(name, spec)`）覆盖一个具名部分的颜色和属性。SPEC 是若干词：`fg:#rrggbb`、`bg:#rrggbb`（`default` 为终端自己的颜色），属性 `bold`、`italic`、`underline`、`dim`、`reverse`、`strikethrough`。没写的颜色沿用主题；写了任何属性就替换主题的属性，`plain` 表示无属性。不带 SPEC 时恢复。Lua 的 spec 也可以是表 `{ fg = "#ff0000", bold = true }`，`nil` 恢复。随时执行，下一帧生效。
 

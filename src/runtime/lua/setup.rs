@@ -38,39 +38,57 @@ pub(super) fn register<'scope, 'r: 'scope>(
         scope.create_function(|_, (name, spec): (String, Value)| {
             let spec = match spec {
                 Value::Nil => None,
-                Value::String(spec) => Some(spec.to_str()?.to_owned()),
-                // `{ fg = "#rrggbb", bold = true }` reads as the words.
-                Value::Table(table) => {
-                    let mut words = vec![];
-                    for side in ["fg", "bg"] {
-                        if let Some(color) = table.get::<Option<String>>(side)? {
-                            words.push(format!("{side}:{color}"));
-                        }
-                    }
-                    for attribute in [
-                        "bold",
-                        "italic",
-                        "underline",
-                        "dim",
-                        "reverse",
-                        "strikethrough",
-                        "plain",
-                    ] {
-                        if table.get::<Option<bool>>(attribute)? == Some(true) {
-                            words.push(attribute.to_owned());
-                        }
-                    }
-                    Some(words.join(" "))
-                }
-                _ => return Err(mlua::Error::runtime("a face is a table, a string or nil")),
+                spec => Some(face_spec(spec)?),
             };
-            let spec = spec
-                .map(|spec| crate::application::faces::FaceSpec::parse(&spec))
-                .transpose()
-                .map_err(mlua::Error::runtime)?;
             runtime
                 .borrow_mut()
                 .edit_event(crate::application::Event::SetFace { name, spec })
+        })?,
+    )?;
+    soda.set(
+        "theme",
+        scope.create_function(|_, (name, spec): (String, Table)| {
+            use crate::application::faces::{ThemeSpec, rgb};
+            let light = match spec.get::<Option<String>>("base")?.as_deref() {
+                None | Some("dark") => false,
+                Some("light") => true,
+                Some(base) => {
+                    return Err(mlua::Error::runtime(format!(
+                        "base is dark or light, not {base}"
+                    )));
+                }
+            };
+            let mut theme = ThemeSpec {
+                light,
+                ..Default::default()
+            };
+            if let Some(palette) = spec.get::<Option<Table>>("palette")? {
+                for pair in palette.pairs::<String, String>() {
+                    let (key, color) = pair?;
+                    let color = rgb(&color)
+                        .map_err(|error| mlua::Error::runtime(format!("palette {key}: {error}")))?;
+                    theme.palette.insert(key, color);
+                }
+            }
+            if let Some(faces) = spec.get::<Option<Table>>("faces")? {
+                for pair in faces.pairs::<String, Value>() {
+                    let (key, face) = pair?;
+                    let face = face_spec(face)
+                        .map_err(|error| mlua::Error::runtime(format!("face {key}: {error}")))?;
+                    theme.faces.insert(key, face);
+                }
+            }
+            runtime
+                .borrow_mut()
+                .edit_event(crate::application::Event::DefineTheme { name, spec: theme })
+        })?,
+    )?;
+    soda.set(
+        "themes",
+        scope.create_function(|lua, ()| {
+            let runtime = runtime.borrow();
+            let faces = runtime.app().faces();
+            lua.create_sequence_from(faces.theme_names().map(str::to_owned))
         })?,
     )?;
     // `map` binds for the user; `map_default` for a plugin, as a default
@@ -262,6 +280,7 @@ fn slots(args: &Table) -> mlua::Result<&'static [crate::interaction::Slot]> {
             "buffer" => SlotKind::Buffer,
             "option" => SlotKind::Option,
             "face" => SlotKind::Face,
+            "theme" => SlotKind::Theme,
             "language" => SlotKind::Language,
             "recent" => SlotKind::Recent,
             "symbol" => SlotKind::Symbol,
@@ -269,7 +288,7 @@ fn slots(args: &Table) -> mlua::Result<&'static [crate::interaction::Slot]> {
             "rest" => SlotKind::Rest,
             name => {
                 return Err(mlua::Error::runtime(format!(
-                    "unknown argument kind {name}: use file, path, buffer, option, face, language, recent, symbol, word, rest or choices"
+                    "unknown argument kind {name}: use file, path, buffer, option, face, theme, language, recent, symbol, word, rest or choices"
                 )));
             }
         })
@@ -325,4 +344,36 @@ fn slots(args: &Table) -> mlua::Result<&'static [crate::interaction::Slot]> {
         out.push(slot);
     }
     Ok(Box::leak(out.into_boxed_slice()))
+}
+
+/// A face as Lua gives it: the words of `face`, or a table such as
+/// `{ fg = "#rrggbb", bold = true }`, which reads as the words.
+fn face_spec(spec: Value) -> mlua::Result<crate::application::faces::FaceSpec> {
+    let words = match spec {
+        Value::String(spec) => spec.to_str()?.to_owned(),
+        Value::Table(table) => {
+            let mut words = vec![];
+            for side in ["fg", "bg"] {
+                if let Some(color) = table.get::<Option<String>>(side)? {
+                    words.push(format!("{side}:{color}"));
+                }
+            }
+            for attribute in [
+                "bold",
+                "italic",
+                "underline",
+                "dim",
+                "reverse",
+                "strikethrough",
+                "plain",
+            ] {
+                if table.get::<Option<bool>>(attribute)? == Some(true) {
+                    words.push(attribute.to_owned());
+                }
+            }
+            words.join(" ")
+        }
+        _ => return Err(mlua::Error::runtime("a face is a table or a string")),
+    };
+    crate::application::faces::FaceSpec::parse(&words).map_err(mlua::Error::runtime)
 }

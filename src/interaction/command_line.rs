@@ -428,6 +428,25 @@ impl CommandLine {
                         mark(row, typed.into_iter().collect(), None)
                     })
                     .collect(),
+                Target::Slot(SlotKind::Theme) => {
+                    let current = app.options().text(None, "theme");
+                    app.faces()
+                        .theme_names()
+                        .enumerate()
+                        .filter(|(_, name)| name.starts_with(&query.text))
+                        .map(|(i, name)| {
+                            let doc = crate::application::faces::BUILTIN_THEMES
+                                .iter()
+                                .find(|(builtin, _)| *builtin == name)
+                                .map_or("Defined by soda.theme", |(_, doc)| doc);
+                            let mark_current = if name == current { "● " } else { "" };
+                            let label = format!("{name:<12} {mark_current}{doc}");
+                            let typed = (!query.text.is_empty()).then_some(0..query.text.len());
+                            let row = row(i as u64, label, Some(name.to_owned()), false);
+                            mark(row, typed.into_iter().collect(), Some(13))
+                        })
+                        .collect()
+                }
                 Target::Slot(SlotKind::Buffer) => buffers(app, &query.text, &mut self.matcher),
                 Target::Slot(SlotKind::Recent) => {
                     recent(&self.recent, &self.root, &query.text, &mut self.matcher)

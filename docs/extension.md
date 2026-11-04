@@ -52,7 +52,7 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 | `completion`、`completion-min-prefix`、`completion-preview` | | | 见[补全](completion.md#键) |
 | `scroll-lines` | 1–100 | 3 | 鼠标滚轮每格滚动的行数 |
 | `idle-time` | 10–60000 | 500 | 最后一次按键之后多少毫秒运行 `idle` 钩子 |
-| `theme` | auto/dark/light | auto | 配色的深浅，auto 跟随终端背景 |
+| `theme` | auto/dark/light/定义的主题名 | auto | 主题，auto 跟随终端背景，见[终端界面](ui.md#主题) |
 | `mouse` | true/false | true | 关闭后终端恢复自己的文本选择 |
 | `trim-trailing-whitespace` | true/false | true | 保存时去掉上次加载或保存以来编辑过的行的行尾空白 |
 | `final-newline` | true/false | true | 保存时给有内容的文件补上末尾换行 |
@@ -116,6 +116,7 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 | `soda.keymap(name, { server = NAME, doc = ... })` | 声明服务器的键位表：在名为 `NAME` 的语言服务器服务的文档里生效，`"*"` 表示任一服务器；再次调用更新说明和范围 |
 | `soda.bindings(keymap)` | 当前生效的绑定：`{ {keys = "C-x o", command = "window-next"}, ... }` |
 | `soda.face(name, spec)` | 设置界面或语法分类的颜色，见[终端界面](ui.md#主题) |
+| `soda.theme(name, { base, palette, faces })` / `soda.themes()` | 定义主题、列出主题名；用 `soda.set("theme", name)` 或命令 `theme` 切换，见[终端界面](ui.md#主题) |
 | `soda.language(name, language)` | 同 `language-map` |
 | `soda.thing(key, kind)` | 让 `,`、`.` 之后的 `key` 选中一种 thing：`round`、`square`、`curly`、`angle`、`string`、`symbol`、`word`、`paragraph`、`line`、`buffer`；`kind` 为 nil 时去掉。初始是 meow 的 `r s c g e w p l b` |
 | `soda.buffers()` | 所有打开的文档的句柄 |
@@ -151,7 +152,7 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 | `soda.lsp.*` | 语言服务器接口，见[语言服务器](lsp.md) |
 
 `soda.define_command` 的 `options.args` 是参数位数组，每项是一种类型或一个表：
-- 类型：`file`（项目文件）、`path`、`buffer`、`option`、`face`、`language`、`recent`、`symbol`（当前文档的符号）、`word`、`rest`。写成字符串时参数位必填，名字是类型的大写。
+- 类型：`file`（项目文件）、`path`、`buffer`、`option`、`face`、`theme`、`language`、`recent`、`symbol`（当前文档的符号）、`word`、`rest`。写成字符串时参数位必填，名字是类型的大写。
 - 表：`{ name = "SIDE", choices = { { "left", "说明" }, "right" }, optional = true }` 或 `{ name = "FILE", kind = "file" }`。有 `choices` 时补全只能从中选。
 
 最后一个参数位取到行尾，前面的各取一个词；参数文本仍整体交给函数。

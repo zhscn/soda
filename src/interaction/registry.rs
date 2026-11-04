@@ -27,6 +27,8 @@ pub enum SlotKind {
     Option,
     /// The name of a face.
     Face,
+    /// The name of a theme, built in or defined.
+    Theme,
     /// A language id.
     Language,
     /// A key table: a context, a document keymap or a language's keymap.
@@ -51,6 +53,7 @@ impl SlotKind {
                 | Self::Choice(_)
                 | Self::Option
                 | Self::Face
+                | Self::Theme
                 | Self::Language
                 | Self::Keymap
                 | Self::Recent
@@ -1197,6 +1200,12 @@ pub static BUILTINS: &[Builtin] = &[
                 language,
             })
         }
+    ),
+    builtin!(
+        "theme",
+        [slot("NAME", SlotKind::Theme)],
+        "Switch to a theme: dark, light, auto, or one soda.theme defined",
+        |a| option(&format!("theme {}", a.trim()), false)
     ),
     builtin!(
         "face",

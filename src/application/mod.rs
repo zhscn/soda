@@ -109,6 +109,11 @@ pub enum Event {
         name: String,
         spec: Option<faces::FaceSpec>,
     },
+    /// Defines a theme the `theme` option may name, or replaces one.
+    DefineTheme {
+        name: String,
+        spec: faces::ThemeSpec,
+    },
     /// Moves the right or bottom edge of a window, as a mouse drags it.
     MoveWindowEdge {
         view: ViewId,
@@ -1347,6 +1352,12 @@ impl Application {
                 self.faces.set(&name, spec).map_err(Error::Setting)?;
                 update.options_changed = true;
             }
+            Event::DefineTheme { name, spec } => {
+                self.faces
+                    .define_theme(&name, spec)
+                    .map_err(Error::Setting)?;
+                update.options_changed = true;
+            }
             Event::MoveWindowEdge { view, axis, delta } => {
                 // A drag that cannot go further leaves the edge where it is.
                 self.windows.move_edge(view, axis, delta, self.area);
@@ -1413,6 +1424,11 @@ impl Application {
             Event::SetDisplay { kind, placement } => self.rules.set(kind, placement),
             Event::ResultsDisplay { kind } => self.rules.results(kind),
             Event::SetOption { scope, name, value } => {
+                if let ("theme", crate::options::Value::Text(theme)) = (name, value)
+                    && !self.faces.has_theme(theme)
+                {
+                    return Err(Error::Setting(format!("unknown theme {theme}")));
+                }
                 let documents: Vec<_> = match scope {
                     crate::options::Scope::Global => self.workspace.documents().collect(),
                     crate::options::Scope::Document(document) => {

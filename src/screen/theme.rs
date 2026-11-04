@@ -1,7 +1,9 @@
-//! The built-in color theme. Colors are 24-bit; a frontend that cannot show
-//! them converts them as it draws. The `theme` option picks the dark or
-//! light variant; `auto` takes the one the frontend reports for its
-//! background. Faces set with `face` go over it.
+//! The color theme. Colors are 24-bit; a frontend that cannot show them
+//! converts them as it draws. The `theme` option picks the dark or light
+//! variant, `auto` the one the frontend reports for its background, or a
+//! theme `soda.theme` defined: its palette colors replace the variant's,
+//! and its faces go over what they make. Faces set with `face` go over
+//! the theme.
 use crate::syntax::Category;
 use ratatui::style::{Color, Modifier, Style};
 
@@ -63,6 +65,7 @@ pub(crate) struct Theme {
     named: Vec<Style>,
 }
 
+#[derive(Clone)]
 struct Palette {
     bg: u32,
     bg_dark: u32,
@@ -124,17 +127,55 @@ const LIGHT: Palette = Palette {
     on_accent: 0xe1e2e7,
 };
 
+impl Palette {
+    /// A color by its name in `faces::PALETTE`.
+    fn slot(&mut self, name: &str) -> Option<&mut u32> {
+        Some(match name {
+            "bg" => &mut self.bg,
+            "bg-dark" => &mut self.bg_dark,
+            "bg-highlight" => &mut self.bg_highlight,
+            "selection" => &mut self.selection,
+            "fg" => &mut self.fg,
+            "fg-dark" => &mut self.fg_dark,
+            "comment" => &mut self.comment,
+            "gutter" => &mut self.gutter,
+            "gutter-current" => &mut self.gutter_current,
+            "blue" => &mut self.blue,
+            "green" => &mut self.green,
+            "magenta" => &mut self.magenta,
+            "orange" => &mut self.orange,
+            "yellow" => &mut self.yellow,
+            "red" => &mut self.red,
+            "cyan" => &mut self.cyan,
+            "teal" => &mut self.teal,
+            "on-accent" => &mut self.on_accent,
+            _ => return None,
+        })
+    }
+}
+
 impl Theme {
     /// The theme a `theme` option value names, with the faces over it;
-    /// `auto` is light when the frontend's background is.
+    /// `auto`, and a name no longer defined, are light when the
+    /// frontend's background is.
     pub fn build(choice: &str, faces: &crate::application::faces::Faces, light: bool) -> Self {
-        let light = match choice {
-            "light" => true,
-            "dark" => false,
+        let defined = faces.theme(choice);
+        let light = match (choice, defined) {
+            (_, Some(defined)) => defined.light,
+            ("light", _) => true,
+            ("dark", _) => false,
             _ => light,
         };
-        let mut theme = Self::new(if light { &LIGHT } else { &DARK });
-        for (name, spec) in faces.iter() {
+        let mut palette = if light { LIGHT } else { DARK };
+        for (name, rgb) in defined.iter().flat_map(|defined| &defined.palette) {
+            if let Some(slot) = palette.slot(name) {
+                *slot = *rgb;
+            }
+        }
+        let mut theme = Self::new(&palette);
+        let theme_faces = defined.iter().flat_map(|defined| &defined.faces);
+        let theme_faces = theme_faces.map(|(name, spec)| (name.as_str(), spec));
+        for (name, spec) in theme_faces.chain(faces.iter()) {
             if let Some(style) = theme.slot(name) {
                 *style = apply(*style, spec);
             }
@@ -395,4 +436,42 @@ fn apply(mut style: Style, spec: &crate::application::faces::FaceSpec) -> Style 
 }
 fn color(rgb: u32) -> Color {
     Color::Rgb((rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::application::faces::{FaceSpec, Faces, PALETTE, ThemeSpec};
+    #[test]
+    fn every_palette_name_has_a_color() {
+        let mut palette = DARK;
+        for name in PALETTE {
+            assert!(palette.slot(name).is_some(), "{name}");
+        }
+    }
+    #[test]
+    fn a_defined_theme_goes_over_its_variant_and_under_faces() {
+        let mut faces = Faces::default();
+        let mut spec = ThemeSpec {
+            light: true,
+            ..Default::default()
+        };
+        spec.palette.insert("bg".into(), 0x101010);
+        spec.faces
+            .insert("title".into(), FaceSpec::parse("fg:#202020").unwrap());
+        spec.faces
+            .insert("key".into(), FaceSpec::parse("fg:#303030").unwrap());
+        faces.define_theme("mine", spec).unwrap();
+        faces
+            .set("key", Some(FaceSpec::parse("fg:#404040").unwrap()))
+            .unwrap();
+        let theme = Theme::build("mine", &faces, false);
+        assert_eq!(theme.text.bg, Some(color(0x101010)));
+        assert_eq!(theme.text.fg, Some(color(LIGHT.fg)));
+        assert_eq!(theme.title.fg, Some(color(0x202020)));
+        assert_eq!(theme.key.fg, Some(color(0x404040)));
+        // A theme no longer named falls back as `auto` does.
+        let theme = Theme::build("gone", &faces, false);
+        assert_eq!(theme.text.bg, Some(color(DARK.bg)));
+    }
 }
