@@ -227,3 +227,68 @@ fn the_fallback_style_is_an_option_and_a_broken_file_is_reported() {
     });
     assert_eq!(width(&runtime), Some(4));
 }
+#[test]
+fn query_replace_asks_at_each_match_and_stops_at_the_end() {
+    let start = |text: &str| {
+        let mut r = Runtime::new(PathBuf::from("/")).unwrap();
+        r.dispatch(Event::NewDocument(Language::PlainText));
+        r.command(Command::SetMode(soda::interaction::EditMode::Insert));
+        r.input(UserInput::Paste(text.into()));
+        r.command(Command::Replace);
+        r.input(UserInput::Paste("a".into()));
+        r.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
+        r.input(UserInput::Paste("aa".into()));
+        r.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
+        r
+    };
+    let keys = |r: &mut Runtime, keys: &str| {
+        for key in KeyStroke::parse_sequence(keys).unwrap() {
+            r.input(UserInput::Key(key));
+        }
+    };
+    let text = |r: &Runtime| {
+        let view = r.app().view(r.app().active_view().unwrap()).unwrap();
+        r.app()
+            .workspace()
+            .editor(view.document_id)
+            .unwrap()
+            .model()
+            .document()
+            .snapshot()
+            .text()
+            .to_owned()
+    };
+    // y replaces and moves past the text it put in; DEL skips; . replaces
+    // and stops.
+    let mut r = start("a1 a2 a3 a4");
+    keys(&mut r, "y DEL .");
+    assert_eq!(text(&r), "aa1 a2 aa3 a4");
+    assert!(r.layer().is_none());
+    assert_eq!(r.message(), "Replaced 2 occurrences");
+    // Each replacement is its own step to undo.
+    r.command(Command::Named("undo".into()));
+    assert_eq!(text(&r), "aa1 a2 a3 a4");
+
+    // ! replaces the rest, from the match in hand.
+    let mut r = start("a1 a2 a3");
+    keys(&mut r, "n !");
+    assert_eq!(text(&r), "a1 aa2 aa3");
+    assert_eq!(r.message(), "Replaced 2 occurrences");
+
+    // Past the last match the review ends, without going round.
+    let mut r = start("a1 a2");
+    keys(&mut r, "SPC y");
+    assert_eq!(text(&r), "aa1 aa2");
+    assert!(r.layer().is_none());
+
+    // Leaving after a replacement keeps it; q and RET leave as well.
+    let mut r = start("a1 a2");
+    keys(&mut r, "y ESC");
+    assert_eq!(text(&r), "aa1 a2");
+    assert!(r.layer().is_none());
+    assert_eq!(r.message(), "Replaced 1 occurrence");
+    let mut r = start("a1 a2");
+    keys(&mut r, "RET");
+    assert_eq!(text(&r), "a1 a2");
+    assert!(r.layer().is_none());
+}

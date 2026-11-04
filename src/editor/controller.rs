@@ -56,6 +56,9 @@ pub enum Command {
     },
     ReplaceCurrent(String),
     ReplaceAll(String),
+    /// Replaces the matches that start at the selection or after it, as
+    /// query-replace's `!` does the rest.
+    ReplaceRest(String),
     ReloadText(String),
 }
 impl Command {
@@ -78,6 +81,7 @@ impl Command {
                 | Self::IndentSelection { .. }
                 | Self::ReplaceCurrent(_)
                 | Self::ReplaceAll(_)
+                | Self::ReplaceRest(_)
         )
     }
 }
@@ -460,7 +464,12 @@ impl Editor {
             }
             Command::ReplaceAll(text) => {
                 let query = self.model.session(id).unwrap().search.query();
-                edit(replace_all(state, query, &text), EditOrigin::Replace)
+                edit(replace_all(state, query, &text, 0), EditOrigin::Replace)
+            }
+            Command::ReplaceRest(text) => {
+                let query = self.model.session(id).unwrap().search.query();
+                let from = state.selection().range().start;
+                edit(replace_all(state, query, &text, from), EditOrigin::Replace)
             }
             Command::ReloadText(text) => edit(reload(state, &text), EditOrigin::Reload),
             Command::Apply(tx) => edit(tx, EditOrigin::Transaction),
@@ -529,11 +538,18 @@ fn replace_current(
         Ok(Transaction::new(state.snapshot().version(), vec![]))
     }
 }
-fn replace_all(state: &EditorState, query: Option<&SearchQuery>, text: &str) -> Transaction {
+/// Replaces the matches that start at `from` or after it.
+fn replace_all(
+    state: &EditorState,
+    query: Option<&SearchQuery>,
+    text: &str,
+    from: usize,
+) -> Transaction {
     let changes = query
         .map(|query| {
             query
                 .cursor(state.snapshot())
+                .filter(|range| range.start >= from)
                 .map(|range| {
                     let replacement = query.expand(state.snapshot(), &range, text);
                     Change::new(range, replacement)

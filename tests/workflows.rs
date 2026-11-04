@@ -280,7 +280,8 @@ fn replace_current_can_choose_match_and_undo_as_one_edit() {
     replace_dialog(&mut editor, "foo", "🦀");
     assert_eq!(editor.text(), "foo 中 foo");
     editor.input(UserInput::Key(KeyStroke::plain(Key::F(3))));
-    editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
+    // `.` replaces the match in hand and stops, as in query-replace.
+    editor.input(UserInput::Key(KeyStroke::plain(Key::Char('.'))));
     assert_eq!(editor.text(), "foo 中 🦀");
     assert!(editor.layers.active().is_none());
     editor.command(Command::Edit(Edit::Undo));
@@ -342,7 +343,7 @@ fn replacement_dialog_refreshes_match_after_other_view_edits() {
     });
     editor.input(UserInput::Paste("bar".into()));
     editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
-    editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
+    editor.input(UserInput::Key(KeyStroke::plain(Key::Char('.'))));
     assert_eq!(editor.text(), "prefixbar foo");
 }
 
