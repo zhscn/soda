@@ -162,6 +162,12 @@ fn kill_change_delete_and_save_act_on_the_selection() {
         ("|ab cd\n", "r", "|\n"),
         // Delete and change leave the clipboard alone.
         ("|ab cd\n", "wylwd C-e p", "ab ab|\n"),
+        // Backspace deletes the selection or the character before, as
+        // `delete-backward-char` under meow's Normal.
+        ("ab|cd\n", "DEL", "a|cd\n"),
+        ("|ab cd\n", "w DEL", "| cd\n"),
+        ("|ab\n", "DEL", "|ab\n"),
+        ("|ab cd\n", "wyl DEL C-e p", "abcdab|\n"),
     ]);
 }
 #[test]

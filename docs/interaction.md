@@ -69,9 +69,9 @@
 
 ### Normal 键
 
-Normal 的键分两层。打不出字符的键是内置默认键（`interaction::keymap` 的 `NORMAL` 表），与 Insert 中的 Emacs 键对应：方向键、`C-b C-n C-p C-f` 移动，Shift+方向键扩展，`Home`/`End`、`C-a`/`C-e`、`M-<`/`M->`、`M-b`/`M-f`，PageUp/PageDown；`C-Space` 开始字符选区；`C-w`、`M-w`、`C-y`、`M-y`、`C-d`、`C-k`、`M-d`、`M-Backspace`；`C-s`/`C-r` 搜索；`Esc`/`C-g`/`C-[` 清除选区和历史；Enter `jump`，`C-o`/`C-i`（Tab）跳转历史，`F1` 帮助。
+Normal 的键分两层。打不出字符的键是内置默认键（`interaction::keymap` 的 `NORMAL` 表），与 Insert 中的 Emacs 键对应：方向键、`C-b C-n C-p C-f` 移动，Shift+方向键扩展，`Home`/`End`、`C-a`/`C-e`、`M-<`/`M->`、`M-b`/`M-f`，PageUp/PageDown；`C-Space` 开始字符选区；`C-w`、`M-w`、`C-y`、`M-y`、`C-d`、Backspace、`C-k`、`M-d`、`M-Backspace`；`C-s`/`C-r` 搜索；`Esc`/`C-g`/`C-[` 清除选区和历史；Enter `jump`，`C-o`/`C-i`（Tab）跳转历史，`F1` 帮助。
 
-能打出字符的键是布局，由 meow 插件给出。默认布局 `qwerty` 是 meow README 里的 QWERTY 布局，去掉 soda 没有的命令（`meow-beginning-of-thing`、`meow-end-of-thing`、`meow-backward-delete`、`meow-quit`、`meow-replace`、`meow-undo-in-selection`、`meow-sync-grab`）：
+能打出字符的键是布局，由 meow 插件给出。默认布局 `qwerty` 是 meow README 里的 QWERTY 布局，去掉 soda 没有的命令（`meow-beginning-of-thing`、`meow-end-of-thing`、`meow-quit`、`meow-replace`、`meow-undo-in-selection`、`meow-sync-grab`）：
 
 | 类别 | 键 |
 | --- | --- |
@@ -80,7 +80,7 @@ Normal 的键分两层。打不出字符的键是内置默认键（`interaction:
 | 选区历史 | `z` 退一步 |
 | 计数 | `0`–`9` 扩展（无选区时为计数），`-` 反向下一条命令 |
 | 进入 Insert | `i`/`a` 选区开头/结尾，`I`/`A` 在上方/下方开新行 |
-| 操作 | `s` 剪切，`c` 修改，`d` 删除，`y` 复制，`p` 粘贴 |
+| 操作 | `s` 剪切，`c` 修改，`d` 删除，`D` 向前删除，`y` 复制，`p` 粘贴 |
 | 搜索 | `n`、`v` |
 | 其他 | `u` 撤销，`'` 重复上一条命令，`Q`/`X` 跳到行，`G` grab，`R` 与 grab 交换，Space keypad leader |
 
@@ -95,6 +95,7 @@ thing 键（`,`、`.` 之后）开始是 meow 的 `meow-char-thing-table`：`r s
 | `r` | `kill` | 剪切到行尾 | 剪切；正向的行选区带上换行；join 选区合并两行 |
 | `s` | `change` | 删一个字符，进入 Insert | 删除，进入 Insert，不写剪贴板 |
 | `d` | `delete` | 删一个字符 | 删除，不写剪贴板；join 选区合并两行 |
+| `DEL` | `backward-delete` | 删前一个字符 | 删除，不写剪贴板（同 meow Normal 下的 `delete-backward-char`） |
 | `y` | `save` | 报告 No selection | 复制，然后取消选区，光标留在原处（同 Emacs 的 `kill-ring-save`） |
 | `p` | `put` | 粘贴 | 收起选区后粘贴，不替换 |
 

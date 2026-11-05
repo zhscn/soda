@@ -1021,6 +1021,11 @@ pub static BUILTINS: &[Builtin] = &[
         "Delete the selection or a character, leaving the clipboard alone",
         modal(Action::Delete)
     ),
+    builtin!(
+        "backward-delete",
+        "Delete the selection or the character before the caret",
+        modal(Action::BackwardDelete)
+    ),
     builtin!("save", "Copy the selection", modal(Action::Save)),
     builtin!(
         "kill-region",

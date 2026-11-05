@@ -311,7 +311,9 @@ impl Layers {
             Action::KillRegion => return self.modal_execute(Action::Kill, app, time),
             Action::KillRingSave => return self.modal_execute(Action::Save, app, time),
             // What meow's Beacon keymap makes `meow-beacon-noop`.
-            Action::Delete | Action::Save | Action::SwapGrab if self.mode == EditMode::Beacon => {
+            Action::Delete | Action::BackwardDelete | Action::Save | Action::SwapGrab
+                if self.mode == EditMode::Beacon =>
+            {
                 return response;
             }
             Action::Kill if self.beacon_active() && !at.selection.range().is_empty() => {
@@ -339,6 +341,17 @@ impl Layers {
                 } else if at.selection.range().is_empty() {
                     response.events.push(at.event(Edit::Delete {
                         direction: Direction::Forward,
+                        smart: false,
+                    }));
+                } else {
+                    response.events.push(at.erase(at.selection.range()));
+                }
+                self.modal.tag = None;
+            }
+            Action::BackwardDelete => {
+                if at.selection.range().is_empty() {
+                    response.events.push(at.event(Edit::Delete {
+                        direction: Direction::Backward,
                         smart: false,
                     }));
                 } else {

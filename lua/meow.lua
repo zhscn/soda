@@ -10,8 +10,8 @@
 --   layout  "qwerty" (default), a table of key = command for Normal, or
 --           false. meow has no keys of its own either: its README gives a
 --           layout to copy, and "qwerty" is that one, less the commands
---           soda lacks (beginning-of-thing, end-of-thing, backward-delete,
---           quit, replace, undo-in-selection, sync-grab).
+--           soda lacks (beginning-of-thing, end-of-thing, quit, replace,
+--           undo-in-selection, sync-grab).
 --   things  extra keys for `,` and `.`, as { a = "angle" }; see soda.thing.
 --
 -- The modal machinery is the editor's: setup sets the `modal` option, which
@@ -43,6 +43,7 @@ M.layouts = {
     B = "back-symbol",
     c = "change",
     d = "delete",
+    D = "backward-delete",
     e = "next-word",
     E = "next-symbol",
     f = "find",

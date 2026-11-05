@@ -468,6 +468,8 @@ const NORMAL: &[(&str, &str)] = &[
     ("C-y", "put"),
     ("M-y", "yank-pop"),
     ("C-d", "delete"),
+    // As DEL falls through meow's Normal to `delete-backward-char`.
+    ("DEL", "backward-delete"),
     ("C-k", "kill-line-end"),
     ("M-d", "kill-word-forward"),
     ("M-DEL", "kill-word-backward"),

@@ -112,6 +112,9 @@ pub enum Action {
     KillRingSave,
     Change,
     Delete,
+    /// meow's `backward-delete`, Emacs's `delete-backward-char`: the
+    /// selection, or the character before the caret.
+    BackwardDelete,
     Save,
     Yank,
     Join,
