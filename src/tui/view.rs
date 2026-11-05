@@ -358,7 +358,15 @@ pub(super) fn render(
             }
         }
         Some(_) => cursor = prompt,
-        None => key_hints(buf, areas, runtime, theme),
+        // The terminal's cursor shows over anything, so where the box
+        // covers the caret it goes, as the GUI draws its caret beneath.
+        None => {
+            if let Some(hints) = key_hints(buf, areas, runtime, theme)
+                && cursor.is_some_and(|at| hints.contains(at))
+            {
+                cursor = None;
+            }
+        }
     }
     if let (Some(position), None, Some(popup)) =
         (cursor, runtime.layer(), runtime.completion_popup())
@@ -1035,11 +1043,11 @@ fn command_line(
 }
 
 /// Which keys continue a pending multi-key binding, in columns at the lower
-/// right of the editing area.
-fn key_hints(buf: &mut Buffer, areas: &Areas, runtime: &Runtime, theme: &Theme) {
+/// right of the editing area; returns the box.
+fn key_hints(buf: &mut Buffer, areas: &Areas, runtime: &Runtime, theme: &Theme) -> Option<Rect> {
     let mut entries = runtime.key_continuations();
     if entries.is_empty() {
-        return;
+        return None;
     }
     entries.sort();
     let key_width = entries
@@ -1062,12 +1070,12 @@ fn key_hints(buf: &mut Buffer, areas: &Areas, runtime: &Runtime, theme: &Theme) 
     let room = usize::from(areas.editor.width).saturating_sub(2) / columns;
     let column_width = column_width.min(room.saturating_sub(2));
     if column_width <= key_width + 2 {
-        return;
+        return None;
     }
     let width = (columns * (column_width + 2) + 2) as u16;
     let height = rows as u16 + 2;
     if width > areas.editor.width || height > areas.editor.height {
-        return;
+        return None;
     }
     let area = Rect::new(
         areas.editor.right() - width,
@@ -1091,6 +1099,7 @@ fn key_hints(buf: &mut Buffer, areas: &Areas, runtime: &Runtime, theme: &Theme) 
         let doc = screen::plain(doc, 0, column_width - key_width - 2);
         buf.set_string(x + key_width as u16 + 2, y, doc, theme.panel);
     }
+    Some(area)
 }
 
 #[cfg(test)]
@@ -1306,6 +1315,29 @@ mod tests {
         let lower = &areas.windows[1];
         assert_eq!(lower.rule.map(|rule| rule.y), Some(lower.area.y));
         assert_eq!(lower.text.y, lower.area.y + 1);
+    }
+    #[test]
+    fn the_cursor_hides_under_the_key_hints() {
+        let mut r = Runtime::new(std::path::PathBuf::from("/")).unwrap();
+        r.command(Command::New);
+        let text = format!("{}{}", "a\n".repeat(11), "b".repeat(48));
+        r.command(Command::Edit(crate::editor::Command::InsertText(text)));
+        let cursor = |r: &mut Runtime| {
+            let mut presenter = Presenter::new();
+            presenter.measure(r, 60, 14);
+            presenter.prepare(r, 60, 14).unwrap();
+            let mut buffer = Buffer::empty(Rect::new(0, 0, 60, 14));
+            presenter.render(r, &mut buffer).unwrap()
+        };
+        // The caret is at the bottom right, where the hints go.
+        assert!(cursor(&mut r).is_some());
+        keys(&mut r, "C-x");
+        assert!(!r.key_continuations().is_empty());
+        assert_eq!(cursor(&mut r), None);
+        // Away from the box it stays.
+        keys(&mut r, "C-g M-<");
+        keys(&mut r, "C-x");
+        assert!(cursor(&mut r).is_some());
     }
     #[test]
     fn windows_other_than_the_focused_one_are_on_a_darker_ground() {
