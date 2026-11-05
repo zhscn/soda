@@ -77,7 +77,13 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 
 命令行在执行时展开，不在定义时展开：
 - `%opt{NAME}`：选项在当前文档的值。
-- `%val{NAME}`：`file`、`name`、`kind`、`line`、`column`、`selection`、`word`、`root`、`mode`、`column-limit`（clang-format 的 `ColumnLimit`，没有时为 0），钩子中还有 `hook`（事件参数）。
+- `%val{NAME}`：`file`、`name`、`kind`、`line`、`column`、`selection`、`word`、`root`、`mode`、`column-limit`（clang-format 的 `ColumnLimit`，没有时为 0）、`frontend`（`gui` 或 `tui`，同 Emacs 的 `display-graphic-p`；不经前端运行时为 `none`，读 `init.lua` 时已经确定），钩子中还有 `hook`（事件参数）。
+
+  ```lua
+  if soda.val("frontend") == "gui" then
+    soda.set("font", "JetBrains Mono")
+  end
+  ```
 - `%arg{1}`…`%arg{9}`、`%arg{@}`：用户命令的参数。
 
 `define-command` 的命令体按 `;` 分成语句（`\;` 是字面的分号），每条语句轮到它时才展开，所以 `goto 10; echo %val{line}` 读到跳转后的行号。不读状态的语句在执行前检查，读状态的语句展开后检查，失败时停止后续语句。展开结果按原文替换，不再拆分，含空格的值只适合放在最后一个参数位。`map`、`define-command`、`hook` 的参数是延后执行的命令行，其中的展开保留到执行时。

@@ -1609,3 +1609,19 @@ fn arguments_take_every_kind_and_words_a_function_lists() {
         .unwrap_err();
     assert!(error.contains("current-buffer"), "{error}");
 }
+#[test]
+fn lua_knows_the_frontend() {
+    let mut r = runtime();
+    lua(
+        &mut r,
+        r#"assert(soda.val("frontend") == "none", soda.val("frontend"))"#,
+    );
+    r.set_frontend(soda::application::Frontend::Graphical);
+    lua(
+        &mut r,
+        r#"assert(soda.val("frontend") == "gui", soda.val("frontend"))"#,
+    );
+    r.set_frontend(soda::application::Frontend::Terminal);
+    r.command(Command::Named("echo %val{frontend}".into()));
+    assert_eq!(r.message(), "tui");
+}

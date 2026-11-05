@@ -243,6 +243,10 @@ impl Runtime {
     pub fn layer(&self) -> Option<&Layer> {
         self.layers.active()
     }
+    /// Names the frontend, for `%val{frontend}`.
+    pub fn set_frontend(&mut self, frontend: crate::application::Frontend) {
+        self.app.set_frontend(frontend);
+    }
     pub fn report(&mut self, message: String) {
         self.message = message;
         self.dirty = true;

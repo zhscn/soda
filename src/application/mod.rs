@@ -377,6 +377,24 @@ pub struct Update {
     /// What to tell the user that is no error, as what `Resume` left out.
     pub report: Option<String>,
 }
+/// The frontend the editor is drawn by, which `%val{frontend}` names.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum Frontend {
+    /// None, as in tests and scripts.
+    #[default]
+    None,
+    Terminal,
+    Graphical,
+}
+impl Frontend {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Terminal => "tui",
+            Self::Graphical => "gui",
+        }
+    }
+}
 /// How much larger each step of `text-scale-increase` makes the text.
 pub const TEXT_SCALE_STEP: f32 = 1.2;
 const TEXT_SCALE_STEPS: i32 = 8;
@@ -514,6 +532,7 @@ pub struct Application {
     /// Steps the text is larger, or smaller when negative, than
     /// `font-size` makes it.
     text_scale: i32,
+    frontend: Frontend,
     tokens: tokens::Tokens,
     inlays: inlays::Inlays,
     /// Files whose presence makes a directory the root of a language's
@@ -637,6 +656,13 @@ impl Application {
     /// Words shown at the end of a line of a document, until the next key.
     pub fn set_indicator(&mut self, document: DocumentId, line: usize, text: String) {
         self.indicator = Some((document, line, text));
+    }
+    /// The frontend the editor is drawn by.
+    pub fn frontend(&self) -> Frontend {
+        self.frontend
+    }
+    pub fn set_frontend(&mut self, frontend: Frontend) {
+        self.frontend = frontend;
     }
     /// Steps the text is larger than `font-size` makes it, each of
     /// `TEXT_SCALE_STEP` times, as Emacs's `text-scale-mode-step`.

@@ -24,6 +24,10 @@ pub const VALUES: &[(&str, &str)] = &[
     ),
     ("mode", "normal, insert or beacon"),
     (
+        "frontend",
+        "gui or tui, the frontend drawing the editor; none without one",
+    ),
+    (
         "hook",
         "In a hook, the event's parameter, such as the saved path",
     ),
@@ -80,6 +84,7 @@ fn value(name: &str, state: &State) -> Result<String, String> {
     match name {
         "root" => return Ok(state.root.to_string_lossy().into_owned()),
         "mode" => return Ok(state.mode.name().into()),
+        "frontend" => return Ok(app.frontend().name().into()),
         "hook" => return Ok(state.hook.unwrap_or_default().into()),
         _ if !VALUES.iter().any(|(value, _)| *value == name) => {
             return Err(format!("%val{{{name}}}: unknown value"));

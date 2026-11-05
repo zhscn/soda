@@ -93,6 +93,7 @@ pub fn start(
     config: bool,
     session: Option<PathBuf>,
     clipboard: Box<dyn SystemClipboard>,
+    frontend: crate::application::Frontend,
 ) -> io::Result<Runtime> {
     // A directory argument is a project; otherwise the working directory
     // only places documents that have nothing else to go by.
@@ -103,6 +104,8 @@ pub fn start(
     };
     let path = path.filter(|path| !path.is_dir());
     runtime.set_system_clipboard(clipboard);
+    // Known before any Lua runs, so that init.lua can ask.
+    runtime.set_frontend(frontend);
     // Built-in modules come first so that configuration can replace their
     // commands and keys; modules in the lua directory beside the command
     // file replace them outright.

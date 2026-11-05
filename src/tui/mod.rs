@@ -303,6 +303,7 @@ pub fn run(args: host::Args) -> io::Result<()> {
         args.config,
         args.session,
         Box::new(crate::clipboard::Clipboard::terminal()),
+        crate::application::Frontend::Terminal,
     )?;
     let mut presenter = Presenter::new();
     let truecolor = color::truecolor();

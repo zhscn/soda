@@ -253,6 +253,7 @@ pub fn run(args: host::Args) -> io::Result<()> {
         args.config,
         args.session,
         Box::new(crate::clipboard::Clipboard::local()),
+        crate::application::Frontend::Graphical,
     )?;
     trace("configuration and documents loaded");
     // Declared after the event loop, so dropped before it: the runtime's
@@ -288,6 +289,7 @@ pub fn snapshot(
         config,
         None,
         Box::new(crate::clipboard::Clipboard::Internal),
+        crate::application::Frontend::Graphical,
     )?;
     let renderer = Renderer::offscreen(size.0, size.1).map_err(io::Error::other)?;
     let mut gui = Gui::new(renderer, scale);
