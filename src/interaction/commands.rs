@@ -130,27 +130,19 @@ pub enum Command {
     /// Hands the terminal back to the shell until the editor is resumed.
     Suspend,
     Restart,
-    /// Asks which of the items; `Choose` answers with one of them, and the
-    /// Lua function under `id` gets its number.
-    Offer {
-        id: u64,
-        title: String,
-        items: Vec<String>,
-        /// The history the chosen item is recalled from and added to.
-        history: Option<String>,
-    },
-    /// Answers `Offer` with an item, from one.
-    Choose(usize),
-    /// Asks for a line of text; `Answer` gives it to the Lua function
-    /// under `id`.
+    /// Asks in the command line, as `completing-read` and `read-string`
+    /// do; the Lua function under `id` gets the answer.
     Question {
         id: u64,
         title: String,
-        initial: String,
-        /// The history the answer is recalled from and added to.
+        asked: super::slots::Asked,
+        /// The history the answer is recalled from and added to; a kind
+        /// has its own otherwise.
         history: Option<String>,
     },
-    /// Answers `Question`.
+    /// Answers `Question` with an item, from one.
+    Choose(usize),
+    /// Answers `Question` with text.
     Answer(String),
     /// Runs Lua code.
     Lua(String),
@@ -614,6 +606,7 @@ impl Layers {
             Command::Ex(_) | Command::Ask { .. } | Command::ProjectLine(_) => {
                 // Only the question Lua just put names a history.
                 let asked_history = self.asked_history.take();
+                let asked_kind = self.asked_kind.take();
                 let (text, note, project) = match command {
                     Command::Ask { line, note } => (line, Some(note), None),
                     Command::Ex(text) => (text, None, None),
@@ -624,9 +617,16 @@ impl Layers {
                 if note.is_none() {
                     self.forget_reply();
                 }
+                // A question of a kind answers as an argument of it would.
+                let mut catalog = self.registry.commands();
+                if let Some(kind) = asked_kind
+                    && let Some(answer) = catalog.iter_mut().find(|info| info.name == "answer")
+                {
+                    answer.slots = super::slots::answer_slots(kind);
+                }
                 let mut line = CommandLine::new(
                     &text,
-                    self.registry.commands(),
+                    catalog,
                     project.clone().unwrap_or_else(|| file_root.to_owned()),
                     app.directory(),
                     app,
@@ -634,7 +634,7 @@ impl Layers {
                 .with_recent(self.recent_files.clone())
                 .with_projects(self.projects.clone())
                 .with_keymaps(self.keymap.names())
-                .with_items(self.offer.as_ref().map_or(vec![], |(_, i)| i.clone()))
+                .with_items(self.question.as_ref().map_or(vec![], |(_, i)| i.clone()))
                 .with_histories(self.history.clone())
                 .with_history(asked_history);
                 if let Some(note) = note {
@@ -650,6 +650,7 @@ impl Layers {
                     let first = line.refresh(app, true);
                     response.effects.extend(first.effects);
                     response.path_requests.extend(first.path_requests);
+                    response.lua.extend(first.lua);
                 }
             }
             Command::KillBuffer(name) => {
@@ -1259,38 +1260,42 @@ impl Layers {
             Command::LuaCall { id, argument } => {
                 response.lua.push(super::LuaRequest::Call { id, argument })
             }
-            Command::Offer {
-                id,
-                title,
-                items,
-                history,
-            } => {
-                self.offer = Some((id, items));
-                self.asked_history = history;
-                let line = "choose ".to_owned();
-                let ask = Command::Ask { line, note: title };
-                return self.execute(ask, app, time, file_root);
-            }
             Command::Question {
                 id,
                 title,
-                initial,
+                asked,
                 history,
             } => {
-                self.question = Some(id);
-                self.asked_history = history;
-                let line = format!("answer {initial}");
+                use super::slots::Asked;
+                let (line, items, kind) = match asked {
+                    Asked::Text(initial) => (format!("answer {initial}"), vec![], None),
+                    Asked::Items(items) => ("choose ".to_owned(), items, None),
+                    Asked::Kind(kind) => ("answer ".to_owned(), vec![], Some(kind)),
+                };
+                self.question = Some((id, items));
+                self.asked_history = history.or_else(|| {
+                    let kind = kind?;
+                    super::slots::behavior(kind).history.map(str::to_owned)
+                });
+                self.asked_kind = kind;
                 let ask = Command::Ask { line, note: title };
                 return self.execute(ask, app, time, file_root);
             }
-            Command::Answer(argument) => match self.question.take() {
-                Some(id) => response.lua.push(super::LuaRequest::Call { id, argument }),
+            Command::Answer(text) => match self.question.take() {
+                Some((id, _)) => response.lua.push(super::LuaRequest::Answer {
+                    id,
+                    text,
+                    index: None,
+                }),
                 None => response.message = Message::Set("Nothing to answer".into()),
             },
-            Command::Choose(index) => match self.offer.take() {
+            Command::Choose(index) => match self.question.take() {
                 Some((id, items)) if (1..=items.len()).contains(&index) => {
-                    let argument = index.to_string();
-                    response.lua.push(super::LuaRequest::Call { id, argument });
+                    let text = items[index - 1].text.clone();
+                    let index = Some(index);
+                    response
+                        .lua
+                        .push(super::LuaRequest::Answer { id, text, index });
                 }
                 _ => response.message = Message::Set("Nothing to choose".into()),
             },

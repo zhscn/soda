@@ -31,7 +31,10 @@ use crate::{application::ViewId, runtime::Runtime};
 /// being chosen, else the `theme` option's.
 pub(crate) fn theme_name(runtime: &Runtime) -> &str {
     match runtime.layer() {
-        Some(crate::interaction::Layer::CommandLine(line)) => line.previewed_theme(),
+        Some(crate::interaction::Layer::CommandLine(line)) => line
+            .preview()
+            .filter(|(preview, _)| *preview == crate::interaction::slots::Preview::Theme)
+            .map(|(_, name)| name),
         _ => None,
     }
     .unwrap_or_else(|| runtime.app().options().text(None, "theme"))

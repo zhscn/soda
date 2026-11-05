@@ -11,6 +11,7 @@ use super::{
     },
     registry::{self, CommandInfo, Slot, SlotKind},
     session::{Transition, edit_field, field_presentation},
+    slots::{PathForm, Preview, behavior},
 };
 use crate::{
     application::{Application, ViewId},
@@ -96,7 +97,9 @@ pub struct CommandLine {
     /// Whether project files complete to absolute paths.
     absolute_files: bool,
     /// The items of an `Item` slot.
-    items: Vec<String>,
+    items: Vec<super::slots::Item>,
+    /// The list a Lua function gives the argument, once asked.
+    computed: Option<ComputedList>,
     /// The key tables by name, for a KEYMAP slot.
     keymaps: Vec<(String, String)>,
     /// The symbols of the document, nearest the caret first, once asked.
@@ -174,7 +177,7 @@ fn skip_space(text: &str, from: usize) -> usize {
 }
 /// Splits a path slot into the directory part, kept verbatim in
 /// replacements, and the file name prefix being completed.
-fn split_path(text: &str) -> (&str, &str) {
+pub(super) fn split_path(text: &str) -> (&str, &str) {
     if text == "~" {
         return ("~/", "");
     }
@@ -265,6 +268,7 @@ impl CommandLine {
             projects: vec![],
             absolute_files: false,
             items: vec![],
+            computed: None,
             keymaps: vec![],
             symbols: None,
             stale: false,
@@ -300,13 +304,13 @@ impl CommandLine {
         self.absolute_files = true;
         self
     }
-    /// Items for an `Item` slot.
     /// The key tables `map` and `unmap` may name, with what each is for.
     pub fn with_keymaps(mut self, keymaps: Vec<(String, String)>) -> Self {
         self.keymaps = keymaps;
         self
     }
-    pub fn with_items(mut self, items: Vec<String>) -> Self {
+    /// Items for an `Item` slot.
+    pub fn with_items(mut self, items: Vec<super::slots::Item>) -> Self {
         self.items = items;
         self
     }
@@ -426,88 +430,7 @@ impl CommandLine {
         let mut response = Response::default();
         let rows = match &query {
             None => vec![],
-            Some(query) => match query.target {
-                Target::Name => self.names(&query.text),
-                Target::Slot(kind @ SlotKind::Choice(choices)) => {
-                    let words = choices.iter().map(|choice| {
-                        let key = choice.key.map_or_else(String::new, |k| format!("[{k}] "));
-                        let label = format!("{:<12} {key}{}", choice.word, choice.doc);
-                        let detail = label.len() - key.len() - choice.doc.len();
-                        Word::new(choice.word, label, Some(detail))
-                    });
-                    self.words(kind, &query.text, words)
-                }
-                Target::Slot(kind @ SlotKind::Option) => {
-                    let words = crate::options::all().into_iter().map(|option| {
-                        let label = format!("{:<14} {}", option.name, option.doc);
-                        Word::new(option.name, label, Some(15))
-                    });
-                    self.words(kind, &query.text, words)
-                }
-                Target::Slot(kind @ SlotKind::Language) => {
-                    let words = crate::language::catalog()
-                        .ids()
-                        .map(|id| Word::new(id, id.to_owned(), None));
-                    self.words(kind, &query.text, words)
-                }
-                Target::Slot(kind @ SlotKind::Keymap) => {
-                    let languages = crate::language::catalog()
-                        .ids()
-                        .map(|id| (id.to_owned(), format!("Keys of {id} documents")));
-                    let mut names = self.keymaps.clone();
-                    for (id, doc) in languages {
-                        if !names.iter().any(|(name, _)| *name == id) {
-                            names.push((id, doc));
-                        }
-                    }
-                    let words = names.into_iter().map(|(name, doc)| {
-                        let label = format!("{name:<12} {doc}");
-                        Word::new(&name, label, Some(13))
-                    });
-                    self.words(kind, &query.text, words)
-                }
-                Target::Slot(kind @ SlotKind::Face) => {
-                    let words = crate::application::faces::names()
-                        .map(|name| Word::new(&name, name.clone(), None));
-                    self.words(kind, &query.text, words)
-                }
-                Target::Slot(kind @ SlotKind::Theme) => {
-                    use crate::application::themes;
-                    let current = app.options().text(None, "theme");
-                    let width = app.faces().theme_names().map(str::len).max().unwrap_or(0);
-                    let words = app.faces().theme_names().map(|name| {
-                        let doc = match themes::builtin(name) {
-                            Some(theme) => {
-                                let shade = if theme.light { "light" } else { "dark" };
-                                format!("{}, {shade}", theme.doc)
-                            }
-                            None => "defined by soda.theme".to_owned(),
-                        };
-                        let mark_current = if name == current { "● " } else { "" };
-                        let label = format!("{name:<width$} {mark_current}{doc}");
-                        Word::new(name, label, Some(width + 1))
-                    });
-                    let words: Vec<_> = words.collect();
-                    self.words(kind, &query.text, words)
-                }
-                Target::Slot(SlotKind::Buffer | SlotKind::CurrentBuffer) => {
-                    buffers(app, &query.text, &mut self.matcher)
-                }
-                Target::Slot(SlotKind::Recent) => {
-                    recent(&self.recent, &self.root, &query.text, &mut self.matcher)
-                }
-                Target::Slot(SlotKind::Project) => projects(
-                    &self.projects,
-                    self.home.as_deref(),
-                    &query.text,
-                    &mut self.matcher,
-                ),
-                Target::Slot(SlotKind::Item) => self.item_rows(&query.text),
-                Target::Slot(SlotKind::Path) => self.paths(&query.text, &mut response),
-                Target::Slot(SlotKind::File) => self.project_files(&query.text, &mut response),
-                Target::Slot(SlotKind::Symbol) => self.symbol_rows(app, &query.text),
-                Target::Slot(SlotKind::Word | SlotKind::Rest) => vec![],
-            },
+            Some(query) => self.candidates(app, query, &mut response),
         };
         let mut rows = rows;
         // Paths order their own; command names put an exact one first.
@@ -559,10 +482,134 @@ impl CommandLine {
         self.query = query;
         response
     }
-    /// Items match fuzzily and answer with their number, so a title may
-    /// hold any text.
-    fn symbol_rows(&mut self, app: &Application, query: &str) -> Vec<MatchedCandidate<Completion>> {
-        let symbols = self.symbols.get_or_insert_with(|| {
+    /// The rows of the argument a query completes, matched against its
+    /// text. Every list of words goes through `words_matching`; paths,
+    /// buffers and project files match as paths.
+    fn candidates(
+        &mut self,
+        app: &Application,
+        query: &Query,
+        response: &mut Response,
+    ) -> Vec<MatchedCandidate<Completion>> {
+        let text = query.text.as_str();
+        let kind = match query.target {
+            Target::Name => return self.names(text),
+            Target::Slot(kind) => kind,
+        };
+        let entries: Vec<Entry> = match kind {
+            SlotKind::Buffer | SlotKind::CurrentBuffer => {
+                return buffers(app, text, &mut self.matcher);
+            }
+            SlotKind::Recent => return recent(&self.recent, &self.root, text, &mut self.matcher),
+            SlotKind::Project => {
+                let home = self.home.as_deref();
+                return projects(&self.projects, home, text, &mut self.matcher);
+            }
+            SlotKind::Path => return self.paths(text, response),
+            SlotKind::File => return self.project_files(text, response),
+            SlotKind::Word | SlotKind::Rest => return vec![],
+            SlotKind::Choice(choices) => choices
+                .iter()
+                .map(|choice| {
+                    let key = choice.key.map_or_else(String::new, |k| format!("[{k}] "));
+                    Entry::new(choice.word, format!("{key}{}", choice.doc))
+                })
+                .collect(),
+            SlotKind::Option => crate::options::all()
+                .into_iter()
+                .map(|option| Entry::new(option.name, option.doc.to_owned()))
+                .collect(),
+            SlotKind::Language => crate::language::catalog()
+                .ids()
+                .map(|id| Entry::new(id, String::new()))
+                .collect(),
+            SlotKind::Keymap => {
+                let mut names = self.keymaps.clone();
+                for id in crate::language::catalog().ids() {
+                    if !names.iter().any(|(name, _)| name == id) {
+                        names.push((id.to_owned(), format!("Keys of {id} documents")));
+                    }
+                }
+                names
+                    .into_iter()
+                    .map(|(name, doc)| Entry::new(&name, doc))
+                    .collect()
+            }
+            SlotKind::Face => crate::application::faces::names()
+                .map(|name| Entry::new(&name, String::new()))
+                .collect(),
+            SlotKind::Theme => {
+                use crate::application::themes;
+                let current = app.options().text(None, "theme");
+                app.faces()
+                    .theme_names()
+                    .map(|name| {
+                        let doc = match themes::builtin(name) {
+                            // Said once, where the name says it already.
+                            Some(theme) => {
+                                let shade = if theme.light { "light" } else { "dark" };
+                                match theme.doc.to_ascii_lowercase().contains(shade) {
+                                    true => theme.doc.to_owned(),
+                                    false => format!("{}, {shade}", theme.doc),
+                                }
+                            }
+                            None => "defined by soda.theme".to_owned(),
+                        };
+                        let mark = if name == current { "● " } else { "" };
+                        Entry::new(name, format!("{mark}{doc}"))
+                    })
+                    .collect()
+            }
+            SlotKind::Symbol => self
+                .symbols(app)
+                .iter()
+                .map(|s| Entry::new(s, String::new()))
+                .collect(),
+            // An item answers with its number, so its text may be anything.
+            SlotKind::Item => self
+                .items
+                .iter()
+                .enumerate()
+                .map(|(index, item)| Entry {
+                    replacement: Some((index + 1).to_string()),
+                    ..Entry::new(&printable(&item.text), item.doc.clone())
+                })
+                .collect(),
+            SlotKind::Computed(function) => match &self.computed {
+                Some(list) if list.function == function => match &list.items {
+                    Some(items) => items
+                        .iter()
+                        .map(|item| Entry::new(&item.text, item.doc.clone()))
+                        .collect(),
+                    None => return vec![],
+                },
+                _ => {
+                    let token = next_token();
+                    response
+                        .lua
+                        .push(super::LuaRequest::Candidates { function, token });
+                    self.computed = Some(ComputedList {
+                        function,
+                        token,
+                        items: None,
+                    });
+                    return vec![];
+                }
+            },
+        };
+        // The history orders the words, but a question's items by the
+        // history it names, and the symbols by nearness alone, as
+        // `consult-imenu` keeps the document's order.
+        let used = match kind {
+            SlotKind::Item => self.asked_history.as_ref().map(|name| self.ranks(name)),
+            _ => self.slot_history(kind).map(|name| self.ranks(&name)),
+        };
+        let used = used.unwrap_or_default();
+        words_matching(&mut self.matcher, text, entries, &used)
+    }
+    /// The symbols of the document, nearest the caret first, listed once.
+    fn symbols(&mut self, app: &Application) -> &[String] {
+        self.symbols.get_or_insert_with(|| {
             let Some(view) = app.active_view().and_then(|view| app.view(view)) else {
                 return vec![];
             };
@@ -574,62 +621,23 @@ impl CommandLine {
                 .selection()
                 .head;
             symbols(editor.model().document().snapshot().text(), caret)
-        });
-        self.matcher.config = Config::DEFAULT;
-        // Equal scores keep the nearest first; the history does not order
-        // them, as `consult-imenu` keeps the order of the document.
-        let shown = symbols.iter().cloned().enumerate();
-        ranked(&mut self.matcher, query, shown, |_| false)
-            .map(|(index, symbol, highlights)| {
-                let row = row(index as u64, symbol.clone(), Some(symbol), false);
-                mark(row, highlights, None)
-            })
-            .collect()
+        })
     }
-    fn item_rows(&mut self, query: &str) -> Vec<MatchedCandidate<Completion>> {
-        self.matcher.config = Config::DEFAULT;
-        let ranks = self
-            .asked_history
-            .as_ref()
-            .map(|name| self.ranks(name))
-            .unwrap_or_default();
-        let items = &self.items;
-        let shown = items.iter().map(|item| printable(item)).enumerate();
-        let rank = |index: &usize| history_rank(&ranks, Some(&items[*index]));
-        ranked(&mut self.matcher, query, shown, rank)
-            .map(|(index, shown, highlights)| {
-                let number = (index + 1).to_string();
-                mark(
-                    row(index as u64, shown, Some(number), false),
-                    highlights,
-                    None,
-                )
-            })
-            .collect()
-    }
-    /// Command names match as words do, by their history.
+    /// Command names are words with their synopsis, by when each ran.
     fn names(&mut self, query: &str) -> Vec<MatchedCandidate<Completion>> {
         let used = self.ranks(history::COMMAND_NAME);
-        let words = self.catalog.iter().map(|info| {
-            let name = format!("{} {}", info.name, info.synopsis());
-            let label = format!("{:<32} {}", name.trim_end(), info.doc);
-            let detail = label.len() - info.doc.len();
-            Word::new(&info.name, label, Some(detail))
-        });
-        let words: Vec<_> = words.collect();
-        words_matching(&mut self.matcher, query, words, &used)
-    }
-    /// The words of a slot, ranked by its history.
-    fn words(
-        &mut self,
-        kind: SlotKind,
-        query: &str,
-        words: impl IntoIterator<Item = Word>,
-    ) -> Vec<MatchedCandidate<Completion>> {
-        let used = self
-            .slot_history(kind)
-            .map(|name| self.ranks(&name))
-            .unwrap_or_default();
+        let words: Vec<_> = self
+            .catalog
+            .iter()
+            .map(|info| Entry {
+                shown: Some(
+                    format!("{} {}", info.name, info.synopsis())
+                        .trim_end()
+                        .to_owned(),
+                ),
+                ..Entry::new(&info.name, info.doc.clone())
+            })
+            .collect();
         words_matching(&mut self.matcher, query, words, &used)
     }
     fn paths(&mut self, text: &str, response: &mut Response) -> Vec<MatchedCandidate<Completion>> {
@@ -783,6 +791,18 @@ impl CommandLine {
         }
         Some(self.refresh(app, true))
     }
+    /// Takes the words a Lua function listed, if they answer the request
+    /// this line made last.
+    pub(super) fn candidates_listed(
+        &mut self,
+        token: u64,
+        items: Vec<super::slots::Item>,
+        app: &Application,
+    ) -> Option<Response> {
+        let list = self.computed.as_mut().filter(|list| list.token == token)?;
+        list.items = Some(items);
+        Some(self.refresh(app, true))
+    }
     pub(super) fn picker_finished(&mut self, completion: PickerCompletion) -> bool {
         let Some(session) = &mut self.files else {
             return false;
@@ -820,7 +840,7 @@ impl CommandLine {
         match self.query.as_ref().map(|q| q.target) {
             None => true,
             Some(Target::Name) => false,
-            Some(Target::Slot(kind)) => !kind.requires_match(),
+            Some(Target::Slot(kind)) => !behavior(kind).requires_match,
         }
     }
     /// Selects the input, so that Enter takes it as typed.
@@ -833,10 +853,10 @@ impl CommandLine {
         !self.rows.is_empty() && self.list.index(&self.rows).is_none()
     }
     /// Where the selection starts on new rows, as `vertico-preselect` set
-    /// to `directory`: the first row, but the input when it names a
-    /// directory, or a project typed as a path; a theme list on the theme
-    /// in force and a buffer to kill on the current buffer, so that Enter
-    /// alone takes them. None is the input.
+    /// to `directory`: the first row, but the input where the text goes on
+    /// to a directory, and while nothing is typed the row of what is in
+    /// force, such as the theme or the buffer to kill, so that Enter alone
+    /// keeps it. None is the input.
     fn default_selection(
         &self,
         app: &Application,
@@ -844,47 +864,50 @@ impl CommandLine {
         rows: &[MatchedCandidate<Completion>],
     ) -> Option<CandidateKey> {
         let first = rows.first().map(|row| row.candidate.key);
-        let Some(query) = query else {
+        let Some(Query {
+            target: Target::Slot(kind),
+            text,
+            ..
+        }) = query
+        else {
             return first;
         };
-        match query.target {
-            Target::Slot(SlotKind::Path) if split_path(&query.text).1.is_empty() => None,
-            Target::Slot(SlotKind::Project) if query.text.starts_with(['/', '~', '.']) => None,
-            Target::Slot(SlotKind::Theme) if query.text.is_empty() => {
-                let theme = app.options().text(None, "theme");
-                rows.iter()
-                    .find(|row| row.candidate.payload.replacement.as_deref() == Some(theme))
-                    .map(|row| row.candidate.key)
-                    .or(first)
-            }
-            Target::Slot(SlotKind::CurrentBuffer) if query.text.is_empty() => app
-                .active_view()
-                .and_then(|view| app.view(view))
-                .map(|view| CandidateKey(view.document_id.number()))
-                .filter(|key| rows.iter().any(|row| row.candidate.key == *key))
-                .or(first),
-            _ => first,
+        let behavior = behavior(*kind);
+        if behavior.input_first.is_some_and(|starts| starts(text)) {
+            return None;
         }
+        let current = behavior
+            .current
+            .filter(|_| text.is_empty())
+            .and_then(|current| current(app));
+        current
+            .and_then(|current| {
+                rows.iter()
+                    .find(|row| row.candidate.payload.replacement.as_deref() == Some(&current))
+            })
+            .map(|row| row.candidate.key)
+            .or(first)
     }
-    /// The theme to show while a THEME slot is completed: the selected row
-    /// once the user moves to one or types text that picks one. The screen
-    /// previews it; closing the line leaves the option's theme in force,
-    /// and taking the row sets the option.
-    pub fn previewed_theme(&self) -> Option<&str> {
+    /// What to show of the selected row before it is taken, once the user
+    /// moves to one or types text that picks one. Closing the line leaves
+    /// what is in force; taking the row sets it.
+    pub fn preview(&self) -> Option<(Preview, &str)> {
         let query = self.query.as_ref()?;
-        if query.target != Target::Slot(SlotKind::Theme)
-            || self.stale
-            || !(self.list.user_selected() || !query.text.is_empty())
-        {
+        let Target::Slot(kind) = query.target else {
+            return None;
+        };
+        let preview = behavior(kind).preview?;
+        if self.stale || !(self.list.user_selected() || !query.text.is_empty()) {
             return None;
         }
         let row = &self.rows[self.list.index(&self.rows)?];
-        row.candidate.payload.replacement.as_deref()
+        Some((preview, row.candidate.payload.replacement.as_deref()?))
     }
     pub fn completes(&self) -> bool {
-        self.query
-            .as_ref()
-            .is_some_and(|q| !matches!(q.target, Target::Slot(SlotKind::Word | SlotKind::Rest)))
+        self.query.as_ref().is_some_and(|q| match q.target {
+            Target::Name => true,
+            Target::Slot(kind) => behavior(kind).completes,
+        })
     }
     pub fn loading(&self) -> bool {
         !self.stale && self.waiting(&self.query)
@@ -899,6 +922,8 @@ impl CommandLine {
                     .files
                     .as_ref()
                     .is_some_and(|s| matches!(s.status(), PickerStatus::Loading)))
+            || (matches!(target, Some(Target::Slot(SlotKind::Computed(_))))
+                && self.computed.as_ref().is_some_and(|c| c.items.is_none()))
     }
     fn close(&self, commands: Vec<Command>) -> Transition {
         Transition::Closed(Response {
@@ -976,22 +1001,21 @@ impl CommandLine {
     /// show them so, and leaving out project files of other projects.
     fn recallable(&self, name: &str, kind: Option<SlotKind>, histories: &Histories) -> Vec<String> {
         let entries = histories.entries(name);
-        match kind {
-            Some(SlotKind::File | SlotKind::Recent) => entries
-                .iter()
-                .filter_map(|entry| {
-                    let path = history::expand(entry, self.home.as_deref());
-                    match path.strip_prefix(&self.root) {
-                        Ok(relative) => relative.to_str().map(str::to_owned),
-                        Err(_) if kind == Some(SlotKind::Recent) => {
-                            path.to_str().map(str::to_owned)
-                        }
-                        Err(_) => None,
-                    }
-                })
-                .collect(),
-            _ => entries.to_vec(),
+        let form = kind.and_then(|kind| behavior(kind).path);
+        if !matches!(form, Some(PathForm::Project | PathForm::Recent)) {
+            return entries.to_vec();
         }
+        entries
+            .iter()
+            .filter_map(|entry| {
+                let path = history::expand(entry, self.home.as_deref());
+                match path.strip_prefix(&self.root) {
+                    Ok(relative) => relative.to_str().map(str::to_owned),
+                    Err(_) if form == Some(PathForm::Recent) => path.to_str().map(str::to_owned),
+                    Err(_) => None,
+                }
+            })
+            .collect()
     }
     /// Puts an older or newer entry of the field's history in the field;
     /// None when there is none that way.
@@ -1058,6 +1082,7 @@ impl CommandLine {
                             .parse::<usize>()
                             .ok()
                             .and_then(|n| self.items.get(n.checked_sub(1)?))?
+                            .text
                             .clone(),
                         _ => text.to_owned(),
                     };
@@ -1073,17 +1098,17 @@ impl CommandLine {
             let Some(name) = history::of_slot(&info.name, info.slots, index) else {
                 continue;
             };
-            let entry = match slot.kind {
+            let entry = match behavior(slot.kind).path {
                 _ if super::expand::has_expansions(text) => None,
-                SlotKind::Path | SlotKind::Project => {
+                Some(PathForm::Typed) => {
                     resolve_path(&self.base, self.home.as_deref(), Path::new(text))
                         .ok()
                         .and_then(|path| history::abbreviate(&path, self.home.as_deref()))
                 }
-                SlotKind::File | SlotKind::Recent => {
+                Some(PathForm::Project | PathForm::Recent) => {
                     history::abbreviate(&self.root.join(text), self.home.as_deref())
                 }
-                _ => Some(text.to_owned()),
+                None => Some(text.to_owned()),
             };
             if let Some(entry) = entry {
                 records.push((name, entry));
@@ -1166,7 +1191,7 @@ impl CommandLine {
             },
             None => {
                 if let Some(Target::Slot(kind)) = location.target
-                    && kind.requires_match()
+                    && behavior(kind).requires_match
                     && !self
                         .rows
                         .iter()
@@ -1339,13 +1364,11 @@ impl CommandLine {
         if app.active_view() != self.view {
             return self.close(vec![]);
         }
-        let buffers = self.query.as_ref().is_some_and(|q| {
-            matches!(
-                q.target,
-                Target::Slot(SlotKind::Buffer | SlotKind::CurrentBuffer)
-            )
-        });
-        Transition::Active(if buffers {
+        let live = self
+            .query
+            .as_ref()
+            .is_some_and(|q| matches!(q.target, Target::Slot(kind) if behavior(kind).live));
+        Transition::Active(if live {
             self.refresh(app, true)
         } else {
             Response::default()
@@ -1400,65 +1423,105 @@ pub(super) fn symbols(text: &str, caret: usize) -> Vec<String> {
         .map(|(symbol, _)| symbol.to_owned())
         .collect()
 }
-/// A word a slot completes: what it fills in, the row that shows it, and
-/// where the row's secondary text, its description, begins. The row
-/// starts with the word.
-struct Word {
-    name: String,
-    label: String,
-    detail: Option<usize>,
+/// A word a list offers: what is matched, what the row shows for it and
+/// after it, and what it fills in. The list lays the rows out, so that
+/// descriptions line up whatever lists them, as marginalia aligns
+/// annotations.
+struct Entry {
+    word: String,
+    /// The word as the row shows it, starting with it; a command shows its
+    /// arguments too.
+    shown: Option<String>,
+    /// What is said of it, dimmed after the words.
+    annotation: String,
+    /// What it fills in: the word, unless said otherwise.
+    replacement: Option<String>,
 }
-impl Word {
-    fn new(name: &str, label: String, detail: Option<usize>) -> Self {
+impl Entry {
+    fn new(word: &str, annotation: String) -> Self {
         Self {
-            name: name.to_owned(),
-            label,
-            detail,
+            word: word.to_owned(),
+            shown: None,
+            annotation,
+            replacement: Some(word.to_owned()),
         }
     }
 }
-/// Words match alike whatever lists them, as a completion table under one
-/// completion style: an exact word first, then words that match fuzzily,
-/// then words whose description holds the text. Words that match alike
-/// come in the order they were last taken, as `minibuffer-sort-by-history`
-/// orders them, then in the list's.
+/// The widest the column of words grows; longer words push their
+/// description on.
+const WORD_COLUMN: usize = 32;
+/// Words match alike whatever lists them, as one completion style serves
+/// every completion table: an exact word first, then words that match
+/// fuzzily, then words whose description holds the text, all in smart
+/// case. Words that match alike come in the order they were last taken,
+/// as `minibuffer-sort-by-history` orders them, then in the list's.
 fn words_matching(
     matcher: &mut Matcher,
     query: &str,
-    words: impl IntoIterator<Item = Word>,
+    entries: impl IntoIterator<Item = Entry>,
     used: &HashMap<String, u32>,
 ) -> Vec<MatchedCandidate<Completion>> {
+    use unicode_width::UnicodeWidthStr;
     matcher.config = Config::DEFAULT;
-    let lower = query.to_ascii_lowercase();
+    let entries: Vec<_> = entries.into_iter().collect();
+    // As wide as the words of the whole list, so the column stays put
+    // while typing narrows it.
+    let column = entries
+        .iter()
+        .map(|entry| entry.shown.as_deref().unwrap_or(&entry.word).width())
+        .max()
+        .unwrap_or(0)
+        .min(WORD_COLUMN);
+    let exact_case = query.chars().any(char::is_uppercase);
+    let fold = |text: &str| match exact_case {
+        true => text.to_owned(),
+        false => text.to_ascii_lowercase(),
+    };
+    let wanted = fold(query);
     let mut ranked = vec![];
-    for (index, word) in words.into_iter().enumerate() {
-        let description = word.detail.map_or("", |detail| &word.label[detail..]);
+    for (index, entry) in entries.into_iter().enumerate() {
+        let shown = entry.shown.unwrap_or_else(|| entry.word.clone());
+        let (label, detail) = match entry.annotation.is_empty() {
+            true => (shown, None),
+            false => {
+                let pad = column.saturating_sub(shown.width());
+                let label = format!("{shown}{:pad$} {}", "", entry.annotation);
+                let detail = label.len() - entry.annotation.len();
+                (label, Some(detail))
+            }
+        };
         let (rank, highlights) = if query.is_empty() {
             (0, vec![])
-        } else if word.name == query {
+        } else if entry.word == query {
             (u32::MAX, one(0..query.len()))
-        } else if let Some((score, highlights)) = fuzzy_match(matcher, query, &word.name) {
+        } else if let Some((score, highlights)) = fuzzy_match(matcher, query, &entry.word) {
             (u32::from(score) + 1, highlights)
-        } else if let Some(start) = description.to_ascii_lowercase().find(&lower) {
-            let start = word.detail.unwrap_or(0) + start;
+        } else if let Some(start) = detail.and_then(|at| fold(&label[at..]).find(&wanted)) {
+            let start = detail.unwrap_or(0) + start;
             (0, one(start..start + query.len()))
         } else {
             continue;
         };
-        let used = history_rank(used, Some(&word.name));
-        let row = row(index as u64, word.label, Some(word.name), false);
-        ranked.push(((rank, used), mark(row, highlights, word.detail)));
+        let used = history_rank(used, Some(&entry.word));
+        let row = row(index as u64, label, entry.replacement, false);
+        ranked.push(((rank, used), mark(row, highlights, detail)));
     }
     // Stable: what ties keeps the list's order.
     ranked.sort_by_key(|((rank, used), _)| (std::cmp::Reverse(*rank), *used));
     ranked.into_iter().map(|(_, row)| row).collect()
 }
-/// Candidates that match `query` fuzzily, best first, each with what it
-/// shows and the ranges that matched; everything matches an empty query.
-/// Equal scores keep the given order, except that those `last` picks go
-/// after the rest.
-/// Candidates that match the query, best first; `rank` orders equal
-/// scores, and all of them when the query is empty.
+/// A list a Lua function gives an argument, once it answers.
+struct ComputedList {
+    function: u64,
+    /// Which request the answer is to.
+    token: u64,
+    items: Option<Vec<super::slots::Item>>,
+}
+/// A request's own number, so a late answer to an earlier one is known.
+fn next_token() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
 /// Moves the row the typed text names exactly to the front, as vertico
 /// does after sorting, so that what is typed in full is the first row: by
 /// its label, or by the text it fills in when that is its name.
@@ -1482,6 +1545,9 @@ fn history_rank(ranks: &HashMap<String, u32>, entry: Option<&str>) -> u32 {
         .copied()
         .unwrap_or(u32::MAX)
 }
+/// Paths that match `query` fuzzily, best first, each with what it shows
+/// and the ranges that matched; `rank` orders equal scores, and all of
+/// them when the query is empty.
 fn ranked<T, K: Ord>(
     matcher: &mut Matcher,
     query: &str,

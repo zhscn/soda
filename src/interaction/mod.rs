@@ -40,6 +40,7 @@ mod registry;
 pub use registry::{BUILTINS, Choice, CommandInfo, Registry, Slot, SlotKind};
 mod resize;
 mod session;
+pub mod slots;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum EditMode {
@@ -163,6 +164,16 @@ pub enum LuaRequest {
     Chunk { origin: String, code: String },
     /// A function registered by `soda.hook` or `soda.define_command`.
     Call { id: u64, argument: String },
+    /// A function of an argument's `candidates`, which lists its words;
+    /// the answer comes back with `token` to `Layers::candidates_listed`.
+    Candidates { function: u64, token: u64 },
+    /// The function a question was asked with, given what was chosen or
+    /// typed, and the number of an item chosen among items.
+    Answer {
+        id: u64,
+        text: String,
+        index: Option<usize>,
+    },
 }
 
 /// Owns editing input state and one modal layer. Read-only access keeps transitions inside
@@ -191,10 +202,12 @@ pub struct Layers {
     recent_files: Vec<std::path::PathBuf>,
     /// Remembered projects, newest first, for `project-switch`.
     projects: Vec<std::path::PathBuf>,
-    /// The Lua function and the items of the question last offered.
-    offer: Option<(u64, Vec<String>)>,
-    /// The Lua function a line of text is asked for.
-    question: Option<u64>,
+    /// The Lua function of the question last asked, with its items when
+    /// it offers some.
+    question: Option<(u64, Vec<slots::Item>)>,
+    /// What kind of answer the next question Lua asks completes, when it
+    /// is one the command line knows.
+    asked_kind: Option<SlotKind>,
     /// Command line and search histories.
     history: history::Histories,
     /// The history named for the next question Lua asks.
@@ -464,7 +477,6 @@ impl Layers {
         })
     }
     fn forget_reply(&mut self) {
-        self.offer = None;
         self.question = None;
     }
     fn transition(&mut self, transition: Transition) -> Option<Response> {
@@ -740,6 +752,20 @@ impl Layers {
             Some(Layer::CommandLine(session)) => {
                 session.path_finished(completion, app).unwrap_or_default()
             }
+            _ => Response::default(),
+        }
+    }
+    /// What a Lua function listed for the argument being completed.
+    pub fn candidates_listed(
+        &mut self,
+        token: u64,
+        items: Vec<slots::Item>,
+        app: &Application,
+    ) -> Response {
+        match &mut self.active {
+            Some(Layer::CommandLine(session)) => session
+                .candidates_listed(token, items, app)
+                .unwrap_or_default(),
             _ => Response::default(),
         }
     }

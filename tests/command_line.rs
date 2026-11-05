@@ -476,6 +476,17 @@ fn words_of_any_slot_match_fuzzily() {
         themes.iter().any(|row| row.starts_with("one-light ")),
         "{themes:?}"
     );
+    // Capitals ask for themselves in descriptions too.
+    let mut r = runtime(root.path());
+    r.command(Command::Ex("theme Latte".into()));
+    assert!(
+        rows(&r)[0].starts_with("catppuccin-latte "),
+        "{:?}",
+        rows(&r)
+    );
+    let mut r = runtime(root.path());
+    r.command(Command::Ex("theme LATTE".into()));
+    assert!(rows(&r).is_empty(), "{:?}", rows(&r));
     // Options too, by any part of the name.
     let mut r = runtime(root.path());
     r.command(Command::Ex("set trailing".into()));
@@ -491,7 +502,7 @@ fn choosing_a_theme_previews_it_until_taken_or_cancelled() {
     let root = tree();
     let mut r = runtime(root.path());
     let previewed = |r: &Runtime| match r.layer() {
-        Some(Layer::CommandLine(line)) => line.previewed_theme().map(str::to_owned),
+        Some(Layer::CommandLine(line)) => line.preview().map(|(_, name)| name.to_owned()),
         _ => None,
     };
     let option = |r: &Runtime| r.app().options().text(None, "theme").to_owned();

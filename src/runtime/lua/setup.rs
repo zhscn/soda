@@ -206,7 +206,7 @@ pub(super) fn register<'scope, 'r: 'scope>(
                 let slots = options
                     .and_then(|options| options.get::<Option<Table>>("args").transpose())
                     .transpose()?
-                    .map(|args| slots(&args))
+                    .map(|args| slots(&args, host))
                     .transpose()?;
                 let (doc, function) = match (second, third) {
                     (Value::String(doc), Some(function)) => {
@@ -258,30 +258,18 @@ fn hook_command(id: u64) -> String {
     format!("lua-call {id} %val{{hook}}")
 }
 /// The argument places of a Lua command, from `args`: each a kind such as
-/// `"file"`, or a table with `name`, `kind` or `choices`, and `optional`.
-/// Commands live as long as the editor, so their slots are leaked once
-/// for each definition.
-fn slots(args: &Table) -> mlua::Result<&'static [crate::interaction::Slot]> {
-    use crate::interaction::{Choice, Slot, SlotKind};
+/// `"file"`, or a table with `name`, `kind`, `choices` or `candidates`, and
+/// `optional`. Commands live as long as the editor, so their slots are
+/// leaked once for each definition.
+fn slots(args: &Table, host: &Host) -> mlua::Result<&'static [crate::interaction::Slot]> {
+    use crate::interaction::{Choice, Slot, SlotKind, slots};
     let leak = |text: String| -> &'static str { Box::leak(text.into_boxed_str()) };
     let kind = |name: &str| -> mlua::Result<SlotKind> {
-        Ok(match name {
-            "file" => SlotKind::File,
-            "path" => SlotKind::Path,
-            "buffer" => SlotKind::Buffer,
-            "option" => SlotKind::Option,
-            "face" => SlotKind::Face,
-            "theme" => SlotKind::Theme,
-            "language" => SlotKind::Language,
-            "recent" => SlotKind::Recent,
-            "symbol" => SlotKind::Symbol,
-            "word" => SlotKind::Word,
-            "rest" => SlotKind::Rest,
-            name => {
-                return Err(mlua::Error::runtime(format!(
-                    "unknown argument kind {name}: use file, path, buffer, option, face, theme, language, recent, symbol, word, rest or choices"
-                )));
-            }
+        slots::named(name).ok_or_else(|| {
+            mlua::Error::runtime(format!(
+                "unknown argument kind {name}: use {}, choices or candidates",
+                slots::names()
+            ))
         })
     };
     let mut out = vec![];
@@ -296,33 +284,27 @@ fn slots(args: &Table) -> mlua::Result<&'static [crate::interaction::Slot]> {
                 }
             }
             Value::Table(arg) => {
-                let kind = match arg.get::<Option<Vec<Value>>>("choices")? {
-                    Some(choices) => {
+                let choices = arg.get::<Option<Vec<Value>>>("choices")?;
+                let candidates = arg.get::<Option<Function>>("candidates")?;
+                let kind = match (choices, candidates) {
+                    (Some(choices), _) => {
                         let choices = choices
                             .into_iter()
                             .map(|choice| {
-                                // A word, or `{ word, doc }`.
-                                let (word, doc) = match choice {
-                                    Value::Table(pair) => {
-                                        (pair.get(1)?, pair.get::<Option<String>>(2)?)
-                                    }
-                                    Value::String(word) => (word.to_str()?.to_owned(), None),
-                                    _ => {
-                                        return Err(mlua::Error::runtime(
-                                            "a choice is a word or { word, doc }",
-                                        ));
-                                    }
-                                };
+                                let item = super::editor::word_item(choice)?;
                                 Ok(Choice {
-                                    word: leak(word),
+                                    word: leak(item.text),
                                     key: None,
-                                    doc: leak(doc.unwrap_or_default()),
+                                    doc: leak(item.doc),
                                 })
                             })
                             .collect::<mlua::Result<Vec<_>>>()?;
                         SlotKind::Choice(Box::leak(choices.into_boxed_slice()))
                     }
-                    None => kind(&arg.get::<Option<String>>("kind")?.unwrap_or("rest".into()))?,
+                    (None, Some(function)) => SlotKind::Computed(host.keep(function)?),
+                    (None, None) => {
+                        kind(&arg.get::<Option<String>>("kind")?.unwrap_or("rest".into()))?
+                    }
                 };
                 Slot {
                     name: leak(arg.get::<Option<String>>("name")?.unwrap_or("ARG".into())),

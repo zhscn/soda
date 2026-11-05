@@ -1200,8 +1200,9 @@ mod tests {
         assert!(rows[2].starts_with(" COMMAND "), "{text}");
         assert!(rows[3].starts_with(":close "));
         assert!(rows[3].contains("unsaved [untitled ") && rows[3].trim_end().ends_with("· 1/2"));
-        assert!(rows[4].starts_with("▌ save         [s]"));
-        assert!(rows[5].starts_with("  discard      [d]"));
+        // Descriptions line up after the longest word.
+        assert!(rows[4].starts_with("▌ save    [s]"), "{text}");
+        assert!(rows[5].starts_with("  discard [d]"), "{text}");
         keys(&mut r, "ESC M-x");
         r.input(UserInput::Paste("map normal ".into()));
         let text = screen(&mut r, 60, 14);

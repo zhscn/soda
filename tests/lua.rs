@@ -1457,11 +1457,11 @@ fn a_question_put_aside_is_not_answered_later() {
     lua(
         &mut r,
         r#"
-        soda.choose("pick", {"alpha", "beta"}, function(i) soda.message("chose " .. i) end)
+        soda.choose("pick", {"alpha", "beta"}, function(item, i) soda.message(item .. " " .. i) end)
         "#,
     );
     keys(&mut r, "bet RET");
-    assert_eq!(r.message(), "chose 2");
+    assert_eq!(r.message(), "beta 2");
     lua(
         &mut r,
         r#"soda.choose("pick", {"alpha", "beta"}, function(i) soda.message("late " .. i) end)"#,
@@ -1505,4 +1505,107 @@ fn semantic_tokens_tell_definitions_from_calls_and_builtins() {
         is(nil, "operator")
         "#,
     );
+}
+
+fn line_rows(r: &Runtime) -> Vec<String> {
+    match r.layer() {
+        Some(soda::interaction::Layer::CommandLine(line)) => line
+            .rows()
+            .iter()
+            .map(|row| row.candidate.label.clone())
+            .collect(),
+        _ => vec![],
+    }
+}
+/// Polls until the command line lists something.
+fn listed(r: &mut Runtime) -> Vec<String> {
+    for _ in 0..200 {
+        r.poll();
+        if !line_rows(r).is_empty() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    line_rows(r)
+}
+#[test]
+fn a_question_asks_for_any_kind_the_command_line_knows() {
+    let mut r = runtime();
+    lua(
+        &mut r,
+        r#"soda.choose("Theme", "theme", function(name, index)
+            soda.message(name .. " " .. tostring(index))
+        end)"#,
+    );
+    // The theme list itself: fuzzy, starting on the theme in force.
+    assert!(
+        line_rows(&r)
+            .iter()
+            .any(|row| row.starts_with("nord-light "))
+    );
+    keys(&mut r, "nord-l RET");
+    assert_eq!(r.message(), "nord-light nil");
+    // Its answer goes to the theme history, as `theme` would put it.
+    lua(&mut r, r#"soda.choose("Theme", "theme", function() end)"#);
+    keys(&mut r, "M-p");
+    match r.layer() {
+        Some(soda::interaction::Layer::CommandLine(line)) => {
+            assert_eq!(line.input().text(), "answer nord-light")
+        }
+        _ => panic!("no command line"),
+    }
+    keys(&mut r, "ESC");
+    let error = r
+        .source_lua("bad", r#"soda.choose("x", "colour", function() end)"#)
+        .unwrap_err();
+    assert!(
+        error.contains("unknown kind colour") && error.contains("theme"),
+        "{error}"
+    );
+}
+#[test]
+fn arguments_take_every_kind_and_words_a_function_lists() {
+    let mut r = runtime();
+    lua(
+        &mut r,
+        r#"
+        soda.define_command("keys-of", "Keys", function(map) soda.message("map " .. map) end,
+          { args = { "keymap" } })
+        soda.define_command("branch", "Branch", function(b) soda.message("branch " .. b) end,
+          { args = { { name = "BRANCH", candidates = function()
+            return { "main", { "dev", "Where work goes on" } }
+          end } } })
+        soda.define_command("later", "Later", function(b) soda.message("later " .. b) end,
+          { args = { { name = "WORD", candidates = function(done)
+            soda.defer(1, function() done({ "eventually" }) end)
+          end } } })
+        "#,
+    );
+    r.command(Command::Ex("keys-of norm".into()));
+    keys(&mut r, "RET");
+    assert_eq!(r.message(), "map normal");
+    r.command(Command::Ex("branch ".into()));
+    let rows = listed(&mut r);
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    assert!(rows[1].starts_with("dev  Where work goes on"), "{rows:?}");
+    // Only a listed word answers.
+    r.input(UserInput::Paste("feature".into()));
+    keys(&mut r, "M-RET");
+    assert!(r.layer().is_some());
+    keys(&mut r, "C-a C-k");
+    r.input(UserInput::Paste("branch de".into()));
+    keys(&mut r, "RET");
+    assert_eq!(r.message(), "branch dev");
+    // A function may answer later.
+    r.command(Command::Ex("later ".into()));
+    assert_eq!(listed(&mut r), ["eventually"]);
+    keys(&mut r, "RET");
+    assert_eq!(r.message(), "later eventually");
+    let error = r
+        .source_lua(
+            "bad",
+            r#"soda.define_command("x", "X", function() end, { args = { "colour" } })"#,
+        )
+        .unwrap_err();
+    assert!(error.contains("current-buffer"), "{error}");
 }

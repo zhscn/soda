@@ -1192,7 +1192,7 @@ soda.define_command("lsp-code-action", "Pick one of the server's code actions", 
       soda.message("No code actions here")
       return
     end
-    soda.choose("code action", titles, function(index)
+    soda.choose("code action", titles, function(_, index)
       perform(actions[index], origin)
     end)
   end)
@@ -1276,7 +1276,7 @@ soda.define_command("lsp-symbols", "List the symbols of the document", function(
     for _, row in ipairs(rows) do
       table.insert(titles, row.title)
     end
-    soda.choose("symbol", titles, function(index)
+    soda.choose("symbol", titles, function(_, index)
       local place = rows[index].place
       local encoding = soda.lsp.info().encoding
       local line = math.min(place.line + 1, buf:line_count())

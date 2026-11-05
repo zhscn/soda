@@ -92,38 +92,24 @@ pub fn merge(ours: &[String], theirs: &[String]) -> Vec<String> {
 /// of its command's, and fixed words and answers have none.
 pub fn of_slot(command: &str, slots: &[Slot], index: usize) -> Option<String> {
     let slot = &slots[index];
-    Some(
-        match slot.kind {
-            SlotKind::Path | SlotKind::File | SlotKind::Recent => FILE,
-            SlotKind::Buffer | SlotKind::CurrentBuffer => "buffer",
-            SlotKind::Project => "project",
-            SlotKind::Symbol => "symbol",
-            SlotKind::Option => "option",
-            SlotKind::Face => "face",
-            SlotKind::Theme => "theme",
-            SlotKind::Language => "language",
-            SlotKind::Keymap => "keymap",
-            SlotKind::Choice(_) | SlotKind::Item => return None,
-            SlotKind::Word | SlotKind::Rest => {
-                // `pipe` reads a shell command as `shell` does, as
-                // `shell-command-on-region` shares `shell-command-history`.
-                let command = match command {
-                    "pipe" => "shell",
-                    command => command,
-                };
-                let free = slots
-                    .iter()
-                    .filter(|s| matches!(s.kind, SlotKind::Word | SlotKind::Rest))
-                    .count();
-                return Some(if free == 1 {
-                    command.to_owned()
-                } else {
-                    format!("{command}-{}", slot.name.to_ascii_lowercase())
-                });
-            }
-        }
-        .to_owned(),
-    )
+    if !matches!(slot.kind, SlotKind::Word | SlotKind::Rest) {
+        return super::slots::behavior(slot.kind).history.map(str::to_owned);
+    }
+    // `pipe` reads a shell command as `shell` does, as
+    // `shell-command-on-region` shares `shell-command-history`.
+    let command = match command {
+        "pipe" => "shell",
+        command => command,
+    };
+    let free = slots
+        .iter()
+        .filter(|s| matches!(s.kind, SlotKind::Word | SlotKind::Rest))
+        .count();
+    Some(if free == 1 {
+        command.to_owned()
+    } else {
+        format!("{command}-{}", slot.name.to_ascii_lowercase())
+    })
 }
 
 /// A path as file histories keep it: under `~` when it is below it, with

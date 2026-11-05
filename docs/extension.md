@@ -135,7 +135,7 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 | `soda.keys(notation)` | 按 Emacs 记法输入按键，如 `soda.keys("foo RET")`，走与键盘相同的路径；要原样输入一段文字时把字符用空格隔开，免得 `RET` 这样的词被读成键 |
 | `soda.prompt(text)` | 打开命令行并预填 `text` |
 | `soda.input(title, [initial], fn, [history])` | 在命令行里要一行文字，回车后以它调用 `fn`；取消时不调用。给了 `history` 时，`M-p` / `M-n` 翻这份历史，回答记入其中，相当于 `read-string` 的 HIST 参数；没给时不翻也不记 |
-| `soda.choose(title, items, fn, [history])` | 从 `items` 中选一项，输入过滤，以从 1 起的序号调用 `fn`；取消时不调用。给了 `history` 时选中的项记入这份历史，较近选过的排在同分项之前，`M-p` 翻出它的文字 |
+| `soda.choose(title, items, fn, [history])` | 在命令行里选一项，相当于 `completing-read`。`items` 是项的数组（文字或 `{ 文字, 说明 }`），以 `fn(文字, 从 1 起的序号)` 调用；或者是参数位类型名（如 `"theme"`、`"file"`、`"buffer"`，见下文），候选、匹配、默认选中和预览都与这种参数位相同，以 `fn(文字)` 调用。取消时不调用。给了 `history` 时选中的项记入这份历史，较近选过的排在同分项之前，`M-p` 翻出它的文字；类型名没给 `history` 时用这种参数位自己的历史 |
 | `soda.hook(event, filter, fn)` / `soda.unhook(id)` | 事件发生时以事件参数调用 `fn`，返回编号；`unhook` 只去掉这一个 |
 | `soda.define_command(name, [doc], fn, [options])` | 定义命令，参数文本整体传给 `fn`；`doc` 显示在按键提示、帮助和补全里，省略时显示命令名；`options.args` 见下文 |
 | `soda.tree(spec)` | 在 `*name*` 文档里显示一棵树，见[树](#树) |
@@ -153,8 +153,8 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 | `soda.lsp.*` | 语言服务器接口，见[语言服务器](lsp.md) |
 
 `soda.define_command` 的 `options.args` 是参数位数组，每项是一种类型或一个表：
-- 类型：`file`（项目文件）、`path`、`buffer`、`option`、`face`、`theme`、`language`、`recent`、`symbol`（当前文档的符号）、`word`、`rest`。写成字符串时参数位必填，名字是类型的大写。
-- 表：`{ name = "SIDE", choices = { { "left", "说明" }, "right" }, optional = true }` 或 `{ name = "FILE", kind = "file" }`。有 `choices` 时补全只能从中选。
+- 类型：`path`、`file`（项目文件）、`recent`、`project`、`buffer`、`current-buffer`（初始选中当前缓冲区）、`option`、`face`、`theme`、`language`、`keymap`、`symbol`（当前文档的符号）、`word`、`rest`，即内置命令用的全部类型（`interaction/slots.rs` 的 `NAMED`）。写成字符串时参数位必填，名字是类型的大写。
+- 表：`{ name = "SIDE", choices = { { "left", "说明" }, "right" }, optional = true }`、`{ name = "FILE", kind = "file" }`，或 `{ name = "BRANCH", candidates = function(done) ... end }`。有 `choices` 时补全只能从中选。`candidates` 在光标进入这个参数位时调用，返回项的数组（文字或 `{ 文字, 说明 }`），或者稍后以数组调用 `done`（如在 `soda.spawn` 的结束函数里）；结果到来之前显示 `[loading]`，补全只能从中选。
 
 最后一个参数位取到行尾，前面的各取一个词；参数文本仍整体交给函数。
 

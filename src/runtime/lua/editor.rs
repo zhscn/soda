@@ -1,7 +1,10 @@
 //! `soda` functions that run commands, read state, talk to the user and
 //! start processes.
 use super::{Host, Runtime};
-use crate::interaction::Command;
+use crate::interaction::{
+    Command,
+    slots::{self, Asked},
+};
 use mlua::{Function, Scope, Table, Value};
 use std::cell::RefCell;
 
@@ -52,7 +55,7 @@ pub(super) fn register<'scope, 'r: 'scope>(
                 runtime.borrow_mut().command(Command::Question {
                     id,
                     title,
-                    initial: initial.unwrap_or_default(),
+                    asked: Asked::Text(initial.unwrap_or_default()),
                     history,
                 });
                 Ok(())
@@ -216,18 +219,33 @@ pub(super) fn register<'scope, 'r: 'scope>(
     soda.set(
         "choose",
         scope.create_function(
-            |_,
-             (title, items, function, history): (
-                String,
-                Vec<String>,
-                Function,
-                Option<String>,
-            )| {
+            |_, (title, items, function, history): (String, Value, Function, Option<String>)| {
+                // Items, or the name of a kind of argument whose
+                // candidates to choose among.
+                let asked = match items {
+                    Value::String(kind) => {
+                        let kind = kind.to_str()?;
+                        let kind = slots::named(&kind).ok_or_else(|| {
+                            mlua::Error::runtime(format!(
+                                "unknown kind {kind}: use items or one of {}",
+                                slots::names()
+                            ))
+                        })?;
+                        Asked::Kind(kind)
+                    }
+                    Value::Table(items) => Asked::Items(
+                        items
+                            .sequence_values::<Value>()
+                            .map(|item| word_item(item?))
+                            .collect::<mlua::Result<_>>()?,
+                    ),
+                    _ => return Err(mlua::Error::runtime("choose among items or a kind")),
+                };
                 let id = host.keep(function)?;
-                runtime.borrow_mut().command(Command::Offer {
+                runtime.borrow_mut().command(Command::Question {
                     id,
                     title,
-                    items,
+                    asked,
                     history,
                 });
                 Ok(())
@@ -429,4 +447,17 @@ fn nodes(list: &Table) -> mlua::Result<Vec<crate::runtime::tree::NodeSpec>> {
             })
         })
         .collect()
+}
+
+/// A word as Lua gives one: its text, or `{ text, doc }`.
+pub(super) fn word_item(value: Value) -> mlua::Result<crate::interaction::slots::Item> {
+    let (text, doc) = match value {
+        Value::Table(pair) => (pair.get(1)?, pair.get::<Option<String>>(2)?),
+        Value::String(text) => (text.to_str()?.to_owned(), None),
+        _ => return Err(mlua::Error::runtime("a word is text or { text, doc }")),
+    };
+    Ok(crate::interaction::slots::Item {
+        text,
+        doc: doc.unwrap_or_default(),
+    })
 }

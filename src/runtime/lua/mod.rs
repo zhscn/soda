@@ -167,12 +167,6 @@ function soda.buffer(path)
   local id = lent("soda.buffer").buffer(path)
   return id and setmetatable({ id = id }, Buffer)
 end
-local choose = soda.choose
-function soda.choose(title, items, answer, history)
-  choose(title, items, function(index)
-    answer(tonumber(index))
-  end, history)
-end
 local tree_show, tree_children = soda.tree_show, soda.tree_children
 soda.tree_show, soda.tree_children = nil, nil
 local tree_ids = 0
@@ -258,6 +252,18 @@ pub(super) enum Request {
         id: u64,
         argument: String,
     },
+    /// An argument's `candidates` function, to list its words.
+    Candidates {
+        function: u64,
+        token: u64,
+    },
+    /// A question's function, with its answer; the function goes once
+    /// called.
+    Answer {
+        id: u64,
+        text: String,
+        index: Option<usize>,
+    },
     Done(Job),
     /// A line a process wrote, for the function streaming it.
     Line {
@@ -286,6 +292,11 @@ enum Answer {
         items: Vec<Item>,
         incomplete: bool,
     },
+    /// The words an argument's `candidates` function listed.
+    Candidates {
+        token: u64,
+        items: Vec<crate::interaction::slots::Item>,
+    },
     /// More about one candidate.
     Resolved {
         source: u64,
@@ -299,6 +310,8 @@ impl From<LuaRequest> for Request {
         match request {
             LuaRequest::Chunk { origin, code } => Self::Chunk { origin, code },
             LuaRequest::Call { id, argument } => Self::Call { id, argument },
+            LuaRequest::Candidates { function, token } => Self::Candidates { function, token },
+            LuaRequest::Answer { id, text, index } => Self::Answer { id, text, index },
         }
     }
 }
@@ -426,6 +439,34 @@ impl Host {
             .get::<Function>(source)?
             .call::<()>((context, sink))
     }
+    /// Calls an argument's `candidates` function with a function to call
+    /// with the words, now or later; words it returns instead are taken
+    /// at once.
+    fn candidates(&self, function: u64, token: u64) -> mlua::Result<()> {
+        let sender = self.answers.0.clone();
+        let send = move |items: Vec<Value>| -> mlua::Result<()> {
+            let items = items
+                .into_iter()
+                .map(editor::word_item)
+                .collect::<mlua::Result<_>>()?;
+            let _ = sender.send(Answer::Candidates { token, items });
+            crate::wake::wake();
+            Ok(())
+        };
+        let done = {
+            let send = send.clone();
+            self.lua
+                .create_function(move |_, items: Vec<Value>| send(items))?
+        };
+        let returned = self
+            .callbacks()?
+            .get::<Function>(function)?
+            .call::<Option<Vec<Value>>>(done)?;
+        match returned {
+            Some(items) => send(items),
+            None => Ok(()),
+        }
+    }
     /// Calls a source's `resolve` with a candidate's key and a function to
     /// call with `{ detail, doc }`, now or later.
     fn resolve(&self, function: u64, source: u64, key: i64) -> mlua::Result<()> {
@@ -490,6 +531,13 @@ impl Host {
                 Request::Chunk { origin, code } => lua.load(code).set_name(origin).exec(),
                 Request::Call { id, argument } => {
                     self.callbacks()?.get::<Function>(id)?.call::<()>(argument)
+                }
+                Request::Candidates { function, token } => self.candidates(function, token),
+                Request::Answer { id, text, index } => {
+                    let callbacks = self.callbacks()?;
+                    let function = callbacks.get::<Function>(id)?;
+                    callbacks.set(id, Value::Nil)?;
+                    function.call::<()>((text, index))
                 }
                 Request::Timer(id) => {
                     let callbacks = self.callbacks()?;
@@ -937,6 +985,11 @@ impl Runtime {
                     detail,
                     doc,
                 } => self.layers.completion_resolved(source, key, detail, doc),
+                Answer::Candidates { token, items } => {
+                    let response = self.layers.candidates_listed(token, items, &self.app);
+                    self.respond(response, self.epoch.elapsed());
+                    true
+                }
             };
         }
         let Some(host) = &self.lua else {

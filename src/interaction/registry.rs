@@ -44,26 +44,11 @@ pub enum SlotKind {
     Item,
     /// A symbol of the current document.
     Symbol,
+    /// Words a Lua function under this id lists as the argument is
+    /// reached.
+    Computed(u64),
     Word,
     Rest,
-}
-impl SlotKind {
-    pub fn requires_match(self) -> bool {
-        matches!(
-            self,
-            Self::File
-                | Self::Buffer
-                | Self::CurrentBuffer
-                | Self::Choice(_)
-                | Self::Option
-                | Self::Face
-                | Self::Theme
-                | Self::Language
-                | Self::Keymap
-                | Self::Recent
-                | Self::Item
-        )
-    }
 }
 /// A word of a `Choice` slot. A key makes the slot's keymap: typed while
 /// the slot is empty, it chooses the word and confirms at once.
