@@ -36,26 +36,38 @@ pub(crate) fn file_label(runtime: &Runtime, document: DocumentId, full: bool) ->
 }
 
 /// A buffer tab: every loaded document has one, with or without a view.
+/// While no window is open the splash has one too, first and active; the
+/// first window to open takes it away, and closing the last brings it back.
 pub(crate) struct Tab {
-    pub document: DocumentId,
+    /// The document, or `None` for the splash.
+    pub document: Option<DocumentId>,
     pub label: String,
     pub dirty: bool,
     pub active: bool,
 }
+/// The splash tab's label.
+pub(crate) const SPLASH: &str = "soda";
+
 pub(crate) fn tabs(runtime: &Runtime) -> Vec<Tab> {
     let app = runtime.app();
     let active = app
         .active_view()
         .and_then(|id| app.view(id))
         .map(|view| view.document_id);
-    app.workspace()
-        .documents()
-        .map(|document| Tab {
-            document,
+    let splash = app.windows().views().is_empty().then(|| Tab {
+        document: None,
+        label: SPLASH.into(),
+        dirty: false,
+        active: true,
+    });
+    splash
+        .into_iter()
+        .chain(app.workspace().documents().map(|document| Tab {
+            document: Some(document),
             label: file_label(runtime, document, false),
             dirty: app.workspace().is_dirty(document),
             active: Some(document) == active,
-        })
+        }))
         .collect()
 }
 /// The title of a window: its document's path and whether it is modified.

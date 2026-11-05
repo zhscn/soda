@@ -238,7 +238,7 @@ pub fn tab_items(
     runtime: &Runtime,
     fonts: &mut Fonts,
     width: f32,
-) -> Vec<(DocumentId, Rect, String)> {
+) -> Vec<(Option<DocumentId>, Rect, String)> {
     let pad = fonts.cell * 1.2;
     let tabs = content::tabs(runtime);
     let widths: Vec<f32> = tabs

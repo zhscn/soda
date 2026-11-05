@@ -452,3 +452,22 @@ fn starting_without_a_file_opens_nothing_and_the_splash_names_keys_in_force() {
     let splash = crate::screen::content::splash(&runtime);
     assert_eq!(splash[0].0, "M-x open");
 }
+#[test]
+fn the_splash_is_a_tab_until_a_window_opens_and_again_after_the_last_closes() {
+    use crate::screen::content::{SPLASH, tabs};
+    let mut runtime = Runtime::new(PathBuf::from("/")).unwrap();
+    runtime.start(None);
+    let shown = |runtime: &Runtime| -> Vec<(bool, String, bool)> {
+        tabs(runtime)
+            .into_iter()
+            .map(|tab| (tab.document.is_none(), tab.label, tab.active))
+            .collect()
+    };
+    assert_eq!(shown(&runtime), [(true, SPLASH.to_string(), true)]);
+    runtime.command(Action::Named("new".into()));
+    let tabs_now = shown(&runtime);
+    assert_eq!(tabs_now.len(), 1);
+    assert!(!tabs_now[0].0 && tabs_now[0].2);
+    runtime.command(Action::Named("close".into()));
+    assert_eq!(shown(&runtime), [(true, SPLASH.to_string(), true)]);
+}

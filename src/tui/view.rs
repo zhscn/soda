@@ -688,41 +688,50 @@ fn splash(buf: &mut Buffer, area: Rect, lines: &[(String, &str)], theme: &Theme)
     }
 }
 
+/// A tab laid out on the row.
+pub(super) struct TabItem {
+    /// The document, or `None` for the splash.
+    pub document: Option<crate::editor::DocumentId>,
+    pub active: bool,
+    pub dirty: bool,
+    /// Its starting column.
+    pub x: u16,
+    pub label: String,
+}
+
 /// Tabs that fit in `width` cells, with their documents, starting columns
 /// and labels; tabs drop from the left until the active one fits.
-pub(super) fn tab_items(
-    runtime: &Runtime,
-    width: u16,
-) -> Vec<(crate::editor::DocumentId, u16, String)> {
-    let tabs = content::tabs(runtime);
-    let active = tabs.iter().find(|tab| tab.active).map(|tab| tab.document);
-    let items: Vec<_> = tabs
+pub(super) fn tab_items(runtime: &Runtime, width: u16) -> Vec<TabItem> {
+    let items: Vec<_> = content::tabs(runtime)
         .into_iter()
         .map(|tab| {
             let dirty = if tab.dirty { " ●" } else { "" };
             let label = format!(" {}{dirty} ", tab.label);
-            (tab.document, screen::plain(&label, 0, usize::from(width)))
+            TabItem {
+                document: tab.document,
+                active: tab.active,
+                dirty: tab.dirty,
+                x: 0,
+                label: screen::plain(&label, 0, usize::from(width)),
+            }
         })
         .collect();
     let widths: Vec<u16> = items
         .iter()
-        .map(|(_, label)| Line::raw(label.as_str()).width() as u16)
+        .map(|item| Line::raw(item.label.as_str()).width() as u16)
         .collect();
-    let index = items
-        .iter()
-        .position(|(id, _)| Some(*id) == active)
-        .unwrap_or(0);
+    let index = items.iter().position(|item| item.active).unwrap_or(0);
     let mut first = 0;
     while first < index && widths[first..=index].iter().sum::<u16>() > width {
         first += 1;
     }
     let mut x = 0u16;
     let mut out = vec![];
-    for ((id, label), item_width) in items.into_iter().zip(widths).skip(first) {
+    for (item, item_width) in items.into_iter().zip(widths).skip(first) {
         if x >= width {
             break;
         }
-        out.push((id, x, label));
+        out.push(TabItem { x, ..item });
         x = x.saturating_add(item_width);
     }
     out
@@ -730,21 +739,16 @@ pub(super) fn tab_items(
 
 fn tabs(buf: &mut Buffer, area: Rect, runtime: &Runtime, theme: &Theme) {
     buf.set_style(area, theme.tabs);
-    let app = runtime.app();
-    let active = app
-        .active_view()
-        .and_then(|id| app.view(id))
-        .map(|view| view.document_id);
-    for (id, offset, label) in tab_items(runtime, area.width) {
-        let x = area.x + offset;
-        let style = if Some(id) == active {
+    for item in tab_items(runtime, area.width) {
+        let x = area.x + item.x;
+        let style = if item.active {
             theme.tab_active
         } else {
             theme.tabs
         };
-        buf.set_stringn(x, area.y, &label, usize::from(area.right() - x), style);
-        if app.workspace().is_dirty(id) {
-            let dot = x + Line::raw(label.as_str()).width() as u16 - 2;
+        buf.set_stringn(x, area.y, &item.label, usize::from(area.right() - x), style);
+        if item.dirty {
+            let dot = x + Line::raw(item.label.as_str()).width() as u16 - 2;
             if dot < area.right() {
                 buf[(dot, area.y)].set_style(theme.modified);
             }

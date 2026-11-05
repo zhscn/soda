@@ -646,7 +646,7 @@ impl Gui {
             let tab = paint::tab_items(runtime, &mut self.fonts, areas.editor.w)
                 .into_iter()
                 .find(|(_, rect, _)| x >= rect.x && x < rect.x + rect.w);
-            if let Some((document, _, _)) = tab {
+            if let Some((Some(document), _, _)) = tab {
                 runtime.input(UserInput::Pointer(Pointer::Document(document)));
             }
             return;

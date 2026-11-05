@@ -60,9 +60,9 @@ impl Mouse {
                 if areas.tabs.is_some_and(inside) {
                     let tab = view::tab_items(runtime, areas.editor.width)
                         .into_iter()
-                        .take_while(|(_, x, _)| *x <= event.column)
+                        .take_while(|item| item.x <= event.column)
                         .last();
-                    if let Some((document, _, _)) = tab {
+                    if let Some(document) = tab.and_then(|item| item.document) {
                         runtime.input(UserInput::Pointer(Pointer::Document(document)));
                     }
                     return;
