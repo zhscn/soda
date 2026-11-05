@@ -6,8 +6,8 @@
 //! The window tree is laid out in columns and rows of the text font and
 //! stretched to fill the editing area. Around the text, words are in a
 //! proportional font, with room around them; panels are rounded, the
-//! gutter has a fringe for flags and no rules, a selection is rounded, and
-//! a thin scroll bar shows while a window scrolls.
+//! gutter has a fringe for flags and a rule after the numbers, a selection
+//! is rounded, and a thin scroll bar shows while a window scrolls.
 use super::{
     render::{Atlas, Instance, OUTLINE, RECT, UNCLIPPED, WAVE},
     text::{Face, Fonts, Kind, UNIT},
@@ -764,6 +764,12 @@ fn editor(
                 painter.band.push(index);
             }
         }
+    }
+    // A rule between the numbers and the text, in the room after them.
+    if window.digits.is_some() {
+        let x = (area.x - cell * 0.5).round();
+        let color = rgba(theme.border.fg, painter.fg);
+        painter.fill(Rect::new(x, window.body.y, 1.0, window.body.h), color, 0.0);
     }
     for (index, row) in text.rows.iter().enumerate() {
         let y = top + index as f32 * line;
