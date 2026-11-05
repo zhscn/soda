@@ -478,17 +478,18 @@ fn styled_row(
         x = end;
     }
     // The line break has no character to show: a beacon caret on it, or a
-    // grab or beacon selection that goes on past it, takes the cell after
-    // the text, as Emacs draws a face on the newline.
+    // selection, grab or beacon selection that goes on past it, takes the
+    // cell after the text, as Emacs draws a face on the newline.
     let line_end = byte_start + text.trim_end_matches(['\n', '\r']).len();
     let mark = mark_of(line_end, line_end + 1);
-    if x >= left && x < right && mark != Mark::None {
+    let selected = selection.start <= line_end && line_end < selection.end;
+    if x >= left && x < right && (selected || mark != Mark::None) {
         let width = measure.column().min(right - x);
         spans.push(Span {
             x: at,
             width,
             text: String::new(),
-            selected: false,
+            selected,
             mark,
             matched: false,
             detail: false,
@@ -1510,6 +1511,23 @@ mod tests {
                 .iter()
                 .all(|s| !s.selected)
         );
+    }
+    #[test]
+    fn selection_over_a_line_break_takes_a_cell_after_the_text() {
+        let tab = NonZeroUsize::new(4).unwrap();
+        let width = |spans: Vec<Span>| {
+            spans
+                .iter()
+                .filter(|s| s.selected)
+                .map(|s| s.width)
+                .sum::<usize>()
+        };
+        assert_eq!(width(row("ab", 0, 1..3, 0, 8, tab)), 2);
+        assert_eq!(width(row("ab", 0, 0..2, 0, 8, tab)), 2);
+        assert_eq!(width(row("", 5, 0..10, 0, 8, tab)), 1);
+        assert_eq!(width(row("", 5, 0..5, 0, 8, tab)), 0);
+        // Not when the line is scrolled past.
+        assert_eq!(width(row("ab", 0, 0..3, 4, 8, tab)), 0);
     }
     #[test]
     fn frame_uses_document_tab_width_and_reveals_caret_after_resize() {
