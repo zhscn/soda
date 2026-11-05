@@ -305,7 +305,9 @@ fn matching_slots_complete_by_cursor_position_and_require_a_candidate() {
     r.input(UserInput::Paste("map ".into()));
     // Choices without keys take typed text.
     keys(&mut r, "no");
-    assert_eq!(rows(&r).len(), 1);
+    // The choice whose name begins so comes first; another whose
+    // description holds the text follows.
+    assert_eq!(rows(&r).len(), 2);
     assert!(rows(&r)[0].starts_with("normal "));
     keys(&mut r, "TAB");
     assert_eq!(text(&r), "map normal ");
@@ -450,10 +452,38 @@ fn every_key_context_is_offered_for_map() {
     let mut r = runtime(root.path());
     r.command(Command::Ex("map tr".into()));
     let rows = rows(&r);
-    assert_eq!(rows.len(), 1);
+    // Fuzzy, as any list of words: typescript has t…r too.
+    assert!(rows.len() > 1, "{rows:?}");
     assert!(rows[0].starts_with("tree "), "{rows:?}");
     keys(&mut r, "TAB");
     assert_eq!(text(&r), "map tree ");
+}
+
+#[test]
+fn words_of_any_slot_match_fuzzily() {
+    let root = tempfile::tempdir().unwrap();
+    let mut r = runtime(root.path());
+    // Not only by how a name begins: every light theme, by name and then
+    // by description.
+    r.command(Command::Ex("theme light".into()));
+    let themes = rows(&r);
+    assert!(themes[0].contains("-light "), "{themes:?}");
+    assert!(
+        themes.iter().any(|row| row.starts_with("nord-light ")),
+        "{themes:?}"
+    );
+    assert!(
+        themes.iter().any(|row| row.starts_with("one-light ")),
+        "{themes:?}"
+    );
+    // Options too, by any part of the name.
+    let mut r = runtime(root.path());
+    r.command(Command::Ex("set trailing".into()));
+    assert!(
+        rows(&r)[0].starts_with("show-trailing-whitespace "),
+        "{:?}",
+        rows(&r)
+    );
 }
 
 #[test]
