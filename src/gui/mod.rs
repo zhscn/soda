@@ -232,6 +232,7 @@ pub const APP_ID: &str = "io.github.zhscn.soda";
 
 /// Run the graphical frontend using the shared owner-thread runtime.
 pub fn run(args: host::Args) -> io::Result<()> {
+    trace("started");
     let mut builder = EventLoop::builder();
     // Without winit's menu, whose Command-Q ends the program at once,
     // Command keys come to the editor: Command-Q asks about unsaved work.
@@ -253,6 +254,7 @@ pub fn run(args: host::Args) -> io::Result<()> {
         args.session,
         Box::new(crate::clipboard::Clipboard::local()),
     )?;
+    trace("configuration and documents loaded");
     // Declared after the event loop, so dropped before it: the runtime's
     // Wayland clipboard uses the loop's connection.
     let mut app = App {
@@ -857,10 +859,12 @@ impl ApplicationHandler for App {
             Ok(window) => Arc::new(window),
             Err(error) => return self.fail(event_loop, error.to_string()),
         };
+        trace("window created");
         let renderer = match Renderer::new(window.clone()) {
             Ok(renderer) => renderer,
             Err(error) => return self.fail(event_loop, error),
         };
+        trace("GPU ready");
         window.set_ime_allowed(false);
         // The window system's clipboard, once there is a window to reach
         // it through; until then, and without it, the clipboard tools.
@@ -869,6 +873,7 @@ impl ApplicationHandler for App {
         }
         let mut gui = Gui::new(renderer, window.scale_factor() as f32);
         gui.measure(&mut self.runtime);
+        trace("fonts ready");
         self.gui = Some(gui);
         window.request_redraw();
     }
@@ -940,6 +945,11 @@ impl ApplicationHandler for App {
                     runtime.input(UserInput::Key(KeyStroke::plain(Key::Char(ch))));
                 }
             }
+            // A frame skipped while hidden is drawn now.
+            WindowEvent::Occluded(false) => {
+                trace("window shown");
+                gui.redraw();
+            }
             WindowEvent::Focused(true) => runtime.input(UserInput::FocusGained),
             WindowEvent::Focused(false) => runtime.input(UserInput::FocusLost),
             WindowEvent::CursorMoved { position, .. } => {
@@ -1007,6 +1017,22 @@ impl ApplicationHandler for App {
             Some(at) => ControlFlow::WaitUntil(at),
             None => ControlFlow::Wait,
         });
+    }
+}
+
+/// With `SODA_TRACE_STARTUP` set, says on stderr how long after the start
+/// each step of starting took, until the first frame: for finding what
+/// keeps a window blank.
+pub(crate) fn trace(step: &str) {
+    use std::sync::OnceLock;
+    static START: OnceLock<Option<std::time::Instant>> = OnceLock::new();
+    let start = START
+        .get_or_init(|| std::env::var_os("SODA_TRACE_STARTUP").map(|_| std::time::Instant::now()));
+    if let Some(start) = start {
+        eprintln!(
+            "soda: {:>7.1} ms  {step}",
+            start.elapsed().as_secs_f64() * 1000.0
+        );
     }
 }
 

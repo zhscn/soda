@@ -175,8 +175,10 @@ impl Fonts {
         let locale = locale();
         let mut db = cosmic_text::fontdb::Database::new();
         db.load_system_fonts();
+        super::trace(&format!("{} system fonts read", db.len()));
         db.set_monospace_family("Noto Sans Mono");
         let fallbacks = Fallbacks::new(&locale);
+        super::trace("fontconfig asked for fallbacks");
         let mut fonts = Self {
             system: FontSystem::new_with_locale_and_db_and_fallback(locale, db, fallbacks),
             swash: SwashCache::new(),

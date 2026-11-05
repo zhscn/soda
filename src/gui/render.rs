@@ -102,6 +102,8 @@ pub struct Renderer {
     pub atlas: Atlas,
     /// How glyph coverage is corrected: `gamma_ratios` and the contrast.
     text: [f32; 8],
+    /// Whether a frame reached the window, which ends the startup trace.
+    presented: bool,
 }
 const ATLAS_SIZE: u32 = 2048;
 impl Renderer {
@@ -312,6 +314,7 @@ impl Renderer {
             capacity,
             atlas: Atlas::new(ATLAS_SIZE),
             text: text_correction(1.8, 1.0),
+            presented: false,
         }
     }
     fn buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
@@ -392,11 +395,28 @@ impl Renderer {
                     (Some(frame), view)
                 }
                 wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
+                    super::trace("frame skipped: the surface changed");
                     surface.configure(&self.device, config);
                     window.request_redraw();
                     return;
                 }
-                _ => return,
+                // No image to draw in yet, as Metal gives none for a while
+                // before the window is on screen: try again, or nothing
+                // draws until the next event and the window stays blank.
+                wgpu::CurrentSurfaceTexture::Timeout => {
+                    super::trace("frame skipped: no image in time");
+                    window.request_redraw();
+                    return;
+                }
+                // Drawn again when it shows; see `Occluded` in the loop.
+                wgpu::CurrentSurfaceTexture::Occluded => {
+                    super::trace("frame skipped: the window is hidden");
+                    return;
+                }
+                _ => {
+                    super::trace("frame skipped: the surface is invalid");
+                    return;
+                }
             },
             Target::Texture { texture, .. } => (
                 None,
@@ -461,6 +481,10 @@ impl Renderer {
         if let (Some(frame), Some(window)) = (frame, self.window()) {
             window.pre_present_notify();
             self.queue.present(frame);
+            if !self.presented {
+                self.presented = true;
+                super::trace("first frame shown");
+            }
         }
     }
     /// The last frame drawn offscreen, as rows of RGBA pixels.
