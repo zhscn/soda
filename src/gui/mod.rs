@@ -639,6 +639,30 @@ impl Gui {
         let measure = Measured::new(&mut self.fonts);
         screen::offset_at(runtime.app(), &measure, width, row, across)
     }
+    /// A middle press on a window's tab closes it, as in `tab-line-mode`.
+    fn middle(&mut self, runtime: &mut Runtime) {
+        let areas = self.areas(runtime);
+        let (x, y) = self.pointer;
+        if runtime.layer().is_some() {
+            return;
+        }
+        let Some(window) = areas.window_at(x, y) else {
+            return;
+        };
+        let Some(row) = window.header.filter(|h| h.contains(x, y)) else {
+            return;
+        };
+        let view = window.view;
+        let tab = paint::tab_items(runtime, Some(view), &mut self.fonts, row.w)
+            .into_iter()
+            .find(|(_, rect, _)| x - row.x >= rect.x && x - row.x < rect.x + rect.w);
+        if let Some((Some(document), _, _)) = tab {
+            if runtime.app().active_view() != Some(view) {
+                runtime.input(UserInput::Pointer(Pointer::Window(view)));
+            }
+            runtime.input(UserInput::Pointer(Pointer::CloseTab(document)));
+        }
+    }
     fn press(&mut self, runtime: &mut Runtime) {
         self.press = None;
         let areas = self.areas(runtime);
@@ -987,6 +1011,14 @@ impl ApplicationHandler for App {
                     gui.edge = None;
                 }
             },
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Middle,
+                ..
+            } => {
+                gui.middle(runtime);
+                gui.redraw();
+            }
             WindowEvent::MouseWheel { delta, .. } => {
                 let step = runtime.app().options().int(None, "scroll-lines") as f32;
                 let (pixels, precise) = match delta {

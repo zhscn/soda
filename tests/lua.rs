@@ -1047,7 +1047,7 @@ fn lua_lists_buffers_and_windows() {
         local windows = soda.windows()
         assert(#windows == 2, #windows)
         assert(windows[1].buffer == buf and windows[1].width == 40)
-        assert(not windows[1].active and windows[2].active)
+        assert(windows[1].active and not windows[2].active)
         soda.message(buf:name())
         "#,
     );

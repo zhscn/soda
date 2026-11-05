@@ -273,6 +273,8 @@ pub enum WindowCommand {
     Resize(Axis, i32),
     /// Makes splits equal and side windows their opening size.
     ResetSizes,
+    /// Takes the window's document out of its row of tabs.
+    CloseTab,
     /// Resizes step by step until Esc.
     ResizeMode,
 }
@@ -1438,10 +1440,17 @@ impl Layers {
                     WindowCommand::Resize(axis, delta) => Event::ResizeWindow { axis, delta },
                     WindowCommand::ResetSizes => Event::ResetWindowSizes,
                     WindowCommand::ResizeMode => unreachable!(),
+                    // A file to open goes to the new window, which takes
+                    // focus for it, as `find-file-other-window`.
                     WindowCommand::Split(axis, path) => {
+                        let follow = path.is_some();
                         response.commands.extend(path.map(Command::OpenPath));
-                        Event::Split(axis)
+                        Event::Split { axis, follow }
                     }
+                    WindowCommand::CloseTab => match app.view(active) {
+                        Some(view) => Event::CloseTab(view.document_id),
+                        None => return Ok(super::InputResult::Handled(response)),
+                    },
                     WindowCommand::Close => Event::CloseWindow(active),
                     WindowCommand::Only => Event::OnlyWindow(active),
                     WindowCommand::Focus(direction) => Event::FocusWindow(direction),

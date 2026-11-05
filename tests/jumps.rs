@@ -217,7 +217,7 @@ fn going_back_focuses_the_window_that_holds_the_place() {
     let Project { mut r, _dir } = project();
     goto(&mut r, 5);
     let first = r.app().active_view().unwrap();
-    keys(&mut r, "C-x 2");
+    keys(&mut r, "C-x 2 C-x o");
     r.command(Command::OpenPath(_dir.path().join("b.txt")));
     wait(&mut r, |r| name(r) == "b.txt");
     assert_eq!(r.app().windows().len(), 2);

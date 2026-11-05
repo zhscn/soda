@@ -53,6 +53,28 @@ impl Mouse {
         };
         let window = areas.window_at(event.column, event.row);
         match event.kind {
+            // A middle press on a window's tab closes it.
+            MouseEventKind::Down(MouseButton::Middle) => {
+                let Some(window) = window.filter(|_| runtime.layer().is_none()) else {
+                    return;
+                };
+                let Some(row) = window.header.filter(|h| inside(*h)) else {
+                    return;
+                };
+                let column = event.column - row.x;
+                let tab = view::tab_items(runtime, Some(window.view), row.width)
+                    .into_iter()
+                    .find(|item| {
+                        let width = ratatui::text::Line::raw(item.label.as_str()).width() as u16;
+                        item.x <= column && column < item.x + width
+                    });
+                if let Some(document) = tab.and_then(|tab| tab.document) {
+                    if runtime.app().active_view() != Some(window.view) {
+                        runtime.input(UserInput::Pointer(Pointer::Window(window.view)));
+                    }
+                    runtime.input(UserInput::Pointer(Pointer::CloseTab(document)));
+                }
+            }
             MouseEventKind::Down(MouseButton::Left) => {
                 self.press = None;
                 // A tab, in the splash's row or a window's, is what a press
@@ -226,7 +248,9 @@ mod tests {
     fn dragging_a_separator_or_a_title_moves_that_edge() {
         let mut runtime = Runtime::new(std::path::PathBuf::from("/")).unwrap();
         runtime.command(crate::interaction::Command::New);
-        for key in KeyStroke::parse_sequence("C-x 3 C-x 2").unwrap() {
+        // Splitting keeps focus, so the right window is split after
+        // moving to it.
+        for key in KeyStroke::parse_sequence("C-x 3 C-x o C-x 2").unwrap() {
             runtime.input(UserInput::Key(key));
         }
         let views = runtime.app().windows().views();

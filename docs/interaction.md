@@ -444,8 +444,9 @@ end)
 | `write [PATH]`、`saveas PATH`、`write-quit` | 保存、另存为、保存后退出 |
 | `buffer NAME`、`recent FILE`、`project FILE`、`project-switch DIR`、`project-root [DIR]` | 切换文档、打开最近或项目中的文件、选一个项目再打开其中的文件、查看或指定项目 |
 | `next-view` | 在当前窗口显示下一个视图，跳过其他窗口中的视图 |
-| `split [PATH]` / `vsplit [PATH]` | 上下 / 左右分屏，新窗口复制当前视图或打开 PATH |
+| `split [PATH]` / `vsplit [PATH]` | 上下 / 左右分屏，新窗口复制当前视图；焦点留在原窗口，同 Emacs 的 `split-window`。给了 PATH 时在新窗口打开它，焦点随之过去，同 `find-file-other-window` |
 | `close-window` / `only` | 关闭当前窗口（视图保留为隐藏）/ 只留当前窗口 |
+| `close-tab` | 把当前文档从这个窗口的标签里去掉，窗口换成旁边的标签；文档不关 |
 | `window-left`、`-right`、`-up`、`-down`、`window-next`、`window-previous` | 切换窗口 |
 | `resize-window [wider\|narrower\|taller\|shorter\|reset [CELLS]]` | 调整当前窗口，默认 1 格；无参数时进入逐步调整模式 |
 | `display KIND PLACEMENT` | 某种文档的显示位置，见[终端界面](ui.md#窗口) |
@@ -692,7 +693,7 @@ Application 拥有一个跨文档共享的剪贴板，它是 Emacs 式的 kill r
 - **单击**：放置光标；点在其他窗口时聚焦那个窗口。
 - **拖动**：从按下处选到当前位置，模式不变。拖到文本区上下边缘之外时选区继续延伸，视口跟随。
 - **滚轮**：每格滚动 `scroll-lines` 行（默认 3），最后一行最多滚到顶部。光标离开可见区时移到最近的可见行，保持列；有选区时移动的是选区头。
-- **标签栏**：单击切换到该文档，同 `buffer`。
+- **标签栏**：单击切换到该文档，同 `buffer`；中键点击同 `close-tab`，关的是那个标签。
 - **窗口边**：拖动分隔线调整窗口大小。
 - 有模态层（命令行、搜索、帮助等）时，编辑区不响应鼠标。
 

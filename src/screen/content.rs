@@ -36,10 +36,10 @@ pub(crate) fn file_label(runtime: &Runtime, document: DocumentId, full: bool) ->
 }
 
 /// A buffer tab. Each window has a row of them, as Emacs's `tab-line-mode`
-/// gives each window its own: every loaded document, with or without a
-/// view, the one the window shows active. A side window, which holds
-/// results, has its own tab alone. While no window is open one row shows
-/// the splash's tab, first and active, before the documents.
+/// gives each window its own: the documents the window has shown, in the
+/// order they first came, the one it shows active. A side window, which
+/// holds results, has its own tab alone. While no window is open one row
+/// shows the splash's tab, first and active, before the open documents.
 pub(crate) struct Tab {
     /// The document, or `None` for the splash.
     pub document: Option<DocumentId>,
@@ -62,19 +62,22 @@ pub(crate) fn tabs(runtime: &Runtime, window: Option<ViewId>) -> Vec<Tab> {
         dirty: app.workspace().is_dirty(document),
         active: Some(document) == active,
     };
-    if let Some(document) =
-        active.filter(|_| window.is_some_and(|w| app.windows().side(w).is_some()))
-    {
-        return vec![tab(document)];
+    if let Some(window) = window {
+        // A side window has no row of its own.
+        let mut documents = app.windows().tabs(window).to_vec();
+        // Until the row catches up, the document shown is in it.
+        if let Some(active) = active.filter(|active| !documents.contains(active)) {
+            documents.push(active);
+        }
+        return documents.into_iter().map(tab).collect();
     }
-    let splash = window.is_none().then(|| Tab {
+    let splash = Tab {
         document: None,
         label: SPLASH.into(),
         dirty: false,
         active: true,
-    });
-    splash
-        .into_iter()
+    };
+    std::iter::once(splash)
         .chain(app.workspace().documents().map(tab))
         .collect()
 }

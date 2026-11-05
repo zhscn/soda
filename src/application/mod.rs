@@ -80,9 +80,16 @@ pub enum Event {
     AddView(DocumentId),
     Focus(ViewId),
     CloseView(ViewId),
-    /// Splits the active window; the new window shows a copy of its view
-    /// and takes focus.
-    Split(Axis),
+    /// Splits the active window; the new window shows a copy of its view.
+    /// Focus stays, as with Emacs's `split-window`, unless `follow`.
+    Split {
+        axis: Axis,
+        follow: bool,
+    },
+    /// Takes a document out of the active window's row of tabs, as
+    /// `tab-line-close-tab` buries a buffer: it stays open. The window
+    /// showing it turns to the tab beside it.
+    CloseTab(DocumentId),
     /// Closes a window; its view stays open, hidden.
     CloseWindow(ViewId),
     /// Closes every window but the one of this view.
@@ -373,6 +380,8 @@ pub enum Error {
     UnknownView,
     LastWindow,
     SideWindow,
+    /// The tab to close is the window's only one.
+    LastTab,
     /// No edge of the window can move that way.
     CannotResize,
     NoHighlight,
@@ -403,6 +412,7 @@ impl fmt::Display for Error {
             Self::UnknownView => f.write_str("unknown view"),
             Self::LastWindow => f.write_str("cannot close the last window"),
             Self::SideWindow => f.write_str("side windows cannot be split"),
+            Self::LastTab => f.write_str("cannot close the window's only tab"),
             Self::CannotResize => f.write_str("the window cannot change size that way"),
             Self::NoHighlight => f.write_str("no such highlight"),
             Self::NoFlags => f.write_str("no such flags"),
@@ -422,6 +432,7 @@ impl std::error::Error for Error {
             Self::UnknownView
             | Self::LastWindow
             | Self::SideWindow
+            | Self::LastTab
             | Self::CannotResize
             | Self::NoHighlight
             | Self::NoFlags
@@ -763,6 +774,58 @@ impl Application {
         if active != self.active {
             self.focus(active);
         }
+    }
+    /// Every window's row of tabs after the windows or documents changed.
+    fn sync_tabs(&mut self) {
+        let views = &self.views;
+        let workspace = &self.workspace;
+        self.windows.sync_tabs(
+            &|view| views.get(&view).map(|view| view.document_id),
+            &|document| workspace.editor(document).is_some(),
+        );
+    }
+    fn close_tab(&mut self, document: DocumentId, update: &mut Update) -> Result<(), Error> {
+        let active = self.active.ok_or(Error::UnknownView)?;
+        if self.windows.side(active).is_some() {
+            return Err(Error::SideWindow);
+        }
+        let shown = self
+            .views
+            .get(&active)
+            .ok_or(Error::UnknownView)?
+            .document_id;
+        if document != shown {
+            self.windows.drop_tab(active, document);
+            return Ok(());
+        }
+        // The tab after it, or with none, the one before.
+        let tabs = self.windows.tabs(active);
+        let next = tabs
+            .iter()
+            .position(|tab| *tab == document)
+            .and_then(|at| tabs.get(at + 1).or_else(|| tabs.get(at.checked_sub(1)?)))
+            .copied()
+            .ok_or(Error::LastTab)?;
+        let shown = self.windows.views();
+        let hidden = self
+            .recent
+            .iter()
+            .rev()
+            .chain(self.views.keys())
+            .copied()
+            .find(|id| self.views[id].document_id == next && !shown.contains(id));
+        let view = match hidden {
+            Some(view) => view,
+            None => {
+                let view = self.add_view(next)?;
+                update.changed_views.push(view);
+                view
+            }
+        };
+        self.windows.replace(Some(active), view);
+        self.windows.drop_tab(view, document);
+        self.focus(Some(view));
+        Ok(())
     }
     /// A new view of the same document, selection and scroll position.
     fn copy_view(&mut self, view: ViewId) -> Result<ViewId, Error> {
@@ -1322,7 +1385,7 @@ impl Application {
                 let file = self.workspace.relocate(document, path)?;
                 self.accept_file(file, None, &mut update);
             }
-            Event::Split(axis) => {
+            Event::Split { axis, follow } => {
                 let active = self.active.ok_or(Error::UnknownView)?;
                 if self.windows.side(active).is_some() {
                     return Err(Error::SideWindow);
@@ -1330,8 +1393,11 @@ impl Application {
                 let view = self.copy_view(active)?;
                 update.changed_views.push(view);
                 self.windows.split(active, view, axis);
-                self.focus(Some(view));
+                if follow {
+                    self.focus(Some(view));
+                }
             }
+            Event::CloseTab(document) => self.close_tab(document, &mut update)?,
             Event::CloseWindow(view) => {
                 self.views.get(&view).ok_or(Error::UnknownView)?;
                 if !self.windows.contains(view) {
@@ -1624,6 +1690,7 @@ impl Application {
                 }
             }
         }
+        self.sync_tabs();
         update.active_changed = before != self.active;
         update.windows_changed = windows != self.windows;
         update.changed_views.sort_unstable();

@@ -70,7 +70,23 @@ impl Application {
             })
             .collect();
         let find = |view: ViewId| index.get(&view).copied();
+        // Each split window's tabs, by its view, as documents.
+        let tabs: Vec<Value> = self
+            .windows
+            .views()
+            .into_iter()
+            .filter_map(|view| {
+                let tabs: Vec<usize> = self
+                    .windows
+                    .tabs(view)
+                    .iter()
+                    .filter_map(|tab| documents.iter().position(|d| d == tab))
+                    .collect();
+                Some(json!([find(view)?, tabs]))
+            })
+            .collect();
         json!({
+            "tabs": tabs,
             "documents": saved_documents,
             "views": saved_views,
             "windows": self.windows.save(&find),
@@ -194,6 +210,23 @@ impl Application {
             .map_or_else(Windows::default, |saved| {
                 windows::Windows::load(saved, &find)
             });
+        for pair in list("tabs") {
+            let Some(view) = pair
+                .get(0)
+                .and_then(Value::as_u64)
+                .and_then(|i| find(i as usize))
+            else {
+                continue;
+            };
+            let tabs = pair
+                .get(1)
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|i| documents.get(i.as_u64()? as usize).copied().flatten())
+                .collect();
+            self.windows.set_tabs(view, tabs);
+        }
         self.recent = list("recent")
             .iter()
             .filter_map(|index| find(index.as_u64()? as usize))
@@ -206,6 +239,7 @@ impl Application {
         if let Some(active) = active {
             self.focus(Some(active));
         }
+        self.sync_tabs();
         // Hooks see each document come, as when it was first opened.
         for document in documents.into_iter().flatten() {
             let Some(view) = views

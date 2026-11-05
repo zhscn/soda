@@ -41,18 +41,22 @@ fn splits_copy_the_view_and_focus_moves_between_windows() {
     let mut r = runtime("one\ntwo");
     let first = r.app().active_view().unwrap();
     keys(&mut r, "C-x 3");
-    let second = r.app().active_view().unwrap();
+    // Focus stays, as with Emacs's split-window.
+    assert_eq!(r.app().active_view(), Some(first));
+    let second = r.app().windows().views()[1];
     assert_ne!(first, second);
     assert_eq!(r.app().windows().views(), [first, second]);
     // The new window shows the same document at the same place, with a
     // selection of its own.
+    keys(&mut r, "C-x o");
+    assert_eq!(r.app().active_view(), Some(second));
     assert_eq!(caret(&r), 2);
     keys(&mut r, "j");
     keys(&mut r, "C-c H");
     assert_eq!(r.app().active_view(), Some(first));
     assert_eq!(caret(&r), 2);
     keys(&mut r, "C-x 2");
-    let third = r.app().active_view().unwrap();
+    let third = r.app().windows().views()[1];
     assert_eq!(
         r.app().windows().root(),
         Some(&Node::Split {
@@ -68,6 +72,8 @@ fn splits_copy_the_view_and_focus_moves_between_windows() {
             weights: vec![1; 2],
         })
     );
+    keys(&mut r, "C-c J");
+    assert_eq!(r.app().active_view(), Some(third));
     keys(&mut r, "C-c K");
     assert_eq!(r.app().active_view(), Some(first));
     keys(&mut r, "C-c L");
@@ -88,6 +94,7 @@ fn documents_shown_in_a_window_replace_its_view_and_closing_repairs_windows() {
     let mut r = runtime("one");
     let first = r.app().active_view().unwrap();
     r.command(Command::Window(WindowCommand::Split(Axis::Columns, None)));
+    keys(&mut r, "C-x o");
     let right = r.app().active_view().unwrap();
     r.command(Command::New);
     let new = r.app().active_view().unwrap();
@@ -262,7 +269,7 @@ fn resize_mode_moves_the_edge_until_escape_and_reset_evens_it() {
     let mut r = runtime("one\ntwo");
     r.set_editing_area(81, 20);
     let first = r.app().active_view().unwrap();
-    keys(&mut r, "C-x 3");
+    keys(&mut r, "C-x 3 C-x o");
     let second = r.app().active_view().unwrap();
     let width = |r: &Runtime, view| r.app().window_area(view).unwrap().width;
     assert_eq!((width(&r, first), width(&r, second)), (40, 40));
@@ -298,7 +305,7 @@ fn a_tab_shows_its_document_in_its_window_even_one_another_window_shows() {
     let document = |r: &Runtime, view| r.app().view(view).unwrap().document_id;
     let first = r.app().active_view().unwrap();
     let a = document(&r, first);
-    keys(&mut r, "C-x 3");
+    keys(&mut r, "C-x 3 C-x o");
     r.command(Command::New);
     let second = r.app().active_view().unwrap();
     assert_ne!(document(&r, second), a);
@@ -311,4 +318,35 @@ fn a_tab_shows_its_document_in_its_window_even_one_another_window_shows() {
     // Its tab in its own window's row leaves things as they are.
     r.input(UserInput::Pointer(Pointer::Document(a)));
     assert_eq!(r.app().windows().views(), windows);
+}
+#[test]
+fn each_window_has_the_tabs_of_what_it_showed_and_closing_one_keeps_the_document() {
+    let mut r = runtime("one");
+    let document = |r: &Runtime, view| r.app().view(view).unwrap().document_id;
+    let tabs = |r: &Runtime, at: usize| {
+        let view = r.app().windows().views()[at];
+        r.app().windows().tabs(view).to_vec()
+    };
+    let a = document(&r, r.app().active_view().unwrap());
+    keys(&mut r, "C-x 3 C-x o");
+    r.command(Command::New);
+    let b = document(&r, r.app().active_view().unwrap());
+    // A document opened in one window is a tab there only.
+    assert_eq!(tabs(&r, 0), [a]);
+    assert_eq!(tabs(&r, 1), [a, b]);
+    // Going back to a tab keeps the order.
+    r.input(UserInput::Pointer(soda::interaction::Pointer::Document(a)));
+    assert_eq!(tabs(&r, 1), [a, b]);
+    // Closing the tab shown turns the window to the one beside it; the
+    // document stays open.
+    r.command(Command::Named("close-tab".into()));
+    assert_eq!(document(&r, r.app().active_view().unwrap()), b);
+    assert_eq!(tabs(&r, 1), [b]);
+    assert!(r.app().workspace().editor(a).is_some());
+    assert_eq!(tabs(&r, 0), [a]);
+    r.command(Command::Named("close-tab".into()));
+    assert!(r.message().contains("only tab"), "{}", r.message());
+    // A new split starts with the document it shows alone.
+    keys(&mut r, "C-x 2");
+    assert_eq!(tabs(&r, 2), [b]);
 }

@@ -78,7 +78,7 @@ fn a_session_comes_back_with_its_windows_and_unsaved_text_but_no_undo() {
         anchor: 6,
         head: 10,
     })));
-    keys(&mut r, "C-x 3");
+    keys(&mut r, "C-x 3 C-x o");
     open(&mut r, &root.join("b.txt"));
     r.command(Command::Edit(Edit::InsertText("X".into())));
     // An untitled draft, hidden behind b.txt.
@@ -179,4 +179,34 @@ fn restart_quits_without_asking_about_unsaved_text() {
     r.command(Command::Named("restart".into()));
     assert!(r.quit_requested() && r.restart_requested());
     assert!(r.layer().is_none(), "nothing is asked");
+}
+#[test]
+fn a_session_keeps_each_windows_tabs() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    std::fs::write(root.join("a.txt"), "alpha\n").unwrap();
+    std::fs::write(root.join("b.txt"), "one\n").unwrap();
+    let mut r = Runtime::new(root.clone()).unwrap();
+    open(&mut r, &root.join("a.txt"));
+    keys(&mut r, "C-x 3 C-x o");
+    open(&mut r, &root.join("b.txt"));
+    let names = |r: &Runtime| -> Vec<Vec<String>> {
+        let app = r.app();
+        app.windows()
+            .views()
+            .iter()
+            .map(|view| {
+                app.windows()
+                    .tabs(*view)
+                    .iter()
+                    .map(|d| app.document_name(*d))
+                    .collect()
+            })
+            .collect()
+    };
+    let before = names(&r);
+    assert_eq!(before[1].len(), 2, "{before:?}");
+    let mut again = Runtime::new(root.clone()).unwrap();
+    again.resume(&r.session());
+    assert_eq!(names(&again), before);
 }

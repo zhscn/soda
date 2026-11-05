@@ -710,8 +710,9 @@ pub(super) fn tab_items(runtime: &Runtime, window: Option<ViewId>, width: u16) -
     }
     let mut x = 0u16;
     let mut out = vec![];
+    // A tab that does not fit whole is left out.
     for (item, item_width) in items.into_iter().zip(widths).skip(first) {
-        if x >= width {
+        if x.saturating_add(item_width) > width && !out.is_empty() {
             break;
         }
         out.push(TabItem { x, ..item });

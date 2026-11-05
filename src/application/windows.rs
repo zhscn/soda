@@ -4,7 +4,14 @@
 //! resized, and a split never holds a single child. Beside the tree, a
 //! bottom and a right side window, as in Emacs, show result lists at a
 //! size of their own and are never split.
+//!
+//! Each split window keeps its row of tabs, as Emacs's `tab-line-mode`
+//! keeps a window's previous buffers: the documents it has shown, in the
+//! order they first came. The row belongs to the window, not its view: it
+//! stays when another view takes the window's place and goes with it.
 use super::ViewId;
+use crate::editor::DocumentId;
+use std::collections::BTreeMap;
 
 /// How a split arranges its children.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -49,6 +56,13 @@ pub enum Node {
     },
 }
 impl Node {
+    /// The views of the windows within, in order.
+    fn windows(&self, out: &mut Vec<ViewId>) {
+        match self {
+            Node::Window(view) => out.push(*view),
+            Node::Split { children, .. } => children.iter().for_each(|c| c.windows(out)),
+        }
+    }
     /// The areas of a split's children within `area`. Side-by-side
     /// children leave a column between them.
     fn areas(&self, area: Area) -> Vec<Area> {
@@ -136,8 +150,49 @@ pub struct Windows {
     right: Option<(ViewId, u16)>,
     /// The sizes the side windows were opened at, which a reset restores.
     opened: [u16; 2],
+    /// Each split window's tabs, by the view it shows.
+    tabs: BTreeMap<ViewId, Vec<DocumentId>>,
 }
 impl Windows {
+    /// The documents in the row of tabs of the window of `view`, in order;
+    /// empty for a side window.
+    pub fn tabs(&self, view: ViewId) -> &[DocumentId] {
+        self.tabs.get(&view).map_or(&[], Vec::as_slice)
+    }
+    /// Gives the window of `view` its row of tabs, as a session saved it.
+    pub(super) fn set_tabs(&mut self, view: ViewId, tabs: Vec<DocumentId>) {
+        if self.side(view).is_none() && self.contains(view) {
+            self.tabs.insert(view, tabs);
+        }
+    }
+    /// Takes `document` out of the row of tabs of the window of `view`.
+    pub(super) fn drop_tab(&mut self, view: ViewId, document: DocumentId) {
+        if let Some(tabs) = self.tabs.get_mut(&view) {
+            tabs.retain(|tab| *tab != document);
+        }
+    }
+    /// Brings every row of tabs up to date: closed documents go, and each
+    /// window's document joins its row at the end the first time it shows.
+    pub(super) fn sync_tabs(
+        &mut self,
+        document: &dyn Fn(ViewId) -> Option<DocumentId>,
+        open: &dyn Fn(DocumentId) -> bool,
+    ) {
+        let mut windows = vec![];
+        if let Some(root) = &self.root {
+            root.windows(&mut windows);
+        }
+        self.tabs.retain(|view, _| windows.contains(view));
+        for view in windows {
+            let tabs = self.tabs.entry(view).or_default();
+            tabs.retain(|tab| open(*tab));
+            if let Some(shown) = document(view)
+                && !tabs.contains(&shown)
+            {
+                tabs.push(shown);
+            }
+        }
+    }
     /// The split windows, without the side windows.
     pub fn root(&self) -> Option<&Node> {
         self.root.as_ref()
@@ -186,15 +241,9 @@ impl Windows {
     /// Visible views: split windows top to bottom and left to right, then
     /// the right and bottom side windows.
     pub fn views(&self) -> Vec<ViewId> {
-        fn walk(node: &Node, out: &mut Vec<ViewId>) {
-            match node {
-                Node::Window(view) => out.push(*view),
-                Node::Split { children, .. } => children.iter().for_each(|c| walk(c, out)),
-            }
-        }
         let mut out = vec![];
         if let Some(root) = &self.root {
-            walk(root, &mut out);
+            root.windows(&mut out);
         }
         out.extend(self.right.map(|(id, _)| id));
         out.extend(self.bottom.map(|(id, _)| id));
@@ -230,8 +279,13 @@ impl Windows {
         }
         if self.is_empty() {
             self.root = Some(Node::Window(new));
-        } else if let Some(node) = old.and_then(|old| self.find(old)) {
+        } else if let Some(old) = old
+            && let Some(node) = self.find(old)
+        {
             *node = Node::Window(new);
+            if let Some(tabs) = self.tabs.remove(&old) {
+                self.tabs.insert(new, tabs);
+            }
         }
     }
     /// Splits the window of `at`, putting `new` after it.
@@ -299,6 +353,7 @@ impl Windows {
             }
             true
         }
+        self.tabs.remove(&view);
         match &mut self.root {
             Some(Node::Window(id)) if *id == view => self.root = None,
             Some(root) => {
@@ -312,6 +367,7 @@ impl Windows {
         self.root = Some(Node::Window(view));
         self.bottom = None;
         self.right = None;
+        self.tabs.retain(|id, _| *id == view);
     }
     /// Each window's area within `area`. Side-by-side windows leave one
     /// column between them for a separator. The bottom side window spans
@@ -620,6 +676,7 @@ impl Windows {
             bottom: side("bottom"),
             right: side("right"),
             opened: [opened(0), opened(1)],
+            tabs: BTreeMap::new(),
         }
     }
     /// The window next to `view` in a direction: among those beyond its

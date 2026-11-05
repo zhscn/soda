@@ -19,6 +19,9 @@ pub enum Pointer {
     /// Shows a document in the focused window, as a tab of its row does
     /// in Emacs's `tab-line-mode`: even one another window shows.
     Document(DocumentId),
+    /// Takes a document out of the focused window's row of tabs, as a
+    /// middle click on a tab does in `tab-line-mode`.
+    CloseTab(DocumentId),
     /// Focuses the window showing a view.
     Window(ViewId),
     /// Moves the right or bottom edge of a window by cells.
@@ -69,6 +72,10 @@ impl Layers {
                         None => Event::AddView(document),
                     });
                 }
+                return InputResult::Handled(response);
+            }
+            Pointer::CloseTab(document) => {
+                response.events.push(Event::CloseTab(document));
                 return InputResult::Handled(response);
             }
             Pointer::Window(view) => {

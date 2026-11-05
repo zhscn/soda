@@ -259,11 +259,12 @@ pub fn tab_items(
     while first < active && widths[first..=active].iter().sum::<f32>() > width {
         first += 1;
     }
-    // Side by side from the left edge, each line between two shared.
+    // Side by side from the left edge, each line between two shared; a
+    // tab that does not fit whole is left out.
     let mut x = 0.0;
     let mut out = vec![];
     for (tab, w) in tabs.into_iter().zip(widths).skip(first) {
-        if x >= width {
+        if x + w > width && !out.is_empty() {
             break;
         }
         out.push((tab.document, Rect::new(x, 0.0, w, 0.0), tab.label));
@@ -649,6 +650,8 @@ fn tab_bar(
     current: bool,
 ) {
     let theme = painter.theme;
+    // A tab wider than the window stops at its edge.
+    painter.clip_to(area);
     let (_, bg) = painter.colors(theme.tabs);
     painter.fill(area, bg.unwrap_or(painter.bg), 0.0);
     let line = painter.fonts.line;
@@ -711,6 +714,7 @@ fn tab_bar(
         }
         None => edge(painter, area.x, y, area.w),
     }
+    painter.unclip();
 }
 
 /// The line between the text and what frames it, in the color of the line
@@ -720,14 +724,20 @@ fn edge(painter: &mut Painter, x: f32, y: f32, width: f32) {
     painter.fill(Rect::new(x, y, width, 1.0), color, 0.0);
 }
 
-/// Side-by-side windows have a thin line between them.
+/// Windows have a thin line between them: side by side, in the column
+/// between; one above another, along the top of the lower one, where
+/// Emacs has the upper one's mode line.
 fn separators(painter: &mut Painter, areas: &Areas) {
     let color = rgba(painter.theme.border.fg, painter.fg);
     for window in &areas.windows {
-        let right = window.area.right();
+        let area = window.area;
+        let right = area.right();
         if right + 1.0 < areas.editor.right() {
             let x = (right + areas.scale.0 / 2.0).floor();
-            painter.fill(Rect::new(x, window.area.y, 1.0, window.area.h), color, 0.0);
+            painter.fill(Rect::new(x, area.y, 1.0, area.h), color, 0.0);
+        }
+        if area.y > areas.editor.y + 1.0 {
+            painter.fill(Rect::new(area.x, area.y.round(), area.w, 1.0), color, 0.0);
         }
     }
 }
@@ -765,10 +775,11 @@ fn editor(
             }
         }
     }
-    // A rule between the numbers and the text, in the room after them.
+    // A rule between the numbers and the text, in the room after them,
+    // fainter than the lines between windows so as not to pass for one.
     if window.digits.is_some() {
         let x = (area.x - cell * 0.5).round();
-        let color = rgba(theme.border.fg, painter.fg);
+        let color = faded(rgba(theme.border.fg, painter.fg), 0.5);
         painter.fill(Rect::new(x, window.body.y, 1.0, window.body.h), color, 0.0);
     }
     for (index, row) in text.rows.iter().enumerate() {

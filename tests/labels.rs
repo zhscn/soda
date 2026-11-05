@@ -75,12 +75,14 @@ fn windows_are_picked_by_label() {
     let mut r = runtime("x");
     let first = r.app().active_view().unwrap();
     keys(&mut r, "M-x vsplit RET");
-    let second = r.app().active_view().unwrap();
+    let second = r.app().windows().views()[1];
     // With two windows, the other one is taken at once.
+    keys(&mut r, "SPC w");
+    assert_eq!(r.app().active_view(), Some(second));
     keys(&mut r, "SPC w");
     assert_eq!(r.app().active_view(), Some(first));
     keys(&mut r, "M-x split RET");
-    let third = r.app().active_view().unwrap();
+    let third = r.app().windows().views()[1];
     keys(&mut r, "SPC w");
     let shown = labels(&r);
     assert_eq!(shown.len(), 3);

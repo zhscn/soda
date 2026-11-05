@@ -562,6 +562,11 @@ pub static BUILTINS: &[Builtin] = &[
         Command::Window(WindowCommand::Close)
     ),
     builtin!(
+        "close-tab",
+        "Take the document out of the window's tabs and show the tab beside it; it stays open",
+        Command::Window(WindowCommand::CloseTab)
+    ),
+    builtin!(
         "only",
         "Close every other window",
         Command::Window(WindowCommand::Only)
