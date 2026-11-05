@@ -1319,14 +1319,32 @@ fn structure(
         }
     };
     match query {
+        // As meow-block: without a selection, the first block that closes
+        // after the caret, so one later at the caret's level before the
+        // one around it; with one, the block around it.
         Query::Block => {
-            let next = range
-                .is_empty()
-                .then(|| editor.item(range.start, crate::language::Side::After));
-            let item = next.and_then(Result::ok).flatten();
-            let group = match item {
-                Some(item) if item.kind == crate::language::ItemKind::Group => item.range,
-                _ => climb(editor, range.start, None)?.range(),
+            let mut next = None;
+            let mut at = range.start;
+            while range.is_empty() {
+                let Some(item) = editor
+                    .item(at, crate::language::Side::After)
+                    .ok()
+                    .flatten()
+                else {
+                    break;
+                };
+                if item.kind == crate::language::ItemKind::Group {
+                    next = Some(item.range);
+                    break;
+                }
+                if item.range.end <= at {
+                    break;
+                }
+                at = item.range.end;
+            }
+            let group = match next {
+                Some(group) => group,
+                None => climb(editor, range.start, None)?.range(),
             };
             let backward = selection.anchor > selection.head;
             let (anchor, head) = if backward {
