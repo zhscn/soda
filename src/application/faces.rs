@@ -69,6 +69,10 @@ pub const UI_FACES: &[(&str, &str)] = &[
     ("tab-active", "The current document's tab"),
     ("border", "Separators between windows"),
     (
+        "paren-match",
+        "The bracket at the caret and the one that matches it, as show-paren-mode",
+    ),
+    (
         "inactive-window",
         "Windows other than the focused one; their background, bg:default to leave them as it",
     ),

@@ -21,6 +21,8 @@
 | 状态栏 | 左：模式（模态编辑时为 NORMAL、INSERT、BEACON，否则不显示；交互层打开时为 COMMAND、SEARCH、REPLACE、SAVING、HELP、JUMP、RESIZE）、相对项目根的路径、`[+]` 与保存中标记、光标的行:列。右：`recording`、未完成的按键、`searching…`/`run…`/`running…`、扩展用 `soda.status` 设置的段落、错误和警告数（`E3 W1`）、服务当前文档的语言服务器名（`soda.lsp.server` 的 `name`，暗色）、语言名。 |
 | 消息行 | 输入层（搜索、替换、保存等）的输入；否则依次是 `soda.hint` 的文字、光标处注记的第一行、最近的消息。新消息盖过注记，下一个键后注记回来。不带文件启动时不建文档，关掉最后一个文档后也一样：编辑区是启动页，列出打开文件、找项目文件、新建、运行命令和帮助，每项写当时生效的按键（像 Emacs 的 `where-is`，被前面键位表遮住的不算）；没有按键的写成运行命令的键加命令名，如 `M-x new`。 |
 
+光标后是开括号、或光标前是闭括号时，它和配对的那个用 `paren-match` 标出（同 Emacs 的 `show-paren-mode`，先看光标后），只在当前窗口。配对用语言的结构，所以 C++ 字符串和注释里的括号不算；文本改了还没重新找时不画。选项 `show-paren` 关闭。
+
 行尾显示这一行最严重的注记（诊断等 `soda.note` 写下的）的第一行，同行还有别的时加 `(+N)`，颜色是 `note-error`、`note-warning`、`note-info`；开了 `wrap` 时在折行的最后一段。选项 `inline-notes` 关闭。
 
 文本按语法着色，见[语法高亮](syntax.md)；状态栏的语言名来自高亮所用的语言，未识别时为 text。
@@ -127,7 +129,7 @@ soda.set("theme", "paper")
 
 `face NAME [SPEC]`（Lua：`soda.face(name, spec)`）覆盖一个具名部分的颜色和属性。SPEC 是若干词：`fg:#rrggbb`、`bg:#rrggbb`（`default` 为终端自己的颜色），属性 `bold`、`italic`、`underline`、`dim`、`reverse`、`strikethrough`。没写的颜色沿用主题；写了任何属性就替换主题的属性，`plain` 表示无属性。不带 SPEC 时恢复。Lua 的 spec 也可以是表 `{ fg = "#ff0000", bold = true }`，`nil` 恢复。随时执行，下一帧生效。
 
-名字有界面部分（`text`、`selection`、`cursor-line`、`gutter`、`gutter-current`、`status`、`mode-normal`、`mode-insert`、`mode-beacon`、`mode-prompt`、`secondary-selection`、`beacon-selection`、`beacon-cursor`、`title`、`border`、`inactive-window`、`float`、`float-border`、`label`、`todo`、`note-error`、`note-warning`、`note-info`、`reference`、`reference-write`、`snippet`、`unnecessary`、`deprecated`、`mark1`…`mark8` 等，完整列表和说明见 `src/application/faces.rs`，命令行可补全）和语法分类 `syntax.comment`、`syntax.keyword`、`syntax.function.definition` 等。带点的语法 face 继承点前面的那个（见[语法分类](syntax.md#分类)）：`face syntax.function bold` 也作用于没单独设置的 `syntax.function.call`。
+名字有界面部分（`text`、`selection`、`cursor-line`、`gutter`、`gutter-current`、`status`、`mode-normal`、`mode-insert`、`mode-beacon`、`mode-prompt`、`secondary-selection`、`beacon-selection`、`beacon-cursor`、`title`、`border`、`paren-match`、`inactive-window`、`float`、`float-border`、`label`、`todo`、`note-error`、`note-warning`、`note-info`、`reference`、`reference-write`、`snippet`、`unnecessary`、`deprecated`、`mark1`…`mark8` 等，完整列表和说明见 `src/application/faces.rs`，命令行可补全）和语法分类 `syntax.comment`、`syntax.keyword`、`syntax.function.definition` 等。带点的语法 face 继承点前面的那个（见[语法分类](syntax.md#分类)）：`face syntax.function bold` 也作用于没单独设置的 `syntax.function.call`。
 
 光标形状跟随模式：Normal 和 Beacon 为方块，Insert 和输入框为竖线。
 

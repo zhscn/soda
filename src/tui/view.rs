@@ -1242,6 +1242,41 @@ mod tests {
         assert!(!last(&mut r).contains("boom"));
     }
     #[test]
+    fn the_bracket_at_the_caret_and_its_match_stand_out() {
+        let mut r = Runtime::new(std::path::PathBuf::from("/")).unwrap();
+        r.command(Command::New);
+        r.command(Command::Edit(crate::editor::Command::InsertText(
+            "f(a [b])".into(),
+        )));
+        let theme = Theme::build(crate::application::themes::DEFAULT, &Default::default());
+        let lit = theme.paren_match.bg.unwrap();
+        // The row of text is below the tab row; columns past the gutter.
+        let row = |r: &mut Runtime| -> Vec<bool> {
+            let buffer = draw(r, 60, 14);
+            let x = (0..60).find(|x| buffer[(*x, 1)].symbol() == "f").unwrap();
+            (x..x + 8).map(|x| buffer[(x, 1)].bg == lit).collect()
+        };
+        // After the closer: it and the opener.
+        let lit_at = |r: &mut Runtime| -> Vec<usize> {
+            row(r)
+                .iter()
+                .enumerate()
+                .filter(|(_, l)| **l)
+                .map(|(i, _)| i)
+                .collect()
+        };
+        assert_eq!(lit_at(&mut r), [1, 7]);
+        // Before an opener.
+        keys(&mut r, "C-a C-f C-f C-f C-f");
+        assert_eq!(lit_at(&mut r), [4, 6]);
+        // Elsewhere, none; nor with the option off.
+        keys(&mut r, "C-f");
+        assert!(lit_at(&mut r).is_empty());
+        keys(&mut r, "C-b");
+        r.command(Command::Named("set show-paren off".into()));
+        assert!(lit_at(&mut r).is_empty());
+    }
+    #[test]
     fn windows_other_than_the_focused_one_are_on_a_darker_ground() {
         let mut r = Runtime::new(std::path::PathBuf::from("/")).unwrap();
         r.command(Command::New);

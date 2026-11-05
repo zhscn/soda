@@ -253,9 +253,17 @@ fn blocks_use_the_structure_of_the_language() {
         // also at the top, where no block is around it.
         ("|int f(int a) {}\n", "o", "int f[(int a)]| {}\n"),
         ("int |x = g(1);\n", "o", "int x = g[(1)]|;\n"),
-        ("void f() { |a; b(c); }\n", "o", "void f() { a; b[(c)]|; }\n"),
+        (
+            "void f() { |a; b(c); }\n",
+            "o",
+            "void f() { a; b[(c)]|; }\n",
+        ),
         // None before the block around the caret: that one.
-        ("void f() { a(b); |c; }\n", "o", "void f() [{ a(b); c; }]|\n"),
+        (
+            "void f() { a(b); |c; }\n",
+            "o",
+            "void f() [{ a(b); c; }]|\n",
+        ),
     ] {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("a.cpp");

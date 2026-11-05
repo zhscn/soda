@@ -572,12 +572,69 @@ impl Runtime {
             );
         }
         self.run_hooks(time);
+        self.find_paren();
         if self.message != self.logged {
             self.logged = self.message.clone();
             if !self.message.is_empty() {
                 self.log(self.message.clone());
             }
         }
+    }
+    /// The bracket at the caret of the active view and its match, as
+    /// `show-paren-mode` finds them: an opener after the caret, else a
+    /// closer before it.
+    fn find_paren(&mut self) {
+        let Some(view) = self.app.active_view().and_then(|id| self.app.view(id)) else {
+            self.app.set_paren(None);
+            return;
+        };
+        let (id, document, session) = (view.id, view.document_id, view.session_id);
+        if !self.app.options().bool(Some(document), "show-paren") {
+            self.app.set_paren(None);
+            return;
+        }
+        let found = self.app.with_editor(document, |editor| {
+            let snapshot = editor.model().document().snapshot().clone();
+            let Some(head) = editor
+                .model()
+                .session(session)
+                .map(|session| session.selection().head)
+            else {
+                return Ok(None);
+            };
+            let byte = |at: usize| snapshot.byte_slice(at..at + 1).map(|b| b.to_string());
+            let after = byte(head).filter(|b| matches!(b.as_str(), "(" | "[" | "{"));
+            let before = head
+                .checked_sub(1)
+                .and_then(byte)
+                .filter(|b| matches!(b.as_str(), ")" | "]" | "}"));
+            let group = if after.is_some() {
+                editor
+                    .enclosing(head + 1)?
+                    .filter(|group| group.open.start == head)
+            } else {
+                None
+            };
+            let group = match group {
+                Some(group) => Some(group),
+                None if before.is_some() => editor
+                    .enclosing(head - 1)?
+                    .filter(|group| group.close.end == head),
+                None => None,
+            };
+            Ok(group.filter(|group| !group.close.is_empty()).map(|group| {
+                crate::application::Paren {
+                    view: id,
+                    version: snapshot.version(),
+                    ranges: [group.open, group.close],
+                }
+            }))
+        });
+        let found = found.ok().flatten();
+        if found.as_ref() != self.app.paren_found() {
+            self.dirty = true;
+        }
+        self.app.set_paren(found);
     }
     /// Keeps a message in the log and in `*messages*`, if it is open.
     fn log(&mut self, message: String) {
@@ -1326,10 +1383,7 @@ fn structure(
             let mut next = None;
             let mut at = range.start;
             while range.is_empty() {
-                let Some(item) = editor
-                    .item(at, crate::language::Side::After)
-                    .ok()
-                    .flatten()
+                let Some(item) = editor.item(at, crate::language::Side::After).ok().flatten()
                 else {
                     break;
                 };

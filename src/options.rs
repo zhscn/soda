@@ -205,6 +205,12 @@ pub const OPTIONS: &[OptionInfo] = &[
         doc: "Use the kitty keyboard protocol where the terminal has it, to tell C-RET from RET",
     },
     OptionInfo {
+        name: "show-paren",
+        kind: Kind::Bool,
+        default: Value::Bool(true),
+        doc: "Highlight the bracket at the caret and its match, as show-paren-mode",
+    },
+    OptionInfo {
         name: "dim-other-windows",
         kind: Kind::Bool,
         default: Value::Bool(true),

@@ -1105,7 +1105,17 @@ pub(crate) fn frame(
     let patterns: Vec<_> = app.highlights(view.document_id).collect();
     let flags = app.flags(view.document_id);
     let notes = app.notes(view.document_id);
-    let paints = app.paints(view.document_id);
+    let mut paints = app.paints(view.document_id);
+    if let (Some(ranges), Some(face)) = (
+        app.paren(view.id),
+        crate::application::faces::index("paren-match"),
+    ) {
+        paints.extend(
+            ranges
+                .iter()
+                .map(|range| (range.clone(), crate::application::Face::Named(face))),
+        );
+    }
     let inline_notes = options.bool(Some(view.document_id), "inline-notes");
     let mut text = std::borrow::Cow::Borrowed("");
     for ((number, row), segment) in &shown {

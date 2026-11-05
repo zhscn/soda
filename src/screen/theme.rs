@@ -30,6 +30,8 @@ pub(crate) struct Theme {
     pub tabs: Style,
     pub tab_active: Style,
     pub border: Style,
+    /// A bracket at the caret and its match.
+    pub paren_match: Style,
     /// The background of windows other than the focused one, as Emacs's
     /// `auto-dim-other-buffers` gives them.
     pub inactive_window: Style,
@@ -259,6 +261,7 @@ impl Theme {
             "tabs" => &mut self.tabs,
             "tab-active" => &mut self.tab_active,
             "border" => &mut self.border,
+            "paren-match" => &mut self.paren_match,
             "inactive-window" => &mut self.inactive_window,
             "title" => &mut self.title,
             "panel" => &mut self.panel,
@@ -324,6 +327,9 @@ impl Theme {
             tab_active: on(p.fg, p.bg).add_modifier(Modifier::BOLD),
             border: on(line, p.bg),
             inactive_window: Style::new().bg(c(p.bg_dark)),
+            paren_match: Style::new()
+                .bg(c(mix(p.bg, p.blue, 0.3)))
+                .add_modifier(Modifier::BOLD),
             title: on(p.blue, p.bg).add_modifier(Modifier::BOLD),
             panel: on(p.fg, p.bg),
             float: on(p.fg, p.bg_dark),

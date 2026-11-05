@@ -375,6 +375,14 @@ pub struct Update {
     /// What to tell the user that is no error, as what `Resume` left out.
     pub report: Option<String>,
 }
+/// A bracket at the caret of a view and the one that matches it, found
+/// in the text of a version, as `show-paren-mode` shows them.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Paren {
+    pub view: ViewId,
+    pub version: u64,
+    pub ranges: [std::ops::Range<usize>; 2],
+}
 #[derive(Debug)]
 pub enum Error {
     UnknownView,
@@ -495,6 +503,9 @@ pub struct Application {
     paints: paints::Paints,
     /// Words at the end of a line, until the next key.
     indicator: Option<(DocumentId, usize, String)>,
+    /// The bracket at the caret of a view and its match, for the text of
+    /// a version.
+    paren: Option<Paren>,
     tokens: tokens::Tokens,
     inlays: inlays::Inlays,
     /// Files whose presence makes a directory the root of a language's
@@ -618,6 +629,22 @@ impl Application {
     /// Words shown at the end of a line of a document, until the next key.
     pub fn set_indicator(&mut self, document: DocumentId, line: usize, text: String) {
         self.indicator = Some((document, line, text));
+    }
+    /// Brackets to show matched; none to show none.
+    pub fn set_paren(&mut self, paren: Option<Paren>) {
+        self.paren = paren;
+    }
+    /// The brackets last found, whatever the text now.
+    pub fn paren_found(&self) -> Option<&Paren> {
+        self.paren.as_ref()
+    }
+    /// The matched brackets in a view, unless its text has changed since
+    /// they were found.
+    pub fn paren(&self, view: ViewId) -> Option<&[std::ops::Range<usize>; 2]> {
+        let paren = self.paren.as_ref().filter(|paren| paren.view == view)?;
+        let document = self.views.get(&view)?.document_id;
+        let editor = self.workspace.editor(document)?;
+        (paren.version == editor.model().document().snapshot().version()).then_some(&paren.ranges)
     }
     pub fn clear_indicator(&mut self) {
         self.indicator = None;
