@@ -70,6 +70,11 @@ pub enum Table {
     Context(Context),
     /// By its place among the document keymaps.
     Document(usize),
+    /// A mode's table under another mode's, as Emacs's global map lies
+    /// under meow's normal state map: Insert's keys, which are Emacs's,
+    /// hold in Normal where Normal's do not, but its plain characters,
+    /// which type text there, do nothing, as `suppress-keymap` makes them.
+    Beneath(Context),
 }
 impl From<Context> for Table {
     fn from(context: Context) -> Self {
@@ -77,6 +82,14 @@ impl From<Context> for Table {
     }
 }
 impl Table {
+    /// Whether the table leaves these keys to the tables after it: plain
+    /// characters, under another mode's table.
+    fn hides(self, keys: &[KeyStroke]) -> bool {
+        matches!(self, Self::Beneath(_))
+            && keys
+                .first()
+                .is_some_and(|key| matches!(key.code, Key::Char(_)) && !key.control && !key.alt)
+    }
     /// Tables that hold keys for every mode, as `global` does: what the
     /// keypad reads its plain keys from.
     fn shared(self) -> bool {
@@ -868,7 +881,7 @@ impl Keymap {
     }
     fn layer(&self, table: Table) -> &Layer<Command> {
         match table {
-            Table::Context(context) => &self.edit[context as usize],
+            Table::Context(context) | Table::Beneath(context) => &self.edit[context as usize],
             Table::Document(index) => &self.documents[index].layer,
         }
     }
@@ -881,7 +894,9 @@ impl Keymap {
     ) -> Result<(), BindingError> {
         match table {
             Table::Context(Context::Prompt) => Err(BindingError::InvalidKey),
-            Table::Context(context) => self.edit[context as usize].bind(keys, command, label),
+            Table::Context(context) | Table::Beneath(context) => {
+                self.edit[context as usize].bind(keys, command, label)
+            }
             Table::Document(index) => self.documents[index].layer.bind(keys, command, label),
         }
     }
@@ -896,7 +911,7 @@ impl Keymap {
     ) -> Result<(), BindingError> {
         match table {
             Table::Context(Context::Prompt) => Err(BindingError::InvalidKey),
-            Table::Context(context) => {
+            Table::Context(context) | Table::Beneath(context) => {
                 self.edit[context as usize].bind_default(keys, command, label)
             }
             Table::Document(index) => self.documents[index]
@@ -915,7 +930,9 @@ impl Keymap {
     pub(super) fn unbind(&mut self, table: Table, keys: &[KeyStroke]) -> Result<(), BindingError> {
         match table {
             Table::Context(Context::Prompt) => self.prompt.unbind(keys),
-            Table::Context(context) => self.edit[context as usize].unbind(keys),
+            Table::Context(context) | Table::Beneath(context) => {
+                self.edit[context as usize].unbind(keys)
+            }
             Table::Document(index) => self.documents[index].layer.unbind(keys),
         }
     }
@@ -928,6 +945,9 @@ impl Keymap {
         skip: &dyn Fn(&Command) -> bool,
     ) -> (Resolution<Command>, Table) {
         for &table in stack {
+            if table.hides(keys) {
+                continue;
+            }
             match self.layer(table).resolve(keys) {
                 Resolution::Pass => {}
                 Resolution::Complete(command) if skip(&command) => {}
@@ -945,6 +965,7 @@ impl Keymap {
             .flat_map(|&table| {
                 self.layer(table)
                     .effective()
+                    .filter(move |binding| !table.hides(&binding.keys))
                     .filter(|binding| binding.label.trim() == label)
                     .map(move |binding| (table, binding.keys.clone()))
             })
@@ -1012,6 +1033,11 @@ impl Keymap {
     fn table_bindings(&self, table: Table) -> Vec<(Vec<KeyStroke>, String)> {
         match table {
             Table::Context(context) => self.bindings(context),
+            Table::Beneath(context) => {
+                let mut bindings = self.bindings(context);
+                bindings.retain(|(keys, _)| !table.hides(keys));
+                bindings
+            }
             Table::Document(index) => self.documents[index]
                 .layer
                 .effective()

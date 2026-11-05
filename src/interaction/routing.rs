@@ -309,6 +309,11 @@ impl Layers {
             let servers = self.servers.get(&document).map_or(&[][..], Vec::as_slice);
             stack.extend(self.keymap.in_force(&language.profile().id, servers));
         }
+        // Emacs's keys hold in Normal where Normal's do not, as meow's
+        // normal state map lies over the global map.
+        if self.mode != EditMode::Insert && super::modal_on(app) {
+            stack.push(keymap::Table::Beneath(Context::Insert));
+        }
         stack.push(Context::Global.into());
         stack
     }

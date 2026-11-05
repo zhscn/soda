@@ -746,3 +746,30 @@ fn an_idle_hook_leaves_the_carets_b_gave() {
     assert_eq!(r.message(), "idle");
     assert_eq!(r.beacons(), vec![0..0, 3..3, 6..6]);
 }
+
+#[test]
+fn emacs_keys_hold_in_normal_where_normal_binds_none() {
+    // As meow's normal state map lies over the global map: the keys of
+    // Emacs work in Normal too, and the mode stays.
+    cases(&[
+        ("ab|cd", "C-j", "ab\n|cd"),
+        ("ab|cd\nef", "C-k", "ab|\nef"),
+        ("ab|cd", "C-a", "|abcd"),
+        ("ab|cd", "C-e", "abcd|"),
+    ]);
+    let mut r = runtime("ab|cd");
+    keys(&mut r, "C-j");
+    assert_eq!(r.edit_mode(), EditMode::Normal);
+    // Plain characters only Insert binds type nothing in Normal.
+    let mut r = runtime("ab|cd");
+    r.source_lua(
+        "pair",
+        r#"soda.map("insert", "%", "lua soda.message('typed')")"#,
+    )
+    .unwrap();
+    keys(&mut r, "%");
+    assert_eq!(shown(&r), "ab|cd");
+    assert_ne!(r.message(), "typed");
+    keys(&mut r, "i %");
+    assert_eq!(r.message(), "typed");
+}

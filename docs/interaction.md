@@ -258,8 +258,10 @@ Beacon 照 meow 的 `meow-beacon.el` 做，键也按 meow 的 beacon 键表分�
 | 模式 | 栈 |
 | --- | --- |
 | Insert | `completion`（列表显示时）、`snippet`（还有位置时；位置在提供选项时排到 `completion` 之前）、不是模态编辑时同 Normal 的 `mark`/`tree`/`results`、`insert`、文档键位表、`global` |
-| Normal | `mark`（光标在标记的符号上时）、`tree`（在树文档中时）或 `results`（在结果文档中时，Enter 是 `jump`）、`normal`、文档键位表、`global` |
-| Beacon | `beacon`、`normal`、文档键位表、`global` |
+| Normal | `mark`（光标在标记的符号上时）、`tree`（在树文档中时）或 `results`（在结果文档中时，Enter 是 `jump`）、`normal`、文档键位表、`insert`（不含可打印字符）、`global` |
+| Beacon | `beacon`、`normal`、文档键位表、`insert`（不含可打印字符）、`global` |
+
+`insert` 表就是 Emacs 的编辑键（`C-j`、`C-a`、`C-k`、`M-w`……），所以在 Normal 和 Beacon 中排在模式表和文档键位表之下：Normal 没有绑定的键按 Emacs 的意思执行，模式不变，与 meow 的 normal state keymap 盖在 global map 之上一样。不加修饰的可打印字符在这里不算，同 meow 用 `suppress-keymap` 让它们在 Normal 中什么都不做，所以 `pairs` 绑在 `insert` 的括号不会在 Normal 中输入。
 
 文档键位表中，服务器的表在前，后声明的先查（`ccls` 在 `lsp` 之后声明，所以同一个键以 `ccls` 的为准），语言的表在最后。它们和 `global` 一样不分模式，在模式表之下，所以遮不住 Normal 的单键，适合 `C-c` 开头的键。`global` 是所有模式共有的键，`C-x`、`C-c` 下的键都在这里。keypad 读不加修饰的键时查文档键位表和 `global`，所以绑到 `C-c` 下的键同时有 `SPC` 入口。
 
