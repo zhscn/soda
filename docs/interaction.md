@@ -326,6 +326,7 @@ Insert 中按选项 `auto-pairs`（默认关）成对输入括号，与 Emacs �
 | `M-x`、`M-!`、`M-\|`、`M-%` | `commands`、`shell`、`pipe`、`replace` |
 | `M-s .` | `search-symbol`：搜索光标处的符号（整个符号匹配），从符号开头开始，第一处就是它，`C-s` 往下 |
 | `C-x z` | `repeat`：再执行一次上一个键的命令 |
+| `C-x C-=`、`C-x C-+`、`C-x C--` | `text-scale-increase`、`text-scale-decrease`（复原是 `text-scale-reset`，不绑 `C-x C-0`，免得 keypad 的 `x 0` 先取到它而不是 `close-window`）：图形界面的字号每步 1.2 倍（同 `text-scale-mode-step`），上下各 8 步；作用于所有窗口，相当于 Emacs 的 `global-text-scale-adjust`，因为窗口树按默认字体的单元格划分。不改 `font-size`，终端里没有效果 |
 | `C-u` | `universal-argument`，见下 |
 | `M-g g`、`M-g M-g` | `goto` |
 | `M-g n`、`M-g p`、``C-x ` `` | `next-result`、`previous-result`、`next-result` |

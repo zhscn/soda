@@ -107,6 +107,8 @@ pub enum Event {
     },
     /// Makes splits equal again and side windows their opening size.
     ResetWindowSizes,
+    /// Makes the text a step larger or smaller, or with none, resets it.
+    TextScale(Option<i32>),
     /// Gives files of a name, or an extension starting with a dot, a
     /// language from now on.
     MapLanguage {
@@ -375,6 +377,9 @@ pub struct Update {
     /// What to tell the user that is no error, as what `Resume` left out.
     pub report: Option<String>,
 }
+/// How much larger each step of `text-scale-increase` makes the text.
+pub const TEXT_SCALE_STEP: f32 = 1.2;
+const TEXT_SCALE_STEPS: i32 = 8;
 /// A bracket at the caret of a view and the one that matches it, found
 /// in the text of a version, as `show-paren-mode` shows them.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -506,6 +511,9 @@ pub struct Application {
     /// The bracket at the caret of a view and its match, for the text of
     /// a version.
     paren: Option<Paren>,
+    /// Steps the text is larger, or smaller when negative, than
+    /// `font-size` makes it.
+    text_scale: i32,
     tokens: tokens::Tokens,
     inlays: inlays::Inlays,
     /// Files whose presence makes a directory the root of a language's
@@ -629,6 +637,11 @@ impl Application {
     /// Words shown at the end of a line of a document, until the next key.
     pub fn set_indicator(&mut self, document: DocumentId, line: usize, text: String) {
         self.indicator = Some((document, line, text));
+    }
+    /// Steps the text is larger than `font-size` makes it, each of
+    /// `TEXT_SCALE_STEP` times, as Emacs's `text-scale-mode-step`.
+    pub fn text_scale(&self) -> i32 {
+        self.text_scale
     }
     /// Brackets to show matched; none to show none.
     pub fn set_paren(&mut self, paren: Option<Paren>) {
@@ -1463,6 +1476,12 @@ impl Application {
                 }
             }
             Event::ResetWindowSizes => self.windows.reset(),
+            Event::TextScale(step) => {
+                self.text_scale = step.map_or(0, |step| {
+                    (self.text_scale + step).clamp(-TEXT_SCALE_STEPS, TEXT_SCALE_STEPS)
+                });
+                update.options_changed = true;
+            }
             Event::MapLanguage { name, language } => self
                 .workspace
                 .map_language(&name, &language)

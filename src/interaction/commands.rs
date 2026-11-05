@@ -82,6 +82,9 @@ pub enum Command {
         extend: bool,
     },
     New,
+    /// Makes the text of the graphical frontend a step larger or smaller,
+    /// or with none, as the options set it.
+    TextScale(Option<i32>),
     Close(Option<Departure>),
     Reload(Option<Departure>),
     Help,
@@ -1118,6 +1121,7 @@ impl Layers {
             Command::New => response
                 .events
                 .push(Event::NewDocument(Language::PlainText)),
+            Command::TextScale(step) => response.events.push(Event::TextScale(step)),
             Command::Close(decision) => {
                 if let Some(view) = active(app) {
                     let document = view.document_id;

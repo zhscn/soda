@@ -427,7 +427,9 @@ impl Gui {
     /// The fonts the options ask for.
     fn settings(&self, runtime: &Runtime) -> text::Settings {
         let options = runtime.app().options();
-        let points = options.int(None, "font-size") as f32;
+        let steps = runtime.app().text_scale();
+        let points =
+            options.int(None, "font-size") as f32 * crate::application::TEXT_SCALE_STEP.powi(steps);
         text::Settings {
             size: (points * self.scale).round(),
             line_height: options.int(None, "line-height"),

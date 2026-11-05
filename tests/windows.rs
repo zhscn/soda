@@ -350,3 +350,17 @@ fn each_window_has_the_tabs_of_what_it_showed_and_closing_one_keeps_the_document
     keys(&mut r, "C-x 2");
     assert_eq!(tabs(&r, 2), [b]);
 }
+#[test]
+fn text_scale_steps_up_and_down_within_bounds_and_resets() {
+    let mut r = runtime("one");
+    keys(&mut r, "C-x C-= C-x C-+");
+    assert_eq!(r.app().text_scale(), 2);
+    keys(&mut r, "C-x C--");
+    assert_eq!(r.app().text_scale(), 1);
+    r.command(Command::Named("text-scale-reset".into()));
+    assert_eq!(r.app().text_scale(), 0);
+    for _ in 0..20 {
+        r.command(Command::Named("text-scale-decrease".into()));
+    }
+    assert_eq!(r.app().text_scale(), -8);
+}

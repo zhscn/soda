@@ -545,6 +545,21 @@ pub static BUILTINS: &[Builtin] = &[
     ),
     builtin!("new", "Create an untitled document", Command::New),
     builtin!(
+        "text-scale-increase",
+        "Make the text of every window a step larger, in the graphical frontend",
+        Command::TextScale(Some(1))
+    ),
+    builtin!(
+        "text-scale-decrease",
+        "Make the text of every window a step smaller, in the graphical frontend",
+        Command::TextScale(Some(-1))
+    ),
+    builtin!(
+        "text-scale-reset",
+        "Give the text the size font-size sets again",
+        Command::TextScale(None)
+    ),
+    builtin!(
         "split",
         [OPTIONAL_PATH],
         "Split the window into two above each other; open PATH in the new one",
