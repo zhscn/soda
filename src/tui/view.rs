@@ -591,6 +591,20 @@ fn editor(
     let area = window.text;
     let digits = usize::from(window.gutter.saturating_sub(4));
     let left = area.x - window.gutter;
+    // Other windows than the focused one sit on a darker ground.
+    let (text_style, gutter_style) = if current {
+        (theme.text, theme.gutter)
+    } else {
+        // `default` leaves them as the focused one.
+        let ground = theme
+            .inactive_window
+            .bg
+            .filter(|bg| *bg != ratatui::style::Color::Reset)
+            .map_or_else(Style::new, |bg| Style::new().bg(bg));
+        let whole = Rect::new(left, area.y, area.width + window.gutter, area.height);
+        buf.set_style(whole, ground);
+        (theme.text.patch(ground), theme.gutter.patch(ground))
+    };
     for (index, row) in text.rows.iter().enumerate() {
         let y = area.y + index as u16;
         // Only the focused window marks the caret line.
@@ -598,7 +612,7 @@ fn editor(
         let base = if caret_line {
             theme.text.patch(theme.cursor_line)
         } else {
-            theme.text
+            text_style
         };
         if caret_line {
             buf.set_style(Rect::new(left, y, area.width + window.gutter, 1), base);
@@ -607,7 +621,7 @@ fn editor(
             let style = if caret_line {
                 theme.gutter_current
             } else {
-                theme.gutter
+                gutter_style
             };
             // Relative numbers count from the caret line, which keeps its own.
             let shown = if relative && row.line != text.caret.0 {
@@ -1159,6 +1173,23 @@ mod tests {
         assert_eq!(top(&mut r), (0, 0));
         r.command(Command::Named("only".into()));
         assert_eq!(top(&mut r), (0, 0));
+    }
+    #[test]
+    fn windows_other_than_the_focused_one_are_on_a_darker_ground() {
+        let mut r = Runtime::new(std::path::PathBuf::from("/")).unwrap();
+        r.command(Command::New);
+        r.command(Command::Named("vsplit".into()));
+        let theme = Theme::build(crate::application::themes::DEFAULT, &Default::default());
+        let ground = theme.inactive_window.bg;
+        assert!(ground.is_some() && ground != theme.text.bg);
+        let buffer = draw(&mut r, 60, 14);
+        // Below the text, the focused left window and the right one.
+        assert_eq!(buffer[(10, 8)].bg, theme.text.bg.unwrap());
+        assert_eq!(buffer[(45, 8)].bg, ground.unwrap());
+        // Taking the face's background away leaves them alike.
+        r.command(Command::Named("face inactive-window bg:default".into()));
+        let buffer = draw(&mut r, 60, 14);
+        assert_eq!(buffer[(45, 8)].bg, buffer[(10, 8)].bg);
     }
     #[test]
     fn screens_compose_tabs_gutter_status_and_panels() {

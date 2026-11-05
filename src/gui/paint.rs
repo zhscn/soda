@@ -667,10 +667,15 @@ fn tab_bar(
         };
         let x = area.x + rect.x;
         let style = if tab.active {
+            // It opens into the text below, which in a window other than
+            // the focused one is on the darker ground.
             let (_, bg) = painter.colors(theme.tab_active);
+            let dim = (window.is_some() && !current)
+                .then(|| painter.colors(theme.inactive_window).1)
+                .flatten();
             painter.fill(
                 Rect::new(x, area.y, rect.w, area.h),
-                bg.unwrap_or(painter.bg),
+                dim.or(bg).unwrap_or(painter.bg),
                 0.0,
             );
             if x > area.x {
@@ -760,6 +765,10 @@ fn editor(
     let area = window.text;
     let left = window.body.x;
     painter.clip_to(window.body);
+    // Other windows than the focused one sit on a darker ground.
+    if !current && let (_, Some(bg)) = painter.colors(theme.inactive_window) {
+        painter.fill(window.body, bg, 0.0);
+    }
     let top = area.y - past;
     let selection = rgba(theme.selection.bg, faded(painter.fg, 0.25));
     // Only the focused window marks the caret line. Its band goes under

@@ -30,6 +30,9 @@ pub(crate) struct Theme {
     pub tabs: Style,
     pub tab_active: Style,
     pub border: Style,
+    /// The background of windows other than the focused one, as Emacs's
+    /// `auto-dim-other-buffers` gives them.
+    pub inactive_window: Style,
     pub title: Style,
     pub panel: Style,
     /// What floats over the text: a box, so it stays apart from the caret
@@ -256,6 +259,7 @@ impl Theme {
             "tabs" => &mut self.tabs,
             "tab-active" => &mut self.tab_active,
             "border" => &mut self.border,
+            "inactive-window" => &mut self.inactive_window,
             "title" => &mut self.title,
             "panel" => &mut self.panel,
             "float" => &mut self.float,
@@ -319,6 +323,7 @@ impl Theme {
             tabs: on(p.comment, surface),
             tab_active: on(p.fg, p.bg).add_modifier(Modifier::BOLD),
             border: on(line, p.bg),
+            inactive_window: Style::new().bg(c(p.bg_dark)),
             title: on(p.blue, p.bg).add_modifier(Modifier::BOLD),
             panel: on(p.fg, p.bg),
             float: on(p.fg, p.bg_dark),

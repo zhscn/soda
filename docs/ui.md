@@ -105,7 +105,7 @@
 - JetBrains：`islands-dark`、`islands-light`（取自 IntelliJ Platform 的 Islands 主题与配色方案；调用用正文色，声明用函数色，内建类型和常量用关键字色，同 CLion），`fleet-dark`、`fleet-dark-purple`、`fleet-light`（取自 zed-fleet-themes，半透明颜色已按背景混合）
 - 其他：`catppuccin-mocha`、`catppuccin-latte`、`gruvbox-dark`、`gruvbox-light`、`dracula`、`nord`、`nord-light`（取自 doom-themes 的 doom-nord-light）、`one-dark`、`one-light`、`solarized-dark`、`solarized-light`、`rose-pine`、`rose-pine-dawn`、`kanagawa`、`everforest-dark`、`everforest-light`、`github-dark`、`github-light`、`monokai`
 
-每个主题是一份调色板加少量语法 face：界面部分都由调色板推出，语法 face 保留该主题原本的关键字、字符串、函数等配色。围绕正文的部分按 Zed 主题的层次由 `bg` 向 `fg` 混合得到，深色主题比正文亮、浅色主题比正文暗：标签栏和窗口标题 6%，状态栏 13%，它们和正文之间、窗口之间的分隔线（`border`）20%。图形前端的标签行照 Zed 画：标签并排，每个后面一条竖线，底边一条横线，只在当前标签下断开，当前标签用正文底色，像是通向下面的正文；当前窗口的当前标签顶上是一条强调色细线。定义在 `src/application/themes.rs`。主题设置整屏背景，不依赖终端配色。终端前端在 `COLORTERM` 为 `truecolor` 或 `24bit` 时输出 24 位颜色，否则换算为最接近的 xterm 256 色。
+每个主题是一份调色板加少量语法 face：界面部分都由调色板推出，语法 face 保留该主题原本的关键字、字符串、函数等配色。围绕正文的部分按 Zed 主题的层次由 `bg` 向 `fg` 混合得到，深色主题比正文亮、浅色主题比正文暗：标签栏和窗口标题 6%，状态栏 13%，它们和正文之间、窗口之间的分隔线（`border`）20%。分屏时焦点以外的窗口用调色板的 `bg-dark` 作底色（face `inactive-window`，同 Emacs 的 `auto-dim-other-buffers`），只换底色不动文字颜色；`face inactive-window bg:default` 关掉。图形前端的标签行照 Zed 画：标签并排，每个后面一条竖线，底边一条横线，只在当前标签下断开，当前标签用正文底色，像是通向下面的正文；当前窗口的当前标签顶上是一条强调色细线。定义在 `src/application/themes.rs`。主题设置整屏背景，不依赖终端配色。终端前端在 `COLORTERM` 为 `truecolor` 或 `24bit` 时输出 24 位颜色，否则换算为最接近的 xterm 256 色。
 
 命令 `theme NAME` 随时切换主题，等同 `set theme NAME`，补全列出所有主题并标出当前的。名字未定义时报错，选项不变。补全时实时预览：用方向键移到某一行，或输入文字选出一行后，整屏立即按该主题绘制；Enter 采用，Esc 回到原来的主题。刚打开、还没有选择时不预览。预览只是前端按命令行的选中行绘制，不改选项，所以取消时没有要恢复的状态。
 
@@ -127,7 +127,7 @@ soda.set("theme", "paper")
 
 `face NAME [SPEC]`（Lua：`soda.face(name, spec)`）覆盖一个具名部分的颜色和属性。SPEC 是若干词：`fg:#rrggbb`、`bg:#rrggbb`（`default` 为终端自己的颜色），属性 `bold`、`italic`、`underline`、`dim`、`reverse`、`strikethrough`。没写的颜色沿用主题；写了任何属性就替换主题的属性，`plain` 表示无属性。不带 SPEC 时恢复。Lua 的 spec 也可以是表 `{ fg = "#ff0000", bold = true }`，`nil` 恢复。随时执行，下一帧生效。
 
-名字有界面部分（`text`、`selection`、`cursor-line`、`gutter`、`gutter-current`、`status`、`mode-normal`、`mode-insert`、`mode-beacon`、`mode-prompt`、`secondary-selection`、`beacon-selection`、`beacon-cursor`、`title`、`border`、`float`、`float-border`、`label`、`todo`、`note-error`、`note-warning`、`note-info`、`reference`、`reference-write`、`snippet`、`unnecessary`、`deprecated`、`mark1`…`mark8` 等，完整列表和说明见 `src/application/faces.rs`，命令行可补全）和语法分类 `syntax.comment`、`syntax.keyword`、`syntax.function.definition` 等。带点的语法 face 继承点前面的那个（见[语法分类](syntax.md#分类)）：`face syntax.function bold` 也作用于没单独设置的 `syntax.function.call`。
+名字有界面部分（`text`、`selection`、`cursor-line`、`gutter`、`gutter-current`、`status`、`mode-normal`、`mode-insert`、`mode-beacon`、`mode-prompt`、`secondary-selection`、`beacon-selection`、`beacon-cursor`、`title`、`border`、`inactive-window`、`float`、`float-border`、`label`、`todo`、`note-error`、`note-warning`、`note-info`、`reference`、`reference-write`、`snippet`、`unnecessary`、`deprecated`、`mark1`…`mark8` 等，完整列表和说明见 `src/application/faces.rs`，命令行可补全）和语法分类 `syntax.comment`、`syntax.keyword`、`syntax.function.definition` 等。带点的语法 face 继承点前面的那个（见[语法分类](syntax.md#分类)）：`face syntax.function bold` 也作用于没单独设置的 `syntax.function.call`。
 
 光标形状跟随模式：Normal 和 Beacon 为方块，Insert 和输入框为竖线。
 

@@ -68,6 +68,10 @@ pub const UI_FACES: &[(&str, &str)] = &[
     ("tabs", "The tab row"),
     ("tab-active", "The current document's tab"),
     ("border", "Separators between windows"),
+    (
+        "inactive-window",
+        "Windows other than the focused one; their background, bg:default to leave them as it",
+    ),
     ("title", "Window titles"),
     ("panel", "Help and lists"),
     ("float", "Floating boxes such as hover"),
