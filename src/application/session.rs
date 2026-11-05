@@ -70,17 +70,21 @@ impl Application {
             })
             .collect();
         let find = |view: ViewId| index.get(&view).copied();
-        // Each split window's tabs, by its view, as documents.
+        // Each split window's tabs, by its view: each document with the
+        // view the window last showed it in.
         let tabs: Vec<Value> = self
             .windows
             .views()
             .into_iter()
             .filter_map(|view| {
-                let tabs: Vec<usize> = self
+                let tabs: Vec<Value> = self
                     .windows
-                    .tabs(view)
+                    .tab_views(view)
                     .iter()
-                    .filter_map(|tab| documents.iter().position(|d| d == tab))
+                    .filter_map(|tab| {
+                        let document = documents.iter().position(|d| *d == tab.document)?;
+                        Some(json!([document, find(tab.view)]))
+                    })
                     .collect();
                 Some(json!([find(view)?, tabs]))
             })
@@ -218,12 +222,31 @@ impl Application {
             else {
                 continue;
             };
+            // A tab without its view, as an older session wrote it, keeps
+            // the window's, which matches no other document.
             let tabs = pair
                 .get(1)
                 .and_then(Value::as_array)
                 .into_iter()
                 .flatten()
-                .filter_map(|i| documents.get(i.as_u64()? as usize).copied().flatten())
+                .filter_map(|tab| {
+                    let (document, shown) = match tab {
+                        Value::Array(pair) => (pair.first()?, pair.get(1)),
+                        document => (document, None),
+                    };
+                    let document = documents
+                        .get(document.as_u64()? as usize)
+                        .copied()
+                        .flatten()?;
+                    let shown = shown
+                        .and_then(Value::as_u64)
+                        .and_then(|i| find(i as usize))
+                        .unwrap_or(view);
+                    Some(windows::Tab {
+                        document,
+                        view: shown,
+                    })
+                })
                 .collect();
             self.windows.set_tabs(view, tabs);
         }

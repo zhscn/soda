@@ -63,10 +63,18 @@ impl Layers {
                     .and_then(|view| app.view(view))
                     .is_some_and(|view| view.document_id == document);
                 if !here {
-                    // A view no window shows comes back; else a new one.
+                    // The view this window left it in comes back, else one
+                    // no window shows; else a new one.
                     let hidden = app
-                        .views()
-                        .find(|view| view.document_id == document && !shown.contains(&view.id));
+                        .active_view()
+                        .and_then(|window| app.windows().tab_view(window, document))
+                        .and_then(|view| app.view(view))
+                        .filter(|view| view.document_id == document && !shown.contains(&view.id))
+                        .or_else(|| {
+                            app.views().find(|view| {
+                                view.document_id == document && !shown.contains(&view.id)
+                            })
+                        });
                     response.events.push(match hidden {
                         Some(view) => Event::Focus(view.id),
                         None => Event::AddView(document),

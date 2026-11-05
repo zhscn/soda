@@ -137,6 +137,13 @@ fn shares(total: u16, weights: &[u32]) -> Vec<u16> {
     }
     sizes.into_iter().map(|size| size as u16).collect()
 }
+/// A document in a window's row of tabs and the view the window last
+/// showed it in.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Tab {
+    pub document: DocumentId,
+    pub view: ViewId,
+}
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Side {
     Bottom,
@@ -151,16 +158,33 @@ pub struct Windows {
     /// The sizes the side windows were opened at, which a reset restores.
     opened: [u16; 2],
     /// Each split window's tabs, by the view it shows.
-    tabs: BTreeMap<ViewId, Vec<DocumentId>>,
+    tabs: BTreeMap<ViewId, Vec<Tab>>,
 }
 impl Windows {
     /// The documents in the row of tabs of the window of `view`, in order;
     /// empty for a side window.
-    pub fn tabs(&self, view: ViewId) -> &[DocumentId] {
+    pub fn tabs(&self, view: ViewId) -> Vec<DocumentId> {
+        self.tabs.get(&view).map_or_else(Vec::new, |tabs| {
+            tabs.iter().map(|tab| tab.document).collect()
+        })
+    }
+    /// The view the window of `view` last showed `document` in, as
+    /// `window-prev-buffers` keeps where a window left each buffer; it may
+    /// be closed since, or shown in another window.
+    pub fn tab_view(&self, view: ViewId, document: DocumentId) -> Option<ViewId> {
+        self.tabs
+            .get(&view)?
+            .iter()
+            .find(|tab| tab.document == document)
+            .map(|tab| tab.view)
+    }
+    /// The row of tabs of the window of `view` with the view each was last
+    /// shown in, for a session.
+    pub(super) fn tab_views(&self, view: ViewId) -> &[Tab] {
         self.tabs.get(&view).map_or(&[], Vec::as_slice)
     }
     /// Gives the window of `view` its row of tabs, as a session saved it.
-    pub(super) fn set_tabs(&mut self, view: ViewId, tabs: Vec<DocumentId>) {
+    pub(super) fn set_tabs(&mut self, view: ViewId, tabs: Vec<Tab>) {
         if self.side(view).is_none() && self.contains(view) {
             self.tabs.insert(view, tabs);
         }
@@ -168,7 +192,7 @@ impl Windows {
     /// Takes `document` out of the row of tabs of the window of `view`.
     pub(super) fn drop_tab(&mut self, view: ViewId, document: DocumentId) {
         if let Some(tabs) = self.tabs.get_mut(&view) {
-            tabs.retain(|tab| *tab != document);
+            tabs.retain(|tab| tab.document != document);
         }
     }
     /// Brings every row of tabs up to date: closed documents go, and each
@@ -185,11 +209,15 @@ impl Windows {
         self.tabs.retain(|view, _| windows.contains(view));
         for view in windows {
             let tabs = self.tabs.entry(view).or_default();
-            tabs.retain(|tab| open(*tab));
-            if let Some(shown) = document(view)
-                && !tabs.contains(&shown)
-            {
-                tabs.push(shown);
+            tabs.retain(|tab| open(tab.document));
+            if let Some(shown) = document(view) {
+                match tabs.iter_mut().find(|tab| tab.document == shown) {
+                    Some(tab) => tab.view = view,
+                    None => tabs.push(Tab {
+                        document: shown,
+                        view,
+                    }),
+                }
             }
         }
     }

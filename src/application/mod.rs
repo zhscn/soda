@@ -850,12 +850,17 @@ impl Application {
             .ok_or(Error::LastTab)?;
         let shown = self.windows.views();
         let hidden = self
-            .recent
-            .iter()
-            .rev()
-            .chain(self.views.keys())
-            .copied()
-            .find(|id| self.views[id].document_id == next && !shown.contains(id));
+            .windows
+            .tab_view(active, next)
+            .into_iter()
+            .chain(self.recent.iter().rev().copied())
+            .chain(self.views.keys().copied())
+            .find(|id| {
+                self.views
+                    .get(id)
+                    .is_some_and(|view| view.document_id == next)
+                    && !shown.contains(id)
+            });
         let view = match hidden {
             Some(view) => view,
             None => {

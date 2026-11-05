@@ -210,3 +210,88 @@ fn a_session_keeps_each_windows_tabs() {
     again.resume(&r.session());
     assert_eq!(names(&again), before);
 }
+#[test]
+fn a_tab_comes_back_where_its_window_left_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    std::fs::write(root.join("a.txt"), "one\ntwo\nthree\n").unwrap();
+    std::fs::write(root.join("b.txt"), "x\n").unwrap();
+    let mut r = Runtime::new(root.clone()).unwrap();
+    open(&mut r, &root.join("a.txt"));
+    r.command(Command::Edit(Edit::SetSelection(Selection::caret(8))));
+    open(&mut r, &root.join("b.txt"));
+    let head = |r: &Runtime| {
+        let app = r.app();
+        let view = app.view(app.active_view().unwrap()).unwrap();
+        let editor = app.workspace().editor(view.document_id).unwrap();
+        editor
+            .model()
+            .session(view.session_id)
+            .unwrap()
+            .selection()
+            .head
+    };
+    let a = |r: &Runtime| {
+        let app = r.app();
+        app.workspace()
+            .documents()
+            .find(|d| app.document_name(*d).ends_with("a.txt"))
+            .unwrap()
+    };
+    let mut again = Runtime::new(root.clone()).unwrap();
+    again.resume(&r.session());
+    let document = a(&again);
+    again.input(UserInput::Pointer(soda::interaction::Pointer::Document(
+        document,
+    )));
+    assert_eq!(head(&again), 8);
+}
+#[test]
+fn each_window_takes_a_tab_back_where_it_left_it_also_after_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    std::fs::write(root.join("a.txt"), "one\ntwo\nthree\n").unwrap();
+    std::fs::write(root.join("b.txt"), "x\n").unwrap();
+    let mut r = Runtime::new(root.clone()).unwrap();
+    open(&mut r, &root.join("a.txt"));
+    std::fs::write(root.join("c.txt"), "y\n").unwrap();
+    // Both windows show a.txt, the left one at 8, the right one at 0, then
+    // each turns to another file.
+    keys(&mut r, "C-x 3");
+    r.command(Command::Edit(Edit::SetSelection(Selection::caret(8))));
+    open(&mut r, &root.join("b.txt"));
+    keys(&mut r, "C-x o");
+    open(&mut r, &root.join("c.txt"));
+    let head = |r: &Runtime| {
+        let app = r.app();
+        let view = app.view(app.active_view().unwrap()).unwrap();
+        let editor = app.workspace().editor(view.document_id).unwrap();
+        editor
+            .model()
+            .session(view.session_id)
+            .unwrap()
+            .selection()
+            .head
+    };
+    let a = |r: &Runtime| {
+        let app = r.app();
+        app.workspace()
+            .documents()
+            .find(|d| app.document_name(*d).ends_with("a.txt"))
+            .unwrap()
+    };
+    let back = |r: &mut Runtime| {
+        let document = a(r);
+        r.input(UserInput::Pointer(soda::interaction::Pointer::Document(
+            document,
+        )));
+        head(r)
+    };
+    let mut again = Runtime::new(root.clone()).unwrap();
+    again.resume(&r.session());
+    for r in [&mut r, &mut again] {
+        assert_eq!(back(r), 0, "the right window");
+        keys(r, "C-x o");
+        assert_eq!(back(r), 8, "the left window");
+    }
+}
