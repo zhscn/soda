@@ -96,7 +96,7 @@ impl Areas {
         let tab_bar = options.bool(None, "tab-bar");
         let alone = app.windows().is_empty();
         let tabs =
-            (tab_bar && alone && height > 4.0 * row).then(|| Rect::new(0.0, 0.0, width, line));
+            (tab_bar && alone && height > 4.0 * row).then(|| Rect::new(0.0, 0.0, width, row));
         let top = tabs.map_or(0.0, |tabs| tabs.h);
         let editor = Rect::new(0.0, top, width, (status.y - top).max(0.0));
         let cells = (
