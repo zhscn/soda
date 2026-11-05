@@ -258,6 +258,18 @@ pub const OPTIONS: &[OptionInfo] = &[
         doc: "Scroll smoothly in the graphical frontend, and by pixels on a touchpad",
     },
     OptionInfo {
+        name: "font-contrast",
+        kind: Kind::Int { min: 0, max: 400 },
+        default: Value::Int(100),
+        doc: "How much the graphical frontend thickens dark text, in percent; 0 for none",
+    },
+    OptionInfo {
+        name: "font-gamma",
+        kind: Kind::Int { min: 100, max: 220 },
+        default: Value::Int(180),
+        doc: "The gamma, in percent, that the graphical frontend fits text's edges to",
+    },
+    OptionInfo {
         name: "font-size",
         kind: Kind::Int { min: 6, max: 72 },
         default: Value::Int(14),

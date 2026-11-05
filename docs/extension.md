@@ -61,6 +61,7 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 | `clipboard` | system/internal | system | internal 时复制和粘贴不经过系统剪贴板 |
 | `font`、`ui-font` | 文字 | 空 | 图形界面的正文和界面字体，见[图形界面](gui.md) |
 | `font-size`、`line-height` | 6–72、100–300 | 14、135 | 图形界面的字号（点）和行高（字号的百分比） |
+| `font-contrast`、`font-gamma` | 0–400、100–220 | 100、180 | 图形界面字形边缘的修正（百分比），同 Zed 取自 DirectWrite 的做法：混合不在线性空间做，浅底深字会变细，`font-contrast` 按文字亮度加粗深色字（0 不加粗），`font-gamma` 是边缘按哪个 gamma 拟合 |
 | `smooth-caret`、`smooth-scroll` | true/false | true | 图形界面的光标滑动和平滑滚动 |
 | `mark-keys` | true/false | true | 光标在标记的符号上时 `mark` 键位表生效；false 对应 Emacs 的 `symbol-overlay-inhibit-map` |
 

@@ -100,6 +100,8 @@ pub struct Renderer {
     instances: wgpu::Buffer,
     capacity: usize,
     pub atlas: Atlas,
+    /// How glyph coverage is corrected: `gamma_ratios` and the contrast.
+    text: [f32; 8],
 }
 const ATLAS_SIZE: u32 = 2048;
 impl Renderer {
@@ -186,7 +188,7 @@ impl Renderer {
         });
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("screen"),
-            size: 16,
+            size: 48,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -309,6 +311,7 @@ impl Renderer {
             instances,
             capacity,
             atlas: Atlas::new(ATLAS_SIZE),
+            text: text_correction(1.8, 1.0),
         }
     }
     fn buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
@@ -344,6 +347,11 @@ impl Renderer {
         }
     }
     /// Draws a frame over `background`.
+    /// Sets how glyphs' coverage is corrected: the gamma it is tuned for,
+    /// 1.0 to 2.2, and how much dark text is thickened, 0 for none.
+    pub fn set_text(&mut self, gamma: f32, contrast: f32) {
+        self.text = text_correction(gamma, contrast);
+    }
     pub fn draw(&mut self, background: [f32; 4], instances: &[Instance]) {
         for (place, rgba) in self.atlas.pending.drain(..) {
             self.queue.write_texture(
@@ -402,11 +410,20 @@ impl Renderer {
         }
         self.queue
             .write_buffer(&self.instances, 0, bytemuck::cast_slice(instances));
+        let t = self.text;
         let screen = [
             width as f32,
             height as f32,
             ATLAS_SIZE as f32,
             ATLAS_SIZE as f32,
+            t[0],
+            t[1],
+            t[2],
+            t[3],
+            t[4],
+            0.0,
+            0.0,
+            0.0,
         ];
         self.queue
             .write_buffer(&self.uniforms, 0, bytemuck::cast_slice(&screen));
@@ -501,4 +518,40 @@ impl Renderer {
         }
         Some(pixels)
     }
+}
+
+/// The coverage correction of glyphs as DirectWrite makes it for blending
+/// that is not gamma correct, as Zed takes it: the ratios for the gamma
+/// nearest `gamma`, scaled to coverage and color in 0 to 1, then the
+/// contrast.
+fn text_correction(gamma: f32, contrast: f32) -> [f32; 8] {
+    const RATIOS: [[f32; 4]; 13] = [
+        [0.0000, 0.0000, 0.0000, 0.0000],
+        [0.0166, -0.0807, 0.2227, -0.0751],
+        [0.0350, -0.1760, 0.4325, -0.1370],
+        [0.0543, -0.2821, 0.6302, -0.1876],
+        [0.0739, -0.3963, 0.8167, -0.2287],
+        [0.0933, -0.5161, 0.9926, -0.2616],
+        [0.1121, -0.6395, 1.1588, -0.2877],
+        [0.1300, -0.7649, 1.3159, -0.3080],
+        [0.1469, -0.8911, 1.4644, -0.3234],
+        [0.1627, -1.0170, 1.6051, -0.3347],
+        [0.1773, -1.1420, 1.7385, -0.3426],
+        [0.1908, -1.2652, 1.8650, -0.3476],
+        [0.2031, -1.3864, 1.9851, -0.3501],
+    ];
+    let norm13 = (0x10000 as f64 / (255.0 * 255.0) * 4.0) as f32 / 4.0;
+    let norm24 = (0x100 as f64 / 255.0 * 4.0) as f32 / 4.0;
+    let index = ((gamma * 10.0).round() as usize).clamp(10, 22) - 10;
+    let r = RATIOS[index];
+    [
+        r[0] * norm13,
+        r[1] * norm24,
+        r[2] * norm13,
+        r[3] * norm24,
+        contrast.max(0.0),
+        0.0,
+        0.0,
+        0.0,
+    ]
 }

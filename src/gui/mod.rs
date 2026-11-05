@@ -430,6 +430,11 @@ impl Gui {
     fn areas(&mut self, runtime: &Runtime) -> Areas {
         let settings = self.settings(runtime);
         self.fonts.configure(settings);
+        let options = runtime.app().options();
+        self.renderer.set_text(
+            options.int(None, "font-gamma") as f32 / 100.0,
+            options.int(None, "font-contrast") as f32 / 100.0,
+        );
         let (width, height) = self.renderer.size();
         Areas::new(runtime, &self.fonts, width as f32, height as f32)
     }

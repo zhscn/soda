@@ -3,6 +3,11 @@
 struct Screen {
     size: vec2<f32>,
     atlas: vec2<f32>,
+    // How glyph coverage is corrected for blending that is not gamma
+    // correct, as DirectWrite and Zed correct it.
+    gamma_ratios: vec4<f32>,
+    // x: how much dark text is thickened.
+    contrast: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> screen: Screen;
 @group(0) @binding(1) var atlas: texture_2d<f32>;
@@ -46,6 +51,23 @@ fn vertex(@builtin(vertex_index) index: u32, instance: Instance) -> Varying {
     return out;
 }
 
+// Perceived brightness, by Rec. 601.
+fn brightness(color: vec3<f32>) -> f32 {
+    return dot(color, vec3(0.30, 0.59, 0.11));
+}
+
+// A glyph's coverage corrected for its color: dark text is thickened, as
+// blending in gamma space thins it on a light background, then the
+// coverage is fitted to the gamma.
+fn corrected(coverage: f32, color: vec3<f32>) -> f32 {
+    let b = brightness(color);
+    let k = screen.contrast.x * clamp(4.0 * (0.75 - b), 0.0, 1.0);
+    let a = coverage * (k + 1.0) / (coverage * k + 1.0);
+    let g = screen.gamma_ratios;
+    let correction = (g.x * b + g.y) * a + (g.z * b + g.w);
+    return a + a * (1.0 - a) * correction;
+}
+
 // Distance from a rounded box centered at the origin.
 fn rounded(point: vec2<f32>, half: vec2<f32>, radius: f32) -> f32 {
     let q = abs(point) - half + vec2(radius);
@@ -73,7 +95,7 @@ fn fragment(in: Varying) -> @location(0) vec4<f32> {
         // A glyph's coverage, in the given color.
         case 1u: {
             let coverage = textureSampleLevel(atlas, atlas_sampler, in.uv, 0.0).a;
-            return vec4(in.color.rgb, in.color.a * coverage);
+            return vec4(in.color.rgb, in.color.a * corrected(coverage, in.color.rgb));
         }
         // A colored glyph, such as an emoji.
         case 2u: {
