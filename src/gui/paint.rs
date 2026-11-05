@@ -653,7 +653,8 @@ fn tab_bar(
     painter.fill(area, bg.unwrap_or(painter.bg), 0.0);
     let line = painter.fonts.line;
     let pad = painter.fonts.cell * 1.2;
-    let top = area.y + (area.h - line) / 2.0;
+    // Centered above the edge along the bottom.
+    let top = (area.y + (area.h - 1.0 - line) / 2.0).round();
     let border = rgba(theme.border.fg, painter.fg);
     let tabs = content::tabs(runtime, window);
     let mut open = None;
@@ -1019,7 +1020,9 @@ fn status(painter: &mut Painter, runtime: &Runtime, area: Rect, text: Option<&Te
     painter.fill(area, bg.unwrap_or(painter.bg), 0.0);
     edge(painter, area.x, area.y, area.w);
     let (cell, line) = (painter.fonts.cell, painter.fonts.line);
-    let top = area.y + (area.h - line) / 2.0;
+    // Words and the mode's pill center below the edge.
+    let inner = Rect::new(area.x, area.y + 1.0, area.w, area.h - 1.0);
+    let top = (inner.y + (inner.h - line) / 2.0).round();
     let status = content::status(runtime, text);
     // The mode's pill, when there is a mode to name; the path follows it.
     let mut left = cell * 0.6;
@@ -1037,7 +1040,7 @@ fn status(painter: &mut Painter, runtime: &Runtime, area: Rect, text: Option<&Te
         };
         let width = painter.fonts.width(label, bold) + 1.6 * cell;
         let (_, badge_bg) = painter.colors(badge);
-        let pill = Rect::new(cell * 0.6, area.y + 4.0, width, area.h - 8.0);
+        let pill = Rect::new(cell * 0.6, inner.y + 3.0, width, inner.h - 6.0);
         painter.fill(pill, badge_bg.unwrap_or(painter.fg), 7.0);
         let style = badge.add_modifier(Modifier::BOLD);
         painter.ui(pill.x + 0.8 * cell, top, label, style, width);
@@ -1081,7 +1084,7 @@ fn status(painter: &mut Painter, runtime: &Runtime, area: Rect, text: Option<&Te
         if document.dirty {
             let dot = (line * 0.28).round();
             let color = rgba(theme.modified.fg, painter.fg);
-            let y = area.y + (area.h - dot) / 2.0;
+            let y = (inner.y + (inner.h - dot) / 2.0).round();
             painter.fill(Rect::new(end + cell * 0.6, y, dot, dot), color, dot);
             end += cell * 0.6 + dot;
         }
@@ -1122,7 +1125,7 @@ fn message(
 ) -> Option<Rect> {
     let theme = painter.theme;
     let (cell, line) = (painter.fonts.cell, painter.fonts.line);
-    let top = area.y + (area.h - line) / 2.0;
+    let top = (area.y + (area.h - line) / 2.0).round();
     let x = cell * 0.8;
     let columns = ((area.w - x) / cell) as usize;
     match content::message(runtime, text) {

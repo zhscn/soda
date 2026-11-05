@@ -226,7 +226,23 @@ impl Fonts {
             .map_or(size * 0.6, |glyph| glyph.w);
         self.shaped.clear();
         self.baseline = self.baseline_of(Face::TEXT);
-        self.ui_baseline = self.baseline_of(Face::UI);
+        self.ui_baseline = self.cap_centered(Face::UI);
+    }
+    /// The baseline that centers capitals in a row: the parts around the
+    /// text sit in rows taller than their words, where a font's ascent,
+    /// which leaves room for accents, puts the words high.
+    fn cap_centered(&mut self, face: Face) -> f32 {
+        let glyphs = self.shape("H", face);
+        let cap = glyphs.first().and_then(|glyph| {
+            let key = glyph.physical((0.0, 0.0), 1.0).cache_key;
+            let image = self.swash.get_image_uncached(&mut self.system, key)?;
+            Some(image.placement.top as f32)
+        });
+        self.shaped.clear();
+        match cap {
+            Some(cap) if cap > 0.0 => ((self.line + cap) / 2.0).round(),
+            _ => self.baseline_of(face),
+        }
     }
     /// Where a font's baseline sits in a row, with the row's height spread
     /// evenly above and below its line.
