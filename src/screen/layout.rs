@@ -251,6 +251,17 @@ struct Marks<'a> {
     /// Hints in order of where they stand. They take room from the row.
     inlays: &'a [Inlay],
 }
+/// The beacons that touch a row's bytes, a caret just past its text
+/// among them. Beacons come ordered and apart, so their ends are ordered
+/// too.
+fn row_beacons(
+    beacons: &[std::ops::Range<usize>],
+    row: std::ops::Range<usize>,
+) -> &[std::ops::Range<usize>] {
+    let first = beacons.partition_point(|beacon| beacon.end < row.start);
+    let last = beacons.partition_point(|beacon| beacon.start <= row.end);
+    &beacons[first..last.max(first)]
+}
 /// A hint, before the character `x` from its line's start; `usize::MAX`
 /// puts it after the line.
 #[derive(Clone)]
@@ -1221,7 +1232,7 @@ pub(crate) fn frame(
         let marks = Marks {
             selection: state.selection().range(),
             grab: modal.grab.clone(),
-            beacons: &modal.beacons,
+            beacons: row_beacons(&modal.beacons, start..start + text.len()),
             digits: &modal.digits,
             matches: &[],
             detail: text.len(),

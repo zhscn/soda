@@ -41,6 +41,56 @@ pub(crate) fn thing_end(text: &Snapshot, mut at: usize, symbol: bool) -> Option<
     }
     Some(at)
 }
+/// A caret at the end of each word within `range`, or at its start going
+/// backward, as `thing_end` and `thing_start` would step from one edge to
+/// the other; found in one pass, for a grab of thousands of words.
+pub(crate) fn thing_carets(
+    text: &Snapshot,
+    range: Range<usize>,
+    symbol: bool,
+    backward: bool,
+) -> Vec<usize> {
+    use unicode_segmentation::UnicodeSegmentation;
+    // Words as far as the range goes.
+    let mut runs: Vec<Range<usize>> = vec![];
+    let mut open = false;
+    for (at, cluster) in text.text()[range.clone()].grapheme_indices(true) {
+        let at = range.start + at;
+        if cluster.chars().next().is_some_and(|ch| wordy(ch, symbol)) {
+            match runs.last_mut() {
+                Some(run) if open => run.end = at + cluster.len(),
+                _ => runs.push(at..at + cluster.len()),
+            }
+            open = true;
+        } else {
+            open = false;
+        }
+    }
+    // A word that goes on past the far edge has its caret beyond it.
+    let across = |at: usize| {
+        at > 0
+            && at < text.len_bytes()
+            && is_thing(text, at, symbol)
+            && is_thing(text, prev(text, at), symbol)
+    };
+    if backward {
+        if runs
+            .first()
+            .is_some_and(|run| run.start == range.start && across(range.start))
+        {
+            runs.remove(0);
+        }
+        runs.into_iter().map(|run| run.start).collect()
+    } else {
+        if runs
+            .last()
+            .is_some_and(|run| run.end == range.end && across(range.end))
+        {
+            runs.pop();
+        }
+        runs.into_iter().map(|run| run.end).collect()
+    }
+}
 /// The start of the word before `at`.
 pub(crate) fn thing_start(text: &Snapshot, mut at: usize, symbol: bool) -> Option<usize> {
     while at > 0 && !is_thing(text, prev(text, at), symbol) {
@@ -177,4 +227,53 @@ pub(crate) fn paragraph(text: &Snapshot, at: usize, inner: bool) -> Option<Range
         }
     }
     Some(text.line_start(start)?..text.line_content_range(end)?.end)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The carets one pass finds are those of stepping word by word.
+    #[test]
+    fn thing_carets_are_those_of_stepping() {
+        let text = Snapshot::new("ab_c d,é  x1 _y\nzz.w".into(), 0);
+        let len = text.len_bytes();
+        let edges: Vec<_> = (0..=len).filter(|&at| text.is_char_boundary(at)).collect();
+        for &start in &edges {
+            for &end in edges.iter().filter(|&&end| end >= start) {
+                for symbol in [false, true] {
+                    let mut forward = vec![];
+                    let mut from = start;
+                    while let Some(at) = thing_end(&text, from, symbol) {
+                        if at > end {
+                            break;
+                        }
+                        forward.push(at);
+                        from = at;
+                    }
+                    let mut backward = vec![];
+                    let mut from = end;
+                    while let Some(at) = thing_start(&text, from, symbol) {
+                        if at < start {
+                            break;
+                        }
+                        backward.push(at);
+                        from = at;
+                    }
+                    backward.reverse();
+                    let range = start..end;
+                    assert_eq!(
+                        thing_carets(&text, range.clone(), symbol, false),
+                        forward,
+                        "{range:?} {symbol}"
+                    );
+                    assert_eq!(
+                        thing_carets(&text, range.clone(), symbol, true),
+                        backward,
+                        "{range:?} {symbol}"
+                    );
+                }
+            }
+        }
+    }
 }

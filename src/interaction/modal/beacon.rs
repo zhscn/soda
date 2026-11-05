@@ -16,8 +16,10 @@ use super::{
 use crate::{
     application::ClipboardAction,
     application::{Application, Event},
+    core::Association,
     core::{Change, Selection, Transaction},
     editor::Command as Edit,
+    editor::{Document, DocumentId, DocumentUpdate},
     interaction::{Command, EditMode, Layers, Response, UserInput},
 };
 use std::{ops::Range, time::Duration};
@@ -41,6 +43,58 @@ pub(in crate::interaction) struct BeaconPlay {
 pub(in crate::interaction) struct BeaconShape {
     pub kind: Option<(Kind, bool)>,
     pub backward: bool,
+}
+
+/// The other places, all of one revision of one document: thousands of
+/// them in a large grab, so they are kept and moved together rather than
+/// each as a position of its own. Ranges run forward.
+#[derive(Default)]
+pub(in crate::interaction) struct Beacons {
+    at: Option<(DocumentId, u64)>,
+    ranges: Vec<Range<usize>>,
+}
+impl Beacons {
+    pub fn is_empty(&self) -> bool {
+        self.ranges.is_empty()
+    }
+    pub fn clear(&mut self) {
+        *self = Self::default();
+    }
+    fn set(&mut self, document: &Document, ranges: Vec<Range<usize>>) {
+        self.at = Some((document.id(), document.snapshot().version()));
+        self.ranges = ranges;
+    }
+    /// Moves them over an edit of their document; one they do not know
+    /// the revision before lets them go.
+    pub fn map(&mut self, update: &DocumentUpdate) {
+        let Some((document, revision)) = self.at else {
+            return;
+        };
+        if document != update.document_id {
+            return;
+        }
+        if revision != update.before_revision {
+            return self.clear();
+        }
+        let map = |offset| update.mapping.map(offset, Association::After);
+        for range in &mut self.ranges {
+            *range = map(range.start)..map(range.end);
+        }
+        self.at = Some((document, update.after_revision));
+    }
+    /// The ranges, if they belong to the document as it is.
+    fn resolve(&self, document: &Document) -> Vec<Range<usize>> {
+        let current = (document.id(), document.snapshot().version());
+        if self.at != Some(current) {
+            return vec![];
+        }
+        let length = document.snapshot().len_bytes();
+        self.ranges
+            .iter()
+            .filter(|range| range.end <= length)
+            .cloned()
+            .collect()
+    }
 }
 
 impl Layers {
@@ -98,15 +152,7 @@ impl Layers {
         self.mode = EditMode::Beacon;
         let (ranges, shape, shrink) = self.derived(&at, grab);
         self.modal.beacon_shape = shape;
-        self.modal.beacons = ranges
-            .into_iter()
-            .filter_map(|range| {
-                Some(Grab {
-                    start: position(at.document, range.start)?,
-                    end: position(at.document, range.end)?,
-                })
-            })
-            .collect();
+        self.modal.beacons.set(at.document, ranges);
         if shrink && !at.selection.range().is_empty() {
             self.modal.tag = None;
             return vec![at.event(Edit::SetSelection(Selection::caret(head)))];
@@ -118,7 +164,7 @@ impl Layers {
         let Some(at) = place(app, Default::default()) else {
             return vec![];
         };
-        resolved(&self.modal.beacons, &at)
+        self.modal.beacons.resolve(at.document)
     }
     /// The other places, by the kind of the main selection, as
     /// `meow--beacon-update-overlays`; and whether the main selection
@@ -151,9 +197,10 @@ impl Layers {
             None => {
                 let column = char_column(text, head);
                 let line = text.line_of(head).unwrap();
+                let mut walk = text.walk_lines();
                 let offsets = lines
                     .around(line)
-                    .filter_map(|other| at_column(text, other, column))
+                    .filter_map(|other| at_column(&mut walk, other, column))
                     .filter(|offset| grab.start <= *offset && *offset <= grab.end)
                     .collect();
                 carets(offsets)
@@ -161,10 +208,11 @@ impl Layers {
             Some((Kind::Char, true)) => {
                 let (from, to) = (char_column(text, main.start), char_column(text, main.end));
                 let line = text.line_of(head).unwrap();
+                let mut walk = text.walk_lines();
                 let ranges = lines
                     .around(line)
                     .filter_map(|other| {
-                        Some(at_column(text, other, from)?..at_column(text, other, to)?)
+                        Some(at_column(&mut walk, other, from)?..at_column(&mut walk, other, to)?)
                     })
                     .filter(|range| grab.start <= range.start && range.end <= grab.end)
                     .collect();
@@ -174,27 +222,7 @@ impl Layers {
                 // A caret at the end of each word going forward, at the start
                 // going backward.
                 let symbol = kind == Kind::Symbol;
-                let mut offsets = vec![];
-                if backward {
-                    let mut from = grab.end;
-                    while let Some(start) = text::thing_start(text, from, symbol) {
-                        if start < grab.start {
-                            break;
-                        }
-                        offsets.push(start);
-                        from = start;
-                    }
-                    offsets.reverse();
-                } else {
-                    let mut from = grab.start;
-                    while let Some(end) = text::thing_end(text, from, symbol) {
-                        if end > grab.end {
-                            break;
-                        }
-                        offsets.push(end);
-                        from = end;
-                    }
-                }
+                let offsets = text::thing_carets(text, grab.clone(), symbol, backward);
                 carets(offsets)
             }
             Some((kind @ (Kind::Word | Kind::Symbol), true)) => {
@@ -307,7 +335,10 @@ impl Layers {
         {
             main.end = text::next(at.text, main.end);
         }
-        let mut others: Vec<_> = resolved(&self.modal.beacons, at)
+        let mut others: Vec<_> = self
+            .modal
+            .beacons
+            .resolve(at.document)
             .into_iter()
             .filter(|range| {
                 !range.is_empty() && (range.end <= main.start || range.start >= main.end)
@@ -372,7 +403,7 @@ impl Layers {
             return;
         };
         let shape = self.modal.beacon_shape;
-        let targets = resolved(&self.modal.beacons, at);
+        let targets = self.modal.beacons.resolve(at.document);
         // The anchor goes in `start`, the head in `end`, whichever is first.
         self.modal.held = position(at.document, at.selection.anchor)
             .zip(position(at.document, at.selection.head))
@@ -463,9 +494,8 @@ fn char_column(text: &crate::core::Snapshot, offset: usize) -> usize {
         .count()
 }
 /// The place `column` characters into `line`, if the line is that long.
-fn at_column(text: &crate::core::Snapshot, line: usize, column: usize) -> Option<usize> {
-    let range = text.line_content_range(line)?;
-    let content = text.byte_slice(range.clone())?.to_string();
+fn at_column(walk: &mut crate::core::LineWalk, line: usize, column: usize) -> Option<usize> {
+    let (range, content) = walk.content(line)?;
     let mut chars = content
         .char_indices()
         .map(|(at, _)| at)
@@ -483,15 +513,5 @@ fn matches(
         .cursor(at.text)
         .filter(|found| found.start >= grab.start && found.end <= grab.end)
         .filter(|found| found.end != main.end && found.end != main.start)
-        .collect()
-}
-fn resolved(beacons: &[Grab], at: &Place) -> Vec<Range<usize>> {
-    beacons
-        .iter()
-        .filter_map(|beacon| {
-            let start = beacon.start.resolve(at.document).ok()?.0;
-            let end = beacon.end.resolve(at.document).ok()?.0;
-            Some(start.min(end)..start.max(end))
-        })
         .collect()
 }

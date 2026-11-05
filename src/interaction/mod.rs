@@ -710,9 +710,7 @@ impl Layers {
                     .flatten()
                     .map(|mapped| *position = mapped)
             };
-            self.modal
-                .beacons
-                .retain_mut(|beacon| keep(&mut beacon.start).and(keep(&mut beacon.end)).is_some());
+            self.modal.beacons.map(edit);
             if let Some(grab) = &mut self.modal.grab
                 && keep(&mut grab.start).and(keep(&mut grab.end)).is_none()
             {

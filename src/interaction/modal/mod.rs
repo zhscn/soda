@@ -12,7 +12,7 @@ use crate::{
     core::{LogicalColumn, Selection},
     editor::{DocumentPosition, search::SearchQuery},
 };
-pub(super) use beacon::{BeaconEntry, BeaconPlay, BeaconShape};
+pub(super) use beacon::{BeaconEntry, BeaconPlay, BeaconShape, Beacons};
 pub use kmacro::MacroAction;
 /// The selection of the active view, if there is one.
 pub(super) fn execute_place(app: &crate::application::Application) -> Option<Selection> {
@@ -288,7 +288,7 @@ pub(in crate::interaction) struct State {
     pub replay: Replay,
     pub grab: Option<Grab>,
     /// The other selections of Beacon; the session holds the main one.
-    pub beacons: Vec<Grab>,
+    pub beacons: Beacons,
     /// Insert was entered from Beacon: what is typed is recorded, to play
     /// at the other places when Esc ends it.
     pub beacon_insert: Option<BeaconEntry>,

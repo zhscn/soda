@@ -58,7 +58,12 @@ pub(crate) fn text(
         let hints = runtime.expand_hints();
         Overlay {
             grab: runtime.grab(),
-            beacons: runtime.beacons(),
+            beacons: {
+                // Ordered, for each row to find its own by bisection.
+                let mut beacons = runtime.beacons();
+                beacons.sort_by_key(|beacon| (beacon.start, beacon.end));
+                beacons
+            },
             digits: hints.at,
             line_digits: hints.lines,
             preview: runtime
