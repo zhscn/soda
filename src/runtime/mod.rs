@@ -96,6 +96,8 @@ pub struct Runtime {
     /// The mode and focused view hooks last saw.
     seen: (crate::interaction::EditMode, Option<ViewId>),
     quit: bool,
+    /// Whether the quit is a `restart`.
+    restart: bool,
     suspend: bool,
     /// A command, or an event it produced, failed since this was cleared.
     failed: bool,
@@ -173,6 +175,7 @@ impl Runtime {
             restores: vec![],
             seen: Default::default(),
             quit: false,
+            restart: false,
             suspend: false,
             failed: false,
             lua: None,
@@ -275,6 +278,11 @@ impl Runtime {
     }
     pub fn quit_requested(&self) -> bool {
         self.quit
+    }
+    /// Whether the quit asked for is `restart`: the frontend ends, and the
+    /// session goes on in a new process; see `session`.
+    pub fn restart_requested(&self) -> bool {
+        self.restart
     }
     /// Whether `suspend` ran since the last call; the frontend stops the
     /// process and redraws when it continues.
@@ -450,6 +458,23 @@ impl Runtime {
                 (self.app.document_name(document), text)
             })
             .collect()
+    }
+    /// What `restart` carries over, as text for `resume`.
+    pub fn session(&self) -> String {
+        let mut session = self.app.session();
+        session["version"] = 1.into();
+        session.to_string()
+    }
+    /// Takes back a session `session` gave, before any document is open:
+    /// documents open as they were, with hooks run for each.
+    pub fn resume(&mut self, text: &str) {
+        match serde_json::from_str::<serde_json::Value>(text) {
+            Ok(session) if session.get("version").and_then(|v| v.as_u64()) == Some(1) => {
+                self.dispatch(Event::Resume(Box::new(session)));
+            }
+            Ok(_) => self.report("The session is of another version and was not restored".into()),
+            Err(error) => self.report(format!("The session was not restored: {error}")),
+        }
     }
     /// Takes back what an earlier session left with `persist`.
     pub fn restore(&mut self, text: &str) {
@@ -781,13 +806,19 @@ impl Runtime {
                 self.message = error;
             }
         }
-        match response {
+        let done = match response {
             Ok(response) => self.respond(response, time),
             Err(error) => {
                 self.interaction_failed(error, time);
                 false
             }
+        };
+        // After the response, which may clear the message row.
+        if let Some(report) = update.report {
+            self.message = report;
+            self.dirty = true;
         }
+        done
     }
     fn respond(&mut self, response: Response, time: Duration) -> bool {
         match response.message {
@@ -913,7 +944,8 @@ impl Runtime {
                 }
             }
         }
-        self.quit |= response.quit;
+        self.quit |= response.quit || response.restart;
+        self.restart |= response.restart;
         self.suspend |= response.suspend;
         if !response.lua.is_empty() {
             let view = self.app.active_view();

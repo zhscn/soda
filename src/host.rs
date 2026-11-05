@@ -12,12 +12,16 @@ pub struct Args {
     pub path: Option<PathBuf>,
     /// Whether to run `init.lua`.
     pub config: bool,
+    /// The session `restart` left, given as `--session FILE` to the
+    /// process it starts; not for people to type.
+    pub session: Option<PathBuf>,
 }
 impl Args {
     /// Reads the process's arguments. `--help` and `--version` print and
     /// end the process, as do arguments it does not take.
     pub fn parse(program: &str) -> Self {
         let mut args: Vec<_> = std::env::args_os().skip(1).collect();
+        let session = take_session(&mut args);
         let config = match args.iter().position(|arg| arg == "--no-config") {
             Some(index) => {
                 args.remove(index);
@@ -44,8 +48,18 @@ impl Args {
                 std::process::exit(2);
             }
         };
-        Self { path, config }
+        Self {
+            path,
+            config,
+            session,
+        }
     }
+}
+/// Takes `--session FILE` out of arguments.
+fn take_session(args: &mut Vec<std::ffi::OsString>) -> Option<PathBuf> {
+    let index = args.iter().position(|arg| arg == "--session")?;
+    args.remove(index);
+    (index < args.len()).then(|| PathBuf::from(args.remove(index)))
 }
 
 /// `$XDG_CONFIG_HOME/soda/init.lua`, falling back to
@@ -71,10 +85,13 @@ pub fn state_path() -> Option<PathBuf> {
 /// Starts Runtime on `path`: a directory is the project; a file opens in
 /// the working directory's. Built-in Lua modules load first, then
 /// `init.lua` unless `config` is false, then the saved state; the first
-/// document opens last, so that configured hooks see it.
+/// document opens last, so that configured hooks see it. With a `session`
+/// that `restart` left, its documents open instead of `path`'s, and the
+/// file goes.
 pub fn start(
     path: Option<PathBuf>,
     config: bool,
+    session: Option<PathBuf>,
     clipboard: Box<dyn SystemClipboard>,
 ) -> io::Result<Runtime> {
     // A directory argument is a project; otherwise the working directory
@@ -116,8 +133,19 @@ pub fn start(
         runtime.restore(&text);
     }
     let message = runtime.message().to_owned();
-    runtime.start(path);
-    if !message.is_empty() {
+    match session {
+        Some(session) => {
+            let text = std::fs::read_to_string(&session);
+            let _ = std::fs::remove_file(&session);
+            match text {
+                Ok(text) => runtime.resume(&text),
+                Err(error) => runtime.report(format!("{}: {error}", session.display())),
+            }
+        }
+        None => runtime.start(path),
+    }
+    // What the session said wins; then what configuration said.
+    if !message.is_empty() && runtime.message().is_empty() {
         runtime.report(message);
     }
     Ok(runtime)
@@ -157,6 +185,13 @@ pub fn finish(runtime: &mut Runtime, outcome: Result<io::Result<()>, Panic>) -> 
     // After a hangup nobody reads stderr, and writing may fail.
     use io::Write;
     let mut stderr = io::stderr();
+    // Restarting carries unsaved text along; only when the new process
+    // cannot start does it go to recovery.
+    if runtime.restart_requested() && matches!(outcome, Ok(Ok(()))) {
+        save(runtime, &mut stderr);
+        let error = restart(runtime);
+        let _ = writeln!(stderr, "soda: cannot restart: {error}");
+    }
     let unsaved = runtime.unsaved();
     if !unsaved.is_empty() {
         let directory = state_path()
@@ -173,14 +208,7 @@ pub fn finish(runtime: &mut Runtime, outcome: Result<io::Result<()>, Panic>) -> 
     }
     match outcome {
         Ok(result) => {
-            if let Some(path) = state_path()
-                && let Err(error) = save_state(
-                    &path,
-                    &runtime.persist_over(std::fs::read_to_string(&path).ok().as_deref()),
-                )
-            {
-                let _ = writeln!(stderr, "soda: cannot save {}: {error}", path.display());
-            }
+            save(runtime, &mut stderr);
             result
         }
         Err(panic) => {
@@ -192,6 +220,53 @@ pub fn finish(runtime: &mut Runtime, outcome: Result<io::Result<()>, Panic>) -> 
     }
 }
 
+/// Saves the state, saying on stderr if it cannot.
+fn save(runtime: &mut Runtime, stderr: &mut io::Stderr) {
+    use io::Write;
+    if let Some(path) = state_path()
+        && let Err(error) = save_state(
+            &path,
+            &runtime.persist_over(std::fs::read_to_string(&path).ok().as_deref()),
+        )
+    {
+        let _ = writeln!(stderr, "soda: cannot save {}: {error}", path.display());
+    }
+}
+/// Writes the session beside the state and runs the program again in this
+/// process, with the arguments it had and `--session`: the program as it
+/// is on disk now, so a newer build takes over. Returns only on failure.
+#[cfg(unix)]
+fn restart(runtime: &Runtime) -> io::Error {
+    use std::os::unix::process::CommandExt;
+    let Some(path) = state_path().map(|state| state.with_file_name("session")) else {
+        return io::Error::other("no directory for the session");
+    };
+    if let Err(error) = save_state(&path, &runtime.session()) {
+        return error;
+    }
+    let program = match std::env::current_exe() {
+        Ok(program) => program,
+        Err(error) => return error,
+    };
+    // Linux names a program replaced since it started `PATH (deleted)`.
+    let program = program
+        .to_str()
+        .and_then(|name| name.strip_suffix(" (deleted)"))
+        .map_or(program.clone(), PathBuf::from);
+    let mut args: Vec<_> = std::env::args_os().skip(1).collect();
+    take_session(&mut args);
+    let error = std::process::Command::new(program)
+        .args(args)
+        .arg("--session")
+        .arg(&path)
+        .exec();
+    let _ = std::fs::remove_file(&path);
+    error
+}
+#[cfg(not(unix))]
+fn restart(_: &Runtime) -> io::Error {
+    io::Error::other("restarting needs a Unix system")
+}
 /// Writes the state through a temporary file, so a failed write leaves the
 /// previous state whole.
 fn save_state(path: &Path, text: &str) -> io::Result<()> {
@@ -227,6 +302,19 @@ fn recover(unsaved: &[(String, String)], directory: &Path) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_session_argument_is_taken_out_and_the_rest_kept() {
+        let mut args: Vec<std::ffi::OsString> = ["--no-config", "--session", "/s", "a.txt"]
+            .into_iter()
+            .map(Into::into)
+            .collect();
+        assert_eq!(
+            super::take_session(&mut args),
+            Some(std::path::PathBuf::from("/s"))
+        );
+        assert_eq!(args, ["--no-config", "a.txt"]);
+        assert_eq!(super::take_session(&mut args), None);
+    }
     #[test]
     fn unsaved_documents_are_recovered_into_files() {
         let mut runtime = crate::runtime::Runtime::new(std::path::PathBuf::from("/")).unwrap();

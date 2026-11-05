@@ -539,6 +539,89 @@ impl Windows {
             }
         }
     }
+    /// The tree and the side windows with each view as `index` names it,
+    /// for `restart`.
+    pub(super) fn save(&self, index: &dyn Fn(ViewId) -> Option<usize>) -> serde_json::Value {
+        use serde_json::{Value, json};
+        fn node(at: &Node, index: &dyn Fn(ViewId) -> Option<usize>) -> Value {
+            match at {
+                Node::Window(view) => json!(index(*view)),
+                Node::Split {
+                    axis,
+                    children,
+                    weights,
+                } => json!({
+                    "axis": if *axis == Axis::Rows { "rows" } else { "columns" },
+                    "children": children.iter().map(|c| node(c, index)).collect::<Vec<_>>(),
+                    "weights": weights,
+                }),
+            }
+        }
+        let side = |slot: Option<(ViewId, u16)>| {
+            slot.and_then(|(view, size)| Some(json!([index(view)?, size])))
+        };
+        json!({
+            "root": self.root.as_ref().map(|root| node(root, index)),
+            "bottom": side(self.bottom),
+            "right": side(self.right),
+            "opened": self.opened,
+        })
+    }
+    /// Windows as `save` wrote them, with each index as `view` gives it
+    /// back. A window whose view is gone goes, and a split left with one
+    /// child gives way to it.
+    pub(super) fn load(value: &serde_json::Value, view: &dyn Fn(usize) -> Option<ViewId>) -> Self {
+        use serde_json::Value;
+        fn node(value: &Value, view: &dyn Fn(usize) -> Option<ViewId>) -> Option<Node> {
+            if let Some(index) = value.as_u64() {
+                return view(index as usize).map(Node::Window);
+            }
+            let axis = match value.get("axis")?.as_str()? {
+                "rows" => Axis::Rows,
+                _ => Axis::Columns,
+            };
+            let weights = value.get("weights")?.as_array()?;
+            let (children, weights): (Vec<_>, Vec<_>) = value
+                .get("children")?
+                .as_array()?
+                .iter()
+                .zip(weights)
+                .filter_map(|(child, weight)| {
+                    Some((
+                        node(child, view)?,
+                        weight.as_u64().unwrap_or(1).max(1) as u32,
+                    ))
+                })
+                .unzip();
+            match children.len() {
+                0 => None,
+                1 => children.into_iter().next(),
+                _ => Some(Node::Split {
+                    axis,
+                    children,
+                    weights,
+                }),
+            }
+        }
+        let side = |key: &str| -> Option<(ViewId, u16)> {
+            let pair = value.get(key)?.as_array()?;
+            let id = view(pair.first()?.as_u64()? as usize)?;
+            Some((id, pair.get(1)?.as_u64()?.clamp(1, u16::MAX as u64) as u16))
+        };
+        let opened = |at: usize| {
+            value
+                .get("opened")
+                .and_then(|opened| opened.get(at))
+                .and_then(Value::as_u64)
+                .map_or(1, |size| size.clamp(1, u16::MAX as u64) as u16)
+        };
+        Self {
+            root: value.get("root").and_then(|root| node(root, view)),
+            bottom: side("bottom"),
+            right: side("right"),
+            opened: [opened(0), opened(1)],
+        }
+    }
     /// The window next to `view` in a direction: among those beyond its
     /// edge that overlap it, the nearest, then the one closest to its
     /// top or left.

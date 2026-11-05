@@ -453,7 +453,7 @@ end)
 | `lua CODE`、`lua-call ID [ARG]`、`choose`、`answer` | 执行 Lua、调用 Lua 注册的函数、回答 Lua 扩展的提问 |
 | `snippet BODY` | 展开 snippet，见[补全](completion.md#snippet) |
 | `echo [TEXT]` | 在消息行显示文字，常与 `%val{}` 合用 |
-| `commands`、`help`、`suspend`、`nop` | 命令面板、帮助、挂起、什么也不做（屏蔽默认键） |
+| `commands`、`help`、`suspend`、`restart`、`nop` | 命令面板、帮助、挂起、重新启动（见[重新启动](#重新启动)）、什么也不做（屏蔽默认键） |
 | `undo` / `redo`、`copy` / `cut` / `paste` / `yank-pop` | 历史与剪贴板 |
 | `move-up` / `move-down`、`document-start` / `document-end`、`select-all`、`normal-mode` | 移动、全选、切换模式；`extend-` 前缀扩展选区 |
 | `indent` / `outdent`、`indent-for-tab`、`insert-tab` / `insert-literal-tab`、`newline` | 缩进、Tab、语言感知换行 |
@@ -615,6 +615,19 @@ Enter 依次处理：
 等待层只采用带自己 Operation 身份的保存结果。等待期间 Esc 只取消离开流程，已提交的保存继续完成。已有保存任务时不启动新的关闭、重新加载或退出；未命名文档不能重新加载。
 
 `quit` 每次询问一个未保存的文档（先当前文档，再其他的，包括没有视图的），`quit discard` 和成功的 `quit save` 之后再次执行 `quit`，直到没有未保存文档和待处理的保存。中途取消时，已丢弃的不恢复，已保存的仍有效。`write-quit` 只自动保存当前文档。
+
+### 重新启动
+
+`restart` 同 Emacs 的 `restart-emacs` 加上 desktop.el：结束当前进程，用原来的参数重新执行磁盘上的程序，接着刚才的会话。程序文件在运行中被替换（重新编译）时执行的是新的。带回来的有：
+
+- 所有文档（scratch 文档除外，它们是结果，可以重新生成）及其所属的项目、目录和服务器根目录；
+- 未保存的修改原样带回，文档仍是未保存，不询问；撤销历史不带回，文本从这里开始；
+- 每个视图的选区和滚动位置，窗口树、侧窗和当前窗口；
+- kill ring，`lsp-start` 启动过的 `(语言, 根目录)`，服务器在它的文档打开后重新启动。
+
+键盘宏和选项不带回：选项由 `init.lua` 重新设置。新进程照常加载内置模块、`init.lua` 和状态，再恢复会话，每个文档像打开时一样触发 `open`（未命名文档触发 `new`）钩子。有路径但文件已不在、又没有未保存修改的文档不带回，消息行说明。
+
+会话经状态目录下的 `session` 文件交给新进程（隐藏参数 `--session`），读入后删除。新进程启动不了时，未保存的文档照异常退出写入 `recovery/`。有保存任务时不重新启动。
 
 ### 保存时整理空白
 

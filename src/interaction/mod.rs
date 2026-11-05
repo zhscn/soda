@@ -135,6 +135,9 @@ pub struct Response {
     /// Lua to run once the rest of the response is done.
     pub lua: Vec<LuaRequest>,
     pub quit: bool,
+    /// Quit and start again in a new process, as Emacs's `restart-emacs`,
+    /// keeping the session.
+    pub restart: bool,
     /// Give the terminal back to the shell, as Ctrl-Z in a shell job.
     pub suspend: bool,
     pub redraw: bool,

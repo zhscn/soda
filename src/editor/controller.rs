@@ -126,6 +126,14 @@ impl Editor {
             epoch: Instant::now(),
         }
     }
+    /// Replaces the text with no undo step to take it back: the document
+    /// starts from it, as from text it was opened with.
+    pub(crate) fn restore_text(&mut self, text: String) -> Result<EditorUpdate, EditError> {
+        let update = self.execute(Command::ReloadText(text))?;
+        self.model.document.forget_history();
+        self.input_history.end();
+        Ok(update)
+    }
     pub(crate) fn checkpoint_history(&mut self) {
         self.model.document.break_group();
         self.input_history.end();

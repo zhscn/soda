@@ -140,6 +140,10 @@ impl Document {
     pub(super) fn break_group(&mut self) {
         self.history.break_group();
     }
+    /// Drops every undo step, as a document starts with none.
+    pub(super) fn forget_history(&mut self) {
+        self.history = History::default();
+    }
     pub(super) fn commit(
         &mut self,
         owner: SessionId,

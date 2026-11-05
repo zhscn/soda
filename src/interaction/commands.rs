@@ -129,6 +129,7 @@ pub enum Command {
     Stop,
     /// Hands the terminal back to the shell until the editor is resumed.
     Suspend,
+    Restart,
     /// Asks which of the items; `Choose` answers with one of them, and the
     /// Lua function under `id` gets its number.
     Offer {
@@ -1238,6 +1239,19 @@ impl Layers {
             }
             Command::Stop => response.stop = true,
             Command::Suspend => response.suspend = true,
+            // Unsaved text goes along, so nothing is asked.
+            Command::Restart => {
+                if app
+                    .workspace()
+                    .documents()
+                    .any(|id| app.workspace().is_saving(id))
+                {
+                    response.message =
+                        Message::Set("Save in progress; restart after it completes".into());
+                } else {
+                    response.restart = true;
+                }
+            }
             Command::Lua(code) => response.lua.push(super::LuaRequest::Chunk {
                 origin: "lua".into(),
                 code,

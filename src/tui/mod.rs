@@ -22,7 +22,6 @@ use crossterm::{
 };
 use std::{
     io::{self, IsTerminal},
-    path::PathBuf,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -265,7 +264,7 @@ fn draw(
 }
 /// Run the terminal frontend using the shared owner-thread runtime.
 /// Run the terminal frontend using the shared owner-thread runtime.
-pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
+pub fn run(args: host::Args) -> io::Result<()> {
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
         return Err(io::Error::other("interactive editing requires a terminal"));
     }
@@ -284,8 +283,9 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
     let mut terminal =
         ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(io::stdout()))?;
     let mut runtime = host::start(
-        path,
-        config,
+        args.path,
+        args.config,
+        args.session,
         Box::new(crate::clipboard::Clipboard::terminal()),
     )?;
     let mut presenter = Presenter::new();

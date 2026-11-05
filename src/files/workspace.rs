@@ -189,6 +189,19 @@ impl Workspace {
     }
     /// Explicit disk reload. Local edits require discard=true; history retains
     /// the replaced contents as one undo unit and document identity is stable.
+    /// Replaces a document's text with no undo step, as `restart` carries
+    /// unsaved text over; against its file, the document is unsaved.
+    pub fn restore_text(
+        &mut self,
+        id: DocumentId,
+        text: String,
+    ) -> Result<crate::editor::EditorUpdate, FileError> {
+        let editor = self
+            .editors
+            .get_mut(&id)
+            .ok_or(FileError::UnknownDocument)?;
+        Ok(editor.restore_text(text)?)
+    }
     pub fn reload(&mut self, id: DocumentId, discard: bool) -> Result<ReloadUpdate, FileError> {
         let session = self
             .editors

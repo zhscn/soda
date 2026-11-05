@@ -10,7 +10,7 @@ fn main() -> ExitCode {
     {
         let _ = std::env::set_current_dir(home);
     }
-    match soda::gui::run(args.path, args.config) {
+    match soda::gui::run(args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("soda-gui: {error}");

@@ -53,6 +53,7 @@ mod preprocessor;
 mod recent;
 mod rules;
 mod runtime;
+mod session;
 mod snippet_cpp;
 mod state;
 mod structure;

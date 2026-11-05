@@ -231,7 +231,7 @@ fn selected(runtime: &Runtime) -> bool {
 pub const APP_ID: &str = "io.github.zhscn.soda";
 
 /// Run the graphical frontend using the shared owner-thread runtime.
-pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
+pub fn run(args: host::Args) -> io::Result<()> {
     let mut builder = EventLoop::builder();
     // Without winit's menu, whose Command-Q ends the program at once,
     // Command keys come to the editor: Command-Q asks about unsaved work.
@@ -247,7 +247,12 @@ pub fn run(path: Option<PathBuf>, config: bool) -> io::Result<()> {
             .unwrap_or_else(|e| e.into_inner())
             .send_event(());
     });
-    let runtime = host::start(path, config, Box::new(crate::clipboard::Clipboard::local()))?;
+    let runtime = host::start(
+        args.path,
+        args.config,
+        args.session,
+        Box::new(crate::clipboard::Clipboard::local()),
+    )?;
     // Declared after the event loop, so dropped before it: the runtime's
     // Wayland clipboard uses the loop's connection.
     let mut app = App {
@@ -279,6 +284,7 @@ pub fn snapshot(
     let mut runtime = host::start(
         path,
         config,
+        None,
         Box::new(crate::clipboard::Clipboard::Internal),
     )?;
     let renderer = Renderer::offscreen(size.0, size.1).map_err(io::Error::other)?;

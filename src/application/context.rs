@@ -106,6 +106,39 @@ impl Application {
             .map(|view| view.document_id)
     }
     /// A document without a file stands where the active one does.
+    /// Where a document belongs, for `restart`.
+    pub(super) fn save_context(&self, document: DocumentId) -> serde_json::Value {
+        let path = |path: &Option<PathBuf>| path.as_ref().map(|p| p.to_string_lossy().into_owned());
+        match self.contexts.get(&document) {
+            Some(context) => serde_json::json!({
+                "directory": context.directory.to_string_lossy(),
+                "project": path(&context.project),
+                "server": path(&context.server),
+            }),
+            None => serde_json::Value::Null,
+        }
+    }
+    /// Takes back where a document belonged; without a record it is placed
+    /// as a newly opened one is.
+    pub(super) fn load_context(&mut self, document: DocumentId, value: &serde_json::Value) {
+        let path = |key: &str| value.get(key).and_then(|v| v.as_str()).map(PathBuf::from);
+        match path("directory") {
+            Some(directory) => {
+                self.contexts.insert(
+                    document,
+                    Context {
+                        directory,
+                        project: path("project"),
+                        server: path("server"),
+                    },
+                );
+            }
+            None => {
+                self.adopt(document);
+                self.settle(document, None);
+            }
+        }
+    }
     pub(super) fn adopt(&mut self, document: DocumentId) {
         let context = self.active_context();
         self.contexts.insert(document, context);

@@ -1580,6 +1580,11 @@ pub static BUILTINS: &[Builtin] = &[
         }
     ),
     builtin!(
+        "restart",
+        "Start soda again, keeping the documents, windows and unsaved text",
+        Command::Restart
+    ),
+    builtin!(
         "suspend",
         "Return to the shell; resume the editor with fg",
         Command::Suspend

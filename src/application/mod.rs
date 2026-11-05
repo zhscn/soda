@@ -25,6 +25,7 @@ mod highlights;
 mod inlays;
 mod notes;
 mod paints;
+mod session;
 pub mod themes;
 pub use paints::PaintSpan;
 mod tidy;
@@ -169,6 +170,9 @@ pub enum Event {
         horizontal_scroll: usize,
     },
     Open(PathBuf),
+    /// Takes back what `Application::session` gave, before any document
+    /// is open: as `restart` continues in a new process.
+    Resume(Box<serde_json::Value>),
     /// Opens a file with the caret on a zero-based line and byte column.
     OpenAt {
         path: PathBuf,
@@ -361,6 +365,8 @@ pub struct Update {
     pub edit: Option<EditorUpdate>,
     pub files: Vec<FileResult>,
     pub notices: Vec<Notice>,
+    /// What to tell the user that is no error, as what `Resume` left out.
+    pub report: Option<String>,
 }
 #[derive(Debug)]
 pub enum Error {
@@ -1429,6 +1435,12 @@ impl Application {
                 update.changed_views.push(view);
             }
             Event::Open(path) => self.open(path, None, &mut update)?,
+            Event::Resume(session) => {
+                let problems = self.resume(&session, &mut update)?;
+                if !problems.is_empty() {
+                    update.report = Some(format!("Not restored: {}", problems.join("; ")));
+                }
+            }
             Event::OpenAt { path, line, column } => {
                 self.open(path, Some((line, column)), &mut update)?
             }
