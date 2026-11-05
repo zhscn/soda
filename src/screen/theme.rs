@@ -334,7 +334,10 @@ impl Theme {
             panel: on(p.fg, p.bg),
             float: on(p.fg, p.bg_dark),
             float_border: on(p.comment, p.bg_dark),
-            candidate_selected: Style::new().bg(c(p.bg_highlight)),
+            // The list's ground is `bg-dark`, which `bg-highlight` may
+            // match or be lighter than, so the selected row is worked out
+            // from the ground itself.
+            candidate_selected: Style::new().bg(c(apart(p.bg_dark, p.selection, p.blue))),
             marker: Style::new().fg(c(p.blue)),
             inlay: Style::new().fg(c(p.comment)).add_modifier(Modifier::ITALIC),
             reference: Style::new().bg(c(p.gutter)),
@@ -495,6 +498,38 @@ fn apply(mut style: Style, spec: &crate::application::faces::FaceSpec) -> Style 
     style
 }
 /// `a` with `amount` of `b` in it.
+/// How much the selected candidate's row stands from its list, as WCAG's
+/// contrast ratio: enough to find at a glance, little enough that the
+/// text on it reads.
+const SELECTED_CONTRAST: f32 = 1.5;
+/// A color for a row picked out of a list on `ground`: from the ground
+/// toward the theme's selection until it stands apart, and when even the
+/// selection is too near the ground, on toward the accent.
+fn apart(ground: u32, selection: u32, accent: u32) -> u32 {
+    let steps = (1..=40).map(|step| step as f32 / 40.0);
+    steps
+        .clone()
+        .map(|amount| mix(ground, selection, amount))
+        .chain(steps.map(|amount| mix(selection, accent, amount)))
+        .find(|color| contrast(*color, ground) >= SELECTED_CONTRAST)
+        .unwrap_or(accent)
+}
+/// WCAG's contrast ratio of two colors, from 1 to 21.
+fn contrast(a: u32, b: u32) -> f32 {
+    let luminance = |rgb: u32| {
+        let channel = |shift: u32| {
+            let value = ((rgb >> shift) & 0xff) as f32 / 255.0;
+            if value <= 0.039_28 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * channel(16) + 0.7152 * channel(8) + 0.0722 * channel(0)
+    };
+    let (a, b) = (luminance(a), luminance(b));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
 fn mix(a: u32, b: u32, amount: f32) -> u32 {
     let channel = |shift: u32| {
         let (a, b) = (((a >> shift) & 0xff) as f32, ((b >> shift) & 0xff) as f32);
@@ -521,6 +556,19 @@ fn color(rgb: u32) -> Color {
 mod tests {
     use super::*;
     use crate::application::faces::{FaceSpec, Faces, PALETTE, ThemeSpec};
+    #[test]
+    fn the_selected_candidate_stands_from_its_list_in_every_theme() {
+        let rgb = |color: Option<Color>| match color {
+            Some(Color::Rgb(r, g, b)) => (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b),
+            other => panic!("{other:?}"),
+        };
+        for builtin in crate::application::themes::BUILTINS {
+            let theme = Theme::build(builtin.name, &Faces::default());
+            let (row, list) = (rgb(theme.candidate_selected.bg), rgb(theme.float.bg));
+            let apart = contrast(row, list);
+            assert!(apart >= SELECTED_CONTRAST, "{}: {apart}", builtin.name);
+        }
+    }
     #[test]
     fn every_palette_name_has_a_color() {
         let mut palette = Palette::default();
