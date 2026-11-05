@@ -103,7 +103,7 @@
 - Tokyo Night：`tokyonight`、`tokyonight-day`、`tokyonight-storm`
 - Modus（取自 modus-themes 的调色板）：`modus-operandi`、`modus-vivendi`，及其 `-tinted`、`-deuteranopia`、`-tritanopia` 变体
 - JetBrains：`islands-dark`、`islands-light`（取自 IntelliJ Platform 的 Islands 主题与配色方案；调用用正文色，声明用函数色，内建类型和常量用关键字色，同 CLion），`fleet-dark`、`fleet-dark-purple`、`fleet-light`（取自 zed-fleet-themes，半透明颜色已按背景混合）
-- 其他：`catppuccin-mocha`、`catppuccin-latte`、`gruvbox-dark`、`gruvbox-light`、`dracula`、`nord`、`one-dark`、`one-light`、`solarized-dark`、`solarized-light`、`rose-pine`、`rose-pine-dawn`、`kanagawa`、`everforest-dark`、`everforest-light`、`github-dark`、`github-light`、`monokai`
+- 其他：`catppuccin-mocha`、`catppuccin-latte`、`gruvbox-dark`、`gruvbox-light`、`dracula`、`nord`、`nord-light`（取自 doom-themes 的 doom-nord-light）、`one-dark`、`one-light`、`solarized-dark`、`solarized-light`、`rose-pine`、`rose-pine-dawn`、`kanagawa`、`everforest-dark`、`everforest-light`、`github-dark`、`github-light`、`monokai`
 
 每个主题是一份调色板加少量语法 face：界面部分都由调色板推出，语法 face 保留该主题原本的关键字、字符串、函数等配色。围绕正文的部分按 Zed 主题的层次由 `bg` 向 `fg` 混合得到，深色主题比正文亮、浅色主题比正文暗：标签栏和窗口标题 6%，状态栏 13%，它们和正文之间、窗口之间的分隔线（`border`）20%。图形前端的标签行照 Zed 画：标签并排，每个后面一条竖线，底边一条横线，只在当前标签下断开，当前标签用正文底色，像是通向下面的正文；当前窗口的当前标签顶上是一条强调色细线。定义在 `src/application/themes.rs`。主题设置整屏背景，不依赖终端配色。终端前端在 `COLORTERM` 为 `truecolor` 或 `24bit` 时输出 24 位颜色，否则换算为最接近的 xterm 256 色。
 

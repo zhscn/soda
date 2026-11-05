@@ -5,9 +5,9 @@
 //! keywords magenta, strings green, functions blue and types teal.
 //!
 //! The Modus palettes come from the modus-themes package, the Islands
-//! ones from the IntelliJ Platform's theme and color scheme files, and
-//! the Fleet ones from the zed-fleet-themes port, with translucent colors
-//! blended over their background.
+//! ones from the IntelliJ Platform's theme and color scheme files, the
+//! Fleet ones from the zed-fleet-themes port, with translucent colors
+//! blended over their background, and Nord Light from doom-themes.
 
 /// A theme the editor has.
 pub struct Builtin {
@@ -169,6 +169,30 @@ pub const BUILTINS: &[Builtin] = &[
             ("syntax.operator", "fg:#81a1c1"),
             ("syntax.parameter", "fg:#d8dee9"),
             ("syntax.macro", "fg:#5e81ac"),
+        ],
+    },
+    Builtin {
+        name: "nord-light",
+        doc: "Nord Light, as doom-themes's doom-nord-light",
+        light: true,
+        palette: [
+            0xe5e9f0, 0xd8dee9, 0xd8dee9, 0xb8c5db, 0x3b4252, 0x60728c, 0x8b95a6, 0xbec8d9,
+            0x60728c, 0x3b6ea8, 0x4f894c, 0x97365b, 0xac4426, 0x9a7500, 0x99324b, 0x398eac,
+            0x29838d, 0xe5e9f0,
+        ],
+        faces: &[
+            ("syntax.comment.doc", "fg:#838c9b"),
+            ("syntax.keyword", "fg:#3b6ea8"),
+            ("syntax.operator", "fg:#3b6ea8"),
+            ("syntax.function", "fg:#29838d"),
+            ("syntax.function.builtin", "fg:#29838d"),
+            ("syntax.type", "fg:#9a7500"),
+            ("syntax.number", "fg:#97365b"),
+            ("syntax.constant", "fg:#97365b"),
+            ("syntax.constant.builtin", "fg:#29838d"),
+            ("syntax.variable.definition", "fg:#842879"),
+            ("syntax.parameter", "fg:#3b4252"),
+            ("syntax.macro", "fg:#29838d"),
         ],
     },
     Builtin {
