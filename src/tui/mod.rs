@@ -7,7 +7,7 @@ mod mouse;
 mod view;
 use crate::{host, interaction::EditMode, runtime::Runtime};
 use crossterm::{
-    cursor::{Hide, SetCursorStyle, Show},
+    cursor::{Hide, MoveTo, SetCursorStyle, Show},
     event::{
         self, DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
         EnableFocusChange, EnableMouseCapture, KeyboardEnhancementFlags,
@@ -247,11 +247,16 @@ fn release_input(fd: std::os::fd::RawFd) {
 /// middle of the screen. The frame goes out as one synchronized update, and
 /// the cursor stays hidden while cells are written for terminals that do not
 /// support synchronized updates.
+///
+/// A hidden cursor is put back where it last showed, `shown`: writing the
+/// cells leaves it after the last one, and terminals that animate the
+/// cursor, as kitty's cursor trail, would show it sliding there.
 fn draw(
     terminal: &mut ratatui::DefaultTerminal,
     runtime: &Runtime,
     presenter: &mut Presenter,
     truecolor: bool,
+    shown: &mut Option<(u16, u16)>,
 ) -> io::Result<()> {
     let mut rendered = Ok(None);
     execute!(io::stdout(), BeginSynchronizedUpdate)?;
@@ -266,6 +271,15 @@ fn draw(
             frame.set_cursor_position(position);
         }
     });
+    match &rendered {
+        Ok(Some(Some(position))) => *shown = Some(*position),
+        Ok(Some(None)) => {
+            if let Some((x, y)) = *shown {
+                execute!(io::stdout(), MoveTo(x, y))?;
+            }
+        }
+        _ => {}
+    }
     // A block stands on a character in Normal and Beacon; a bar goes
     // between characters where text is typed.
     let shape = if runtime.layer().is_none() && runtime.edit_mode() != EditMode::Insert {
@@ -315,6 +329,8 @@ pub fn run(args: host::Args) -> io::Result<()> {
     });
     let outcome = host::guard(|| {
         let mut capturing = true;
+        // Where the cursor last showed, where a hidden one waits.
+        let mut shown = None;
         let mut mouse = mouse::Mouse::default();
         let mut catching_up = false;
         let mut resumed = false;
@@ -337,7 +353,13 @@ pub fn run(args: host::Args) -> io::Result<()> {
                 presenter
                     .prepare(&mut runtime, width, height)
                     .map_err(io::Error::other)?;
-                draw(&mut terminal, &runtime, &mut presenter, truecolor)?;
+                draw(
+                    &mut terminal,
+                    &runtime,
+                    &mut presenter,
+                    truecolor,
+                    &mut shown,
+                )?;
                 runtime.take_redraw();
                 catching_up = presenter.take_pending();
             }
