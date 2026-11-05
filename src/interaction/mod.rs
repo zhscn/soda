@@ -66,6 +66,17 @@ use crate::{
 use session::Transition;
 use std::time::Duration;
 
+/// The digits that extend the selection, shown for a moment after a key,
+/// as meow's position hints.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ExpandHints {
+    /// Each over the character where it would take the head.
+    pub at: Vec<(usize, char)>,
+    /// By zero-based line, for a selection of lines: at the start of the
+    /// line as it shows, whatever is scrolled off to the left.
+    pub lines: Vec<(usize, char)>,
+}
+
 #[derive(Clone, Debug)]
 pub enum Input {
     Help,

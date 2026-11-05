@@ -630,6 +630,13 @@ fn editor(
             }
         }
         spans(buf, area.x, y, area.width, &row.spans, base, theme);
+        // A digit that extends a selection of lines covers the first cell
+        // that shows, as meow's covers the line's first character.
+        if let Some(digit) = row.digit.filter(|_| area.width > 0) {
+            let cell = &mut buf[(area.x, y)];
+            cell.set_char(digit);
+            cell.set_style(base.patch(theme.digit));
+        }
         if let Some(column) = text.ruler {
             let cell = &mut buf[(area.x + column as u16, y)];
             cell.set_style(cell.style().patch(theme.ruler));
@@ -1635,13 +1642,14 @@ mod tests {
             crate::core::Selection::caret(0),
         )));
         r.command(Command::SetMode(EditMode::Normal));
-        // A line selection extends to line ends, where no character is.
+        // A line selection's digits cover the start of the lines, as
+        // meow's do.
         keys(&mut r, "e");
         let shown = screen(&mut r, 30, 6);
         let rows: Vec<_> = shown.lines().collect();
         // The first row is the tab line.
-        assert!(rows[2].contains("cd ef gh1"), "{shown}");
-        assert!(rows[3].contains("ij2"), "{shown}");
+        assert!(rows[2].contains("│ 1d ef gh"), "{shown}");
+        assert!(rows[3].contains("│ 2j"), "{shown}");
         // A word selection's next end within the line covers the space there.
         keys(&mut r, "ESC C-n C-a w");
         let shown = screen(&mut r, 30, 6);
@@ -1649,6 +1657,21 @@ mod tests {
             shown.lines().nth(2).unwrap().contains("cd ef1gh2"),
             "{shown}"
         );
+        // Scrolled sideways, they stand at the left of what shows, even on
+        // a line too short to reach it.
+        let long = "x".repeat(60);
+        r.command(Command::Edit(crate::editor::Command::SelectAll));
+        r.command(Command::Edit(crate::editor::Command::InsertText(format!(
+            "{long}\n{long}\nab\n"
+        ))));
+        r.command(Command::Edit(crate::editor::Command::SetSelection(
+            crate::core::Selection::caret(59),
+        )));
+        keys(&mut r, "ESC e");
+        let shown = screen(&mut r, 30, 6);
+        let rows: Vec<_> = shown.lines().collect();
+        assert!(rows[2].contains("│ 1xxx"), "{shown}");
+        assert!(rows[3].contains("│ 2 "), "{shown}");
     }
     #[test]
     fn flags_take_the_first_gutter_cell() {

@@ -710,22 +710,30 @@ impl Layers {
         }
     }
     /// The digits that extend the selection, and where each one would take it.
-    pub fn expand_hints(&self, app: &Application) -> Vec<(usize, char)> {
+    pub fn expand_hints(&self, app: &Application) -> crate::interaction::ExpandHints {
+        let mut hints = crate::interaction::ExpandHints::default();
         let Some(at) = place(app, Default::default()) else {
-            return vec![];
+            return hints;
         };
         let Some(tag) = self.modal.tag(at.selection) else {
-            return vec![];
+            return hints;
         };
         if self.mode == EditMode::Insert {
-            return vec![];
+            return hints;
         }
-        (1..=10)
-            .filter_map(|count| {
-                let to = self.reach(&at, tag, count)?;
-                Some((to, char::from_digit(count as u32 % 10, 10)?))
-            })
-            .collect()
+        let digits = (1..=10).filter_map(|count| {
+            let to = self.reach(&at, tag, count)?;
+            Some((to, char::from_digit(count as u32 % 10, 10)?))
+        });
+        // A line's digit goes by the line, whichever end the head reaches.
+        if tag.kind == Kind::Line {
+            hints.lines = digits
+                .filter_map(|(to, digit)| Some((at.text.line_of(to)?, digit)))
+                .collect();
+        } else {
+            hints.at = digits.collect();
+        }
+        hints
     }
     /// A digit: the same command again that many times, keeping the far end.
     fn expand_selection(&mut self, at: &Place, digit: usize, mut response: Response) -> Response {

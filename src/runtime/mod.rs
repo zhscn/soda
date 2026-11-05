@@ -232,9 +232,9 @@ impl Runtime {
         self.run.busy()
     }
     /// Digits that extend the selection, for a moment after each key.
-    pub fn expand_hints(&self) -> Vec<(usize, char)> {
+    pub fn expand_hints(&self) -> crate::interaction::ExpandHints {
         if self.hints_until.is_none() {
-            return vec![];
+            return Default::default();
         }
         self.layers.expand_hints(&self.app)
     }

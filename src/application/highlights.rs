@@ -10,6 +10,9 @@ use std::collections::BTreeMap;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Face {
     Todo,
+    /// The digits that extend a selection, as meow's
+    /// `meow-position-highlight-number`.
+    Digit,
     Error,
     Info,
     /// One of the backgrounds for marked symbols.

@@ -852,6 +852,27 @@ fn editor(
             let wavy = matches!(span.face, Some(AppFace::Note(_)));
             painter.words(x, y, &span.text, style, kind, w, wavy);
         }
+        // A digit that extends a selection of lines covers the first column
+        // that shows, as meow's covers the line's first character.
+        if let Some(digit) = row.digit {
+            let cell = painter.fonts.cell;
+            let (_, bg) = painter.colors(theme.digit);
+            painter.fill(
+                Rect::new(area.x, y, cell, line),
+                bg.unwrap_or(painter.bg),
+                0.0,
+            );
+            let text = digit.to_string();
+            painter.words(
+                area.x,
+                y,
+                &text,
+                without_bg(theme.digit),
+                Kind::Text,
+                cell,
+                false,
+            );
+        }
         if let Some(ruler) = text.ruler {
             let x = area.x + ruler as f32 / UNIT;
             let color = rgba(theme.ruler.bg, faded(painter.fg, 0.15));

@@ -52,10 +52,12 @@ pub(crate) fn text(
     rows: u16,
 ) -> Result<Option<TextFrame>, crate::application::Error> {
     let overlay = if runtime.app().active_view() == Some(view) {
+        let hints = runtime.expand_hints();
         Overlay {
             grab: runtime.grab(),
             beacons: runtime.beacons(),
-            digits: runtime.expand_hints(),
+            digits: hints.at,
+            line_digits: hints.lines,
             preview: runtime
                 .completion_popup()
                 .and_then(|popup| popup.preview)

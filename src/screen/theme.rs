@@ -65,6 +65,8 @@ pub(crate) struct Theme {
     /// Jump labels over the text.
     pub label: Style,
     pub todo: Style,
+    /// Digits that extend the selection.
+    pub digit: Style,
     pub marks: [Style; crate::application::MARKS as usize],
     /// Every face by its place in `faces::names`, for paints.
     named: Vec<Style>,
@@ -280,6 +282,7 @@ impl Theme {
             "key" => &mut self.key,
             "label" => &mut self.label,
             "todo" => &mut self.todo,
+            "expand-digit" => &mut self.digit,
             _ => return None,
         })
     }
@@ -387,6 +390,9 @@ impl Theme {
             key: Style::new().fg(c(p.magenta)).add_modifier(Modifier::BOLD),
             label: badge(p.magenta),
             todo: Style::new().fg(c(p.yellow)).add_modifier(Modifier::BOLD),
+            // As meow's: the background's color on the cursor's, so a digit
+            // stands apart from the text it covers.
+            digit: on(p.bg, p.blue).add_modifier(Modifier::BOLD),
             marks: [
                 p.yellow, p.green, p.blue, p.magenta, p.orange, p.cyan, p.red, p.comment,
             ]
@@ -400,6 +406,7 @@ impl Theme {
     pub fn face(&self, face: crate::application::Face) -> Style {
         match face {
             crate::application::Face::Todo => self.todo,
+            crate::application::Face::Digit => self.digit,
             crate::application::Face::Error => self.error,
             crate::application::Face::Info => self.info,
             crate::application::Face::Mark(n) => self.marks[usize::from(n)],

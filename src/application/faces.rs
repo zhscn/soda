@@ -106,6 +106,7 @@ pub const UI_FACES: &[(&str, &str)] = &[
     ("key", "Keys in hints"),
     ("label", "Jump labels"),
     ("todo", "The todo highlight"),
+    ("expand-digit", "Digits that extend the selection"),
     ("mark1", "First mark background"),
     ("mark2", "Second mark background"),
     ("mark3", "Third mark background"),

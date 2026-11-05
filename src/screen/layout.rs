@@ -161,6 +161,10 @@ pub(crate) struct Row {
     pub continued: bool,
     /// The line's flag, on its first row.
     pub flag: Option<crate::application::Flag>,
+    /// The digit that extends a selection of lines to this line, on its
+    /// first row: the frontend draws it at the left edge of the text, so it
+    /// shows however far the text is scrolled sideways.
+    pub digit: Option<char>,
     pub spans: Vec<Span>,
 }
 /// The text area of the active view, positioned relative to its top left.
@@ -220,6 +224,9 @@ pub(crate) struct Overlay {
     pub beacons: Vec<std::ops::Range<usize>>,
     /// Digits that extend the selection, drawn over the character there.
     pub digits: Vec<(usize, char)>,
+    /// Digits that extend a selection of lines, by line: drawn at the start
+    /// of the line's first row as it shows.
+    pub line_digits: Vec<(usize, char)>,
     /// The rest of the selected candidate, at the caret's offset.
     pub preview: Option<(usize, String)>,
 }
@@ -426,13 +433,15 @@ fn styled_row(
                 .get(next_category)
                 .filter(|(range, _)| range.start <= offset)
                 .map(|(_, category)| *category);
-            // The last highlight to start wins where they overlap.
-            let face = faces
-                .iter()
-                .rev()
-                .find(|(range, _)| range.start <= offset && offset < range.end)
-                .map(|(_, face)| *face)
-                .or(digit.map(|_| Face::Todo));
+            // A digit stands out over everything; otherwise the last
+            // highlight to start wins where they overlap.
+            let face = digit.map(|_| Face::Digit).or_else(|| {
+                faces
+                    .iter()
+                    .rev()
+                    .find(|(range, _)| range.start <= offset && offset < range.end)
+                    .map(|(_, face)| *face)
+            });
             let blank = shown.is_empty();
             if let Some(last) = spans.last_mut().filter(|last| {
                 last.selected == selected
@@ -1154,7 +1163,7 @@ pub(crate) fn frame(
         let content = text.trim_end_matches(['\n', '\r']).len();
         if last_row != Some(false) {
             for (_, digit) in modal.digits.iter().filter(|(at, _)| *at == start + content) {
-                hints.push(after(digit.to_string(), Some(Face::Todo), Font::Text));
+                hints.push(after(digit.to_string(), Some(Face::Digit), Font::Text));
             }
         }
         if last_row != Some(false)
@@ -1225,6 +1234,11 @@ pub(crate) fn frame(
                 .get(&number)
                 .filter(|_| *row == 0)
                 .map(|flag| (*flag).clone()),
+            digit: modal
+                .line_digits
+                .iter()
+                .find(|(line, _)| *line == number && *row == 0)
+                .map(|(_, digit)| *digit),
             spans: styled_row(&text, start, marks, first, room, walk),
         });
     }
