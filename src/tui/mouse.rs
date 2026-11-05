@@ -1,8 +1,8 @@
-//! Resolves mouse events against the current screen areas: the tab row
-//! switches documents, a click in a window focuses it and places the
-//! caret, a drag selects, and the wheel scrolls an open popup, else the
+//! Resolves mouse events against the current screen areas: a tab shows
+//! its document in its window, a click in a window focuses it and places
+//! the caret, a drag selects, and the wheel scrolls an open popup, else the
 //! window under it. Dragging the column between side-by-side windows, or
-//! the title row of a window below another, moves that edge.
+//! the tab row of a window below another where no tab is, moves that edge.
 use super::view;
 use crate::{
     application::{Axis, ViewId},
@@ -21,7 +21,7 @@ pub(super) struct Mouse {
     edge: Option<(ViewId, Axis)>,
 }
 /// The window whose right or bottom edge is at a cell: the column between
-/// it and a window to its right, or the title row of a window below it.
+/// it and a window to its right, or the tab row of a window below it.
 fn edge_at(areas: &view::Areas, x: u16, y: u16) -> Option<(ViewId, Axis)> {
     let within = |from: u16, size: u16, at: u16| from <= at && at < from + size;
     match areas.window_at(x, y) {
@@ -55,18 +55,39 @@ impl Mouse {
         match event.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.press = None;
+                // A tab, in the splash's row or a window's, is what a press
+                // on it is for; the rest of a window's row is its top edge.
+                let row = match areas.tabs.filter(|row| inside(*row)) {
+                    Some(row) => Some((row, None)),
+                    None => window
+                        .filter(|_| runtime.layer().is_none())
+                        .and_then(|w| Some((w.header.filter(|h| inside(*h))?, Some(w.view)))),
+                };
+                if let Some((row, view)) = row {
+                    let column = event.column - row.x;
+                    let tab = view::tab_items(runtime, view, row.width)
+                        .into_iter()
+                        .find(|item| {
+                            let width =
+                                ratatui::text::Line::raw(item.label.as_str()).width() as u16;
+                            item.x <= column && column < item.x + width
+                        });
+                    if let Some(tab) = tab {
+                        if let Some(view) = view.filter(|v| runtime.app().active_view() != Some(*v))
+                        {
+                            runtime.input(UserInput::Pointer(Pointer::Window(view)));
+                        }
+                        if let Some(document) = tab.document {
+                            runtime.input(UserInput::Pointer(Pointer::Document(document)));
+                        }
+                        return;
+                    }
+                    if view.is_none() {
+                        return;
+                    }
+                }
                 self.edge =
                     edge_at(areas, event.column, event.row).filter(|_| runtime.layer().is_none());
-                if areas.tabs.is_some_and(inside) {
-                    let tab = view::tab_items(runtime, areas.editor.width)
-                        .into_iter()
-                        .take_while(|item| item.x <= event.column)
-                        .last();
-                    if let Some(document) = tab.and_then(|item| item.document) {
-                        runtime.input(UserInput::Pointer(Pointer::Document(document)));
-                    }
-                    return;
-                }
                 let Some(window) = window.filter(|_| runtime.layer().is_none()) else {
                     return;
                 };

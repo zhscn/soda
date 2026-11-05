@@ -74,6 +74,7 @@ impl Window {
     }
 }
 pub struct Areas {
+    /// The row of tabs while no window is open, for the splash.
     pub tabs: Option<Rect>,
     pub editor: Rect,
     /// The editing area in columns and rows of the text font.
@@ -92,13 +93,10 @@ impl Areas {
         let status = Rect::new(0.0, (message.y - row).max(0.0), width, row);
         let app = runtime.app();
         let options = app.options();
-        let several = app.windows().views().len() > 1;
-        let tab_bar = match options.choice(None, "tab-bar") {
-            "on" => true,
-            "off" => false,
-            _ => !several,
-        };
-        let tabs = (tab_bar && height > 4.0 * row).then(|| Rect::new(0.0, 0.0, width, row));
+        let tab_bar = options.bool(None, "tab-bar");
+        let alone = app.windows().is_empty();
+        let tabs =
+            (tab_bar && alone && height > 4.0 * row).then(|| Rect::new(0.0, 0.0, width, line));
         let top = tabs.map_or(0.0, |tabs| tabs.h);
         let editor = Rect::new(0.0, top, width, (status.y - top).max(0.0));
         let cells = (
@@ -109,7 +107,6 @@ impl Areas {
             editor.w / f32::from(cells.0.max(1)),
             editor.h / f32::from(cells.1.max(1)),
         );
-        let titled = several && options.bool(None, "window-title");
         let windows = app
             .windows()
             .layout(Area {
@@ -126,7 +123,10 @@ impl Areas {
                     f32::from(area.width) * scale.0,
                     f32::from(area.height) * scale.1,
                 );
-                let header = (titled && area.h >= 2.0 * line).then_some(Rect { h: line, ..area });
+                // Each window's row of tabs, as `tab-line-mode` gives it, as
+                // high as the status line: the text starts below it, off
+                // the grid the windows are cut on.
+                let header = (tab_bar && area.h >= row + line).then_some(Rect { h: row, ..area });
                 let body = match header {
                     Some(header) => Rect {
                         y: area.y + header.h,
@@ -236,11 +236,12 @@ fn bar_height(fonts: &Fonts) -> f32 {
 /// active one fits.
 pub fn tab_items(
     runtime: &Runtime,
+    window: Option<ViewId>,
     fonts: &mut Fonts,
     width: f32,
 ) -> Vec<(Option<DocumentId>, Rect, String)> {
     let pad = fonts.cell * 1.2;
-    let tabs = content::tabs(runtime);
+    let tabs = content::tabs(runtime, window);
     let widths: Vec<f32> = tabs
         .iter()
         .map(|tab| {
@@ -258,14 +259,15 @@ pub fn tab_items(
     while first < active && widths[first..=active].iter().sum::<f32>() > width {
         first += 1;
     }
-    let mut x = 4.0;
+    // Side by side from the left edge, each line between two shared.
+    let mut x = 0.0;
     let mut out = vec![];
     for (tab, w) in tabs.into_iter().zip(widths).skip(first) {
         if x >= width {
             break;
         }
         out.push((tab.document, Rect::new(x, 0.0, w, 0.0), tab.label));
-        x += w + 2.0;
+        x += w;
     }
     out
 }
@@ -526,7 +528,7 @@ pub fn screen(
         runtime.layer().is_some() || runtime.edit_mode() == crate::interaction::EditMode::Insert;
     let mut caret = None;
     if let Some(tabs) = areas.tabs {
-        tab_bar(painter, runtime, tabs);
+        tab_bar(painter, runtime, tabs, None, true);
     }
     if areas.windows.is_empty() {
         splash(painter, areas.editor, &content::splash(runtime));
@@ -554,7 +556,7 @@ pub fn screen(
         };
         let current = Some(window.view) == active;
         if let Some(header) = window.header {
-            title(painter, runtime, window.view, header, current);
+            tab_bar(painter, runtime, header, Some(window.view), current);
         }
         if let Some(text) = &text {
             let document = runtime.app().view(window.view).map(|view| view.document_id);
@@ -634,29 +636,61 @@ pub fn screen(
     Ok(caret.map(|at| (at, bar)))
 }
 
-fn tab_bar(painter: &mut Painter, runtime: &Runtime, area: Rect) {
+/// A window's row of tabs, or the splash's, as Zed draws a tab bar: tabs
+/// side by side with a line after each, and a line along the bottom except
+/// under the active tab, which has the text's background and so opens into
+/// the text below. In the focused window the active tab is underlined in
+/// the accent; elsewhere its label is not bold.
+fn tab_bar(
+    painter: &mut Painter,
+    runtime: &Runtime,
+    area: Rect,
+    window: Option<ViewId>,
+    current: bool,
+) {
     let theme = painter.theme;
     let (_, bg) = painter.colors(theme.tabs);
     painter.fill(area, bg.unwrap_or(painter.bg), 0.0);
     let line = painter.fonts.line;
     let pad = painter.fonts.cell * 1.2;
     let top = area.y + (area.h - line) / 2.0;
-    let tabs = content::tabs(runtime);
-    for (document, rect, label) in tab_items(runtime, painter.fonts, area.w) {
+    let border = rgba(theme.border.fg, painter.fg);
+    let tabs = content::tabs(runtime, window);
+    let mut open = None;
+    for (document, rect, label) in tab_items(runtime, window, painter.fonts, area.w) {
         let Some(tab) = tabs.iter().find(|tab| tab.document == document) else {
             continue;
         };
+        let x = area.x + rect.x;
         let style = if tab.active {
-            theme.tab_active
+            let (_, bg) = painter.colors(theme.tab_active);
+            painter.fill(
+                Rect::new(x, area.y, rect.w, area.h),
+                bg.unwrap_or(painter.bg),
+                0.0,
+            );
+            if x > area.x {
+                painter.fill(Rect::new(x - 1.0, area.y, 1.0, area.h), border, 0.0);
+            }
+            open = Some((x, x + rect.w));
+            if current && window.is_some() {
+                let accent = rgba(theme.marker.fg, painter.fg);
+                painter.fill(Rect::new(x, area.y, rect.w, 2.0), accent, 0.0);
+                theme.tab_active
+            } else if window.is_some() {
+                theme.tab_active.remove_modifier(Modifier::BOLD)
+            } else {
+                theme.tab_active
+            }
         } else {
             theme.tabs
         };
-        if tab.active {
-            let (_, bg) = painter.colors(style);
-            let pill = Rect::new(rect.x, area.y + 4.0, rect.w, area.h - 8.0);
-            painter.fill(pill, bg.unwrap_or(painter.bg), 7.0);
-        }
-        let end = painter.ui(rect.x + pad, top, &label, style, rect.w);
+        painter.fill(
+            Rect::new(x + rect.w - 1.0, area.y, 1.0, area.h),
+            border,
+            0.0,
+        );
+        let end = painter.ui(x + pad, top, &label, style, rect.w);
         if tab.dirty {
             let dot = (line * 0.28).round();
             let color = rgba(theme.modified.fg, painter.fg);
@@ -668,33 +702,26 @@ fn tab_bar(painter: &mut Painter, runtime: &Runtime, area: Rect) {
             );
         }
     }
+    let y = area.bottom() - 1.0;
+    match open {
+        Some((start, end)) => {
+            edge(painter, area.x, y, start - area.x);
+            edge(painter, end, y, area.right() - end);
+        }
+        None => edge(painter, area.x, y, area.w),
+    }
 }
 
-fn title(painter: &mut Painter, runtime: &Runtime, view: ViewId, area: Rect, current: bool) {
-    let theme = painter.theme;
-    let (_, bg) = painter.colors(theme.tabs);
-    painter.fill(area, bg.unwrap_or(painter.bg), 0.0);
-    let Some((path, dirty)) = content::title(runtime, view) else {
-        return;
-    };
-    let style = if current {
-        theme.tab_active
-    } else {
-        theme.tabs.add_modifier(Modifier::DIM)
-    };
-    let cell = painter.fonts.cell;
-    let end = painter.ui(area.x + cell, area.y, &path, style, area.w - 3.0 * cell);
-    if dirty {
-        let dot = (painter.fonts.line * 0.28).round();
-        let color = rgba(theme.modified.fg, painter.fg);
-        let y = area.y + (area.h - dot) / 2.0;
-        painter.fill(Rect::new(end + cell * 0.6, y, dot, dot), color, dot);
-    }
+/// The line between the text and what frames it, in the color of the line
+/// between windows, so the frame does not run into the caret line.
+fn edge(painter: &mut Painter, x: f32, y: f32, width: f32) {
+    let color = rgba(painter.theme.border.fg, painter.fg);
+    painter.fill(Rect::new(x, y, width, 1.0), color, 0.0);
 }
 
 /// Side-by-side windows have a thin line between them.
 fn separators(painter: &mut Painter, areas: &Areas) {
-    let color = faded(rgba(painter.theme.border.fg, painter.fg), 0.35);
+    let color = rgba(painter.theme.border.fg, painter.fg);
     for window in &areas.windows {
         let right = window.area.right();
         if right + 1.0 < areas.editor.right() {
@@ -969,6 +996,7 @@ fn status(painter: &mut Painter, runtime: &Runtime, area: Rect, text: Option<&Te
     let theme = painter.theme;
     let (_, bg) = painter.colors(theme.status);
     painter.fill(area, bg.unwrap_or(painter.bg), 0.0);
+    edge(painter, area.x, area.y, area.w);
     let (cell, line) = (painter.fonts.cell, painter.fonts.line);
     let top = area.y + (area.h - line) / 2.0;
     let status = content::status(runtime, text);

@@ -646,17 +646,36 @@ impl Gui {
         if runtime.layer().is_some() {
             return;
         }
+        // A tab, in the splash's row or a window's, is what a press on it
+        // is for; the rest of a window's row is near its top edge.
+        let row = match areas.tabs.filter(|row| row.contains(x, y)) {
+            Some(row) => Some((row, None)),
+            None => areas.window_at(x, y).and_then(|window| {
+                Some((
+                    window.header.filter(|h| h.contains(x, y))?,
+                    Some(window.view),
+                ))
+            }),
+        };
+        if let Some((row, view)) = row {
+            let tab = paint::tab_items(runtime, view, &mut self.fonts, row.w)
+                .into_iter()
+                .find(|(_, rect, _)| x - row.x >= rect.x && x - row.x < rect.x + rect.w);
+            if let Some((document, _, _)) = tab {
+                if let Some(view) = view.filter(|v| runtime.app().active_view() != Some(*v)) {
+                    runtime.input(UserInput::Pointer(Pointer::Window(view)));
+                }
+                if let Some(document) = document {
+                    runtime.input(UserInput::Pointer(Pointer::Document(document)));
+                }
+                return;
+            }
+            if view.is_none() {
+                return;
+            }
+        }
         self.edge = areas.edge_at(x, y);
         if self.edge.is_some() {
-            return;
-        }
-        if areas.tabs.is_some_and(|tabs| tabs.contains(x, y)) {
-            let tab = paint::tab_items(runtime, &mut self.fonts, areas.editor.w)
-                .into_iter()
-                .find(|(_, rect, _)| x >= rect.x && x < rect.x + rect.w);
-            if let Some((Some(document), _, _)) = tab {
-                runtime.input(UserInput::Pointer(Pointer::Document(document)));
-            }
             return;
         }
         let Some(window) = areas.window_at(x, y) else {

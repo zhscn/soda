@@ -457,8 +457,10 @@ fn the_splash_is_a_tab_until_a_window_opens_and_again_after_the_last_closes() {
     use crate::screen::content::{SPLASH, tabs};
     let mut runtime = Runtime::new(PathBuf::from("/")).unwrap();
     runtime.start(None);
+    // The row the splash shows in while no window is open, else the row
+    // of the window there is.
     let shown = |runtime: &Runtime| -> Vec<(bool, String, bool)> {
-        tabs(runtime)
+        tabs(runtime, runtime.app().active_view())
             .into_iter()
             .map(|tab| (tab.document.is_none(), tab.label, tab.active))
             .collect()

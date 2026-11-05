@@ -19,17 +19,18 @@ use ratatui::{
     widgets::{Block, BorderType, Clear, Widget},
 };
 
-/// One window: an optional title row when several are shown, then the
-/// line number gutter and the text.
+/// One window: its row of tabs, then the line number gutter and the text.
 pub(super) struct Window {
     pub view: ViewId,
     pub area: Rect,
+    /// The window's row of tabs, as `tab-line-mode`'s.
     pub header: Option<Rect>,
     pub gutter: u16,
     pub text: Rect,
 }
 /// Screen regions for one terminal size.
 pub(super) struct Areas {
+    /// The row of tabs while no window is open, for the splash.
     pub tabs: Option<Rect>,
     /// Every window together.
     pub editor: Rect,
@@ -42,14 +43,9 @@ impl Areas {
         let message = Rect::new(0, height.saturating_sub(1), width, height.min(1));
         let status = (height >= 2).then(|| Rect::new(0, height - 2, width, 1));
         let options = runtime.app().options();
-        let several = runtime.app().windows().views().len() > 1;
-        let tab_bar = match options.choice(None, "tab-bar") {
-            "on" => true,
-            "off" => false,
-            _ => !several,
-        };
-        let tabs = (height >= 4 && tab_bar).then(|| Rect::new(0, 0, width, 1));
-        let titled = several && options.bool(None, "window-title");
+        let tab_bar = options.bool(None, "tab-bar");
+        let alone = runtime.app().windows().is_empty();
+        let tabs = (height >= 4 && tab_bar && alone).then(|| Rect::new(0, 0, width, 1));
         let top = u16::from(tabs.is_some());
         let bottom = height.saturating_sub(if status.is_some() { 2 } else { 1 });
         let editor = Rect::new(0, top, width, bottom.saturating_sub(top));
@@ -64,7 +60,7 @@ impl Areas {
             .into_iter()
             .map(|(view, area)| {
                 let area = Rect::new(area.x, area.y, area.width, area.height);
-                let header = (titled && area.height >= 2).then_some(Rect { height: 1, ..area });
+                let header = (tab_bar && area.height >= 2).then_some(Rect { height: 1, ..area });
                 let body = match header {
                     Some(_) => Rect {
                         y: area.y + 1,
@@ -265,7 +261,7 @@ pub(super) fn render(
     let screen = buf.area;
     buf.set_style(screen, theme.text);
     if let Some(area) = areas.tabs {
-        tabs(buf, area, runtime, theme);
+        tabs(buf, area, runtime, None, true, theme);
     }
     let active = runtime.app().active_view();
     let mut cursor = None;
@@ -277,7 +273,7 @@ pub(super) fn render(
     for (window, text) in areas.windows.iter().zip(texts) {
         let current = Some(window.view) == active;
         if let Some(header) = window.header {
-            window_header(buf, header, runtime, window.view, current, theme);
+            tabs(buf, header, runtime, Some(window.view), current, theme);
         }
         if let Some(text) = text {
             let document = runtime.app().view(window.view).map(|view| view.document_id);
@@ -584,27 +580,6 @@ fn separators(buf: &mut Buffer, areas: &Areas, theme: &Theme) {
         }
     }
 }
-fn window_header(
-    buf: &mut Buffer,
-    area: Rect,
-    runtime: &Runtime,
-    view: ViewId,
-    current: bool,
-    theme: &Theme,
-) {
-    buf.set_style(area, theme.tabs);
-    let Some((path, dirty)) = content::title(runtime, view) else {
-        return;
-    };
-    let label = format!(" {path}{} ", if dirty { " ●" } else { "" });
-    let label = tail(&label, area.width.into());
-    let style = if current {
-        theme.tab_active
-    } else {
-        theme.tabs
-    };
-    buf.set_stringn(area.x, area.y, label, area.width.into(), style);
-}
 fn editor(
     buf: &mut Buffer,
     window: &Window,
@@ -699,10 +674,11 @@ pub(super) struct TabItem {
     pub label: String,
 }
 
-/// Tabs that fit in `width` cells, with their documents, starting columns
-/// and labels; tabs drop from the left until the active one fits.
-pub(super) fn tab_items(runtime: &Runtime, width: u16) -> Vec<TabItem> {
-    let items: Vec<_> = content::tabs(runtime)
+/// Tabs of `window`'s row, or the splash's, that fit in `width` cells,
+/// with their documents, starting columns and labels; tabs drop from the
+/// left until the active one fits.
+pub(super) fn tab_items(runtime: &Runtime, window: Option<ViewId>, width: u16) -> Vec<TabItem> {
+    let items: Vec<_> = content::tabs(runtime, window)
         .into_iter()
         .map(|tab| {
             let dirty = if tab.dirty { " ●" } else { "" };
@@ -737,14 +713,25 @@ pub(super) fn tab_items(runtime: &Runtime, width: u16) -> Vec<TabItem> {
     out
 }
 
-fn tabs(buf: &mut Buffer, area: Rect, runtime: &Runtime, theme: &Theme) {
+/// A row of tabs; in a window other than the current one the active tab
+/// is not bold, so the current window's stands out.
+fn tabs(
+    buf: &mut Buffer,
+    area: Rect,
+    runtime: &Runtime,
+    window: Option<ViewId>,
+    current: bool,
+    theme: &Theme,
+) {
     buf.set_style(area, theme.tabs);
-    for item in tab_items(runtime, area.width) {
+    for item in tab_items(runtime, window, area.width) {
         let x = area.x + item.x;
-        let style = if item.active {
-            theme.tab_active
-        } else {
-            theme.tabs
+        let style = match (item.active, current) {
+            (true, true) => theme.tab_active,
+            (true, false) => theme
+                .tab_active
+                .remove_modifier(ratatui::style::Modifier::BOLD),
+            (false, _) => theme.tabs,
         };
         buf.set_stringn(x, area.y, &item.label, usize::from(area.right() - x), style);
         if item.dirty {
@@ -1142,7 +1129,7 @@ mod tests {
         assert_eq!(cells, vec![plain; 9]);
     }
     #[test]
-    fn options_choose_the_tab_bar_and_the_window_titles() {
+    fn each_window_has_its_row_of_tabs_unless_the_option_is_off() {
         let root = tempfile::tempdir().unwrap();
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
         r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
@@ -1152,27 +1139,21 @@ mod tests {
             "first\n".into(),
         )));
         r.command(Command::SetMode(EditMode::Normal));
-        let top = |r: &mut Runtime| -> (bool, bool, usize) {
+        // How many windows' tabs the top row shows, and the row of the text.
+        let top = |r: &mut Runtime| -> (usize, usize) {
             let text = screen(r, 60, 14);
             let rows: Vec<_> = text.lines().collect();
-            let tabs = rows[0].contains('●') && !rows[0].contains('│');
             let first = rows.iter().position(|row| row.contains("first")).unwrap();
-            (tabs, first > usize::from(tabs), first)
+            (rows[0].matches("[untitled").count(), first)
         };
-        // A single window has its tabs and no title.
-        assert_eq!(top(&mut r), (true, false, 1));
+        assert_eq!(top(&mut r), (1, 1));
+        // Split, each window has its own row, the same as one alone.
         r.command(Command::Named("vsplit".into()));
-        // By default a title takes the row of the tabs.
-        assert_eq!(top(&mut r), (false, true, 1));
-        r.command(Command::Named("set tab-bar on".into()));
-        assert_eq!(top(&mut r), (true, true, 2));
-        r.command(Command::Named("set window-title off".into()));
-        assert_eq!(top(&mut r), (true, false, 1));
-        r.command(Command::Named("set tab-bar auto".into()));
-        assert_eq!(top(&mut r), (false, false, 0));
+        assert_eq!(top(&mut r), (2, 1));
         r.command(Command::Named("set tab-bar off".into()));
+        assert_eq!(top(&mut r), (0, 0));
         r.command(Command::Named("only".into()));
-        assert_eq!(top(&mut r), (false, false, 0));
+        assert_eq!(top(&mut r), (0, 0));
     }
     #[test]
     fn screens_compose_tabs_gutter_status_and_panels() {
@@ -1209,11 +1190,11 @@ mod tests {
         // The input sits under the status line it pushed up, the question
         // and count to its right, and candidates below; the 12-row editing
         // area keeps 10 candidate rows whether or not they are used.
-        assert!(rows[3].starts_with(" COMMAND "), "{text}");
-        assert!(rows[4].starts_with(":close "));
-        assert!(rows[4].contains("unsaved [untitled ") && rows[4].trim_end().ends_with("· 1/2"));
-        assert!(rows[5].starts_with("▌ save         [s]"));
-        assert!(rows[6].starts_with("  discard      [d]"));
+        assert!(rows[2].starts_with(" COMMAND "), "{text}");
+        assert!(rows[3].starts_with(":close "));
+        assert!(rows[3].contains("unsaved [untitled ") && rows[3].trim_end().ends_with("· 1/2"));
+        assert!(rows[4].starts_with("▌ save         [s]"));
+        assert!(rows[5].starts_with("  discard      [d]"));
         keys(&mut r, "ESC M-x");
         r.input(UserInput::Paste("map normal ".into()));
         let text = screen(&mut r, 60, 14);
@@ -1226,13 +1207,14 @@ mod tests {
         keys(&mut r, "ESC");
         r.command(Command::Help);
         let text = screen(&mut r, 60, 14);
+        // Over the windows, their rows of tabs too.
         assert!(
             text.lines()
-                .nth(1)
+                .next()
                 .unwrap()
                 .starts_with("╭ Help · Esc closes")
         );
-        assert!(text.lines().nth(2).unwrap().starts_with("│ Editing"));
+        assert!(text.lines().nth(1).unwrap().starts_with("│ Editing"));
     }
     #[test]
     fn notes_underline_their_range_and_speak_at_the_caret() {

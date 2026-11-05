@@ -291,3 +291,24 @@ fn resize_mode_moves_the_edge_until_escape_and_reset_evens_it() {
     r.command(Command::Named("resize-window narrower 30".into()));
     assert_eq!((width(&r, first), width(&r, second)), (32, 8));
 }
+#[test]
+fn a_tab_shows_its_document_in_its_window_even_one_another_window_shows() {
+    use soda::interaction::Pointer;
+    let mut r = runtime("one\ntwo");
+    let document = |r: &Runtime, view| r.app().view(view).unwrap().document_id;
+    let first = r.app().active_view().unwrap();
+    let a = document(&r, first);
+    keys(&mut r, "C-x 3");
+    r.command(Command::New);
+    let second = r.app().active_view().unwrap();
+    assert_ne!(document(&r, second), a);
+    // The tab of the first window's document, in the second window's row.
+    r.input(UserInput::Pointer(Pointer::Document(a)));
+    let windows = r.app().windows().views();
+    let docs: Vec<_> = windows.iter().map(|v| document(&r, *v)).collect();
+    assert_eq!(docs, [a, a], "both windows show it");
+    assert_eq!(r.app().active_view(), Some(windows[1]));
+    // Its tab in its own window's row leaves things as they are.
+    r.input(UserInput::Pointer(Pointer::Document(a)));
+    assert_eq!(r.app().windows().views(), windows);
+}

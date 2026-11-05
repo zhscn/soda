@@ -287,6 +287,14 @@ impl Theme {
         let c = color;
         let on = |fg: u32, bg: u32| Style::new().fg(c(fg)).bg(c(bg));
         let badge = |bg: u32| on(p.on_accent, bg).add_modifier(Modifier::BOLD);
+        // What frames the text stands apart from it in steps toward the
+        // text's color, so lighter in a dark theme and darker in a light
+        // one, as Zed's themes do: the tab bar and window titles a step
+        // off, the status line two, and the lines between them and the
+        // text further. `bg-dark` is too near the text to tell.
+        let surface = mix(p.bg, p.fg, 0.06);
+        let bar = mix(p.bg, p.fg, 0.13);
+        let line = mix(p.bg, p.fg, 0.2);
         Self {
             text: on(p.fg, p.bg),
             dim: on(p.comment, p.bg),
@@ -297,17 +305,17 @@ impl Theme {
             secondary_selection: Style::new().bg(c(mix(p.bg, p.yellow, 0.3))),
             beacon_selection: Style::new(),
             beacon_cursor: Style::new(),
-            status: on(p.fg_dark, p.bg_dark),
-            status_strong: on(p.fg, p.bg_dark).add_modifier(Modifier::BOLD),
+            status: on(p.fg_dark, bar),
+            status_strong: on(p.fg, bar).add_modifier(Modifier::BOLD),
             modified: Style::new().fg(c(p.yellow)),
             error: Style::new().fg(c(p.red)),
             mode_normal: badge(p.blue),
             mode_insert: badge(p.green),
             mode_visual: badge(p.magenta),
             mode_prompt: badge(p.orange),
-            tabs: on(p.comment, p.bg_dark),
+            tabs: on(p.comment, surface),
             tab_active: on(p.fg, p.bg).add_modifier(Modifier::BOLD),
-            border: on(p.gutter, p.bg),
+            border: on(line, p.bg),
             title: on(p.blue, p.bg).add_modifier(Modifier::BOLD),
             panel: on(p.fg, p.bg),
             float: on(p.fg, p.bg_dark),
@@ -326,8 +334,8 @@ impl Theme {
             deprecated: Style::new().add_modifier(Modifier::CROSSED_OUT),
             notes: [p.blue, p.yellow, p.red]
                 .map(|fg| Style::new().fg(c(fg)).add_modifier(Modifier::ITALIC)),
-            status_error: on(p.red, p.bg_dark).add_modifier(Modifier::BOLD),
-            status_warning: on(p.yellow, p.bg_dark).add_modifier(Modifier::BOLD),
+            status_error: on(p.red, bar).add_modifier(Modifier::BOLD),
+            status_warning: on(p.yellow, bar).add_modifier(Modifier::BOLD),
             info: Style::new().fg(c(p.blue)),
             matched: Style::new().fg(c(p.orange)).add_modifier(Modifier::BOLD),
             detail: Style::new().fg(c(p.comment)),

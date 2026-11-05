@@ -152,15 +152,9 @@ pub const OPTIONS: &[OptionInfo] = &[
     },
     OptionInfo {
         name: "tab-bar",
-        kind: Kind::Choice(&["auto", "on", "off"]),
-        default: Value::Choice("auto"),
-        doc: "The row of document tabs: auto shows it with a single window",
-    },
-    OptionInfo {
-        name: "window-title",
         kind: Kind::Bool,
         default: Value::Bool(true),
-        doc: "Show a title row on each window when there are several",
+        doc: "Show a row of document tabs atop each window, as tab-line-mode",
     },
     OptionInfo {
         name: "cpp-fallback-style",

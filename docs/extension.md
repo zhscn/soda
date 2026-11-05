@@ -42,8 +42,7 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 | `expand-tab` | true/false | true | 用空格缩进；false 时用制表符 |
 | `auto-pairs` | true/false | false | 成对输入括号和语言列出的引号，退格删除空的一对；同 Emacs 的 `electric-pair-mode`，默认关 |
 | `line-numbers` | absolute/relative/off | absolute | 行号栏；relative 时光标行显示自身行号，其他行显示距离 |
-| `tab-bar` | auto/on/off | auto | 文档标签行；auto 只在单窗口时显示 |
-| `window-title` | true/false | true | 有多个窗口时在每个窗口顶部显示标题 |
+| `tab-bar` | true/false | true | 每个窗口顶部的文档标签行，同 `tab-line-mode` |
 | `wrap` | true/false | false | 长行折到下一屏幕行，尽量在空格后断开 |
 | `show-tabs` | true/false | false | 用 `»` 标出制表符 |
 | `show-trailing-whitespace` | true/false | false | 用 `·` 标出行尾空格 |

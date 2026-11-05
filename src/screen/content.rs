@@ -35,9 +35,11 @@ pub(crate) fn file_label(runtime: &Runtime, document: DocumentId, full: bool) ->
     }
 }
 
-/// A buffer tab: every loaded document has one, with or without a view.
-/// While no window is open the splash has one too, first and active; the
-/// first window to open takes it away, and closing the last brings it back.
+/// A buffer tab. Each window has a row of them, as Emacs's `tab-line-mode`
+/// gives each window its own: every loaded document, with or without a
+/// view, the one the window shows active. A side window, which holds
+/// results, has its own tab alone. While no window is open one row shows
+/// the splash's tab, first and active, before the documents.
 pub(crate) struct Tab {
     /// The document, or `None` for the splash.
     pub document: Option<DocumentId>,
@@ -48,13 +50,24 @@ pub(crate) struct Tab {
 /// The splash tab's label.
 pub(crate) const SPLASH: &str = "soda";
 
-pub(crate) fn tabs(runtime: &Runtime) -> Vec<Tab> {
+/// The tabs of `window`'s row, or with none, of the row the splash shows in.
+pub(crate) fn tabs(runtime: &Runtime, window: Option<ViewId>) -> Vec<Tab> {
     let app = runtime.app();
-    let active = app
-        .active_view()
+    let active = window
         .and_then(|id| app.view(id))
         .map(|view| view.document_id);
-    let splash = app.windows().views().is_empty().then(|| Tab {
+    let tab = |document: DocumentId| Tab {
+        document: Some(document),
+        label: file_label(runtime, document, false),
+        dirty: app.workspace().is_dirty(document),
+        active: Some(document) == active,
+    };
+    if let Some(document) =
+        active.filter(|_| window.is_some_and(|w| app.windows().side(w).is_some()))
+    {
+        return vec![tab(document)];
+    }
+    let splash = window.is_none().then(|| Tab {
         document: None,
         label: SPLASH.into(),
         dirty: false,
@@ -62,19 +75,8 @@ pub(crate) fn tabs(runtime: &Runtime) -> Vec<Tab> {
     });
     splash
         .into_iter()
-        .chain(app.workspace().documents().map(|document| Tab {
-            document: Some(document),
-            label: file_label(runtime, document, false),
-            dirty: app.workspace().is_dirty(document),
-            active: Some(document) == active,
-        }))
+        .chain(app.workspace().documents().map(tab))
         .collect()
-}
-/// The title of a window: its document's path and whether it is modified.
-pub(crate) fn title(runtime: &Runtime, view: ViewId) -> Option<(String, bool)> {
-    let document = runtime.app().view(view)?.document_id;
-    let dirty = runtime.app().workspace().is_dirty(document);
-    Some((file_label(runtime, document, true), dirty))
 }
 
 /// The mode the status line names.

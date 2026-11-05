@@ -16,7 +16,8 @@ pub enum Pointer {
     Drag { anchor: usize, head: usize },
     /// Moves the head of the selection back into view after scrolling.
     Reveal(usize),
-    /// Shows a document, as `buffer` does.
+    /// Shows a document in the focused window, as a tab of its row does
+    /// in Emacs's `tab-line-mode`: even one another window shows.
     Document(DocumentId),
     /// Focuses the window showing a view.
     Window(ViewId),
@@ -53,7 +54,21 @@ impl Layers {
         let current = editor.model().session(view.session_id).unwrap().selection();
         let selection = match pointer {
             Pointer::Document(document) => {
-                response.events.push(super::commands::show(app, document));
+                let shown = app.windows().views();
+                let here = app
+                    .active_view()
+                    .and_then(|view| app.view(view))
+                    .is_some_and(|view| view.document_id == document);
+                if !here {
+                    // A view no window shows comes back; else a new one.
+                    let hidden = app
+                        .views()
+                        .find(|view| view.document_id == document && !shown.contains(&view.id));
+                    response.events.push(match hidden {
+                        Some(view) => Event::Focus(view.id),
+                        None => Event::AddView(document),
+                    });
+                }
                 return InputResult::Handled(response);
             }
             Pointer::Window(view) => {
