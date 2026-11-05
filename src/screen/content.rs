@@ -118,8 +118,8 @@ pub(crate) struct StatusDocument {
     pub dirty: bool,
     pub saving: bool,
 }
-/// The status line: the mode and document on the left; on the right
-/// segments, then the caret's place.
+/// The status line: the mode, document and caret's place on the left;
+/// segments on the right.
 pub(crate) struct Status {
     /// What keys do: a prompt's name, or the editing mode when editing is
     /// modal; nothing in plain editing.
@@ -128,9 +128,8 @@ pub(crate) struct Status {
     /// What is going on, extensions' segments, problem counts and the
     /// language.
     pub segments: Vec<(String, Role)>,
-    /// One-based line and column of the caret, and how far down the
-    /// document its line is, in percent.
-    pub place: Option<(usize, usize, usize)>,
+    /// One-based line and column of the caret.
+    pub place: Option<(usize, usize)>,
 }
 pub(crate) fn mode(runtime: &Runtime) -> Option<Mode> {
     Some(match runtime.layer() {
@@ -190,8 +189,7 @@ pub(crate) fn status(runtime: &Runtime, text: Option<&super::TextFrame>) -> Stat
         }
         segments.push((text.language.clone(), Role::Plain));
         let (line, column) = text.caret;
-        let percent = (line + 1) * 100 / text.line_count.max(1);
-        place = Some((line + 1, column + 1, percent));
+        place = Some((line + 1, column + 1));
     }
     let document = view.map(|view| StatusDocument {
         path: file_label(runtime, view.document_id, true),

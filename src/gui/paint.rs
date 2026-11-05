@@ -1043,16 +1043,12 @@ fn status(painter: &mut Painter, runtime: &Runtime, area: Rect, text: Option<&Te
         painter.ui(pill.x + 0.8 * cell, top, label, style, width);
         left = pill.right() + cell;
     }
-    // The right side: segments, then the caret's place.
-    let mut right: Vec<(String, Style)> = status
+    // The right side: segments.
+    let right: Vec<(String, Style)> = status
         .segments
         .iter()
         .map(|(words, role)| (words.clone(), role_style(*role, theme)))
         .collect();
-    if let Some((line, column, percent)) = status.place {
-        right.push((format!("{line}:{column}"), theme.status_strong));
-        right.push((format!("{percent}%"), Style::new()));
-    }
     let gap = 1.6 * cell;
     let widths: Vec<f32> = right
         .iter()
@@ -1068,18 +1064,33 @@ fn status(painter: &mut Painter, runtime: &Runtime, area: Rect, text: Option<&Te
     if let Some(document) = status.document {
         let x = left;
         let room = (area.right() - total - x - gap).max(0.0);
+        // The caret's place follows the document, as Emacs's mode line.
+        let place = status
+            .place
+            .map(|(line, column)| format!("{line}:{column}"));
+        let place_width = place
+            .as_deref()
+            .map_or(0.0, |place| painter.ui_width(place, theme.status) + gap);
         let style = theme.status.patch(theme.status_strong);
-        let path = fitting(painter.fonts, &document.path, room - 6.0 * cell);
-        let end = painter.ui(x, top, &path, style, room);
+        let path = fitting(
+            painter.fonts,
+            &document.path,
+            room - 6.0 * cell - place_width,
+        );
+        let mut end = painter.ui(x, top, &path, style, room);
         if document.dirty {
             let dot = (line * 0.28).round();
             let color = rgba(theme.modified.fg, painter.fg);
             let y = area.y + (area.h - dot) / 2.0;
             painter.fill(Rect::new(end + cell * 0.6, y, dot, dot), color, dot);
+            end += cell * 0.6 + dot;
         }
         if document.saving {
             let style = theme.status.add_modifier(Modifier::DIM);
-            painter.ui(end + 2.0 * cell, top, "saving…", style, room);
+            end = painter.ui(end + 2.0 * cell, top, "saving…", style, room);
+        }
+        if let Some(place) = place {
+            painter.ui(end + gap, top, &place, theme.status, room);
         }
     }
 }

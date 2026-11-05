@@ -761,18 +761,11 @@ fn status(
     Clear.render(area, buf);
     buf.set_style(area, theme.status);
     let status = content::status(runtime, text);
-    let mut right: Vec<_> = status
+    let right: Vec<_> = status
         .segments
         .iter()
         .map(|(words, role)| Text::styled(format!("{words}  "), role_style(*role, theme)))
         .collect();
-    if let Some((line, column, percent)) = status.place {
-        right.push(Text::styled(
-            format!("{line}:{column}"),
-            theme.status_strong,
-        ));
-        right.push(Text::raw(format!("  {percent:>3}% ")));
-    }
     let right = Line::from(right);
     let right_width = (right.width() as u16).min(area.width);
     let mut left = match status.mode {
@@ -789,6 +782,10 @@ fn status(
         }
         if document.saving {
             marks.push(Text::raw(" saving…"));
+        }
+        // The caret's place follows the document, as Emacs's mode line.
+        if let Some((line, column)) = status.place {
+            marks.push(Text::raw(format!("  {line}:{column}")));
         }
         // Long paths keep their file name and lose leading directories.
         let used = Line::from(left.clone()).width() + Line::from(marks.clone()).width();
@@ -1181,8 +1178,8 @@ mod tests {
         assert!(rows[0].starts_with(" [untitled ") && rows[0].contains("] ●"));
         assert!(rows[1].starts_with("   1 │ int main() {"));
         assert!(rows[12].starts_with(" NORMAL  [untitled "));
-        assert!(rows[12].contains("] [+]"));
-        assert!(rows[12].trim_end().ends_with("3:2  100%"));
+        assert!(rows[12].contains("] [+]  3:2 "), "{:?}", rows[12]);
+        assert!(!rows[12].contains('%'));
         assert_eq!(
             rows[13].trim(),
             "",
@@ -1625,7 +1622,7 @@ mod tests {
         assert!(shown[3].starts_with("   3 │"), "{shown:?}");
         assert!(!shown[4].contains('4'));
         keys(&mut r, "jjj");
-        assert!(rows(&mut r)[6].trim_end().ends_with("3:1  100%"));
+        assert!(rows(&mut r)[6].contains("  3:1 "));
         keys(&mut r, "M-< i <down> <down> <down>");
         assert!(rows(&mut r)[6].contains("3:1"));
     }

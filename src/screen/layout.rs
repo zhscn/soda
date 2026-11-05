@@ -178,7 +178,6 @@ pub(crate) struct Frame {
     pub caret_width: usize,
     /// Zero-based line and logical column of the caret.
     pub caret: (usize, usize),
-    pub line_count: usize,
     /// The highlighting language's display name.
     pub language: String,
     /// Where the ruler is from the left, when it is in view.
@@ -1071,7 +1070,6 @@ pub(crate) fn frame(
     let column = logical_column_at(snapshot, ByteOffset(head), tab)?.0;
     let layout = Rows::new(app, view, measure, width).unwrap();
     let walk = layout.walk;
-    let lines = layout.lines;
     let left = left.unwrap_or(view.viewport.horizontal_scroll);
     let mut output = Vec::new();
     // The rows shown, each with its line's segment.
@@ -1299,7 +1297,6 @@ pub(crate) fn frame(
         cursor,
         caret_width,
         caret: (line, column),
-        line_count: lines,
         language: document.language().profile().name.clone(),
         ruler,
         note,
