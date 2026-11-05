@@ -391,6 +391,10 @@ impl Lsp {
             }
         }
     }
+    /// Whether `language` has a server configured.
+    pub fn serves(&self, language: &str) -> bool {
+        self.servers.contains_key(language)
+    }
     pub fn on(&mut self, method: String, function: u64) {
         self.handlers.entry(method).or_default().push(function);
     }

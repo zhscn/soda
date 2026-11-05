@@ -588,8 +588,18 @@ impl Layers {
     }
     /// The names of the language servers serving each document, for the
     /// keymaps of servers; a document left out has none.
-    pub fn set_servers(&mut self, servers: HashMap<crate::editor::DocumentId, Vec<String>>) {
+    /// Returns whether they changed.
+    pub fn set_servers(
+        &mut self,
+        servers: HashMap<crate::editor::DocumentId, Vec<String>>,
+    ) -> bool {
+        let changed = self.servers != servers;
         self.servers = servers;
+        changed
+    }
+    /// The names of the language servers serving `document`.
+    pub fn servers_of(&self, document: crate::editor::DocumentId) -> &[String] {
+        self.servers.get(&document).map_or(&[], Vec::as_slice)
     }
     /// Recently used files, newest first.
     pub fn set_recent_files(&mut self, files: Vec<std::path::PathBuf>) {

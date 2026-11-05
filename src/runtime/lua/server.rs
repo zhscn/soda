@@ -215,7 +215,10 @@ pub(super) fn register<'scope, 'r: 'scope>(
         scope.create_function(|_, dir: Option<String>| {
             let mut runtime = runtime.borrow_mut();
             let document = runtime.document().map_err(mlua::Error::runtime)?;
-            let Some((language, root)) = runtime.lsp_key_of(document) else {
+            let Some((language, root)) = runtime
+                .lsp_key_of(document)
+                .filter(|(language, _)| runtime.lsp.serves(language))
+            else {
                 return Ok(None);
             };
             let root = match dir {

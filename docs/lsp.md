@@ -51,7 +51,7 @@ soda.lsp.server("rust", { "rust-analyzer" }, {
 | | `lsp-format` | 格式化选区，没有选区或服务器不支持范围格式化时格式化整个文档 |
 | | `lsp-diagnostics` | 列出所有诊断 |
 | | `lsp-restart` | 重启当前语言的服务器，失败后也用它重试 |
-| | `lsp-start [DIR]` | 像 eglot：在 `DIR`（默认按规则得到的根目录）启动，之后这个目录下这种语言的文档都归它；也解除 `lsp-stop` |
+| | `lsp-start [DIR]` | 像 eglot：在 `DIR`（默认按规则得到的根目录）启动，之后这个目录下这种语言的文档都归它；也解除 `lsp-stop`；这种语言没有配置服务器时只说明没有 |
 | | `lsp-stop` | 停掉当前文档的服务器，清掉它的诊断、语义高亮和 inlay hint；设了 `auto` 的在 `lsp-start` 之前也不再自动启动 |
 | | `lsp-servers` | 在 `*servers*` 里列出服务器（语言、根目录、程序、状态）及各自的文档，回车打开 |
 

@@ -182,6 +182,12 @@ pub(crate) fn status(runtime: &Runtime, text: Option<&super::TextFrame>) -> Stat
         if warnings > 0 {
             segments.push((format!("W{warnings}"), Role::Severity(Severity::Warning)));
         }
+        // Which server serves the document, as eglot's mode line.
+        if let Some(view) = view {
+            for server in runtime.servers_of(view.document_id) {
+                segments.push((server.clone(), Role::Detail));
+            }
+        }
         segments.push((text.language.clone(), Role::Plain));
         let (line, column) = text.caret;
         let percent = (line + 1) * 100 / text.line_count.max(1);

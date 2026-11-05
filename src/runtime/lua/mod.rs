@@ -1037,7 +1037,10 @@ impl Runtime {
         if let Some(error) = failure.or(closed) {
             self.report(error);
         }
-        self.layers.set_servers(self.lsp.serving());
+        // The status line names them.
+        if self.layers.set_servers(self.lsp.serving()) {
+            self.dirty = true;
+        }
         if !deliveries.is_empty() {
             let view = self.app.active_view();
             self.lua_queue

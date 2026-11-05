@@ -215,6 +215,10 @@ impl Runtime {
     pub fn app(&self) -> &Application {
         &self.app
     }
+    /// The names of the language servers serving `document`.
+    pub fn servers_of(&self, document: crate::editor::DocumentId) -> &[String] {
+        self.layers.servers_of(document)
+    }
     pub fn layer(&self) -> Option<&Layer> {
         self.layers.active()
     }

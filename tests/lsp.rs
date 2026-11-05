@@ -1265,6 +1265,36 @@ fn by_default_a_server_waits_for_lsp_start_then_serves_its_root_as_eglot() {
     assert_eq!(initialized(&log).len(), 1);
 }
 #[test]
+fn lsp_start_without_a_server_for_the_language_says_so() {
+    if Process::new("python3").arg("--version").output().is_err() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let base = dir.path().canonicalize().unwrap();
+    std::fs::write(base.join("a.rs"), "x\n").unwrap();
+    // A server for C++ only.
+    let (mut r, log) = server_in(&base, "a.rs", "{ auto = nil }");
+    r.command(Command::Named("lsp-start".into()));
+    assert_eq!(r.message(), "No language server for this document");
+    settle(&mut r);
+    assert!(initialized(&log).is_empty());
+}
+#[test]
+fn the_status_line_names_the_server_of_the_document() {
+    let Some(mut f) = open("x\n") else { return };
+    let document = |r: &Runtime| {
+        r.app()
+            .view(r.app().active_view().unwrap())
+            .unwrap()
+            .document_id
+    };
+    wait(&mut f.r, |r| !r.servers_of(document(r)).is_empty());
+    assert_eq!(f.r.servers_of(document(&f.r)), ["env"]);
+    f.r.command(Command::Named("lsp-stop".into()));
+    settle(&mut f.r);
+    assert!(f.r.servers_of(document(&f.r)).is_empty());
+}
+#[test]
 fn a_server_waits_for_its_markers_or_lsp_start_and_lsp_stop_holds() {
     if Process::new("python3").arg("--version").output().is_err() {
         return;
