@@ -251,6 +251,9 @@ pub enum Command {
         backward: bool,
     },
     Replace,
+    /// Asks a query and a replacement, then reviews their matches in each
+    /// file of the project, as Emacs's `project-query-replace-regexp`.
+    ProjectReplace,
 }
 /// An answer to `save-some-buffers` about one file.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -979,12 +982,16 @@ impl Layers {
                 };
                 response.events.push(show(app, order[*at]));
             }
-            Command::Search | Command::SearchBackward | Command::Replace => {
+            Command::Search
+            | Command::SearchBackward
+            | Command::Replace
+            | Command::ProjectReplace => {
                 if let Some(view) = app.active_view() {
                     let session = SearchSession::new(app, view)?;
                     let session = match command {
                         Command::SearchBackward => session.backward(),
                         Command::Replace => session.replacing(),
+                        Command::ProjectReplace => session.across_project(),
                         _ => session,
                     };
                     response = self.enter(Layer::Search(Box::new(session)), app, time)?;

@@ -322,7 +322,7 @@ Insert 中按选项 `auto-pairs`（默认关）成对输入括号，与 Emacs �
 | `C-x s` | `save-some-buffers`：逐个询问未保存的文件，`y` 保存、`n` 跳过、`!` 保存这个和之后的全部、`q` 不再保存；未命名文档不问 |
 | `C-x 0`、`1`、`2`、`3`、`o` | `close-window`、`only`、`split`、`vsplit`、`window-next` |
 | `C-x ^` | `resize-window` |
-| `C-x p f`、`C-x p p`、`C-x p b`、`C-x p g` | `project`、`project-switch`、`buffer`、`grep` |
+| `C-x p f`、`C-x p p`、`C-x p b`、`C-x p g`、`C-x p r` | `project`、`project-switch`、`buffer`、`grep`、`project-replace` |
 | `M-x`、`M-!`、`M-\|`、`M-%` | `commands`、`shell`、`pipe`、`replace` |
 | `M-s .` | `search-symbol`：搜索光标处的符号（整个符号匹配），从符号开头开始，第一处就是它，`C-s` 往下 |
 | `C-x z` | `repeat`：再执行一次上一个键的命令 |
@@ -796,6 +796,15 @@ Application 拥有一个跨文档共享的剪贴板，它是 Emacs 式的 kill r
 | `C-s` / `C-r`、`F3` / `Shift-F3` | 选择后 / 前一处，环绕 |
 
 下一处从替换进去的文字之后找，所以把 `a` 换成 `aa` 不会再问到新文字；越过最后一处时结束，不环绕（同 Emacs 停在缓冲区末尾）。结束时消息行报告替换了几处。每处替换是一个可撤销事务，`!` 和 `F4` 各是一个。查询和替换文字阶段取消恢复进入前的选区与视口；确认阶段已经替换过时，Esc 与 `q` 一样结束并保留已做的替换，光标留在停下的位置，还没替换时恢复原状。
+
+`project-replace`（`C-x p r`）同 Emacs 的 `project-query-replace-regexp`：同样依次输入查询和替换文字（当前文档里预览匹配，但不在这里替换），然后后台找出项目中有匹配的文件（范围和 `grep` 一样，按名字排序，按磁盘上的内容找），逐个打开，在每个文件里从头开始上面的确认阶段。一个文件问完（越过最后一处、`!`、`F4`）自动打开下一个；另有两个键，同 Emacs 多文件的 query-replace：
+
+| 键 | 作用 |
+| --- | --- |
+| `N` | 这个文件剩下的不替换，到下一个文件 |
+| `Y` | 这一处和之后所有文件的所有匹配都替换，不再询问 |
+
+`.`、`q`、`RET`、Esc 结束整个替换。改过的文件只是未保存，同 Emacs，用 `save-some-buffers`（`C-x s`）保存。结束时消息行报告替换了几处、几个文件。焦点离开正在询问的文件时整个替换结束。
 
 ## Picker 后台引擎
 

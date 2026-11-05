@@ -50,11 +50,30 @@ fn popup_page(key: &crate::interaction::KeyStroke) -> Option<bool> {
     }
 }
 
+/// A replacement over the files of the project, as Emacs's fileloop goes
+/// through them: each file is opened, then reviewed, then the next.
+struct FileLoop {
+    query: String,
+    replacement: String,
+    /// Files still to go to, in order; none until they are found.
+    files: Option<std::collections::VecDeque<PathBuf>>,
+    /// The file opened and not yet reviewed.
+    opening: Option<PathBuf>,
+    /// A file's review is open.
+    reviewing: bool,
+    /// Every match left is replaced without asking, as after `Y`.
+    all: bool,
+    replaced: usize,
+    files_replaced: usize,
+}
 pub struct Runtime {
     // Workers drop before the application so in-progress file writes can finish.
     files: FileRunner,
     shell: shell::ShellRunner,
     grep: grep::GrepRunner,
+    /// The files a replacement over the project goes through, being found.
+    file_search: grep::FileSearch,
+    file_loop: Option<FileLoop>,
     completions: completion::Completions,
     lsp: lsp::Lsp,
     run: run::RunRunner,
@@ -149,6 +168,8 @@ impl Runtime {
             files: FileRunner::new()?,
             shell: shell::ShellRunner::default(),
             grep: grep::GrepRunner::default(),
+            file_search: grep::FileSearch::default(),
+            file_loop: None,
             completions: completion::Completions::default(),
             lsp: lsp::Lsp::default(),
             run: run::RunRunner::default(),
@@ -577,6 +598,145 @@ impl Runtime {
             self.logged = self.message.clone();
             if !self.message.is_empty() {
                 self.log(self.message.clone());
+            }
+        }
+    }
+    /// Starts a replacement over the project: finds the files first.
+    fn project_replace(&mut self, request: crate::interaction::ProjectReplace) {
+        let query = crate::editor::search::SearchQuery::new(&request.query);
+        self.file_search.submit(self.app.root(), query);
+        self.message = "Searching the project…".into();
+        self.file_loop = Some(FileLoop {
+            query: request.query,
+            replacement: request.replacement,
+            files: None,
+            opening: None,
+            reviewing: false,
+            all: false,
+            replaced: 0,
+            files_replaced: 0,
+        });
+    }
+    /// Takes how a file's review ended; the loop moves on when polled.
+    fn file_loop_step(&mut self, step: crate::interaction::LoopStep) {
+        use crate::interaction::LoopNext;
+        let Some(file_loop) = &mut self.file_loop else {
+            return;
+        };
+        file_loop.reviewing = false;
+        file_loop.replaced += step.replaced;
+        file_loop.files_replaced += usize::from(step.replaced > 0);
+        match step.next {
+            LoopNext::File => {}
+            LoopNext::All => file_loop.all = true,
+            LoopNext::Stop => {
+                if let Some(files) = &mut file_loop.files {
+                    files.clear();
+                }
+            }
+        }
+    }
+    /// Moves a replacement over the project on: opens the next file, then
+    /// once it shows, reviews it, or after `Y` replaces all of it; past the
+    /// last file, says how much was replaced.
+    fn advance_file_loop(&mut self) {
+        loop {
+            let Some(file_loop) = &mut self.file_loop else {
+                return;
+            };
+            if file_loop.reviewing {
+                // The review went without saying how, as when its view
+                // lost focus: the replacement stops there.
+                if self.layers.active().is_none() {
+                    file_loop.files = Some(Default::default());
+                    file_loop.reviewing = false;
+                } else {
+                    return;
+                }
+            }
+            let Some(files) = &mut file_loop.files else {
+                return;
+            };
+            let Some(path) = file_loop.opening.clone() else {
+                let Some(next) = files.pop_front() else {
+                    let file_loop = self.file_loop.take().unwrap();
+                    let noun = if file_loop.replaced == 1 {
+                        "occurrence"
+                    } else {
+                        "occurrences"
+                    };
+                    let files = if file_loop.files_replaced == 1 {
+                        "file"
+                    } else {
+                        "files"
+                    };
+                    self.message = format!(
+                        "Replaced {} {noun} in {} {files}",
+                        file_loop.replaced, file_loop.files_replaced
+                    );
+                    self.dirty = true;
+                    return;
+                };
+                file_loop.opening = Some(next.clone());
+                self.command(Command::OpenPath(next));
+                continue;
+            };
+            // Wait until the file shows in the active window.
+            let shown = self.app.active_view().and_then(|id| self.app.view(id));
+            let Some(view) = shown.filter(|view| {
+                self.app
+                    .workspace()
+                    .file(view.document_id)
+                    .and_then(|file| file.path())
+                    .is_some_and(|shown| same_file(shown, &path))
+            }) else {
+                return;
+            };
+            let (view, document) = (view.id, view.document_id);
+            let (query, replacement, all) = (
+                file_loop.query.clone(),
+                file_loop.replacement.clone(),
+                file_loop.all,
+            );
+            file_loop.opening = None;
+            let time = self.epoch.elapsed();
+            if all {
+                let search = crate::editor::search::SearchQuery::new(&query);
+                let count = self.app.workspace().editor(document).map_or(0, |editor| {
+                    search.cursor(editor.model().document().snapshot()).count()
+                });
+                let edit = |command| Event::Edit {
+                    view,
+                    command,
+                    time,
+                };
+                self.reduce(
+                    edit(crate::editor::Command::SetSearchQuery(search.clone())),
+                    time,
+                );
+                if count > 0
+                    && self.reduce(edit(crate::editor::Command::ReplaceAll(replacement)), time)
+                {
+                    let file_loop = self.file_loop.as_mut().unwrap();
+                    file_loop.replaced += count;
+                    file_loop.files_replaced += 1;
+                }
+                self.dirty = true;
+                continue;
+            }
+            self.file_loop.as_mut().unwrap().reviewing = true;
+            match self
+                .layers
+                .review_replace(&self.app, view, &query, &replacement, time)
+            {
+                Ok(response) => {
+                    self.respond(response, time);
+                }
+                Err(error) => {
+                    self.file_loop = None;
+                    self.interaction_failed(error, time);
+                    return;
+                }
             }
         }
     }
@@ -1057,6 +1217,14 @@ impl Runtime {
                 self.tree_action(action);
                 None
             }
+            Effect::ProjectReplace(request) => {
+                self.project_replace(request);
+                None
+            }
+            Effect::FileLoop(step) => {
+                self.file_loop_step(step);
+                None
+            }
         }
     }
     /// Routes macro input again. A failing command drops the rest,
@@ -1256,6 +1424,12 @@ impl Runtime {
         if let Some(completion) = self.grep.poll() {
             self.grep_finished(completion);
         }
+        if let Some(files) = self.file_search.poll()
+            && let Some(file_loop) = &mut self.file_loop
+        {
+            file_loop.files = Some(files.into());
+        }
+        self.advance_file_loop();
         if let Some(output) = self.run.poll() {
             self.run_output(output);
         }
@@ -1444,4 +1618,12 @@ fn structure(
             })
         }
     }
+}
+/// Whether two paths name the same file, however they are written.
+fn same_file(a: &std::path::Path, b: &std::path::Path) -> bool {
+    a == b
+        || std::fs::canonicalize(a)
+            .ok()
+            .zip(std::fs::canonicalize(b).ok())
+            .is_some_and(|(a, b)| a == b)
 }

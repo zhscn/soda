@@ -158,6 +158,11 @@ pub enum Effect {
     Indicator(usize, String),
     /// A key on the row of a tree.
     Tree(TreeAction),
+    /// A replacement to make over the files of the project, its query and
+    /// replacement typed.
+    ProjectReplace(crate::interaction::ProjectReplace),
+    /// How the review of one of those files ended.
+    FileLoop(crate::interaction::LoopStep),
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TreeAction {

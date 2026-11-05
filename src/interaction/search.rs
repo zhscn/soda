@@ -41,6 +41,41 @@ struct Replace {
     replacement: String,
     /// Matches replaced so far in the review.
     replaced: usize,
+    project: Project,
+}
+/// Whether a replacement goes over the files of the project, as Emacs's
+/// `project-query-replace-regexp`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Project {
+    /// Only the document.
+    No,
+    /// The query and the replacement are asked here, then the Runtime
+    /// finds the files with matches.
+    Ask,
+    /// Reviewing one of those files; ending says where the loop goes.
+    Loop,
+}
+/// A replacement over the project, once its query and replacement are
+/// typed.
+#[derive(Clone, Debug)]
+pub struct ProjectReplace {
+    pub query: String,
+    pub replacement: String,
+}
+/// How the review of a file in a replacement over the project ended, and
+/// how many matches it replaced.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LoopStep {
+    pub replaced: usize,
+    pub next: LoopNext,
+}
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LoopNext {
+    /// On to the next file.
+    File,
+    /// Every match of the files left, without asking, as `Y`.
+    All,
+    Stop,
 }
 #[derive(Default)]
 pub struct SearchResults {
@@ -60,8 +95,41 @@ impl SearchSession {
             step: Step::Query,
             replacement: String::new(),
             replaced: 0,
+            project: Project::No,
         });
         self
+    }
+    /// Asks the query and the replacement for the files of the project.
+    pub fn across_project(mut self) -> Self {
+        self = self.replacing();
+        self.replace.as_mut().unwrap().project = Project::Ask;
+        self
+    }
+    /// Reviews the matches of a file of a replacement over the project,
+    /// from its start; with none, it ends at once.
+    pub(super) fn reviewing(
+        app: &Application,
+        view: ViewId,
+        query: SearchQuery,
+        replacement: String,
+        time: Duration,
+    ) -> Result<(Self, Transition), EditError> {
+        let mut session = Self::starting_at(app, view, 0)?;
+        session.input = TextInput::new(query.text());
+        session.query = query;
+        session.replace = Some(Replace {
+            step: Step::Review,
+            replacement,
+            replaced: 0,
+            project: Project::Loop,
+        });
+        let transition = session.move_on(app, 0, time)?;
+        Ok((session, transition))
+    }
+    fn project(&self) -> Project {
+        self.replace
+            .as_ref()
+            .map_or(Project::No, |replace| replace.project)
     }
     pub fn is_replacing(&self) -> bool {
         self.replace.is_some()
@@ -278,9 +346,14 @@ impl SearchSession {
                 replacement,
                 ..
             }) => {
+                let keys = if self.project() == Project::Loop {
+                    "y/SPC replace, n/DEL skip, ! rest of file, N next file, Y all files, . last, q/RET quit"
+                } else {
+                    "y/SPC replace, n/DEL skip, ! rest, . last, q/RET quit, F4 all"
+                };
                 return Presentation {
                     text: format!(
-                        "Query replacing {:?} with {:?} [{} matches]: y/SPC replace, n/DEL skip, ! rest, . last, q/RET quit, F4 all",
+                        "Query replacing {:?} with {:?} [{} matches]: {keys}",
                         self.query.text(),
                         replacement,
                         self.results.count
@@ -370,7 +443,16 @@ impl SearchSession {
         };
         Ok(match (self.step(), input) {
             (step, Input::Cancel) if step != Some(Step::Review) || self.replaced() == 0 => {
-                Transition::Closed(self.cancel_response(app, time)?)
+                let mut response = self.cancel_response(app, time)?;
+                if self.project() == Project::Loop {
+                    response
+                        .commands
+                        .push(effect(super::modal::Effect::FileLoop(LoopStep {
+                            replaced: 0,
+                            next: LoopNext::Stop,
+                        })));
+                }
+                Transition::Closed(response)
             }
             (None, Input::Confirm) => Transition::Closed(Response {
                 events: vec![set_query(self.query.clone())],
@@ -385,14 +467,29 @@ impl SearchSession {
                 self.input = TextInput::default();
                 Transition::redraw()
             }
+            (Some(Step::Replacement), Input::Confirm) if self.project() == Project::Ask => {
+                // The files are reviewed one by one once they are found;
+                // this document is left as it was.
+                let mut response = self.cancel_response(app, time)?;
+                response.message = super::Message::Keep;
+                response
+                    .commands
+                    .push(effect(super::modal::Effect::ProjectReplace(
+                        ProjectReplace {
+                            query: self.query.text().to_owned(),
+                            replacement: self.input.text().to_owned(),
+                        },
+                    )));
+                Transition::Closed(response)
+            }
             (Some(Step::Replacement), Input::Confirm) => {
                 let replace = self.replace.as_mut().unwrap();
                 replace.replacement = self.input.text().to_owned();
                 replace.step = Step::Review;
                 Transition::redraw()
             }
-            (Some(Step::Review), input) if review(&input).is_some() => {
-                self.answer(review(&input).unwrap(), app, time)?
+            (Some(Step::Review), input) if review(&input, self.project()).is_some() => {
+                self.answer(review(&input, self.project()).unwrap(), app, time)?
             }
             (Some(Step::Replacement), Input::Navigate { .. }) => Transition::Blocked,
             // Leaving after replacing keeps what was replaced, and the
@@ -468,10 +565,17 @@ enum Answer {
     Quit,
     /// `F4`, `C-RET`: replace every match of the document.
     All,
+    /// `N`, over the project: leave the rest of the file.
+    NextFile,
+    /// `Y`, over the project: replace every match left in every file.
+    AllFiles,
 }
-fn review(input: &Input) -> Option<Answer> {
+fn review(input: &Input, project: Project) -> Option<Answer> {
     use super::InputKey;
+    let across = project == Project::Loop;
     Some(match input {
+        Input::Text(InputKey::Char('N')) if across => Answer::NextFile,
+        Input::Text(InputKey::Char('Y')) if across => Answer::AllFiles,
         Input::Text(InputKey::Char('y' | ' ')) => Answer::Replace,
         Input::Text(InputKey::Char('n')) => Answer::Skip,
         Input::Text(InputKey::Delete { backward: true, .. }) => Answer::Skip,
@@ -503,7 +607,7 @@ impl SearchSession {
         let current = self.results.current.clone();
         // With no match in hand only stopping is left to do.
         if current.is_none() && !matches!(answer, Answer::All) {
-            return self.finish(vec![], app);
+            return self.finish(vec![], LoopNext::File);
         }
         let edit = |command| Event::Edit {
             view: self.view,
@@ -524,7 +628,7 @@ impl SearchSession {
             }
             Answer::Skip => {
                 let Some(current) = current else {
-                    return self.finish(vec![], app);
+                    return self.finish(vec![], LoopNext::File);
                 };
                 // An empty match is passed by a character, so it is not
                 // found again where it is.
@@ -538,18 +642,32 @@ impl SearchSession {
             Answer::Last => {
                 replace.replaced += 1;
                 let events = vec![set_query, edit(Command::ReplaceCurrent(replacement))];
-                self.finish(events, app)
+                self.finish(events, LoopNext::Stop)
             }
             Answer::Rest => {
                 let rest = current.map_or(0, |current| self.count_from(app, current.start));
                 self.replace.as_mut().unwrap().replaced += rest;
                 let events = vec![set_query, edit(Command::ReplaceRest(replacement))];
-                self.finish(events, app)
+                self.finish(events, LoopNext::File)
+            }
+            Answer::AllFiles => {
+                let rest = current.map_or(0, |current| self.count_from(app, current.start));
+                self.replace.as_mut().unwrap().replaced += rest;
+                let events = vec![set_query, edit(Command::ReplaceRest(replacement))];
+                self.finish(events, LoopNext::All)
             }
             Answer::All => {
                 replace.replaced += self.results.count;
                 let events = vec![set_query, edit(Command::ReplaceAll(replacement))];
-                self.finish(events, app)
+                self.finish(events, LoopNext::File)
+            }
+            Answer::NextFile => {
+                let caret = self.caret(app)?;
+                let stay = edit(Command::SetSelection(Selection {
+                    anchor: caret,
+                    head: caret,
+                }));
+                self.finish(vec![set_query, stay], LoopNext::File)
             }
             Answer::Quit => {
                 let caret = self.caret(app)?;
@@ -557,7 +675,7 @@ impl SearchSession {
                     anchor: caret,
                     head: caret,
                 }));
-                self.finish(vec![set_query, stay], app)
+                self.finish(vec![set_query, stay], LoopNext::Stop)
             }
         }
     }
@@ -599,7 +717,7 @@ impl SearchSession {
                 }),
                 time,
             };
-            return self.finish(vec![stay], app);
+            return self.finish(vec![stay], LoopNext::File);
         };
         Ok(Transition::Active(Response {
             events: vec![Event::Edit {
@@ -626,9 +744,21 @@ impl SearchSession {
             .filter(|range| range.start >= from)
             .count()
     }
-    /// Ends the review, saying how many matches were replaced.
-    fn finish(&self, events: Vec<Event>, _app: &Application) -> Result<Transition, EditError> {
+    /// Ends the review, saying how many matches were replaced; over the
+    /// project, the Runtime says it for all the files, and goes `next`.
+    fn finish(&self, events: Vec<Event>, next: LoopNext) -> Result<Transition, EditError> {
         let replaced = self.replaced();
+        if self.project() == Project::Loop {
+            return Ok(Transition::Closed(Response {
+                events,
+                redraw: true,
+                commands: vec![effect(super::modal::Effect::FileLoop(LoopStep {
+                    replaced,
+                    next,
+                }))],
+                ..Response::default()
+            }));
+        }
         let noun = if replaced == 1 {
             "occurrence"
         } else {
@@ -650,4 +780,8 @@ fn next_char(app: &Application, view: ViewId, at: usize) -> usize {
     let editor = app.workspace().editor(view.document_id).unwrap();
     let text = editor.model().document().snapshot().text();
     text[at..].chars().next().map_or(at, |c| at + c.len_utf8())
+}
+/// A command that asks the Runtime for `effect`.
+fn effect(effect: super::modal::Effect) -> super::Command {
+    super::Command::Effect(Box::new(effect))
 }

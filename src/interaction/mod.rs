@@ -31,7 +31,7 @@ pub use pointer::Pointer;
 mod routing;
 pub use routing::{Key, KeyStroke, UserInput, emacs_notation};
 mod search;
-pub use search::{SearchResults, SearchSession};
+pub use search::{LoopNext, LoopStep, ProjectReplace, SearchResults, SearchSession};
 mod jumps;
 mod keymap;
 pub use keymap::{BindingError, Context, Keymap, KeypadStart, LineEdit, Scope};
@@ -478,6 +478,33 @@ impl Layers {
     }
     fn forget_reply(&mut self) {
         self.question = None;
+    }
+    /// Reviews the matches of `view`'s document for a replacement over
+    /// the project; with none, the response says to go on at once.
+    pub fn review_replace(
+        &mut self,
+        app: &Application,
+        view: crate::application::ViewId,
+        query: &str,
+        replacement: &str,
+        time: Duration,
+    ) -> Result<Response, EditError> {
+        let (session, transition) = search::SearchSession::reviewing(
+            app,
+            view,
+            crate::editor::search::SearchQuery::new(query),
+            replacement.to_owned(),
+            time,
+        )?;
+        match transition {
+            Transition::Active(found) => {
+                let mut response = self.enter(Layer::Search(Box::new(session)), app, time)?;
+                response.events.extend(found.events);
+                Ok(response)
+            }
+            Transition::Closed(response) => Ok(response),
+            Transition::Blocked => Ok(Response::default()),
+        }
     }
     fn transition(&mut self, transition: Transition) -> Option<Response> {
         match transition {

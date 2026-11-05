@@ -670,6 +670,11 @@ pub static BUILTINS: &[Builtin] = &[
     ),
     builtin!("replace", "Search and replace", Command::Replace),
     builtin!(
+        "project-replace",
+        "Search and replace in every file of the project, asking at each match",
+        Command::ProjectReplace
+    ),
+    builtin!(
         "goto",
         [slot("LINE[:COLUMN]", SlotKind::Word)],
         "Go to a line and logical column",

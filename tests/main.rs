@@ -50,6 +50,7 @@ mod parser_samples;
 mod picker;
 mod plain;
 mod preprocessor;
+mod project_replace;
 mod recent;
 mod rules;
 mod runtime;
