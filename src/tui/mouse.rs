@@ -21,7 +21,8 @@ pub(super) struct Mouse {
     edge: Option<(ViewId, Axis)>,
 }
 /// The window whose right or bottom edge is at a cell: the column between
-/// it and a window to its right, or the tab row of a window below it.
+/// it and a window to its right, or the tab row or rule of a window below
+/// it.
 fn edge_at(areas: &view::Areas, x: u16, y: u16) -> Option<(ViewId, Axis)> {
     let within = |from: u16, size: u16, at: u16| from <= at && at < from + size;
     match areas.window_at(x, y) {
@@ -30,7 +31,7 @@ fn edge_at(areas: &view::Areas, x: u16, y: u16) -> Option<(ViewId, Axis)> {
             .iter()
             .find(|w| w.area.x + w.area.width == x && within(w.area.y, w.area.height, y))
             .map(|w| (w.view, Axis::Columns)),
-        Some(below) if below.header.is_some_and(|header| header.y == y) => areas
+        Some(below) if below.header.or(below.rule).is_some_and(|row| row.y == y) => areas
             .windows
             .iter()
             .find(|w| w.area.y + w.area.height == below.area.y && within(w.area.x, w.area.width, x))
@@ -116,7 +117,7 @@ impl Mouse {
                 if runtime.app().active_view() != Some(window.view) {
                     runtime.input(UserInput::Pointer(Pointer::Window(window.view)));
                 }
-                if window.header.is_some_and(inside) {
+                if window.header.or(window.rule).is_some_and(inside) {
                     return;
                 }
                 if let Some(offset) = offset(runtime) {
@@ -243,6 +244,21 @@ mod tests {
             runtime,
             &a,
         );
+    }
+    #[test]
+    fn without_tabs_the_rule_between_windows_moves_their_edge() {
+        let mut runtime = Runtime::new(std::path::PathBuf::from("/")).unwrap();
+        runtime.command(crate::interaction::Command::New);
+        runtime.command(Command::Named("split".into()));
+        runtime.command(Command::Named("set tab-bar off".into()));
+        let views = runtime.app().windows().views();
+        let areas = view::Areas::new(&runtime, 80, 24);
+        runtime.set_editing_area(areas.editor.width, areas.editor.height);
+        let rule = areas.windows[1].rule.unwrap().y;
+        let height = |runtime: &Runtime| runtime.app().window_area(views[0]).unwrap().height;
+        let before = height(&runtime);
+        drag(&mut runtime, (10, rule), &[(10, rule + 3)]);
+        assert_eq!(height(&runtime), before + 3);
     }
     #[test]
     fn dragging_a_separator_or_a_title_moves_that_edge() {

@@ -25,6 +25,9 @@ pub(super) struct Window {
     pub area: Rect,
     /// The window's row of tabs, as `tab-line-mode`'s.
     pub header: Option<Rect>,
+    /// Without tabs, a rule along the top of a window below another, where
+    /// Emacs has the upper one's mode line.
+    pub rule: Option<Rect>,
     pub gutter: u16,
     pub text: Rect,
 }
@@ -61,7 +64,9 @@ impl Areas {
             .map(|(view, area)| {
                 let area = Rect::new(area.x, area.y, area.width, area.height);
                 let header = (tab_bar && area.height >= 2).then_some(Rect { height: 1, ..area });
-                let body = match header {
+                let rule = (!tab_bar && area.y > editor.y && area.height >= 3)
+                    .then_some(Rect { height: 1, ..area });
+                let body = match header.or(rule) {
                     Some(_) => Rect {
                         y: area.y + 1,
                         height: area.height - 1,
@@ -92,6 +97,7 @@ impl Areas {
                     view,
                     area,
                     header,
+                    rule,
                     gutter,
                     text: Rect {
                         x: body.x + gutter,
@@ -274,6 +280,11 @@ pub(super) fn render(
     }
     for (window, text) in areas.windows.iter().zip(texts) {
         let current = Some(window.view) == active;
+        if let Some(rule) = window.rule {
+            for x in rule.left()..rule.right() {
+                buf[(x, rule.y)].set_symbol("─").set_style(theme.gutter);
+            }
+        }
         if let Some(header) = window.header {
             tabs(buf, header, runtime, Some(window.view), current, theme);
         }
@@ -1275,6 +1286,26 @@ mod tests {
         keys(&mut r, "C-b");
         r.command(Command::Named("set show-paren off".into()));
         assert!(lit_at(&mut r).is_empty());
+    }
+    #[test]
+    fn without_tabs_a_rule_parts_windows_above_one_another() {
+        let mut r = Runtime::new(std::path::PathBuf::from("/")).unwrap();
+        r.command(Command::New);
+        r.command(Command::Named("split".into()));
+        let rules = |r: &mut Runtime| {
+            screen(r, 60, 14)
+                .lines()
+                .filter(|row| !row.is_empty() && row.chars().all(|c| c == '─'))
+                .count()
+        };
+        // The tab row parts them already.
+        assert_eq!(rules(&mut r), 0);
+        r.command(Command::Named("set tab-bar off".into()));
+        assert_eq!(rules(&mut r), 1);
+        let areas = Areas::new(&r, 60, 14);
+        let lower = &areas.windows[1];
+        assert_eq!(lower.rule.map(|rule| rule.y), Some(lower.area.y));
+        assert_eq!(lower.text.y, lower.area.y + 1);
     }
     #[test]
     fn windows_other_than_the_focused_one_are_on_a_darker_ground() {
