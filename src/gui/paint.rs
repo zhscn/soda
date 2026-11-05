@@ -531,7 +531,7 @@ pub fn screen(
     if let Some(tabs) = areas.tabs {
         tab_bar(painter, runtime, tabs, None, true);
     }
-    if areas.windows.is_empty() {
+    if areas.windows.is_empty() && runtime.app().options().bool(None, "splash") {
         splash(painter, areas.editor, &content::splash(runtime));
     }
     let line = painter.fonts.line;
@@ -670,9 +670,11 @@ fn tab_bar(
             // It opens into the text below, which in a window other than
             // the focused one is on the darker ground.
             let (_, bg) = painter.colors(theme.tab_active);
-            let dim = (window.is_some() && !current)
-                .then(|| painter.colors(theme.inactive_window).1)
-                .flatten();
+            let dim = (window.is_some()
+                && !current
+                && runtime.app().options().bool(None, "dim-other-windows"))
+            .then(|| painter.colors(theme.inactive_window).1)
+            .flatten();
             painter.fill(
                 Rect::new(x, area.y, rect.w, area.h),
                 dim.or(bg).unwrap_or(painter.bg),
@@ -766,16 +768,19 @@ fn editor(
     let left = window.body.x;
     painter.clip_to(window.body);
     // Other windows than the focused one sit on a darker ground.
-    if !current && let (_, Some(bg)) = painter.colors(theme.inactive_window) {
+    let dim = !current && runtime.app().options().bool(None, "dim-other-windows");
+    if dim && let (_, Some(bg)) = painter.colors(theme.inactive_window) {
         painter.fill(window.body, bg, 0.0);
     }
     let top = area.y - past;
     let selection = rgba(theme.selection.bg, faded(painter.fg, 0.25));
     // Only the focused window marks the caret line. Its band goes under
     // every row: gliding, it passes over the rows next to its own.
+    let options = runtime.app().options();
+    let highlight = current && options.bool(None, "highlight-line");
     let (_, band) = painter.colors(theme.cursor_line);
     for (index, row) in text.rows.iter().enumerate() {
-        if let Some(bg) = band.filter(|_| current && row.line == text.caret.0) {
+        if let Some(bg) = band.filter(|_| highlight && row.line == text.caret.0) {
             let y = top + index as f32 * line;
             let index = painter.out.len();
             painter.fill(Rect::new(left, y, window.body.w, line), bg, 0.0);
@@ -786,7 +791,7 @@ fn editor(
     }
     // A rule between the numbers and the text, in the room after them,
     // fainter than the lines between windows so as not to pass for one.
-    if window.digits.is_some() {
+    if window.digits.is_some() && options.bool(None, "gutter-rule") {
         let x = (area.x - cell * 0.5).round();
         let color = faded(rgba(theme.border.fg, painter.fg), 0.5);
         painter.fill(Rect::new(x, window.body.y, 1.0, window.body.h), color, 0.0);
@@ -794,7 +799,7 @@ fn editor(
     for (index, row) in text.rows.iter().enumerate() {
         let y = top + index as f32 * line;
         let caret_line = current && row.line == text.caret.0;
-        let base = if caret_line {
+        let base = if caret_line && highlight {
             theme.text.patch(theme.cursor_line)
         } else {
             theme.text
@@ -953,7 +958,7 @@ pub fn line_at(runtime: &Runtime, window: &Window, y: f32, line: f32) -> Option<
 }
 /// A thin thumb at the window's right, shown while it scrolls.
 fn scroll_bar(painter: &mut Painter, runtime: &Runtime, window: &Window, moving: Motion) {
-    if moving.bar <= 0.0 {
+    if moving.bar <= 0.0 || !runtime.app().options().bool(None, "scroll-bar") {
         return;
     }
     let line = painter.fonts.line;

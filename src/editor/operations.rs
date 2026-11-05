@@ -249,7 +249,7 @@ pub(super) fn prepare_char(
     ch: char,
     language: &mut LanguageSession,
 ) -> Result<Transaction, EditError> {
-    prepare_char_with(state, ch, None, language)
+    prepare_char_with(state, ch, None, language, true)
 }
 /// Types a character, followed by a closer that stays after the caret.
 pub(super) fn prepare_char_with(
@@ -257,13 +257,14 @@ pub(super) fn prepare_char_with(
     ch: char,
     closer: Option<char>,
     language: &mut LanguageSession,
+    electric: bool,
 ) -> Result<Transaction, EditError> {
     let range = state.selection().range();
     let position = range.start;
     let mut text = ch.to_string();
     text.extend(closer);
     let input = InputEdit::new(state, Change::new(range, text), position + ch.len_utf8())?;
-    if !language.triggers(ch) {
+    if !electric || !language.triggers(ch) {
         return input.finish(vec![]);
     }
     let snapshot = input.speculative.snapshot();

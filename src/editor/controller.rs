@@ -24,6 +24,9 @@ pub enum Command {
     SetWhitespace(crate::language::WhitespacePolicy),
     /// Whether typed brackets and quotes come in pairs.
     SetAutoPairs(bool),
+    /// Whether typing a character the language names reindents its line,
+    /// as Emacs's `electric-indent-mode`; Enter indents either way.
+    SetElectricIndent(bool),
     /// Merges the undo steps recorded since this history depth into one.
     SquashHistory(usize),
     Undo,
@@ -205,6 +208,7 @@ impl Editor {
                 | Command::SetLanguage(_)
                 | Command::SetWhitespace(_)
                 | Command::SetAutoPairs(_)
+                | Command::SetElectricIndent(_)
                 | Command::SquashHistory(_)
                 | Command::ReloadText(_)
         ) {
@@ -333,6 +337,10 @@ impl Editor {
                 document.auto_pairs = on;
                 Step::Done(None)
             }
+            Command::SetElectricIndent(on) => {
+                document.electric_indent = on;
+                Step::Done(None)
+            }
             Command::SquashHistory(depth) => {
                 document.squash_history(depth)?;
                 Step::Done(None)
@@ -409,12 +417,19 @@ impl Editor {
                 } else {
                     None
                 };
+                let electric = document.electric_indent;
                 let tx = match &typed {
-                    Some(super::pairs::Typed::Pair(close)) => {
-                        operations::prepare_char_with(state, ch, Some(*close), &mut language)?
-                    }
+                    Some(super::pairs::Typed::Pair(close)) => operations::prepare_char_with(
+                        state,
+                        ch,
+                        Some(*close),
+                        &mut language,
+                        electric,
+                    )?,
                     Some(typed) => super::pairs::transaction(state, ch, typed).unwrap(),
-                    None => operations::prepare_char(state, ch, &mut language)?,
+                    None => {
+                        operations::prepare_char_with(state, ch, None, &mut language, electric)?
+                    }
                 };
                 Step::Edit {
                     tx,

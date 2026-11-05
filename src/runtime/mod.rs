@@ -274,7 +274,12 @@ impl Runtime {
     pub fn where_is(&self, name: &str) -> Option<String> {
         self.layers.where_is(&self.app, name)
     }
+    /// The keys that may follow a prefix, for the hints; none with the
+    /// option `key-hints` off.
     pub fn key_continuations(&self) -> Vec<(String, String)> {
+        if !self.app.options().bool(None, "key-hints") {
+            return vec![];
+        }
         self.layers.continuations(&self.app)
     }
     pub fn message(&self) -> &str {

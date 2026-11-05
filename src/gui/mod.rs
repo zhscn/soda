@@ -709,7 +709,8 @@ impl Gui {
         // A press on a showing scroll bar takes the thumb there.
         let now = std::time::Instant::now();
         let bar = self.scrolls.get(&view).map_or(0.0, |s| s.bar(now));
-        if bar > 0.0 && window.scroll_bar().contains(x, y) {
+        let shown = runtime.app().options().bool(None, "scroll-bar");
+        if shown && bar > 0.0 && window.scroll_bar().contains(x, y) {
             self.thumb = Some(view);
             self.drag_thumb(runtime);
             return;

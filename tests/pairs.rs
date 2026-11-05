@@ -104,3 +104,15 @@ fn cpp_pairs_quotes_outside_literals_and_opens_blocks() {
     keys(&mut r, "DEL");
     assert_eq!(shown(&r), "c = x |\nif (x) {\n  s = \"(\"; // don't (\n}");
 }
+#[test]
+fn a_closing_brace_reindents_its_line_unless_electric_indent_is_off() {
+    let (_dir, mut r) = cpp();
+    r.command(Command::Named("set auto-pairs false".into()));
+    keys(&mut r, "i{ RET }");
+    assert_eq!(shown(&r), "{\n}|");
+    keys(&mut r, "ESC");
+    r.command(Command::Named("set electric-indent false".into()));
+    keys(&mut r, "a RET { RET }");
+    // Enter still indents; the brace stays where it was typed.
+    assert_eq!(shown(&r), "{\n}\n{\n  }|");
+}

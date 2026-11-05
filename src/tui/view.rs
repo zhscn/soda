@@ -266,7 +266,9 @@ pub(super) fn render(
     let active = runtime.app().active_view();
     let mut cursor = None;
     if areas.windows.is_empty() {
-        splash(buf, areas.editor, &content::splash(runtime), theme);
+        if runtime.app().options().bool(None, "splash") {
+            splash(buf, areas.editor, &content::splash(runtime), theme);
+        }
     } else {
         separators(buf, areas, theme);
     }
@@ -278,7 +280,14 @@ pub(super) fn render(
         if let Some(text) = text {
             let document = runtime.app().view(window.view).map(|view| view.document_id);
             let relative = runtime.app().options().choice(document, "line-numbers") == "relative";
-            let position = editor(buf, window, text, theme, current, relative);
+            let options = runtime.app().options();
+            let look = Look {
+                current,
+                relative,
+                dim: !current && options.bool(None, "dim-other-windows"),
+                highlight: current && options.bool(None, "highlight-line"),
+            };
+            let position = editor(buf, window, text, theme, look);
             if current {
                 cursor = position;
             }
@@ -580,19 +589,35 @@ fn separators(buf: &mut Buffer, areas: &Areas, theme: &Theme) {
         }
     }
 }
+/// How a window's text is drawn.
+#[derive(Clone, Copy)]
+struct Look {
+    /// The focused window.
+    current: bool,
+    relative: bool,
+    /// On the inactive window's ground.
+    dim: bool,
+    /// With the caret's line highlighted.
+    highlight: bool,
+}
 fn editor(
     buf: &mut Buffer,
     window: &Window,
     text: &TextFrame,
     theme: &Theme,
-    current: bool,
-    relative: bool,
+    look: Look,
 ) -> Option<Position> {
+    let Look {
+        current,
+        relative,
+        dim,
+        highlight,
+    } = look;
     let area = window.text;
     let digits = usize::from(window.gutter.saturating_sub(4));
     let left = area.x - window.gutter;
     // Other windows than the focused one sit on a darker ground.
-    let (text_style, gutter_style) = if current {
+    let (text_style, gutter_style) = if !dim {
         (theme.text, theme.gutter)
     } else {
         // `default` leaves them as the focused one.
@@ -609,19 +634,24 @@ fn editor(
         let y = area.y + index as u16;
         // Only the focused window marks the caret line.
         let caret_line = current && row.line == text.caret.0;
-        let base = if caret_line {
+        let band = caret_line && highlight;
+        let base = if band {
             theme.text.patch(theme.cursor_line)
         } else {
             text_style
         };
-        if caret_line {
+        if band {
             buf.set_style(Rect::new(left, y, area.width + window.gutter, 1), base);
         }
         if window.gutter > 0 {
-            let style = if caret_line {
-                theme.gutter_current
-            } else {
-                gutter_style
+            // Without the band the caret line's number keeps its color only.
+            let style = match (caret_line, band) {
+                (true, true) => theme.gutter_current,
+                (true, false) => Style {
+                    bg: gutter_style.bg,
+                    ..theme.gutter_current
+                },
+                (false, _) => gutter_style,
             };
             // Relative numbers count from the caret line, which keeps its own.
             let shown = if relative && row.line != text.caret.0 {
@@ -1175,6 +1205,43 @@ mod tests {
         assert_eq!(top(&mut r), (0, 0));
     }
     #[test]
+    fn switches_take_away_the_splash_the_caret_line_the_key_hints_and_the_note() {
+        let mut r = Runtime::new(std::path::PathBuf::from("/")).unwrap();
+        assert!(screen(&mut r, 60, 14).contains("Find a project file"));
+        r.command(Command::Named("set splash off".into()));
+        assert!(!screen(&mut r, 60, 14).contains("Find a project file"));
+        r.command(Command::New);
+        r.command(Command::Edit(crate::editor::Command::InsertText(
+            "abc".into(),
+        )));
+        // The caret's line, below the tab row, on the band and then not.
+        let theme = Theme::build(crate::application::themes::DEFAULT, &Default::default());
+        let band = theme.cursor_line.bg.unwrap();
+        assert_eq!(draw(&mut r, 60, 14)[(30, 1)].bg, band);
+        r.command(Command::Named("set highlight-line off".into()));
+        assert_eq!(draw(&mut r, 60, 14)[(30, 1)].bg, theme.text.bg.unwrap());
+        // Hints after a prefix.
+        keys(&mut r, "C-x");
+        assert!(!r.key_continuations().is_empty());
+        keys(&mut r, "C-g");
+        r.command(Command::Named("set key-hints off".into()));
+        keys(&mut r, "C-x");
+        assert!(r.key_continuations().is_empty());
+        keys(&mut r, "C-g");
+        // The note at the caret on the message row.
+        r.source_lua(
+            "note",
+            r#"soda.note("t", {{ from = {1, 1}, to = {1, 4}, severity = "error", text = "boom" }})"#,
+        )
+        .unwrap();
+        // A key clears the last message and takes the caret into the note.
+        keys(&mut r, "C-a");
+        let last = |r: &mut Runtime| screen(r, 60, 14).lines().last().unwrap().to_owned();
+        assert!(last(&mut r).contains("boom"), "{}", last(&mut r));
+        r.command(Command::Named("set notes-at-caret off".into()));
+        assert!(!last(&mut r).contains("boom"));
+    }
+    #[test]
     fn windows_other_than_the_focused_one_are_on_a_darker_ground() {
         let mut r = Runtime::new(std::path::PathBuf::from("/")).unwrap();
         r.command(Command::New);
@@ -1186,7 +1253,11 @@ mod tests {
         // Below the text, the focused left window and the right one.
         assert_eq!(buffer[(10, 8)].bg, theme.text.bg.unwrap());
         assert_eq!(buffer[(45, 8)].bg, ground.unwrap());
-        // Taking the face's background away leaves them alike.
+        // The option turns it off, as does taking the face's background away.
+        r.command(Command::Named("set dim-other-windows false".into()));
+        let buffer = draw(&mut r, 60, 14);
+        assert_eq!(buffer[(45, 8)].bg, buffer[(10, 8)].bg);
+        r.command(Command::Named("set dim-other-windows true".into()));
         r.command(Command::Named("face inactive-window bg:default".into()));
         let buffer = draw(&mut r, 60, 14);
         assert_eq!(buffer[(45, 8)].bg, buffer[(10, 8)].bg);

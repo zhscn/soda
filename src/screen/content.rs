@@ -222,7 +222,10 @@ pub(crate) fn message<'a>(runtime: &'a Runtime, text: Option<&'a super::TextFram
         ) => Message::Prompt(layer.presentation()),
         _ => {
             let quiet = runtime.message().is_empty();
-            let note = text.and_then(|text| text.note.as_ref()).filter(|_| quiet);
+            let shown = runtime.app().options().bool(None, "notes-at-caret");
+            let note = text
+                .and_then(|text| text.note.as_ref())
+                .filter(|_| quiet && shown);
             match (runtime.hint().filter(|_| quiet), note) {
                 (Some(words), _) => Message::Words(words, Role::Detail),
                 (None, Some((severity, words))) => Message::Words(

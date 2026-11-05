@@ -287,6 +287,19 @@ fn a_call_shows_its_signature_until_it_closes() {
     wait(&mut f.r, |r| r.hint().is_none());
 }
 #[test]
+fn lsp_signature_off_leaves_the_message_row_alone() {
+    let Some(mut f) = open("\n") else { return };
+    f.r.command(Command::Named("set lsp-signature false".into()));
+    f.r.command(Command::SetMode(EditMode::Insert));
+    keys(&mut f.r, "add(");
+    let until = Instant::now() + Duration::from_millis(500);
+    while Instant::now() < until {
+        f.r.poll();
+        assert!(f.r.hint().is_none(), "{:?}", f.r.hint());
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+#[test]
 fn symbols_are_offered_with_their_outline_and_go_where_they_stand() {
     let Some(mut f) = open("class\n  member\n") else {
         return;

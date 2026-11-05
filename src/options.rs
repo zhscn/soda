@@ -121,6 +121,12 @@ pub const OPTIONS: &[OptionInfo] = &[
         doc: "Type brackets, and the quotes a language lists, in pairs; Backspace removes an empty pair",
     },
     OptionInfo {
+        name: "electric-indent",
+        kind: Kind::Bool,
+        default: Value::Bool(true),
+        doc: "Reindent the line when typing a character its language names, as electric-indent-mode; Enter indents either way",
+    },
+    OptionInfo {
         name: "mark-keys",
         kind: Kind::Bool,
         default: Value::Bool(true),
@@ -155,6 +161,54 @@ pub const OPTIONS: &[OptionInfo] = &[
         kind: Kind::Bool,
         default: Value::Bool(true),
         doc: "Show a row of document tabs atop each window, as tab-line-mode",
+    },
+    OptionInfo {
+        name: "highlight-line",
+        kind: Kind::Bool,
+        default: Value::Bool(true),
+        doc: "Highlight the caret's line in the focused window, as hl-line-mode",
+    },
+    OptionInfo {
+        name: "gutter-rule",
+        kind: Kind::Bool,
+        default: Value::Bool(true),
+        doc: "Draw a rule between the line numbers and the text in the graphical frontend",
+    },
+    OptionInfo {
+        name: "key-hints",
+        kind: Kind::Bool,
+        default: Value::Bool(true),
+        doc: "After a prefix key, list the keys that may follow, as which-key-mode",
+    },
+    OptionInfo {
+        name: "splash",
+        kind: Kind::Bool,
+        default: Value::Bool(true),
+        doc: "Show the keys of what to do first while no document is open",
+    },
+    OptionInfo {
+        name: "notes-at-caret",
+        kind: Kind::Bool,
+        default: Value::Bool(true),
+        doc: "Show the first line of the note at the caret on the message row",
+    },
+    OptionInfo {
+        name: "scroll-bar",
+        kind: Kind::Bool,
+        default: Value::Bool(true),
+        doc: "Show a thin scroll bar in the graphical frontend while a window scrolls",
+    },
+    OptionInfo {
+        name: "kitty-keyboard",
+        kind: Kind::Bool,
+        default: Value::Bool(true),
+        doc: "Use the kitty keyboard protocol where the terminal has it, to tell C-RET from RET",
+    },
+    OptionInfo {
+        name: "dim-other-windows",
+        kind: Kind::Bool,
+        default: Value::Bool(true),
+        doc: "Put windows other than the focused one on the inactive-window face's ground",
     },
     OptionInfo {
         name: "cpp-fallback-style",

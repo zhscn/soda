@@ -685,8 +685,10 @@ impl Application {
             },
         };
         let pairs = options.bool(Some(document), "auto-pairs");
+        let electric = options.bool(Some(document), "electric-indent");
         if let Some(mut editor) = self.workspace.editor_mut(document) {
             let _ = editor.execute(Command::SetAutoPairs(pairs));
+            let _ = editor.execute(Command::SetElectricIndent(electric));
             if editor
                 .execute(Command::SetWhitespace(policy))
                 .is_ok_and(|edit| edit.language_changed)

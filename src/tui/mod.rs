@@ -32,7 +32,9 @@ use std::{
 use view::Presenter;
 /// Restores the terminal when dropped, also while a panic unwinds.
 struct Terminal {
-    /// Whether the terminal took the kitty keyboard protocol.
+    /// Whether the terminal answered the kitty keyboard protocol's query.
+    supported: bool,
+    /// Whether the protocol is on.
     enhanced: bool,
     /// Whether the terminal is set up for the editor, not yet restored.
     active: bool,
@@ -41,6 +43,7 @@ impl Terminal {
     fn enter() -> io::Result<Self> {
         terminal::enable_raw_mode()?;
         let mut guard = Self {
+            supported: false,
             enhanced: false,
             active: true,
         };
@@ -58,14 +61,27 @@ impl Terminal {
         // encoding. The main and alternate screens keep separate flag stacks,
         // so the push comes after entering the alternate screen, and restore
         // pops before leaving it; otherwise the flags stay on the shell's.
-        if terminal::supports_keyboard_enhancement().unwrap_or(false) {
+        guard.supported = terminal::supports_keyboard_enhancement().unwrap_or(false);
+        guard.keyboard(true)?;
+        Ok(guard)
+    }
+    /// Turns the kitty keyboard protocol on or off, where the terminal has
+    /// it; the option `kitty-keyboard` asks for it.
+    fn keyboard(&mut self, on: bool) -> io::Result<()> {
+        let on = on && self.supported;
+        if on == self.enhanced {
+            return Ok(());
+        }
+        if on {
             execute!(
                 io::stdout(),
                 PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
             )?;
-            guard.enhanced = true;
+        } else {
+            execute!(io::stdout(), PopKeyboardEnhancementFlags)?;
         }
-        Ok(guard)
+        self.enhanced = on;
+        Ok(())
     }
 }
 impl Drop for Terminal {
@@ -313,6 +329,7 @@ pub fn run(args: host::Args) -> io::Result<()> {
                     execute!(io::stdout(), DisableMouseCapture)?;
                 }
             }
+            screen.keyboard(runtime.app().options().bool(None, "kitty-keyboard"))?;
             let (width, height) = terminal::size()?;
             presenter.measure(&mut runtime, width, height);
             if runtime.take_redraw() || catching_up || std::mem::take(&mut resumed) {

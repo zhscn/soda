@@ -45,6 +45,8 @@ soda-gui [--no-config] [FILE | DIRECTORY]
 | `line-height` | 135 | 行高，字号的百分比 |
 | `smooth-caret` | true | 光标滑动 |
 | `smooth-scroll` | true | 平滑滚动与触控板按像素滚动 |
+| `gutter-rule` | true | 行号后的分隔线 |
+| `scroll-bar` | true | 滚动时右侧的细滚动条；关掉后也不能拖动 |
 
 改了下一帧生效。颜色用 `face` 改，与终端版共用；图形界面另读 `scrollbar`。`theme` 命令补全时的预览两个前端都有。
 

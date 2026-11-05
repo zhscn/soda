@@ -1341,13 +1341,17 @@ end
 
 -- Typing a call shows its signature on the message row; it stays while the
 -- arguments are typed, so a popup, which any key closes, would not do.
+soda.declare_option("lsp-signature", {
+  default = true,
+  doc = "Show the signature of the call being typed on the message row, as eldoc",
+})
 soda.completion.register({
   triggers = { "(", ",", ")" },
   complete = function(context, sink)
     sink:done()
     if context.trigger == ")" then
       soda.hint(nil)
-    elseif context.trigger then
+    elseif context.trigger and soda.option("lsp-signature") then
       local params = here()
       if params and supports("textDocument/signatureHelp", true) then
         send("signature", "textDocument/signatureHelp", params, function(result)

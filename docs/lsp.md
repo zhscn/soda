@@ -62,7 +62,7 @@ soda.lsp.server("rust", { "rust-analyzer" }, {
 - **诊断**：行号栏按级别标 `E`、`W`、`I`（一行取最严重的），范围加彩色下划线，消息第一行显示在行尾（`inline-notes`，见[界面](ui.md)），光标处的显示在消息行，状态栏显示错误和警告数。`relatedInformation` 以 `路径:行: 文字` 接在消息后。带 `Unnecessary` 标签的范围用 `unnecessary` 变暗，带 `Deprecated` 的用 `deprecated` 加删除线。
 - **拉取诊断**：服务器声明 `diagnosticProvider` 时，停止输入 `idle-time` 毫秒后和切换到文档时发 `textDocument/diagnostic`，每个版本最多一次，带上次的 `resultId`；`workspace/diagnostic/refresh` 时重新拉取。
 - **补全**：服务器在就是一个来源，`.`、`->`、`::` 触发。`additionalTextEdits` 随候选一起做（clangd 借此补上 `#include`，这类候选名字前有 `•`）。Enter 用 insert 范围，Tab 用 replace 范围；只有一个范围时它归 Enter，Tab 仍替换到词尾。`commitCharacters`（或列表默认值、`allCommitCharacters`）在选中候选后输入时先确认它。支持 `completionItem/resolve` 时，选中的候选再问一次 detail 和说明。
-- **签名**：输入 `(` 或 `,` 时，签名显示在消息行，当前参数加方括号；输入 `)` 或离开 Insert 时消失。没有其他消息时才显示，优先于诊断。
+- **签名**：输入 `(` 或 `,` 时，签名显示在消息行，当前参数加方括号；输入 `)` 或离开 Insert 时消失。没有其他消息时才显示，优先于诊断。选项 `lsp-signature` 关闭。
 - **同符号高亮**：空闲时 `textDocument/documentHighlight` 标出光标处符号的各处，读处 `reference`，写处 `reference-write`；选项 `lsp-highlight` 关闭。
 - **语义高亮**：盖在词法高亮上，区分类型、函数、变量、成员、参数、命名空间、宏和枚举值；带 `declaration` 或 `definition` 修饰符的函数、变量、成员分别是 `function.definition`、`variable.definition`、`property.definition`，其余函数是 `function.call`，`defaultLibrary` 的是 `.builtin`（分类见[语法高亮](syntax.md#分类)）；clangd 和 ccls 的类型名都认（ccls 的 `field`、`staticMethod`、`typeAlias` 等）。不活跃的预处理分支（clangd）显示成注释；`readonly` 的变量显示成常量，`deprecated` 修饰符加删除线。支持 delta 时只取增量，在 Lua 里拼回。编辑时 token 随文本移动，直到新回答替换，不闪烁。
 - **inlay hint**：斜体灰色显示在文字之间，不是文档内容：不能选中，光标、滚动和鼠标都按文字算。开了 `wrap` 时集中到行尾。选项 `inlay-hints` 关闭。

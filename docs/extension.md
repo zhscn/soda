@@ -43,6 +43,14 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 | `auto-pairs` | true/false | false | 成对输入括号和语言列出的引号，退格删除空的一对；同 Emacs 的 `electric-pair-mode`，默认关 |
 | `line-numbers` | absolute/relative/off | absolute | 行号栏；relative 时光标行显示自身行号，其他行显示距离 |
 | `tab-bar` | true/false | true | 每个窗口顶部的文档标签行，同 `tab-line-mode` |
+| `dim-other-windows` | true/false | true | 分屏时焦点以外的窗口铺 face `inactive-window` 的底色，同 `auto-dim-other-buffers` |
+| `highlight-line` | true/false | true | 当前窗口的光标行加底色，同 `hl-line-mode`；关掉后光标行的行号仍用 `gutter-current` 的颜色 |
+| `key-hints` | true/false | true | 多键前缀之后列出接下来的键，同 `which-key-mode` |
+| `splash` | true/false | true | 没有文档时编辑区的启动页；关掉后留空 |
+| `notes-at-caret` | true/false | true | 光标处注记的第一行显示在消息行 |
+| `electric-indent` | true/false | true | 输入语言列出的字符（如 C++ 的 `}`、`:`）时重算本行缩进，同 `electric-indent-mode`；回车缩进不受影响 |
+| `kitty-keyboard` | true/false | true | 终端支持时用 kitty 键盘协议，区分 `C-RET` 与 `RET` 等；关掉退回传统编码，改了立即生效 |
+| `gutter-rule`、`scroll-bar` | true/false | true | 图形界面行号后的分隔线、滚动时右侧的滚动条 |
 | `wrap` | true/false | false | 长行折到下一屏幕行，尽量在空格后断开 |
 | `show-tabs` | true/false | false | 用 `»` 标出制表符 |
 | `show-trailing-whitespace` | true/false | false | 用 `·` 标出行尾空格 |

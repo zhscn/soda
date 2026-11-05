@@ -65,6 +65,8 @@ pub struct Document {
     newline: &'static str,
     /// Type brackets and quotes in pairs.
     pub(super) auto_pairs: bool,
+    /// Reindent the line when a character the language names is typed.
+    pub(super) electric_indent: bool,
 }
 impl Document {
     pub(super) fn new(text: impl Into<String>, language: Language) -> Self {
@@ -79,6 +81,7 @@ impl Document {
             id: DocumentId(id),
             newline: super::operations::detect_newline(&snapshot),
             auto_pairs: false,
+            electric_indent: true,
             snapshot,
             language: LanguageSession::new(language),
             history: History::default(),
