@@ -1526,6 +1526,16 @@ pub static BUILTINS: &[Builtin] = &[
         Command::JumpTo
     ),
     builtin!(
+        "flash",
+        "Type to search the screen, then a match's label to go there; RET goes to the next match",
+        Command::Flash
+    ),
+    builtin!(
+        "flash-structure",
+        "Select a group around the caret by its label; ; and , go out and in",
+        Command::FlashStructure
+    ),
+    builtin!(
         "window-pick",
         "Focus a window by its label; with two windows, the other one",
         Command::WindowPick

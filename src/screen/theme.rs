@@ -69,6 +69,11 @@ pub(crate) struct Theme {
     pub key: Style,
     /// Jump labels over the text.
     pub label: Style,
+    /// What flash's search matches, the match Enter goes to, and the text
+    /// around them while it searches.
+    pub flash_match: Style,
+    pub flash_current: Style,
+    pub flash_backdrop: Style,
     pub todo: Style,
     /// Digits that extend the selection.
     pub digit: Style,
@@ -288,6 +293,9 @@ impl Theme {
             "scrollbar" => &mut self.scrollbar,
             "key" => &mut self.key,
             "label" => &mut self.label,
+            "flash-match" => &mut self.flash_match,
+            "flash-current" => &mut self.flash_current,
+            "flash-backdrop" => &mut self.flash_backdrop,
             "todo" => &mut self.todo,
             "expand-digit" => &mut self.digit,
             _ => return None,
@@ -403,6 +411,10 @@ impl Theme {
             },
             key: Style::new().fg(c(p.magenta)).add_modifier(Modifier::BOLD),
             label: badge(p.magenta),
+            // As flash.nvim's links: Search, IncSearch and Comment.
+            flash_match: Style::new().bg(c(mix(p.bg, p.blue, 0.35))),
+            flash_current: on(p.on_accent, p.orange),
+            flash_backdrop: Style::new().fg(c(p.comment)),
             todo: Style::new().fg(c(p.yellow)).add_modifier(Modifier::BOLD),
             // As meow's: the background's color on the cursor's, so a digit
             // stands apart from the text it covers.

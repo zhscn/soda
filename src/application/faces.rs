@@ -113,6 +113,12 @@ pub const UI_FACES: &[(&str, &str)] = &[
     ),
     ("key", "Keys in hints"),
     ("label", "Jump labels"),
+    ("flash-match", "What flash's search matches"),
+    ("flash-current", "The match RET goes to in flash's search"),
+    (
+        "flash-backdrop",
+        "Text of the windows flash searches, while it does; see the flash-backdrop option",
+    ),
     ("todo", "The todo highlight"),
     ("expand-digit", "Digits that extend the selection"),
     ("mark1", "First mark background"),

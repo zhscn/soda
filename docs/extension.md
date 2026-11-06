@@ -45,6 +45,7 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 | `tab-bar` | true/false | true | 每个窗口顶部的文档标签行，同 `tab-line-mode` |
 | `dim-other-windows` | true/false | true | 分屏时焦点以外的窗口铺 face `inactive-window` 的底色，同 `auto-dim-other-buffers` |
 | `show-paren` | true/false | true | 光标后是开括号或光标前是闭括号时，它和配对的括号用 face `paren-match` 标出，同 `show-paren-mode`；只在当前窗口，括号按语言的结构配对，字符串和注释里的不算 |
+| `flash-backdrop` | true/false | true | `flash` 搜索期间，被搜索窗口的文字用 face `flash-backdrop` 显示，只留匹配和标签醒目，同 flash.nvim 的 backdrop |
 | `highlight-line` | true/false | true | 当前窗口的光标行加底色，同 `hl-line-mode`；关掉后光标行的行号仍用 `gutter-current` 的颜色 |
 | `key-hints` | true/false | true | 多键前缀之后列出接下来的键，同 `which-key-mode` |
 | `splash` | true/false | true | 没有文档时编辑区的启动页；关掉后留空 |

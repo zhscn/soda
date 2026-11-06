@@ -1213,6 +1213,16 @@ impl Runtime {
                     _ => Some(Command::Fail("No block here".into())),
                 }
             }
+            Effect::Groups(selection) => {
+                let groups = self
+                    .app
+                    .with_editor(document, |editor| Ok(groups_around(editor, selection.head)))
+                    .unwrap_or_default();
+                if groups.is_empty() {
+                    return Some(Command::Fail("No group here".into()));
+                }
+                Some(Command::LabelGroups { groups, selection })
+            }
             Effect::Indicator(line, text) => {
                 self.app.set_indicator(document, line, text);
                 None
@@ -1525,6 +1535,32 @@ mod tests;
 
 /// How long the digits that extend a selection stay.
 const HINT_TIME: Duration = Duration::from_millis(1500);
+/// The groups around `at`, innermost first: one that opens at `at`, then
+/// each that holds it, out to the outermost.
+fn groups_around(editor: &mut crate::files::Editing<'_>, at: usize) -> Vec<crate::language::Group> {
+    let mut groups: Vec<crate::language::Group> = vec![];
+    if let Ok(Some(item)) = editor.item(at, crate::language::Side::After)
+        && item.kind == crate::language::ItemKind::Group
+        && item.range.start == at
+        && let Ok(Some(group)) = editor.enclosing(at + 1)
+        && group.open.start == at
+    {
+        groups.push(group);
+    }
+    let mut from = at;
+    while let Ok(Some(group)) = editor.enclosing(from) {
+        // Each step must leave the group before it.
+        if groups
+            .last()
+            .is_some_and(|last| last.range() == group.range())
+        {
+            break;
+        }
+        from = group.open.start;
+        groups.push(group);
+    }
+    groups
+}
 /// What a query finds, as the selection to make.
 fn structure(
     editor: &mut crate::files::Editing<'_>,

@@ -1,12 +1,18 @@
 //! Jumps chosen by on-screen labels, after avy and ace-window. `jump-to`
 //! reads two characters, labels where they occur in the lines every window
 //! shows, and goes to the labelled one; `window-pick` labels the windows and
-//! focuses one. A single candidate is taken at once.
-use super::{Input, InputKey, Message, Presentation, Response, session::Transition};
+//! focuses one. A single candidate is taken at once. `flash` and
+//! `flash-structure` label as flash.nvim does; see `flash`.
+use super::{
+    Command, Input, InputKey, Message, Presentation, Response,
+    flash::{Flash, GROUP_LABELS, Structure},
+    session::Transition,
+};
 use crate::{
     application::{Application, Event, ViewId},
     core::Selection,
     editor::Command as Edit,
+    language::Group,
 };
 use std::time::Duration;
 
@@ -19,16 +25,26 @@ pub struct Target {
     pub view: ViewId,
     /// Where the caret goes; none for a window.
     pub offset: Option<usize>,
+    /// Where the label shows, when not at `offset`.
+    pub marks: Vec<usize>,
 }
 pub struct LabelSession {
-    /// The characters to find while they are still being typed.
-    query: Option<String>,
+    mode: Mode,
     view: ViewId,
-    /// The windows to search and their rows, the active one first so that
-    /// it gets the easiest labels.
-    windows: Vec<(ViewId, usize)>,
     targets: Vec<Target>,
     typed: String,
+}
+enum Mode {
+    /// The characters to find while they are still being typed, and the
+    /// windows to search with their rows, the active one first so that it
+    /// gets the easiest labels.
+    Jump {
+        query: String,
+        windows: Vec<(ViewId, usize)>,
+    },
+    Windows,
+    Flash(Box<Flash>),
+    Structure(Structure),
 }
 /// Labels of one length, enough for `count` targets; two letters beyond
 /// the alphabet, so no label is a prefix of another.
@@ -47,11 +63,91 @@ impl LabelSession {
     /// Starts a jump from the active view over the lines each window shows.
     pub(super) fn jump(view: ViewId, windows: Vec<(ViewId, usize)>) -> Self {
         Self {
-            query: Some(String::new()),
+            mode: Mode::Jump {
+                query: String::new(),
+                windows,
+            },
             view,
-            windows,
             targets: vec![],
             typed: String::new(),
+        }
+    }
+    /// Starts flash's search from the caret over the lines each window
+    /// shows, the active one first.
+    pub(super) fn flash(view: ViewId, caret: usize, windows: Vec<(ViewId, usize)>) -> Self {
+        Self {
+            mode: Mode::Flash(Box::new(Flash::new(view, caret, windows))),
+            view,
+            targets: vec![],
+            typed: String::new(),
+        }
+    }
+    /// Labels the groups around the caret, innermost first, and selects
+    /// the innermost; the response does that.
+    pub(super) fn structure(
+        view: ViewId,
+        groups: Vec<Group>,
+        original: Selection,
+        time: Duration,
+    ) -> (Self, Response) {
+        let targets = groups
+            .iter()
+            .zip(GROUP_LABELS.chars())
+            .map(|(group, label)| Target {
+                label: label.to_string(),
+                view,
+                offset: Some(group.open.start),
+                marks: vec![group.open.start, group.close.start],
+            })
+            .collect();
+        let structure = Structure {
+            view,
+            groups,
+            current: 0,
+            original,
+        };
+        let response = select(view, structure.selection(0), time);
+        let session = Self {
+            mode: Mode::Structure(structure),
+            view,
+            targets,
+            typed: String::new(),
+        };
+        (session, response)
+    }
+    /// The search, while flash's is open.
+    pub fn flash_search(&self) -> Option<&Flash> {
+        match &self.mode {
+            Mode::Flash(flash) => Some(flash),
+            _ => None,
+        }
+    }
+    /// Each label as it shows: in a view, at a place in its text or, for a
+    /// window, at its corner, with the part still to type.
+    pub fn placements(&self) -> Vec<(ViewId, Option<usize>, String)> {
+        match &self.mode {
+            Mode::Flash(flash) => flash
+                .matches()
+                .iter()
+                .filter_map(|m| Some((m.view, Some(flash.mark(m)?), m.label?.to_string())))
+                .collect(),
+            _ => self
+                .targets()
+                .flat_map(|(target, rest)| {
+                    let marks = match (&target.marks[..], target.offset) {
+                        ([], Some(offset)) => vec![Some(offset)],
+                        ([], None) => vec![None],
+                        (marks, _) => marks.iter().copied().map(Some).collect(),
+                    };
+                    let text = match target.offset {
+                        Some(_) => rest.to_owned(),
+                        None => format!(" {rest} "),
+                    };
+                    marks
+                        .into_iter()
+                        .map(move |at| (target.view, at, text.clone()))
+                })
+                .collect(),
         }
     }
     /// Labels every window. With two, the error is the other one to take
@@ -70,12 +166,12 @@ impl LabelSession {
                 label,
                 view: *view,
                 offset: None,
+                marks: vec![],
             })
             .collect();
         Ok(Self {
-            query: None,
+            mode: Mode::Windows,
             view: active.unwrap(),
-            windows: vec![],
             targets,
             typed: String::new(),
         })
@@ -88,10 +184,12 @@ impl LabelSession {
             .map(|target| (target, &target.label[self.typed.len()..]))
     }
     pub(super) fn presentation(&self) -> Presentation {
-        let text = match &self.query {
-            Some(query) if self.targets.is_empty() => format!("jump: {query}"),
-            Some(query) => format!("jump: {query} · label {}", self.typed),
-            None => format!("window: {}", self.typed),
+        let text = match &self.mode {
+            Mode::Jump { query, .. } if self.targets.is_empty() => format!("jump: {query}"),
+            Mode::Jump { query, .. } => format!("jump: {query} · label {}", self.typed),
+            Mode::Windows => format!("window: {}", self.typed),
+            Mode::Flash(flash) => format!("flash: {}", flash.query()),
+            Mode::Structure(_) => "group: label, ; out, , in, RET keeps".to_owned(),
         };
         Presentation {
             cursor: Some(text.len()),
@@ -111,6 +209,13 @@ impl LabelSession {
         }
     }
     pub(super) fn handle(&mut self, input: Input, app: &Application, time: Duration) -> Transition {
+        match &mut self.mode {
+            Mode::Flash(flash) => return flash_input(flash, self.view, input, app, time),
+            Mode::Structure(structure) => {
+                return structure_input(structure, &self.targets, input, app, time);
+            }
+            _ => {}
+        }
         let ch = match input {
             Input::Text(InputKey::Char(ch)) => ch,
             Input::Text(InputKey::Delete { backward: true, .. }) if !self.typed.is_empty() => {
@@ -120,14 +225,15 @@ impl LabelSession {
             Input::Cancel => return Transition::close(),
             _ => return Transition::Blocked,
         };
-        if let Some(query) = self.query.as_mut().filter(|_| self.targets.is_empty()) {
+        if let Mode::Jump { query, windows } = &mut self.mode
+            && self.targets.is_empty()
+        {
             query.push(ch);
             if query.chars().count() < 2 {
                 return Transition::redraw();
             }
             let query = query.clone();
-            let mut found: Vec<_> = self
-                .windows
+            let mut found: Vec<_> = windows
                 .iter()
                 .flat_map(|(view, rows)| find(app, *view, *rows, &query))
                 .collect();
@@ -144,6 +250,7 @@ impl LabelSession {
                     label,
                     view: *view,
                     offset: Some(*offset),
+                    marks: vec![],
                 })
                 .collect();
             return Transition::redraw();
@@ -157,22 +264,122 @@ impl LabelSession {
         }
     }
     fn take(&self, view: ViewId, offset: Option<usize>, time: Duration) -> Transition {
-        let mut events = vec![];
-        if Some(view) != Some(self.view) || offset.is_none() {
-            events.push(Event::Focus(view));
+        take(self.view, view, offset, time)
+    }
+}
+/// Goes to a target: its window, and the caret to its place.
+fn take(from: ViewId, view: ViewId, offset: Option<usize>, time: Duration) -> Transition {
+    let mut events = vec![];
+    if view != from || offset.is_none() {
+        events.push(Event::Focus(view));
+    }
+    if let Some(offset) = offset {
+        events.push(Event::Edit {
+            view,
+            command: Edit::SetSelection(Selection::caret(offset)),
+            time,
+        });
+    }
+    Transition::Closed(Response {
+        events,
+        redraw: true,
+        ..Response::default()
+    })
+}
+/// A key in flash's search, as flash.nvim's `step`: a label goes to its
+/// match, Enter to the current one; anything else goes on with the query,
+/// and a query that matches nothing ends the search.
+fn flash_input(
+    flash: &mut Flash,
+    from: ViewId,
+    input: Input,
+    app: &Application,
+    time: Duration,
+) -> Transition {
+    let go = |m: &super::flash::Match| take(from, m.view, Some(m.range.start), time);
+    match input {
+        Input::Text(InputKey::Char(ch)) => {
+            if let Some(m) = flash.labelled(ch) {
+                return go(m);
+            }
+            flash.push(ch, app);
+            if flash.matches().is_empty() {
+                return Transition::close();
+            }
+            Transition::redraw()
         }
-        if let Some(offset) = offset {
-            events.push(Event::Edit {
-                view,
-                command: Edit::SetSelection(Selection::caret(offset)),
-                time,
-            });
+        Input::Text(InputKey::Delete { backward: true, .. }) => {
+            flash.pop(app);
+            Transition::redraw()
         }
-        Transition::Closed(Response {
-            events,
+        Input::Confirm => flash.current().map_or_else(Transition::close, go),
+        Input::Cancel => Transition::close(),
+        _ => Transition::Blocked,
+    }
+}
+/// A key while the groups around the caret are labelled: `;` selects the
+/// one outside, `,` the one inside, a label its group; Enter keeps the
+/// selection and Esc goes back to the one before.
+fn structure_input(
+    structure: &mut Structure,
+    targets: &[Target],
+    input: Input,
+    app: &Application,
+    time: Duration,
+) -> Transition {
+    let view = structure.view;
+    let last = structure.groups.len() - 1;
+    let chosen = match input {
+        Input::Text(InputKey::Char(';')) => {
+            structure.current = (structure.current + 1).min(last);
+            return Transition::Active(select(view, structure.selection(structure.current), time));
+        }
+        Input::Text(InputKey::Char(',')) => {
+            structure.current = structure.current.saturating_sub(1);
+            return Transition::Active(select(view, structure.selection(structure.current), time));
+        }
+        Input::Text(InputKey::Char(ch)) => {
+            let label = ch.to_string();
+            match targets.iter().position(|target| target.label == label) {
+                Some(index) => index,
+                None => return message(format!("No label {ch}")),
+            }
+        }
+        Input::Confirm => structure.current,
+        Input::Cancel => {
+            let mut response = select(view, structure.original, time);
+            response.redraw = true;
+            return Transition::Closed(response);
+        }
+        _ => return Transition::Blocked,
+    };
+    let selection = structure.selection(chosen);
+    // With modal editing the group is a block, for `o` to go on outward.
+    let response = if super::modal_on(app) {
+        Response {
+            commands: vec![Command::Modal(super::modal::Action::Found {
+                anchor: selection.anchor,
+                head: selection.head,
+                kind: super::modal::Kind::Block,
+                expand: true,
+            })],
             redraw: true,
             ..Response::default()
-        })
+        }
+    } else {
+        select(view, selection, time)
+    };
+    Transition::Closed(response)
+}
+fn select(view: ViewId, selection: Selection, time: Duration) -> Response {
+    Response {
+        events: vec![Event::Edit {
+            view,
+            command: Edit::SetSelection(selection),
+            time,
+        }],
+        redraw: true,
+        ..Response::default()
     }
 }
 fn message(text: String) -> Transition {

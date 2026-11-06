@@ -228,6 +228,15 @@ pub(crate) struct Overlay {
     pub line_digits: Vec<(usize, char)>,
     /// The rest of the selected candidate, at the caret's offset.
     pub preview: Option<(usize, String)>,
+    /// What flash's search shows in this window, of any window it covers.
+    pub flash: Option<FlashMarks>,
+}
+/// flash's matches in a window, the one Enter goes to, and whether the
+/// rest of the text recedes.
+pub(crate) struct FlashMarks {
+    pub matches: Vec<std::ops::Range<usize>>,
+    pub current: Option<std::ops::Range<usize>>,
+    pub backdrop: bool,
 }
 /// Byte ranges styled within a row: the selection is document-relative;
 /// matches, the detail offset and highlight categories are relative to the
@@ -250,6 +259,33 @@ struct Marks<'a> {
     faces: &'a [(std::ops::Range<usize>, crate::application::Face)],
     /// Hints in order of where they stand. They take room from the row.
     inlays: &'a [Inlay],
+}
+/// flash's faces in a line from `start` of `length` bytes, relative to
+/// it: the backdrop under all, then the matches, then the current one.
+fn flash_faces(
+    flash: &FlashMarks,
+    start: usize,
+    length: usize,
+) -> Vec<(std::ops::Range<usize>, Face)> {
+    let named = |name| crate::application::faces::index(name).map(Face::Named);
+    let within = |range: &std::ops::Range<usize>| {
+        let from = range.start.max(start) - start;
+        let to = range.end.min(start + length).checked_sub(start)?;
+        (from < to).then_some(from..to)
+    };
+    let mut faces = vec![];
+    if flash.backdrop
+        && let Some(face) = named("flash-backdrop")
+    {
+        faces.push((0..length, face));
+    }
+    if let Some(face) = named("flash-match") {
+        faces.extend(flash.matches.iter().filter_map(within).map(|r| (r, face)));
+    }
+    if let Some(face) = named("flash-current") {
+        faces.extend(flash.current.iter().filter_map(within).map(|r| (r, face)));
+    }
+    faces
 }
 /// The beacons that touch a row's bytes, a caret just past its text
 /// among them. Beacons come ordered and apart, so their ends are ordered
@@ -1156,6 +1192,10 @@ pub(crate) fn frame(
             let to = note.range.end.min(start + text.len()).checked_sub(start)?;
             (from < to).then_some((from..to, Face::Note(note.severity)))
         }));
+        // flash's search shows only its matches over the text receding.
+        if let Some(flash) = &modal.flash {
+            faces = flash_faces(flash, start, text.len());
+        }
         let base = highlights.get(number - top).map_or(&[][..], Vec::as_slice);
         let semantic = app.tokens(view.document_id, start..start + text.len());
         let categories = overlay(base, &semantic);

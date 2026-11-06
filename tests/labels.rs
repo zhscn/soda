@@ -97,3 +97,102 @@ fn windows_are_picked_by_label() {
     assert_eq!(r.app().active_view(), Some(second));
     assert_ne!(second, third);
 }
+fn flash(r: &Runtime) -> Vec<(char, usize)> {
+    match r.layer() {
+        Some(Layer::Labels(session)) => session
+            .flash_search()
+            .unwrap()
+            .matches()
+            .iter()
+            .filter_map(|m| Some((m.label?, m.range.start)))
+            .collect(),
+        _ => vec![],
+    }
+}
+#[test]
+fn flash_labels_matches_nearest_first_and_never_with_a_following_character() {
+    let mut r = runtime("foo bar\nbaz fob\nfox");
+    r.command(Command::Edit(Edit::SetSelection(Selection::caret(9))));
+    keys(&mut r, "M-x flash RET");
+    assert!(flash(&r).is_empty());
+    // Nearest the caret first, a line counting as the screen's width;
+    // `o` follows `f` everywhere, so no label is o.
+    keys(&mut r, "f");
+    assert_eq!(flash(&r), [('a', 12), ('s', 16), ('d', 0)]);
+    // Each match keeps its label as the query grows; `b` and `x` follow
+    // now, and `o` no longer does.
+    keys(&mut r, "o");
+    assert_eq!(flash(&r), [('a', 12), ('s', 16), ('d', 0)]);
+    keys(&mut r, "DEL o");
+    assert_eq!(flash(&r), [('a', 12), ('s', 16), ('d', 0)]);
+    keys(&mut r, "d");
+    assert!(r.layer().is_none());
+    assert_eq!(caret(&r), 0);
+}
+#[test]
+fn flash_goes_on_with_the_query_rather_than_take_what_follows_a_match() {
+    let mut r = runtime("ab ad\nab");
+    keys(&mut r, "M-x flash RET a");
+    // `b` and `d` follow `a`: typed, they narrow the search.
+    let labels: Vec<char> = flash(&r).iter().map(|(label, _)| *label).collect();
+    assert!(!labels.contains(&'b') && !labels.contains(&'d'));
+    keys(&mut r, "d");
+    assert_eq!(flash(&r).len(), 1);
+    // Enter goes to the match after the caret.
+    keys(&mut r, "RET");
+    assert!(r.layer().is_none());
+    assert_eq!(caret(&r), 3);
+}
+#[test]
+fn flash_ends_when_nothing_matches_and_esc_stays() {
+    let mut r = runtime("foo bar");
+    keys(&mut r, "M-x flash RET q");
+    assert!(r.layer().is_none());
+    assert_eq!(caret(&r), 0);
+    keys(&mut r, "M-x flash RET b ESC");
+    assert!(r.layer().is_none());
+    assert_eq!(caret(&r), 0);
+    // Capitals match case.
+    let mut r = runtime("Bar bar");
+    keys(&mut r, "M-x flash RET B");
+    assert_eq!(flash(&r).len(), 1);
+}
+fn selection(r: &Runtime) -> Selection {
+    let view = r.app().view(r.app().active_view().unwrap()).unwrap();
+    let editor = r.app().workspace().editor(view.document_id).unwrap();
+    editor.model().session(view.session_id).unwrap().selection()
+}
+#[test]
+fn flash_structure_selects_the_groups_around_the_caret() {
+    let text = "f(a, [b, c], {d})";
+    let mut r = runtime(text);
+    r.command(Command::Edit(Edit::SetSelection(Selection::caret(7))));
+    keys(&mut r, "M-x flash-structure RET");
+    // Innermost first, selected at once; each labelled at both brackets.
+    assert_eq!(labels(&r), [("a".into(), Some(5)), ("b".into(), Some(1))]);
+    let range = |r: &Runtime| selection(r).range();
+    assert_eq!(range(&r), 5..11);
+    keys(&mut r, ";");
+    assert_eq!(range(&r), 1..17);
+    keys(&mut r, ";");
+    assert_eq!(range(&r), 1..17);
+    keys(&mut r, ",");
+    assert_eq!(range(&r), 5..11);
+    // Esc goes back to the caret.
+    keys(&mut r, "ESC");
+    assert!(r.layer().is_none());
+    assert_eq!(selection(&r), Selection::caret(7));
+    // A label selects its group as a block, which `o` goes on from.
+    keys(&mut r, "M-x flash-structure RET b");
+    assert!(r.layer().is_none());
+    assert_eq!(range(&r), 1..17);
+    // On an opening bracket, its own group comes first.
+    r.command(Command::Edit(Edit::SetSelection(Selection::caret(13))));
+    keys(&mut r, "M-x flash-structure RET RET");
+    assert_eq!(range(&r), 13..16);
+    // Outside any group there is nothing to label.
+    r.command(Command::Edit(Edit::SetSelection(Selection::caret(0))));
+    keys(&mut r, "M-x flash-structure RET");
+    assert!(r.layer().is_none());
+    assert_eq!(r.message(), "No group here");
+}

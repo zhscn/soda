@@ -154,6 +154,9 @@ pub enum Effect {
     /// A question about the language structure and the selection it is
     /// about; the answer comes back as `Action::Found`.
     Structure(Query, Selection),
+    /// The groups around a selection, for `flash-structure` to label;
+    /// the answer comes back as `Command::LabelGroups`.
+    Groups(Selection),
     /// Words for the end of a line, until the next key.
     Indicator(usize, String),
     /// A key on the row of a tree.

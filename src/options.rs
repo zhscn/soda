@@ -211,6 +211,12 @@ pub const OPTIONS: &[OptionInfo] = &[
         doc: "Highlight the bracket at the caret and its match, as show-paren-mode",
     },
     OptionInfo {
+        name: "flash-backdrop",
+        kind: Kind::Bool,
+        default: Value::Bool(true),
+        doc: "Show the text of the windows flash searches in the flash-backdrop face while it does",
+    },
+    OptionInfo {
         name: "dim-other-windows",
         kind: Kind::Bool,
         default: Value::Bool(true),

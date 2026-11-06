@@ -12,6 +12,7 @@ pub use commands::{Command, Departure, WindowCommand, show};
 mod departure;
 pub use departure::SaveWait;
 pub mod expand;
+pub mod flash;
 pub mod grep;
 pub mod help;
 pub mod history;

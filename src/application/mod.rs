@@ -48,8 +48,14 @@ use crate::{
 };
 use std::{collections::BTreeMap, fmt, path::PathBuf, time::Duration};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct ViewId(u64);
+#[cfg(test)]
+impl ViewId {
+    pub(crate) fn for_test(id: u64) -> Self {
+        Self(id)
+    }
+}
 
 /// A view owns a dedicated editing session. Its anchor is a text position;
 /// display rows and screen coordinates are resolved by the frontend.

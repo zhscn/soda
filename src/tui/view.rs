@@ -552,28 +552,21 @@ fn labels(
     session: &crate::interaction::labels::LabelSession,
     theme: &Theme,
 ) {
-    for (target, rest) in session.targets() {
-        let Some(window) = areas.windows.iter().find(|w| w.view == target.view) else {
+    for (view, at, label) in session.placements() {
+        let Some(window) = areas.windows.iter().find(|w| w.view == view) else {
             continue;
         };
         let text = window.text;
-        let (row, column, label) = match target.offset {
+        let (row, column) = match at {
             Some(offset) => {
                 let cells = &screen::Cells;
                 let width = text.width.into();
-                match screen::position_of(
-                    runtime.app(),
-                    target.view,
-                    cells,
-                    width,
-                    text.height,
-                    offset,
-                ) {
-                    Some((row, column)) => (row, column, rest.to_owned()),
+                match screen::position_of(runtime.app(), view, cells, width, text.height, offset) {
+                    Some(place) => place,
                     None => continue,
                 }
             }
-            None => (0, 0, format!(" {rest} ")),
+            None => (0, 0),
         };
         if row >= usize::from(text.height) || column >= usize::from(text.width) {
             continue;
@@ -1133,6 +1126,53 @@ mod tests {
         }
     }
 
+    #[test]
+    fn flash_labels_stand_after_matches_over_a_backdrop() {
+        let root = tempfile::tempdir().unwrap();
+        let mut r = Runtime::new(root.path().to_owned()).unwrap();
+        r.command(Command::New);
+        r.command(Command::Edit(crate::editor::Command::InsertText(
+            "foo bar\nfoo".into(),
+        )));
+        r.command(Command::Edit(crate::editor::Command::SetSelection(
+            crate::core::Selection::caret(0),
+        )));
+        // The window's rows are known once it has been drawn.
+        draw(&mut r, 30, 6);
+        keys(&mut r, "M-x flash RET f");
+        let buffer = draw(&mut r, 30, 6);
+        let row = |text: &str| {
+            (0..6u16)
+                .find(|&y| {
+                    (0..30u16)
+                        .map(|x| buffer[(x, y)].symbol())
+                        .collect::<String>()
+                        .contains(text)
+                })
+                .unwrap()
+        };
+        // Each label covers the character after its match.
+        let (first, second) = (row("fao bar"), row("fso"));
+        let x = (0..30u16)
+            .find(|&x| buffer[(x, first)].symbol() == "f")
+            .unwrap();
+        let theme = Theme::build("tokyonight", &Default::default());
+        assert_eq!(buffer[(x + 1, first)].fg, theme.label.fg.unwrap());
+        // The match after the caret is the one Enter goes to.
+        assert_eq!(buffer[(x, first)].bg, theme.flash_match.bg.unwrap());
+        assert_eq!(buffer[(x, second)].bg, theme.flash_current.bg.unwrap());
+        assert_eq!(buffer[(x + 4, first)].fg, theme.flash_backdrop.fg.unwrap());
+        // Without the backdrop the rest keeps its own color.
+        keys(&mut r, "ESC");
+        r.command(Command::SetOption {
+            local: false,
+            name: "flash-backdrop",
+            value: crate::options::Value::Bool(false),
+        });
+        keys(&mut r, "M-x flash RET f");
+        let buffer = draw(&mut r, 30, 6);
+        assert_ne!(buffer[(x + 4, first)].fg, theme.flash_backdrop.fg.unwrap());
+    }
     #[test]
     fn the_grab_and_beacon_selections_each_have_their_face() {
         let root = tempfile::tempdir().unwrap();

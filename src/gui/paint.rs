@@ -1569,18 +1569,18 @@ fn labels(
 ) {
     let theme = painter.theme;
     let line = painter.fonts.line;
-    for (target, rest) in session.targets() {
-        let Some(window) = areas.windows.iter().find(|w| w.view == target.view) else {
+    for (view, at, label) in session.placements() {
+        let Some(window) = areas.windows.iter().find(|w| w.view == view) else {
             continue;
         };
         let text = window.text;
         let scroll = motion(window.view).scroll;
-        let (x, y, label) = match target.offset {
+        let (x, y) = match at {
             Some(offset) => {
                 let measure = super::text::Measured::new(painter.fonts);
                 let place = screen::position_of(
                     runtime.app(),
-                    target.view,
+                    view,
                     &measure,
                     window.width(),
                     window.rows + 1,
@@ -1590,12 +1590,11 @@ fn labels(
                     Some((row, across)) => (
                         text.x + across as f32 / UNIT,
                         text.y + row as f32 * line - scroll,
-                        rest.to_owned(),
                     ),
                     None => continue,
                 }
             }
-            None => (text.x, text.y, format!(" {rest} ")),
+            None => (text.x, text.y),
         };
         if x >= text.right() || y >= text.bottom() {
             continue;

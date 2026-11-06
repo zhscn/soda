@@ -54,7 +54,24 @@ pub(crate) fn text(
     left: Option<usize>,
     rows: u16,
 ) -> Result<Option<TextFrame>, crate::application::Error> {
-    let overlay = if runtime.app().active_view() == Some(view) {
+    let flash = match runtime.layer() {
+        Some(crate::interaction::Layer::Labels(session)) => session
+            .flash_search()
+            .filter(|flash| flash.covers(view))
+            .map(|flash| layout::FlashMarks {
+                matches: (flash.matches().iter())
+                    .filter(|m| m.view == view)
+                    .map(|m| m.range.clone())
+                    .collect(),
+                current: flash
+                    .current()
+                    .filter(|m| m.view == view)
+                    .map(|m| m.range.clone()),
+                backdrop: runtime.app().options().bool(None, "flash-backdrop"),
+            }),
+        _ => None,
+    };
+    let mut overlay = if runtime.app().active_view() == Some(view) {
         let hints = runtime.expand_hints();
         Overlay {
             grab: runtime.grab(),
@@ -73,10 +90,12 @@ pub(crate) fn text(
                     let document = runtime.app().view(view).map(|v| v.document_id);
                     runtime.app().options().bool(document, "completion-preview")
                 }),
+            flash: None,
         }
     } else {
         Overlay::default()
     };
+    overlay.flash = flash;
     layout::frame(
         runtime.app(),
         view,

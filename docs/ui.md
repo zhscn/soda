@@ -129,7 +129,7 @@ soda.set("theme", "paper")
 
 `face NAME [SPEC]`（Lua：`soda.face(name, spec)`）覆盖一个具名部分的颜色和属性。SPEC 是若干词：`fg:#rrggbb`、`bg:#rrggbb`（`default` 为终端自己的颜色），属性 `bold`、`italic`、`underline`、`dim`、`reverse`、`strikethrough`。没写的颜色沿用主题；写了任何属性就替换主题的属性，`plain` 表示无属性。不带 SPEC 时恢复。Lua 的 spec 也可以是表 `{ fg = "#ff0000", bold = true }`，`nil` 恢复。随时执行，下一帧生效。
 
-名字有界面部分（`text`、`selection`、`cursor-line`、`gutter`、`gutter-current`、`status`、`mode-normal`、`mode-insert`、`mode-beacon`、`mode-prompt`、`secondary-selection`、`beacon-selection`、`beacon-cursor`、`title`、`border`、`paren-match`、`inactive-window`、`float`、`float-border`、`label`、`todo`、`note-error`、`note-warning`、`note-info`、`reference`、`reference-write`、`snippet`、`unnecessary`、`deprecated`、`mark1`…`mark8` 等，完整列表和说明见 `src/application/faces.rs`，命令行可补全）和语法分类 `syntax.comment`、`syntax.keyword`、`syntax.function.definition` 等。带点的语法 face 继承点前面的那个（见[语法分类](syntax.md#分类)）：`face syntax.function bold` 也作用于没单独设置的 `syntax.function.call`。
+名字有界面部分（`text`、`selection`、`cursor-line`、`gutter`、`gutter-current`、`status`、`mode-normal`、`mode-insert`、`mode-beacon`、`mode-prompt`、`secondary-selection`、`beacon-selection`、`beacon-cursor`、`title`、`border`、`paren-match`、`inactive-window`、`float`、`float-border`、`label`、`flash-match`、`flash-current`、`flash-backdrop`、`todo`、`note-error`、`note-warning`、`note-info`、`reference`、`reference-write`、`snippet`、`unnecessary`、`deprecated`、`mark1`…`mark8` 等，完整列表和说明见 `src/application/faces.rs`，命令行可补全）和语法分类 `syntax.comment`、`syntax.keyword`、`syntax.function.definition` 等。带点的语法 face 继承点前面的那个（见[语法分类](syntax.md#分类)）：`face syntax.function bold` 也作用于没单独设置的 `syntax.function.call`。
 
 光标形状跟随模式：Normal 和 Beacon 为方块，Insert 和输入框为竖线。
 

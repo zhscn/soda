@@ -163,6 +163,18 @@ pub enum Command {
     Fail(String),
     /// Moves to one of the places two typed characters occur on screen.
     JumpTo,
+    /// Searches the screen as the query is typed and moves to a match by
+    /// its label, as flash.nvim's jump.
+    Flash,
+    /// Labels the groups around the caret and selects one, as flash.nvim's
+    /// Treesitter mode.
+    FlashStructure,
+    /// The groups around the selection, innermost first, as the runtime
+    /// found them for `FlashStructure`.
+    LabelGroups {
+        groups: Vec<crate::language::Group>,
+        selection: crate::core::Selection,
+    },
     /// Highlights a pattern everywhere, or in the current document.
     Highlight {
         local: bool,
@@ -1398,6 +1410,39 @@ impl Layers {
                     response = self.enter(Layer::Labels(session), app, time)?;
                 }
             }
+            Command::Flash => {
+                if let Some(view) = app.active_view() {
+                    let rows = |id: crate::application::ViewId| {
+                        let shown = self.window_rows.iter().find(|(view, _)| *view == id);
+                        shown.map_or(self.page_rows, |(_, rows)| *rows)
+                    };
+                    let others = app.windows().views();
+                    let others = others.into_iter().filter(|id| *id != view);
+                    let windows = std::iter::once(view)
+                        .chain(others)
+                        .map(|id| (id, rows(id)))
+                        .collect();
+                    let caret = selection_of(app, view).map_or(0, |selection| selection.head);
+                    let session = super::labels::LabelSession::flash(view, caret, windows);
+                    response = self.enter(Layer::Labels(session), app, time)?;
+                }
+            }
+            Command::FlashStructure => {
+                if let Some(selection) = app.active_view().and_then(|view| selection_of(app, view))
+                {
+                    response.commands.push(Command::Effect(Box::new(
+                        super::modal::Effect::Groups(selection),
+                    )));
+                }
+            }
+            Command::LabelGroups { groups, selection } => {
+                if let Some(view) = app.active_view() {
+                    let (session, select) =
+                        super::labels::LabelSession::structure(view, groups, selection, time);
+                    response = self.enter(Layer::Labels(session), app, time)?;
+                    response.events.extend(select.events);
+                }
+            }
             Command::WindowPick => match super::labels::LabelSession::windows(app) {
                 Ok(session) => response = self.enter(Layer::Labels(session), app, time)?,
                 Err(Some(other)) => response.events.push(Event::Focus(other)),
@@ -1794,4 +1839,14 @@ impl Layers {
             stops: parsed.stops,
         });
     }
+}
+
+/// A view's selection.
+fn selection_of(
+    app: &Application,
+    view: crate::application::ViewId,
+) -> Option<crate::core::Selection> {
+    let state = app.view(view)?;
+    let editor = app.workspace().editor(state.document_id)?;
+    Some(editor.model().session(state.session_id)?.selection())
 }
