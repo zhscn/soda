@@ -1400,3 +1400,69 @@ fn a_function_can_choose_the_root_later() {
     wait(&mut r, move |_| !initialized(&seen).is_empty());
     assert_eq!(initialized(&log), [base.join("ws").display().to_string()]);
 }
+
+#[test]
+fn empty_pulled_diagnostics_preserve_pushed_compiler_diagnostics() {
+    let Some(mut f) = open("one\ntwo\n") else {
+        return;
+    };
+    let document =
+        f.r.app()
+            .view(f.r.app().active_view().unwrap())
+            .unwrap()
+            .document_id;
+    wait(&mut f.r, |r| !r.app().notes(document).is_empty());
+    f.r.command(Command::Named("set idle-time 10".into()));
+    f.r.command(Command::SetMode(EditMode::Insert));
+    keys(&mut f.r, "hybrid SPC");
+    let log = f.log.clone();
+    wait(&mut f.r, move |_| {
+        std::fs::read_to_string(&log).is_ok_and(|log| log.contains("pull "))
+    });
+    settle(&mut f.r);
+    assert!(
+        f.r.app()
+            .notes(document)
+            .iter()
+            .any(|n| n.text == "bad line\nmore")
+    );
+}
+
+#[test]
+#[ignore = "requires installed rust-analyzer and Rust toolchain"]
+fn rust_analyzer_keeps_compiler_and_native_diagnostics() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("src")).unwrap();
+    std::fs::write(
+        dir.path().join("Cargo.toml"),
+        "[package]\nname=\"diagnostics_probe\"\nversion=\"0.1.0\"\nedition=\"2024\"\n",
+    )
+    .unwrap();
+    let path = dir.path().join("src/main.rs");
+    std::fs::write(
+        &path,
+        "compile_error!(\"compiler diagnostic probe\");\nfn main() { let x: u32 = \"wrong\"; }\n",
+    )
+    .unwrap();
+    let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.load_startup_lua();
+    r.enable_lsp();
+    r.source_lua(
+        "test",
+        r#"soda.lsp.server("rust", { "rust-analyzer" }, { auto = true })"#,
+    )
+    .unwrap();
+    r.start(Some(path));
+    wait(&mut r, |r| {
+        let Some(view) = r.app().active_view().and_then(|id| r.app().view(id)) else {
+            return false;
+        };
+        let notes = r.app().notes(view.document_id);
+        notes
+            .iter()
+            .any(|n| n.text.starts_with("compiler diagnostic probe"))
+            && notes
+                .iter()
+                .any(|n| n.text.starts_with("expected u32, found"))
+    });
+}

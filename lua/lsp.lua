@@ -21,6 +21,19 @@
 -- can be replaced from there.
 local module = {}
 local diagnostics = {}
+local pushed_diagnostics, pulled_diagnostics = {}, {}
+
+-- Servers can push compiler diagnostics while serving native diagnostics
+-- through pull requests. Each report replaces only its own stream.
+local function update_diagnostics(uri)
+  local combined = {}
+  for _, reports in ipairs({ pushed_diagnostics, pulled_diagnostics }) do
+    for _, diagnostic in ipairs(reports[uri] or {}) do
+      table.insert(combined, diagnostic)
+    end
+  end
+  diagnostics[uri] = combined
+end
 local severities = { "error", "warning" }
 
 local function path_of(uri)
@@ -581,7 +594,8 @@ local function pull_diagnostics()
     end
     pulled[uri] = { revision = revision, id = report.resultId }
     if report.kind == "full" then
-      diagnostics[uri] = report.items or {}
+      pulled_diagnostics[uri] = report.items or {}
+      update_diagnostics(uri)
     end
     if uri == soda.lsp.uri() then
       flag_current()
@@ -597,7 +611,8 @@ soda.lsp.on("workspace/diagnostic/refresh", function()
 end)
 
 soda.lsp.on("textDocument/publishDiagnostics", function(params)
-  diagnostics[params.uri] = params.diagnostics
+  pushed_diagnostics[params.uri] = params.diagnostics
+  update_diagnostics(params.uri)
   if params.uri == soda.lsp.uri() then
     flag_current()
     decorate()
@@ -1501,6 +1516,8 @@ soda.define_command("lsp-stop", "Stop the document's language server until lsp-s
   end
   for _, uri in ipairs(uris) do
     diagnostics[uri] = nil
+    pushed_diagnostics[uri] = nil
+    pulled_diagnostics[uri] = nil
     token_results[uri] = nil
     pulled[uri] = nil
   end

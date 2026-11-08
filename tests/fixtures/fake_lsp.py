@@ -232,7 +232,9 @@ while True:
     elif method == "textDocument/diagnostic":
         uri = params["textDocument"]["uri"]
         log.write("pull %s\n" % json.dumps(params.get("previousResultId")))
-        if "pulled" in texts.get(uri, ""):
+        if "hybrid" in texts.get(uri, ""):
+            answer(message, {"kind": "full", "resultId": "hybrid", "items": []})
+        elif "pulled" in texts.get(uri, ""):
             answer(message, {"kind": "full", "resultId": "r1", "items": [
                 {"range": spot("", 0, 0)["range"], "severity": 2, "message": "pulled one"}]})
         else:
