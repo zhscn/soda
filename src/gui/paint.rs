@@ -1267,7 +1267,7 @@ fn command_line(
             };
             if chosen {
                 let marker = rgba(theme.marker.fg, painter.fg);
-                painter.fill(Rect::new(6.0, y + 4.0, 3.0, row_h - 8.0), marker, 1.5);
+                painter.fill(Rect::new(6.0, y + 4.0, 5.0, row_h - 8.0), marker, 2.5);
             }
             // The name in the text font; the words after it, such as a
             // command's description, in the parts' font, from the column
