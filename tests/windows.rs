@@ -357,7 +357,7 @@ fn text_scale_steps_up_and_down_within_bounds_and_resets() {
     assert_eq!(r.app().text_scale(), 2);
     keys(&mut r, "C-x C--");
     assert_eq!(r.app().text_scale(), 1);
-    r.command(Command::Named("text-scale-reset".into()));
+    keys(&mut r, "C-x C-0");
     assert_eq!(r.app().text_scale(), 0);
     for _ in 0..20 {
         r.command(Command::Named("text-scale-decrease".into()));

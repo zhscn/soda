@@ -48,7 +48,7 @@ soda-gui [--no-config] [FILE | DIRECTORY]
 | `gutter-rule` | true | 行号后的分隔线 |
 | `scroll-bar` | true | 滚动时右侧的细滚动条；关掉后也不能拖动 |
 
-改了下一帧生效。`C-x C-=`、`C-x C--` 和 `text-scale-reset` 临时放大、缩小、复原所有文字，见[交互](interaction.md)。颜色用 `face` 改，与终端版共用；图形界面另读 `scrollbar`。`theme` 命令补全时的预览两个前端都有。
+改了下一帧生效。`C-x C-=`、`C-x C--` 和 `C-x C-0` 临时放大、缩小、复原所有文字，见[交互](interaction.md)。颜色用 `face` 改，与终端版共用；图形界面另读 `scrollbar`。`theme` 命令补全时的预览两个前端都有。
 
 ## 输入
 

@@ -391,6 +391,7 @@ const GLOBAL: &[(&str, &str)] = &[
     ("C-x C-=", "text-scale-increase"),
     ("C-x C-+", "text-scale-increase"),
     ("C-x C--", "text-scale-decrease"),
+    ("C-x C-0", "text-scale-reset"),
     ("M-s .", "search-symbol"),
     ("C-x 0", "close-window"),
     ("C-x 1", "only"),
