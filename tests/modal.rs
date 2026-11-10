@@ -181,7 +181,14 @@ fn undo_takes_back_a_change_as_one_step() {
 #[test]
 fn join_selects_the_blanks_and_closes_them_to_a_space() {
     cases(&[
-        ("a\n  |b\n", "'", "a|[\n  ]b\n"),
+        ("a\n  |b\n", "'", "a[\n  ]|b\n"),
+        ("a\n  b|c\n", "'", "a[\n  ]|bc\n"),
+        ("a\n\n  |b\n", "'", "a[\n\n  ]|b\n"),
+        ("a\r\n\t|b\r\n", "'", "a[\r\n\t]|b\r\n"),
+        ("甲\n  |乙\n", "'", "甲[\n  ]|乙\n"),
+        ("a\n  |b\n", "''", "a[\n  ]|b\n"),
+        ("a\n  |b\n", "';", "a|[\n  ]b\n"),
+        ("|a\nb\n", "'", "|a\nb\n"),
         ("a\n\n  |b\n", "'d", "a| b\n"),
         ("a\n  |b\n", "'r", "a| b\n"),
         ("f(\n  |)\n", "'d", "f(|)\n"),

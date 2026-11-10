@@ -909,8 +909,8 @@ impl Layers {
             }
         }
         let selection = Selection {
-            anchor: text::first(text, line),
-            head: text.line_content_range(above).unwrap().end,
+            anchor: text.line_content_range(above).unwrap().end,
+            head: text::first(text, line),
         };
         self.select(at, selection, Some((Kind::Join, true)), &mut response);
         response
