@@ -62,6 +62,16 @@ fn open(source: &str) -> Option<Fixture> {
 }
 /// The same with options for `soda.lsp.server`, and Lua to run first.
 fn open_with(source: &str, options: &str, first: &str) -> Option<Fixture> {
+    let mut fixture = start_with(source, options, first)?;
+    let log = fixture.log.clone();
+    wait(&mut fixture.r, move |_| {
+        std::fs::read_to_string(&log).is_ok_and(|log| log.contains("didOpen"))
+    });
+    Some(fixture)
+}
+
+/// Opens the document without waiting for the server to initialize.
+fn start_with(source: &str, options: &str, first: &str) -> Option<Fixture> {
     if Process::new("python3").arg("--version").output().is_err() {
         return None;
     }
@@ -92,10 +102,6 @@ fn open_with(source: &str, options: &str, first: &str) -> Option<Fixture> {
     let mut fixture = Fixture { dir, log, r };
     wait(&mut fixture.r, |r| {
         r.app().active_view().is_some() && text(r) == source
-    });
-    let log = fixture.log.clone();
-    wait(&mut fixture.r, move |_| {
-        std::fs::read_to_string(&log).is_ok_and(|log| log.contains("didOpen"))
     });
     Some(fixture)
 }
@@ -887,6 +893,102 @@ fn root_markers_choose_the_server_root() {
     assert_eq!(r.app().project(), Some(base.join("repo")));
 }
 #[test]
+fn failed_initialization_is_reported_and_does_not_expose_capabilities() {
+    for (options, reason) in [
+        ("{ init = { initializeError = true } }", "index unavailable"),
+        (
+            "{ init = { initializeResult = { capabilities = false } } }",
+            "capabilities object",
+        ),
+        (
+            "{ init = { initializeResult = { other = true } } }",
+            "capabilities object",
+        ),
+    ] {
+        let Some(mut f) = start_with("x\n", options, "") else {
+            return;
+        };
+        wait(&mut f.r, |r| r.message().contains("failed to initialize"));
+        assert!(f.r.message().contains(reason), "{}", f.r.message());
+        f.r.source_lua("test", "assert(soda.lsp.info() == nil)")
+            .unwrap();
+        f.r.command(Command::Named("lsp-hover".into()));
+        assert_eq!(f.r.message(), "No language server for this document");
+        assert!(!f.log().contains("initialized\n"));
+    }
+}
+
+#[test]
+fn a_late_response_cannot_replace_initialized_capabilities() {
+    let Some(mut f) = open("one\ntwo\n") else {
+        return;
+    };
+    f.r.source_lua(
+        "test",
+        r#"soda.lsp.on("$fake/late-response-done", function() soda.message("late response handled") end)
+           soda.lsp.notify("$fake/late-initialize-response", { uri = soda.lsp.uri() })"#,
+    )
+    .unwrap();
+    wait(&mut f.r, |r| r.message() == "late response handled");
+    f.r.source_lua(
+        "test",
+        r#"assert(soda.lsp.info().capabilities.hoverProvider)"#,
+    )
+    .unwrap();
+    assert!(
+        !f.r.messages()
+            .any(|message| message.contains("field 'capabilities'")
+                || message.contains("field capabilities"))
+    );
+    keys(&mut f.r, "C-c k");
+    wait(&mut f.r, |r| r.popup() == Some("first\n  second"));
+    assert_eq!(
+        f.log()
+            .lines()
+            .filter(|line| *line == "initialized")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn capabilities_are_available_while_the_server_initializes() {
+    let gate_dir = tempfile::tempdir().unwrap();
+    let gate = gate_dir.path().join("ready");
+    let options = format!("{{ init = {{ waitFor = {:?} }} }}", gate);
+    let Some(mut f) = start_with("x\n", &options, "") else {
+        return;
+    };
+    let log = f.log.clone();
+    wait(&mut f.r, move |_| {
+        std::fs::read_to_string(&log).is_ok_and(|log| log.contains("initialize "))
+    });
+    f.r.source_lua(
+        "test",
+        r#"local info = assert(soda.lsp.info())
+           assert(type(info.capabilities) == "table")
+           assert(next(info.capabilities) == nil)
+           soda.command("lsp-hover")"#,
+    )
+    .unwrap();
+    assert_eq!(
+        f.r.message(),
+        "The language server does not offer textDocument/hover"
+    );
+
+    std::fs::write(&gate, "").unwrap();
+    wait(&mut f.r, |r| {
+        r.source_lua(
+            "test",
+            r#"assert(soda.lsp.info().capabilities.hoverProvider)"#,
+        )
+        .is_ok()
+    });
+    keys(&mut f.r, "C-c k");
+    wait(&mut f.r, |r| r.popup() == Some("first\n  second"));
+}
+
+#[test]
 fn what_the_server_does_not_offer_is_said_and_not_asked() {
     let Some(mut f) = open("x\n") else { return };
     f.r.source_lua(
@@ -1425,6 +1527,66 @@ fn empty_pulled_diagnostics_preserve_pushed_compiler_diagnostics() {
             .notes(document)
             .iter()
             .any(|n| n.text == "bad line\nmore")
+    );
+}
+
+#[test]
+#[ignore = "requires installed ccls and C++ toolchain"]
+fn ccls_highlights_references_after_indexing() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("a.cpp");
+    let source = "int value;\nint read() { return value; }\n";
+    std::fs::write(&path, source).unwrap();
+    std::fs::write(
+        dir.path().join("compile_commands.json"),
+        serde_json::json!([{
+            "directory": dir.path(),
+            "file": path,
+            "arguments": ["clang++", "-c", path],
+        }])
+        .to_string(),
+    )
+    .unwrap();
+    let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.source_lua("modal", include_str!("fixtures/modal.lua"))
+        .unwrap();
+    r.load_startup_lua();
+    r.enable_lsp();
+    r.source_lua(
+        "test",
+        r#"require("ccls").setup({ auto = true, init = { cache = { directory = "" } } })"#,
+    )
+    .unwrap();
+    r.start(Some(path));
+    wait(&mut r, |r| {
+        r.app().active_view().is_some() && text(r) == source
+    });
+    r.command(Command::Named("set idle-time 10".into()));
+    keys(&mut r, "l l l l l");
+    let mut moved = Instant::now();
+    wait(&mut r, |r| {
+        assert!(
+            !r.messages()
+                .any(|message| message.contains("field capabilities")),
+            "{}",
+            r.message()
+        );
+        let view = r.app().view(r.app().active_view().unwrap()).unwrap();
+        if r.app().paints(view.document_id).len() >= 2 {
+            return true;
+        }
+        if moved.elapsed() >= Duration::from_millis(20) {
+            keys(r, "l h");
+            moved = Instant::now();
+        }
+        false
+    });
+    let settled = Instant::now();
+    wait(&mut r, |_| settled.elapsed() >= Duration::from_secs(1));
+    assert!(
+        !r.messages().any(|message| message.contains("capabilities")),
+        "{}",
+        r.messages().collect::<Vec<_>>().join("\n")
     );
 }
 

@@ -538,7 +538,7 @@ impl Lsp {
                 held: Some(vec![]),
                 waiting: HashMap::new(),
                 encoding: "utf-16".into(),
-                capabilities: Value::Null,
+                capabilities: json!({}),
                 opened: HashMap::new(),
                 watchers: vec![],
             },
@@ -770,15 +770,22 @@ impl Lsp {
                     }
                 }
                 Incoming::Message(key, message) => {
-                    self.message(&key, message, &mut deliveries);
+                    if let Some(error) = self.message(&key, message, &mut deliveries) {
+                        failure = Some(error);
+                    }
                 }
             }
         }
         (deliveries, failure)
     }
-    fn message(&mut self, key: &Key, mut message: Value, out: &mut Vec<Delivery>) {
+    fn message(
+        &mut self,
+        key: &Key,
+        mut message: Value,
+        out: &mut Vec<Delivery>,
+    ) -> Option<String> {
         let Some(client) = self.clients.get_mut(key) else {
-            return;
+            return None;
         };
         let id = message.get("id").cloned();
         let method = message.get("method").and_then(Value::as_str);
@@ -849,7 +856,19 @@ impl Lsp {
                     });
                 }
             }
-            (Some(id), None) if id == json!(0) => {
+            (Some(id), None) if id == json!(0) && client.held.is_some() => {
+                if !message["error"].is_null() || !message["result"]["capabilities"].is_object() {
+                    let reason = message["error"]["message"]
+                        .as_str()
+                        .unwrap_or("initialize result must contain a capabilities object");
+                    let failure = format!(
+                        "language server for {} failed to initialize: {reason}",
+                        key.0
+                    );
+                    self.clients.remove(key);
+                    self.failed.push(key.clone());
+                    return Some(failure);
+                }
                 let result = &message["result"];
                 client.capabilities = result["capabilities"].clone();
                 if let Some(encoding) = result["capabilities"]["positionEncoding"]
@@ -889,5 +908,6 @@ impl Lsp {
             }
             (None, None) => {}
         }
+        None
     }
 }

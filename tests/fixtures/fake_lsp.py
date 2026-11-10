@@ -3,6 +3,7 @@
 import json
 import os
 import sys
+import time
 
 log = open(os.environ["FAKE_LSP_LOG"], "a", buffering=1)
 texts = {}
@@ -49,6 +50,17 @@ while True:
     if method == "initialize":
         log.write("initialize %s\n" % params["rootUri"])
         log.write("init %s\n" % json.dumps(params.get("initializationOptions")))
+        gate = (params.get("initializationOptions") or {}).get("waitFor")
+        while gate and not os.path.exists(gate):
+            time.sleep(0.002)
+        options = params.get("initializationOptions") or {}
+        if options.get("initializeError"):
+            write({"jsonrpc": "2.0", "id": message["id"],
+                   "error": {"code": -32603, "message": "index unavailable"}})
+            continue
+        if "initializeResult" in options:
+            answer(message, options["initializeResult"])
+            continue
         # A question first, as real servers ask, to see that it is answered.
         write({"jsonrpc": "2.0", "id": "q", "method": "window/workDoneProgress/create"})
         answer(message, {"capabilities": {
@@ -75,7 +87,14 @@ while True:
                 "didDelete": {"filters": [{"pattern": {"glob": "**/*.{c,h}"}}]},
             }},
         }})
+    elif method == "$fake/late-initialize-response":
+        write({"jsonrpc": "2.0", "id": 0,
+               "error": {"code": -32601, "message": "method not found"}})
+        write({"jsonrpc": "2.0", "method": "textDocument/publishDiagnostics",
+               "params": {"uri": params["uri"], "diagnostics": []}})
+        write({"jsonrpc": "2.0", "method": "$fake/late-response-done", "params": {}})
     elif method == "initialized":
+        log.write("initialized\n")
         write({"jsonrpc": "2.0", "id": "config", "method": "workspace/configuration",
                "params": {"items": [{"section": "fake.index"}, {"section": "fake.none"}, {}]}})
         write({"jsonrpc": "2.0", "id": "private", "method": "$fake/ask", "params": {"n": 2}})
