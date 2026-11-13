@@ -139,7 +139,7 @@ impl Areas {
                 let lines = document
                     .and_then(|document| app.workspace().editor(document))
                     .map_or(1, |editor| {
-                        editor.model().document().snapshot().line_count()
+                        editor.model().document().snapshot().text_lines()
                     });
                 let digits = (lines.max(1).ilog10() as usize + 1).max(3);
                 let numbers = app.options().choice(document, "line-numbers") != "off";
@@ -780,10 +780,15 @@ fn editor(
     let highlight = current && options.bool(None, "highlight-line");
     let (_, band) = painter.colors(theme.cursor_line);
     for (index, row) in text.rows.iter().enumerate() {
-        if let Some(bg) = band.filter(|_| highlight && row.line == text.caret.0) {
+        if let Some(bg) =
+            band.filter(|_| highlight && row.line == text.caret.0 && row.highlight_end != Some(0))
+        {
             let y = top + index as f32 * line;
             let index = painter.out.len();
-            painter.fill(Rect::new(left, y, window.body.w, line), bg, 0.0);
+            let width = row
+                .highlight_end
+                .map_or(window.body.w, |end| area.x - left + end as f32 / UNIT);
+            painter.fill(Rect::new(left, y, width, line), bg, 0.0);
             if painter.out.len() > index {
                 painter.band.push(index);
             }
@@ -799,12 +804,12 @@ fn editor(
     for (index, row) in text.rows.iter().enumerate() {
         let y = top + index as f32 * line;
         let caret_line = current && row.line == text.caret.0;
-        let base = if caret_line && highlight {
+        let base = if caret_line && highlight && row.highlight_end != Some(0) {
             theme.text.patch(theme.cursor_line)
         } else {
             theme.text
         };
-        if let Some(digits) = window.digits.filter(|_| !row.continued) {
+        if let Some(digits) = window.digits.filter(|_| row.numbered) {
             let shown = if relative && row.line != text.caret.0 {
                 row.line.abs_diff(text.caret.0)
             } else {

@@ -158,7 +158,13 @@ pub(crate) enum Mark {
 pub(crate) struct Row {
     pub line: usize,
     /// A later row of a wrapped line, which has no number.
+    #[cfg_attr(not(feature = "gui"), allow(dead_code))]
     pub continued: bool,
+    /// The first visual row of a real text line; EOF after a newline has no number.
+    pub numbered: bool,
+    /// The visible end of an unterminated final line, in measured units.
+    /// None lets its current-line background extend to the window edge.
+    pub highlight_end: Option<usize>,
     /// The line's flag, on its first row.
     pub flag: Option<crate::application::Flag>,
     /// The digit that extends a selection of lines to this line, on its
@@ -1287,9 +1293,26 @@ pub(crate) fn frame(
             Some(_) => (segment.xs.start, width),
             None => (left, width),
         };
+        let highlight_end =
+            (number + 1 == snapshot.line_count() && last_row != Some(false)).then(|| {
+                let end = walk.x_of(&text, content);
+                let hints = if layout.wrap.is_none() {
+                    layout
+                        .inlays(number)
+                        .iter()
+                        .filter(|hint| first <= hint.x && hint.x < end)
+                        .map(|hint| text_width(measure, &hint.text, hint.font))
+                        .sum::<usize>()
+                } else {
+                    0
+                };
+                end.saturating_sub(first).saturating_add(hints).min(room)
+            });
         output.push(Row {
             line: number,
             continued: *row > 0,
+            numbered: *row == 0 && number < snapshot.text_lines(),
+            highlight_end,
             flag: flags
                 .get(&number)
                 .filter(|_| *row == 0)
@@ -1472,6 +1495,111 @@ mod tests {
     }
     fn joined(spans: Vec<Span>) -> String {
         spans.iter().map(padded).collect()
+    }
+    #[test]
+    fn eof_rows_keep_carets_without_extra_numbers_or_extended_backgrounds() {
+        for (text, numbered, ends) in [
+            ("", vec![true], vec![Some(0)]),
+            ("abc", vec![true], vec![Some(3)]),
+            ("abc\n", vec![true, false], vec![None, Some(0)]),
+            (
+                "abc\n\n",
+                vec![true, true, false],
+                vec![None, None, Some(0)],
+            ),
+            ("abc\r\n", vec![true, false], vec![None, Some(0)]),
+        ] {
+            let mut app = app(text, Language::PlainText);
+            let shown = frame(&mut app, 20, 5).unwrap();
+            assert_eq!(
+                shown
+                    .rows
+                    .iter()
+                    .map(|row| row.numbered)
+                    .collect::<Vec<_>>(),
+                numbered,
+                "{text:?}"
+            );
+            assert_eq!(
+                shown
+                    .rows
+                    .iter()
+                    .map(|row| row.highlight_end)
+                    .collect::<Vec<_>>(),
+                ends,
+                "{text:?}"
+            );
+            assert!(shown.cursor.is_some(), "{text:?}");
+        }
+    }
+    #[test]
+    fn eof_background_bounds_follow_wrapping_scrolling_and_measured_widths() {
+        let mut wrapped = app("abcdefghij", Language::PlainText);
+        wrapped
+            .dispatch(Event::SetOption {
+                scope: crate::options::Scope::Global,
+                name: "wrap",
+                value: crate::options::Value::Bool(true),
+            })
+            .unwrap();
+        let shown = frame(&mut wrapped, 4, 5).unwrap();
+        assert_eq!(
+            shown
+                .rows
+                .iter()
+                .map(|row| row.highlight_end)
+                .collect::<Vec<_>>(),
+            [None, None, Some(2)]
+        );
+        assert_eq!(
+            shown
+                .rows
+                .iter()
+                .map(|row| row.numbered)
+                .collect::<Vec<_>>(),
+            [true, false, false]
+        );
+        let app = app("\t中e\u{301}", Language::PlainText);
+        let view = app.active_view().unwrap();
+        for (left, end) in [(0, 7), (5, 2), (20, 0)] {
+            let shown = super::frame(
+                &app,
+                view,
+                &mut Highlighter::default(),
+                &Cells,
+                20,
+                0,
+                Some(left),
+                3,
+                &Overlay::default(),
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(shown.rows[0].highlight_end, Some(end));
+        }
+        struct Pixels;
+        impl Measure for Pixels {
+            fn width(&self, text: &str, font: Font) -> usize {
+                Cells.width(text, font) * 10
+            }
+            fn column(&self) -> usize {
+                10
+            }
+        }
+        let shown = super::frame(
+            &app,
+            view,
+            &mut Highlighter::default(),
+            &Pixels,
+            200,
+            0,
+            None,
+            3,
+            &Overlay::default(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(shown.rows[0].highlight_end, Some(70));
     }
     #[test]
     fn highlighted_patterns_style_their_spans() {

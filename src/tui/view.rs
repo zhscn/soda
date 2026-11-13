@@ -78,7 +78,7 @@ impl Areas {
                 let lines = document
                     .and_then(|document| app.workspace().editor(document))
                     .map_or(1, |editor| {
-                        editor.model().document().snapshot().line_count()
+                        editor.model().document().snapshot().text_lines()
                     });
                 let digits = lines.max(1).ilog10() as u16 + 1;
                 // ` 123 │ ` keeps numbers right-aligned with a separator.
@@ -646,14 +646,15 @@ fn editor(
         let y = area.y + index as u16;
         // Only the focused window marks the caret line.
         let caret_line = current && row.line == text.caret.0;
-        let band = caret_line && highlight;
+        let band = caret_line && highlight && row.highlight_end != Some(0);
         let base = if band {
             theme.text.patch(theme.cursor_line)
         } else {
             text_style
         };
         if band {
-            buf.set_style(Rect::new(left, y, area.width + window.gutter, 1), base);
+            let width = row.highlight_end.unwrap_or(area.width.into()) as u16;
+            buf.set_style(Rect::new(left, y, width + window.gutter, 1), base);
         }
         if window.gutter > 0 {
             // Without the band the caret line's number keeps its color only.
@@ -673,7 +674,7 @@ fn editor(
             };
             let number = if window.gutter == 2 {
                 "  ".to_owned()
-            } else if row.continued {
+            } else if !row.numbered {
                 format!(" {:>digits$} │ ", "")
             } else {
                 format!(" {shown:>digits$} │ ")
@@ -685,7 +686,10 @@ fn editor(
                 buf.set_stringn(left, y, &flag.sign, 1, style);
             }
         }
-        spans(buf, area.x, y, area.width, &row.spans, base, theme);
+        // The band already supplies the background. Text and virtual hints
+        // keep that ground unless their own face specifies another one.
+        let span_base = Style { bg: None, ..base };
+        spans(buf, area.x, y, area.width, &row.spans, span_base, theme);
         // A digit that extends a selection of lines covers the first cell
         // that shows, as meow's covers the line's first character.
         if let Some(digit) = row.digit.filter(|_| area.width > 0) {
@@ -1277,9 +1281,9 @@ mod tests {
         // The caret's line, below the tab row, on the band and then not.
         let theme = Theme::build(crate::application::themes::DEFAULT, &Default::default());
         let band = theme.cursor_line.bg.unwrap();
-        assert_eq!(draw(&mut r, 60, 14)[(30, 1)].bg, band);
+        assert_eq!(draw(&mut r, 60, 14)[(8, 1)].bg, band);
         r.command(Command::Named("set highlight-line off".into()));
-        assert_eq!(draw(&mut r, 60, 14)[(30, 1)].bg, theme.text.bg.unwrap());
+        assert_eq!(draw(&mut r, 60, 14)[(8, 1)].bg, theme.text.bg.unwrap());
         // Hints after a prefix.
         keys(&mut r, "C-x");
         assert!(!r.key_continuations().is_empty());
@@ -1855,17 +1859,68 @@ mod tests {
         let rows = |r: &mut Runtime| -> Vec<String> {
             screen(r, 40, 8).lines().map(str::to_owned).collect()
         };
-        // As at the end of an Emacs buffer, the empty line after the final
-        // newline is a line: shown wherever the caret is, and reached by
-        // moving down, in Normal and in Insert.
+        // EOF after a final newline stays reachable without a line number,
+        // in both Normal and Insert.
         keys(&mut r, "M-<");
         let shown = rows(&mut r);
-        assert!(shown[3].starts_with("   3 │"), "{shown:?}");
+        assert!(shown[3].starts_with("     │"), "{shown:?}");
         assert!(!shown[4].contains('4'));
         keys(&mut r, "jjj");
         assert!(rows(&mut r)[6].contains("  3:1 "));
         keys(&mut r, "M-< i <down> <down> <down>");
         assert!(rows(&mut r)[6].contains("3:1"));
+    }
+    #[test]
+    fn eof_line_background_stops_at_text_and_real_blank_lines_remain_numbered() {
+        let theme = Theme::build(crate::application::themes::DEFAULT, &Default::default());
+        let band = theme.cursor_line.bg.unwrap();
+        let ground = theme.text.bg.unwrap();
+        for text in ["abc", "abc\n", "abc\n\n", "abc\r\n"] {
+            let mut r = Runtime::new(std::path::PathBuf::from("/")).unwrap();
+            r.command(Command::New);
+            r.command(Command::Edit(crate::editor::Command::InsertText(
+                text.into(),
+            )));
+            r.command(Command::Edit(crate::editor::Command::SetSelection(
+                crate::core::Selection::caret(0),
+            )));
+            let areas = Areas::new(&r, 40, 9);
+            let x = areas.windows[0].text.x;
+            let first = draw(&mut r, 40, 9);
+            assert_eq!(first[(x + 2, 1)].bg, band, "{text:?}");
+            assert_eq!(
+                first[(35, 1)].bg,
+                if text == "abc" { ground } else { band },
+                "{text:?}"
+            );
+            if text.ends_with('\n') {
+                r.command(Command::Edit(crate::editor::Command::SetSelection(
+                    crate::core::Selection::caret(text.len()),
+                )));
+                let last = text.matches('\n').count() as u16 + 1;
+                let shown = draw(&mut r, 40, 9);
+                assert_eq!(shown[(x + 2, last)].bg, ground, "{text:?}");
+                assert_eq!(shown[(35, last)].bg, ground, "{text:?}");
+                let number: String = (0..x.saturating_sub(2))
+                    .map(|column| shown[(column, last)].symbol())
+                    .collect();
+                assert!(number.trim().is_empty(), "{text:?}: {number:?}");
+            }
+            if text == "abc\n\n" {
+                r.command(Command::Edit(crate::editor::Command::SetSelection(
+                    crate::core::Selection::caret(4),
+                )));
+                let shown = draw(&mut r, 40, 9);
+                assert_eq!(shown[(35, 2)].bg, band);
+                assert!(
+                    screen(&mut r, 40, 9)
+                        .lines()
+                        .nth(2)
+                        .unwrap()
+                        .starts_with("   2 │")
+                );
+            }
+        }
     }
     #[test]
     fn expand_digits_show_on_text_and_after_the_end_of_lines() {
