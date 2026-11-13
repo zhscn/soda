@@ -1364,6 +1364,8 @@ mod tests {
     fn the_cursor_hides_under_the_key_hints() {
         let mut r = Runtime::new(std::path::PathBuf::from("/")).unwrap();
         r.command(Command::New);
+        // A dedicated prefix keeps the popup size independent of global bindings.
+        r.command(Command::Named(r#"map global "C-c z z" nop"#.into()));
         let text = format!("{}{}", "a\n".repeat(11), "b".repeat(48));
         r.command(Command::Edit(crate::editor::Command::InsertText(text)));
         let cursor = |r: &mut Runtime| {
@@ -1375,12 +1377,12 @@ mod tests {
         };
         // The caret is at the bottom right, where the hints go.
         assert!(cursor(&mut r).is_some());
-        keys(&mut r, "C-x");
-        assert!(!r.key_continuations().is_empty());
+        keys(&mut r, "C-c z");
+        assert_eq!(r.key_continuations().len(), 1);
         assert_eq!(cursor(&mut r), None);
         // Away from the box it stays.
         keys(&mut r, "C-g M-<");
-        keys(&mut r, "C-x");
+        keys(&mut r, "C-c z");
         assert!(cursor(&mut r).is_some());
     }
     #[test]

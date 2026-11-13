@@ -359,7 +359,7 @@ fn the_keypad_reaches_chords_with_or_without_ctrl() {
     let mut r = runtime("|a\n");
     keys(&mut r, "x2");
     assert_eq!(r.app().windows().views().len(), 2);
-    keys(&mut r, "x0");
+    keys(&mut r, "x SPC 0");
     assert_eq!(r.app().windows().views().len(), 1);
     keys(&mut r, "C-x 2");
     assert_eq!(r.app().windows().views().len(), 2);
@@ -373,8 +373,13 @@ fn the_keypad_tries_ctrl_first_and_space_asks_for_the_plain_key() {
     let first = r.app().active_view();
     keys(&mut r, "x SPC o");
     assert_ne!(first, r.app().active_view());
-    // `x k` has no Ctrl binding, so the plain one answers.
+    // C-x C-0 resets scaling; Space selects the plain C-x 0 window command.
+    r.command(Command::TextScale(Some(2)));
+    assert_eq!(r.app().text_scale(), 2);
     keys(&mut r, "x0");
+    assert_eq!(r.app().text_scale(), 0);
+    assert_eq!(r.app().windows().views().len(), 2);
+    keys(&mut r, "x SPC 0");
     assert_eq!(r.app().windows().views().len(), 1);
 }
 #[test]
