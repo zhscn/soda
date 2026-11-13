@@ -67,6 +67,7 @@ pub(crate) struct SavePlan {
     pub image: DiskImage,
     pub expected: Option<DiskImage>,
     pub configuration: Option<ResolvedConfig>,
+    pub editorconfig: crate::config::editorconfig::Settings,
     pub config_generation: u64,
 }
 pub(super) struct SavePayload {

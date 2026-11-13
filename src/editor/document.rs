@@ -63,6 +63,7 @@ pub struct Document {
     history: History<SessionId>,
     config_generation: u64,
     newline: &'static str,
+    newline_override: Option<&'static str>,
     /// Type brackets and quotes in pairs.
     pub(super) auto_pairs: bool,
     /// Reindent the line when a character the language names is typed.
@@ -80,6 +81,7 @@ impl Document {
         Self {
             id: DocumentId(id),
             newline: super::operations::detect_newline(&snapshot),
+            newline_override: None,
             auto_pairs: false,
             electric_indent: true,
             snapshot,
@@ -104,9 +106,15 @@ impl Document {
     pub fn whitespace(&self) -> crate::language::WhitespacePolicy {
         self.language.whitespace()
     }
-    /// The line terminator inserted by Enter, detected when text is loaded.
+    /// The line terminator inserted by Enter: a file override, or the detected default.
     pub fn newline(&self) -> &'static str {
-        self.newline
+        self.newline_override.unwrap_or(self.newline)
+    }
+    pub(super) fn set_newline(&mut self, newline: Option<&'static str>) {
+        if self.newline_override.is_some() && newline.is_none() {
+            self.newline = super::operations::detect_newline(&self.snapshot);
+        }
+        self.newline_override = newline;
     }
     pub fn config_generation(&self) -> u64 {
         self.config_generation

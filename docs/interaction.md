@@ -634,9 +634,49 @@ Enter 依次处理：
 
 会话经状态目录下的 `session` 文件交给新进程（隐藏参数 `--session`），读入后删除。新进程启动不了时，未保存的文档照异常退出写入 `recovery/`。有保存任务时不重新启动。
 
+### EditorConfig
+
+打开文件时，soda 自动读取适用于该路径的 `.editorconfig`。配置由文件所在目录向上查找，遇到前导区中的 `root = true` 或文件系统根目录停止；较近目录和同一文件中较后的匹配节覆盖较早的值。节名支持 EditorConfig 的 glob，包括 `**`、`*.{c,h}` 和数值范围；`unset` 去掉对应属性的效果。解析使用 `ec4rs` 核心，规则见 [EditorConfig 规范](https://spec.editorconfig.org/)。
+
+同一选项的优先级为：显式 `set-local` > EditorConfig > 全局 `set` / `init.lua` > 内置默认值。`unset-local` 恢复文件的默认值。C/C++ 有 `.clang-format` 或 `_clang-format` 时，缩进使用它的规则；没有时，EditorConfig 的缩进属性覆盖 clang-format 回退预设中的对应字段。其他格式规则仍来自回退预设。
+
+| 属性 | 支持的取值与行为 |
+| --- | --- |
+| `indent_style` | `space` / `tab`，对应 `expand-tab` |
+| `indent_size` | 0–16 的整数，或 `tab`；`tab` 使用有效的制表符宽度 |
+| `tab_width` | 1–16 的整数；未指定时按 EditorConfig 的缩进回退规则处理 |
+| `end_of_line` | `lf` / `crlf`；Enter 使用指定换行符，保存时统一已有换行符 |
+| `charset` | `utf-8` / `utf-8-bom`；保存时去掉或写入 UTF-8 BOM |
+| `trim_trailing_whitespace` | `true` / `false`；启用时保存会清理整个文件的行尾空白，包括未编辑的行 |
+| `insert_final_newline` | `true` 给非空文件补末尾换行；`false` 移除文件末尾的换行；空文件保持为空 |
+
+未知属性和不支持的值会忽略。soda 的文本读写使用 UTF-8，因此 `latin1`、`utf-16le`、`utf-16be` 不触发转码；`end_of_line = cr` 也不应用。配置解析或读取失败时仍可打开文件，消息日志记录原因。
+
+打开文件只应用编辑设置，已有文本和 BOM 到保存时才按配置调整。新建的命名文件同样读取配置；另存为按目标路径的配置整理并保存，成功后应用目标文件的编辑设置。保存和 `reload` 会重新读取配置，因此修改或删除 `.editorconfig` 后，保存文件或重新加载即可更新；显式的局部选项继续保留。
+
+```ini
+root = true
+
+[*]
+indent_style = space
+indent_size = 4
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+[*.{c,h}]
+indent_style = tab
+indent_size = tab
+tab_width = 8
+
+[*.md]
+trim_trailing_whitespace = false
+```
+
 ### 保存时整理空白
 
-保存前，Application 按文档的选项整理一次，作为单独的一步撤销，写入的就是整理后的文本：
+保存前，Application 按文档的选项整理一次，作为单独的一步撤销，写入的就是整理后的文本。未配置 EditorConfig 的保存属性时，使用以下行为：
 
 - `trim-trailing-whitespace`：去掉自加载或上次保存以来编辑过的行的行尾空格和制表符，与 ws-butler 相同，没动过的行保持原样。编辑过的范围随之后的编辑映射，重新加载时清空。
 - `final-newline`：有内容但不以换行结尾时补一个换行，换行符跟随第一行（CRLF 文件补 `\r\n`）。光标在文件末尾时留在新换行之前。

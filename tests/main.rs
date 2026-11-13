@@ -20,6 +20,7 @@ mod cpp;
 mod departure;
 mod each;
 mod editor;
+mod editorconfig;
 mod emacs;
 mod emacs_keys;
 mod enter_cases;

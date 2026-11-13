@@ -100,19 +100,19 @@ pub const OPTIONS: &[OptionInfo] = &[
         name: "indent-width",
         kind: Kind::Int { min: 0, max: 16 },
         default: Value::Int(4),
-        doc: "Columns per indentation level; C++ follows clang-format instead",
+        doc: "Columns per indentation level; explicit clang-format rules take precedence for C++",
     },
     OptionInfo {
         name: "tab-width",
         kind: Kind::Int { min: 1, max: 16 },
         default: Value::Int(4),
-        doc: "Columns between tab stops; C++ follows clang-format instead",
+        doc: "Columns between tab stops; explicit clang-format rules take precedence for C++",
     },
     OptionInfo {
         name: "expand-tab",
         kind: Kind::Bool,
         default: Value::Bool(true),
-        doc: "Indent with spaces rather than tabs; C++ follows clang-format instead",
+        doc: "Indent with spaces rather than tabs; explicit clang-format rules take precedence for C++",
     },
     OptionInfo {
         name: "auto-pairs",
@@ -487,18 +487,37 @@ pub enum Scope {
 #[derive(Clone, Debug, Default)]
 pub struct Options {
     global: BTreeMap<&'static str, Value>,
+    files: BTreeMap<DocumentId, BTreeMap<&'static str, Value>>,
     documents: BTreeMap<DocumentId, BTreeMap<&'static str, Value>>,
 }
 impl Options {
-    /// The value for a document: its own, else the global one, else the
-    /// default.
+    /// Explicit document values override file defaults, then global values
+    /// and the built-in default.
     pub fn get(&self, document: Option<DocumentId>, name: &str) -> Value {
         let info = info(name).unwrap_or_else(|| panic!("unknown option {name}"));
         document
             .and_then(|document| self.documents.get(&document)?.get(info.name))
+            .or_else(|| self.files.get(&document?)?.get(info.name))
             .or_else(|| self.global.get(info.name))
             .copied()
             .unwrap_or(info.default)
+    }
+    pub(crate) fn set_file(&mut self, document: DocumentId, values: BTreeMap<&'static str, Value>) {
+        self.files.insert(document, values);
+    }
+    /// Resolve a save target's defaults before its file binding changes.
+    pub(crate) fn for_file(
+        &self,
+        document: DocumentId,
+        name: &'static str,
+        value: Option<Value>,
+    ) -> Value {
+        self.documents
+            .get(&document)
+            .and_then(|values| values.get(name))
+            .copied()
+            .or(value)
+            .unwrap_or_else(|| self.get(None, name))
     }
     pub fn bool(&self, document: Option<DocumentId>, name: &str) -> bool {
         matches!(self.get(document, name), Value::Bool(true))
@@ -532,7 +551,7 @@ impl Options {
                 .insert(name, value),
         };
     }
-    /// Removes a document's own value, so the global one applies again.
+    /// Removes a document's explicit value so its file or global default applies.
     pub fn unset(&mut self, document: DocumentId, name: &str) {
         if let Some(values) = self.documents.get_mut(&document) {
             values.remove(name);
@@ -540,6 +559,7 @@ impl Options {
     }
     pub fn forget(&mut self, document: DocumentId) {
         self.documents.remove(&document);
+        self.files.remove(&document);
     }
 }
 

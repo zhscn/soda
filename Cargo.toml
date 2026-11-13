@@ -24,6 +24,7 @@ name = "gui_snapshot"
 required-features = ["gui"]
 
 [dependencies]
+ec4rs = { version = "1.2", features = ["allow-empty-values"] }
 crossterm = { version = "0.29", default-features = false, features = ["events", "bracketed-paste"] }
 ignore = "0.4"
 libc = "0.2"

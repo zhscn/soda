@@ -180,6 +180,7 @@ impl Workspace {
         Ok(self.insert(
             editor,
             FileState {
+                editorconfig: crate::config::editorconfig::Settings::load(&path),
                 path: Some(path),
                 configuration,
                 config_problem,
@@ -272,6 +273,7 @@ impl Workspace {
             FileState {
                 path: Some(loaded.path.clone()),
                 bom: loaded.bom,
+                editorconfig: loaded.editorconfig,
                 saved: Some(DiskImage {
                     snapshot,
                     bom: loaded.bom,
@@ -364,6 +366,7 @@ impl Workspace {
         let file = FileState {
             path: Some(loaded.path),
             bom: loaded.bom,
+            editorconfig: loaded.editorconfig,
             saved: Some(DiskImage {
                 snapshot,
                 bom: loaded.bom,
@@ -410,6 +413,7 @@ impl Workspace {
             ))?
             .language_changed;
         file.configuration = configuration;
+        file.editorconfig = crate::config::editorconfig::Settings::load(&path);
         file.config_problem = problem;
         if let Some(old) = file.path.replace(path.clone()) {
             self.paths.remove(&old);
@@ -467,6 +471,17 @@ impl Workspace {
         target: Option<&Path>,
     ) -> Result<SaveRequest, FileError> {
         let path = self.check_save(id, target)?;
+        let editorconfig = crate::config::editorconfig::Settings::load(&path);
+        self.prepare_save_configured(id, target, editorconfig)
+    }
+    /// Freeze the same file defaults used to tidy this save's snapshot.
+    pub(crate) fn prepare_save_configured(
+        &mut self,
+        id: DocumentId,
+        target: Option<&Path>,
+        editorconfig: crate::config::editorconfig::Settings,
+    ) -> Result<SaveRequest, FileError> {
+        let path = self.check_save(id, target)?;
         let document = self.editors[&id].model().document();
         let file = &self.files[&id];
         let same_path = file.path() == Some(path.as_path());
@@ -491,11 +506,12 @@ impl Workspace {
             path: path.clone(),
             image: DiskImage {
                 snapshot: document.snapshot().clone(),
-                bom: file.has_utf8_bom(),
+                bom: editorconfig.bom.unwrap_or(file.has_utf8_bom()),
             },
             expected: if same_path { file.saved.clone() } else { None },
             configuration,
             config_generation: document.config_generation(),
+            editorconfig,
         };
         self.editors.get_mut(&id).unwrap().checkpoint_history();
         self.pending.insert(id, PendingSave { token, path });
@@ -553,6 +569,8 @@ impl Workspace {
             false
         };
         file.path = Some(plan.path.clone());
+        file.bom = plan.image.bom;
+        file.editorconfig = plan.editorconfig;
         file.saved = Some(DiskImage {
             snapshot: plan.image.snapshot.for_history(),
             bom: plan.image.bom,
@@ -662,7 +680,9 @@ impl Workspace {
                 self.service.language(&path, &configuration),
             ))?
             .language_changed;
-        self.files.get_mut(&id).unwrap().configuration = configuration;
+        let file = self.files.get_mut(&id).unwrap();
+        file.configuration = configuration;
+        file.editorconfig = crate::config::editorconfig::Settings::load(&path);
         Ok(changed)
     }
 }

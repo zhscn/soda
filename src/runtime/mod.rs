@@ -947,6 +947,15 @@ impl Runtime {
                 let first = problem.lines().next().unwrap_or(problem);
                 self.report(format!("Using {style} style: {first}"));
             }
+            if let Notice::Opened(view) = notice
+                && let Some(problem) = self
+                    .app
+                    .view(*view)
+                    .and_then(|state| self.app.workspace().file(state.document_id))
+                    .and_then(|file| file.editorconfig_problem())
+            {
+                self.report(problem.lines().next().unwrap_or(problem).to_owned());
+            }
             let notice = match notice {
                 Notice::Opened(view) => self.app.view(*view).map(|state| {
                     let document = state.document_id;

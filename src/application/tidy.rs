@@ -1,7 +1,8 @@
 //! Whitespace tidied when a file is saved: trailing spaces and tabs go from
 //! the lines edited since the file was loaded or saved, as ws-butler does,
 //! so lines nobody touched never show up in a diff; a missing final line
-//! break is added.
+//! break is added. EditorConfig can instead request whole-file whitespace
+//! cleanup, explicit line endings and removal of final line breaks.
 use crate::{
     core::{Change, Snapshot},
     editor::{DocumentId, DocumentUpdate, EditOrigin},
@@ -85,6 +86,89 @@ pub(super) fn changes(
             && snapshot.line_range(0).unwrap().len()
                 == snapshot.line_content_range(0).unwrap().len() + 2;
         out.push(Change::new(end..end, if crlf { "\r\n" } else { "\n" }));
+    }
+    out
+}
+
+/// EditorConfig can tidy every line, choose line endings, or remove trailing
+/// newlines. Each changed line keeps its unchanged prefix so retained carets
+/// and diagnostics continue to point at the same text.
+pub(super) fn configured_changes(
+    snapshot: &Snapshot,
+    touched: &[Range<usize>],
+    trim_all: bool,
+    final_newline: bool,
+    remove_final: bool,
+    newline: Option<&str>,
+) -> Vec<Change> {
+    let mut trim_lines = std::collections::BTreeSet::new();
+    for range in touched {
+        let first = snapshot
+            .line_of(range.start.min(snapshot.len_bytes()))
+            .unwrap();
+        let last = snapshot
+            .line_of(range.end.min(snapshot.len_bytes()))
+            .unwrap();
+        trim_lines.extend(first..=last);
+    }
+    let mut rows = Vec::new();
+    for line in 0..snapshot.line_count() {
+        let range = snapshot.line_range(line).unwrap();
+        let content = snapshot.line_content_range(line).unwrap();
+        let text = snapshot.byte_slice(content.clone()).unwrap().to_string();
+        let kept = if trim_all {
+            text.trim_end_matches(char::is_whitespace)
+        } else if trim_lines.contains(&line) {
+            text.trim_end_matches([' ', '\t'])
+        } else {
+            &text
+        };
+        let ending = if range.end > content.end {
+            newline.unwrap_or(if range.end - content.end == 2 {
+                "\r\n"
+            } else {
+                "\n"
+            })
+        } else {
+            ""
+        };
+        rows.push((range, kept.to_owned(), ending));
+    }
+    let last_content = rows.iter().rposition(|(_, text, _)| !text.is_empty());
+    let detected = if snapshot.line_count() > 1
+        && snapshot.line_range(0).unwrap().len() - snapshot.line_content_range(0).unwrap().len()
+            == 2
+    {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let last_line = rows.len() - 1;
+    let mut out = Vec::new();
+    for (line, (range, mut text, mut ending)) in rows.into_iter().enumerate() {
+        if remove_final && last_content.is_none_or(|last| line > last) {
+            text.clear();
+            ending = "";
+        } else if remove_final && Some(line) == last_content {
+            ending = "";
+        } else if final_newline && line == last_line && !text.is_empty() && ending.is_empty() {
+            ending = newline.unwrap_or(detected);
+        }
+        text.push_str(ending);
+        let old = snapshot.byte_slice(range.clone()).unwrap().to_string();
+        if old == text {
+            continue;
+        }
+        let prefix = old
+            .chars()
+            .zip(text.chars())
+            .take_while(|(a, b)| a == b)
+            .map(|(ch, _)| ch.len_utf8())
+            .sum::<usize>();
+        out.push(Change::new(
+            range.start + prefix..range.end,
+            text[prefix..].to_owned(),
+        ));
     }
     out
 }

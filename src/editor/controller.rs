@@ -22,6 +22,8 @@ pub enum Command {
     SetLanguage(Language),
     /// Whitespace settings for plain text; other languages ignore them.
     SetWhitespace(crate::language::WhitespacePolicy),
+    /// A configured line terminator for Enter, or the loaded file default.
+    SetNewline(Option<&'static str>),
     /// Whether typed brackets and quotes come in pairs.
     SetAutoPairs(bool),
     /// Whether typing a character the language names reindents its line,
@@ -207,6 +209,7 @@ impl Editor {
                 | Command::EndUndoGroup(_)
                 | Command::SetLanguage(_)
                 | Command::SetWhitespace(_)
+                | Command::SetNewline(_)
                 | Command::SetAutoPairs(_)
                 | Command::SetElectricIndent(_)
                 | Command::SquashHistory(_)
@@ -331,6 +334,10 @@ impl Editor {
             Command::Redo => Step::Done(document.restore(id, true)?),
             Command::SetWhitespace(policy) => {
                 *language_changed = document.set_whitespace(policy);
+                Step::Done(None)
+            }
+            Command::SetNewline(newline) => {
+                document.set_newline(newline);
                 Step::Done(None)
             }
             Command::SetAutoPairs(on) => {

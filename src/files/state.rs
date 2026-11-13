@@ -22,6 +22,7 @@ impl DiskImage {
 pub struct FileState {
     pub(crate) path: Option<PathBuf>,
     pub(crate) bom: bool,
+    pub(crate) editorconfig: crate::config::editorconfig::Settings,
     pub(crate) saved: Option<DiskImage>,
     pub(crate) saved_revision: Option<u64>,
     pub(crate) configuration: Option<ResolvedConfig>,
@@ -33,6 +34,9 @@ pub struct FileState {
 impl FileState {
     pub fn config_problem(&self) -> Option<&str> {
         self.config_problem.as_deref()
+    }
+    pub fn editorconfig_problem(&self) -> Option<&str> {
+        self.editorconfig.problem.as_deref()
     }
     pub fn scratch(&self) -> Option<&str> {
         self.scratch.as_deref()

@@ -1,5 +1,6 @@
-//! Clang-format configuration resolution, independent of synchronous input.
+//! File formatting configuration, independent of synchronous input.
 mod cpp;
+pub(crate) mod editorconfig;
 mod parse;
 mod resolve;
 mod schema;

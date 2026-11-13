@@ -740,9 +740,36 @@ impl Application {
     pub fn highlights(&self, document: DocumentId) -> impl Iterator<Item = &Highlight> {
         self.highlights.of(document)
     }
-    /// Gives a document the whitespace its options choose; only plain text
-    /// takes them.
+    /// Applies file defaults below document options; explicit clang-format
+    /// configurations retain their own C++ whitespace rules.
     fn apply_options(&mut self, document: DocumentId, update: &mut Update) {
+        let mut defaults = self
+            .workspace
+            .file(document)
+            .map(|file| file.editorconfig.values.clone())
+            .unwrap_or_default();
+        if self
+            .workspace
+            .file(document)
+            .is_some_and(|file| file.editorconfig.indent_uses_tab)
+        {
+            let cpp_tab = self
+                .workspace
+                .file(document)
+                .and_then(|file| file.configuration())
+                .map(|config| {
+                    crate::options::Value::Int(
+                        config.config.rules.whitespace().tab_width.get() as u32
+                    )
+                });
+            let width = self.options.for_file(
+                document,
+                "tab-width",
+                defaults.get("tab-width").copied().or(cpp_tab),
+            );
+            defaults.insert("indent-width", width);
+        }
+        self.options.set_file(document, defaults.clone());
         let options = &self.options;
         let policy = crate::language::WhitespacePolicy {
             indent_width: options.int(Some(document), "indent-width") as usize,
@@ -756,9 +783,40 @@ impl Application {
                 crate::language::TabPolicy::ForIndentation
             },
         };
+        // Explicit clang-format files keep authority over C++ indentation;
+        // EditorConfig can supply the whitespace of the fallback preset.
+        let cpp_rules = self
+            .workspace
+            .file(document)
+            .and_then(|file| file.configuration())
+            .filter(|config| config.sources.is_empty())
+            .map(|config| {
+                let mut rules = config.config.rules.clone();
+                if defaults.contains_key("indent-width") {
+                    rules.whitespace.indent_width = policy.indent_width;
+                }
+                if defaults.contains_key("tab-width") {
+                    rules.whitespace.tab_width = policy.tab_width;
+                }
+                if defaults.contains_key("expand-tab") {
+                    rules.whitespace.tabs = policy.tabs;
+                }
+                rules
+            });
+        let newline = self
+            .workspace
+            .file(document)
+            .and_then(|file| file.editorconfig.newline);
         let pairs = options.bool(Some(document), "auto-pairs");
         let electric = options.bool(Some(document), "electric-indent");
+        let mut cpp_changed = false;
         if let Some(mut editor) = self.workspace.editor_mut(document) {
+            if let Some(rules) = cpp_rules {
+                cpp_changed = editor
+                    .execute(Command::SetLanguage(rules.into()))
+                    .is_ok_and(|edit| edit.language_changed);
+            }
+            let _ = editor.execute(Command::SetNewline(newline));
             let _ = editor.execute(Command::SetAutoPairs(pairs));
             let _ = editor.execute(Command::SetElectricIndent(electric));
             if editor
@@ -767,6 +825,9 @@ impl Application {
             {
                 self.changed_document(document, update);
             }
+        }
+        if cpp_changed {
+            self.changed_document(document, update);
         }
     }
     /// The windows on screen. The active view is always in one of them.
@@ -1004,11 +1065,13 @@ impl Application {
         update.edit = Some(edit);
     }
     fn accept_file(
-        &self,
+        &mut self,
         file: FileUpdate,
         request: Option<crate::files::SaveId>,
         update: &mut Update,
     ) {
+        self.apply_options(file.document_id, update);
+        update.options_changed = true;
         self.changed_document(file.document_id, update);
         update.files.push(FileResult {
             request,
@@ -1195,12 +1258,30 @@ impl Application {
         self.focus(Some(view));
         Ok(())
     }
-    /// Trims edited lines and adds a final line break, as options ask, in
-    /// one undoable step before a save.
-    fn tidy(&mut self, document: DocumentId, update: &mut Update) -> Result<(), Error> {
+    /// Applies save-time whitespace and line-ending rules in one undoable step.
+    fn tidy(
+        &mut self,
+        document: DocumentId,
+        settings: &crate::config::editorconfig::Settings,
+        update: &mut Update,
+    ) -> Result<(), Error> {
         let options = &self.options;
-        let trim = options.bool(Some(document), "trim-trailing-whitespace");
-        let final_newline = options.bool(Some(document), "final-newline");
+        let trim = matches!(
+            options.for_file(
+                document,
+                "trim-trailing-whitespace",
+                settings.values.get("trim-trailing-whitespace").copied()
+            ),
+            crate::options::Value::Bool(true)
+        );
+        let final_newline = matches!(
+            options.for_file(
+                document,
+                "final-newline",
+                settings.values.get("final-newline").copied()
+            ),
+            crate::options::Value::Bool(true)
+        );
         let snapshot = self
             .workspace
             .editor(document)
@@ -1214,7 +1295,21 @@ impl Application {
         } else {
             &[]
         };
-        let changes = tidy::changes(&snapshot, touched, final_newline);
+        let changes = if settings.newline.is_some()
+            || settings.values.contains_key("trim-trailing-whitespace")
+            || settings.values.contains_key("final-newline")
+        {
+            tidy::configured_changes(
+                &snapshot,
+                touched,
+                trim && settings.values.contains_key("trim-trailing-whitespace"),
+                final_newline,
+                !final_newline && settings.values.contains_key("final-newline"),
+                settings.newline,
+            )
+        } else {
+            tidy::changes(&snapshot, touched, final_newline)
+        };
         // The focused view's caret is the one most likely at the end.
         let Some(view) = self
             .active
@@ -1664,10 +1759,15 @@ impl Application {
             }
             Event::Save { document, target } => {
                 // A save that would be refused leaves the text alone.
-                self.workspace.check_save(document, target.as_deref())?;
-                self.tidy(document, &mut update)?;
+                let path = self.workspace.check_save(document, target.as_deref())?;
+                let settings = crate::config::editorconfig::Settings::load(&path);
+                self.tidy(document, &settings, &mut update)?;
                 update.effects.push(Effect::Save(Box::new(
-                    self.workspace.prepare_save(document, target.as_deref())?,
+                    self.workspace.prepare_save_configured(
+                        document,
+                        target.as_deref(),
+                        settings,
+                    )?,
                 )));
                 self.changed_document(document, &mut update);
             }

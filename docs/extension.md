@@ -27,12 +27,12 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 
 选项是带类型的命名值，由 Application 持有，前端与交互层只读。
 
-- **作用域**：全局和单个文档。读取时先查文档，再查全局，最后用默认值。文档关闭时它的选项一并删除。
+- **作用域**：全局和单个文档。读取时先查显式文档设置，再查 EditorConfig、全局设置和内置默认值。文档关闭时它的选项一并删除。
 - **类型**：布尔（也接受 yes/no、on/off）、带范围的整数、固定选项之一、任意文字。`set` 在解析命令行时就按类型检查，错误在执行前报告，失败时原值不变。
-- **命令**：`set NAME VALUE` 设全局值，`set-local NAME VALUE` 只对当前文档，`unset-local NAME` 回到全局值。选项名可以补全，候选带说明。
+- **命令**：`set NAME VALUE` 设全局值，`set-local NAME VALUE` 只对当前文档，`unset-local NAME` 恢复文件默认值（EditorConfig、全局设置或内置默认值）。选项名可以补全，候选带说明。
 - **生效**：选项变化作为 Application 更新传播。缩进类选项推给对应文档的编辑器，显示类选项由前端每帧读取。
 
-`init.lua` 在第一个文档创建之前运行，其中设置的选项都是全局的；按文档的设置写在钩子里。C++ 的缩进和制表符宽度由 clang-format 决定，`indent-width`、`tab-width`、`expand-tab` 只作用于其他语言。
+`init.lua` 在第一个文档创建之前运行，其中设置的选项都是全局的；按文档的设置写在钩子里。C/C++ 的缩进通常由 clang-format 决定；文件没有 `.clang-format` 时，EditorConfig 可以提供缩进宽度和制表符策略，见 [EditorConfig](interaction.md#editorconfig)。其他语言按文件选项缩进。
 
 | 选项 | 取值 | 默认 | 作用 |
 | --- | --- | --- | --- |

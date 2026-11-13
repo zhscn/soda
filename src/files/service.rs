@@ -76,6 +76,7 @@ pub struct LoadedFile {
     pub(crate) path: PathBuf,
     pub(crate) text: String,
     pub(crate) bom: bool,
+    pub(crate) editorconfig: crate::config::editorconfig::Settings,
     pub(crate) configuration: Option<ResolvedConfig>,
     /// Why the configuration is the fallback rather than the file's own.
     pub(crate) config_problem: Option<String>,
@@ -227,7 +228,9 @@ impl FileService {
         let text = String::from_utf8(if bom { bytes[3..].to_vec() } else { bytes })
             .map_err(|_| FileError::InvalidUtf8(path.clone()))?;
         let (configuration, config_problem) = self.usable_configuration(&path);
+        let editorconfig = crate::config::editorconfig::Settings::load(&path);
         Ok(LoadedFile {
+            editorconfig,
             path,
             text,
             bom,
