@@ -211,6 +211,11 @@ fn pending(message: Message) -> InputResult {
     })
 }
 impl Layers {
+    pub(crate) fn prompt_yanks(&self, input: &UserInput) -> bool {
+        self.active().is_some()
+            && matches!(input, UserInput::Key(key) if !key.release
+                && matches!(self.keymap.input(*key), Input::Text(super::InputKey::Yank)))
+    }
     /// Route to the active modal layer before resolving document bindings.
     /// A consumed event is never replayed after a layer closes. Execute the
     /// response and observe every resulting update before routing more input.

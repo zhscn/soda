@@ -51,6 +51,9 @@ impl TextInput {
     pub fn text(&self) -> &str {
         &self.text
     }
+    pub(super) fn has_killed_text(&self) -> bool {
+        !self.killed.is_empty()
+    }
     pub fn cursor(&self) -> usize {
         self.selection.head
     }

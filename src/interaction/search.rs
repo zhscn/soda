@@ -501,7 +501,7 @@ impl SearchSession {
                 Transition::Active(self.preview_response(app, backward, true, time)?)
             }
             (Some(Step::Review), _) => Transition::Blocked,
-            (step, input) => match edit_field(&mut self.input, input) {
+            (step, input) => match edit_field(&mut self.input, input, app.clipboard()) {
                 Some(update) if update.text_changed && step != Some(Step::Replacement) => {
                     let text = self.input.text().to_owned();
                     self.set_query(&text);

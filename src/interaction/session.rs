@@ -21,8 +21,15 @@ impl Transition {
         })
     }
 }
-pub(super) fn edit_field(field: &mut TextInput, input: Input) -> Option<InputUpdate> {
+pub(super) fn edit_field(
+    field: &mut TextInput,
+    input: Input,
+    clipboard: &str,
+) -> Option<InputUpdate> {
     match input {
+        Input::Text(super::InputKey::Yank) if !field.has_killed_text() => {
+            Some(field.insert(clipboard))
+        }
         Input::Text(key) => Some(field.key(key)),
         Input::Paste(text) => Some(field.insert(&text)),
         _ => None,

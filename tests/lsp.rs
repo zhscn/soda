@@ -1345,16 +1345,16 @@ fn by_default_a_server_waits_for_lsp_start_then_serves_its_root_as_eglot() {
     for repo in ["repo", "other"] {
         std::fs::create_dir_all(base.join(repo).join(".git")).unwrap();
     }
-    for file in ["repo/a.cpp", "repo/b.cpp", "repo/c.cpp", "other/d.cpp"] {
+    for file in ["repo/a.c", "repo/b.cpp", "repo/c.cpp", "other/d.cpp"] {
         std::fs::write(base.join(file), "x\n").unwrap();
     }
     // `auto` left out: the default.
-    let (mut r, log) = server_in(&base, "repo/a.cpp", "{ auto = nil }");
+    let (mut r, log) = server_in(&base, "repo/a.c", "{ auto = nil }");
     r.command(Command::OpenPath(base.join("repo/b.cpp")));
     r.command(Command::OpenPath(base.join("other/d.cpp")));
     settle(&mut r);
     assert!(initialized(&log).is_empty(), "nothing starts on opening");
-    r.command(Command::OpenPath(base.join("repo/a.cpp")));
+    r.command(Command::OpenPath(base.join("repo/a.c")));
     r.command(Command::Named("lsp-start".into()));
     let opened = |log: &std::path::Path| -> Vec<String> {
         let mut names: Vec<_> = std::fs::read_to_string(log)
@@ -1370,13 +1370,13 @@ fn by_default_a_server_waits_for_lsp_start_then_serves_its_root_as_eglot() {
     wait(&mut r, move |_| opened(&seen).len() == 2);
     assert_eq!(initialized(&log), [base.join("repo").display().to_string()]);
     // The documents of its root already open join it; another root's not.
-    assert_eq!(opened(&log), ["a.cpp", "b.cpp"]);
+    assert_eq!(opened(&log), ["a.c", "b.cpp"]);
     // Nor does one opened later under its root wait for another start.
     r.command(Command::OpenPath(base.join("repo/c.cpp")));
     let seen = log.clone();
     wait(&mut r, move |_| opened(&seen).len() == 3);
     settle(&mut r);
-    assert_eq!(opened(&log), ["a.cpp", "b.cpp", "c.cpp"]);
+    assert_eq!(opened(&log), ["a.c", "b.cpp", "c.cpp"]);
     assert_eq!(initialized(&log).len(), 1);
 }
 #[test]
@@ -1533,8 +1533,18 @@ fn empty_pulled_diagnostics_preserve_pushed_compiler_diagnostics() {
 #[test]
 #[ignore = "requires installed ccls and C++ toolchain"]
 fn ccls_highlights_references_after_indexing() {
+    ccls_references("a.cpp", true);
+}
+
+#[test]
+#[ignore = "requires installed ccls and C toolchain"]
+fn ccls_starts_manually_for_c() {
+    ccls_references("a.c", false);
+}
+
+fn ccls_references(file: &str, auto: bool) {
     let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("a.cpp");
+    let path = dir.path().join(file);
     let source = "int value;\nint read() { return value; }\n";
     std::fs::write(&path, source).unwrap();
     std::fs::write(
@@ -1542,7 +1552,7 @@ fn ccls_highlights_references_after_indexing() {
         serde_json::json!([{
             "directory": dir.path(),
             "file": path,
-            "arguments": ["clang++", "-c", path],
+            "arguments": [if file.ends_with(".c") { "clang" } else { "clang++" }, "-c", path],
         }])
         .to_string(),
     )
@@ -1554,13 +1564,16 @@ fn ccls_highlights_references_after_indexing() {
     r.enable_lsp();
     r.source_lua(
         "test",
-        r#"require("ccls").setup({ auto = true, init = { cache = { directory = "" } } })"#,
+        &format!(r#"require("ccls").setup({{ auto = {auto}, init = {{ cache = {{ directory = "" }} }} }})"#),
     )
     .unwrap();
     r.start(Some(path));
     wait(&mut r, |r| {
         r.app().active_view().is_some() && text(r) == source
     });
+    if !auto {
+        r.command(Command::Named("lsp-start".into()));
+    }
     r.command(Command::Named("set idle-time 10".into()));
     keys(&mut r, "l l l l l");
     let mut moved = Instant::now();

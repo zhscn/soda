@@ -473,3 +473,46 @@ fn the_splash_is_a_tab_until_a_window_opens_and_again_after_the_last_closes() {
     runtime.command(Action::Named("close".into()));
     assert_eq!(shown(&runtime), [(true, SPLASH.to_string(), true)]);
 }
+
+#[test]
+fn prompts_yank_the_clipboard_and_keep_local_kills() {
+    let mut host = host();
+    let system = FakeClipboard::default();
+    host.set_system_clipboard(Box::new(system.clone()));
+    host.input(TerminalEvent::Key(
+        KeyStroke::parse_sequence("M-x").unwrap()[0],
+    ));
+    system.0.borrow_mut().1 = Some("路径/file\n".into());
+    host.input(TerminalEvent::Key(key_with(
+        KeyCode::Char('y'),
+        KeyModifiers::CONTROL,
+    )));
+    assert_eq!(host.layer().unwrap().presentation().text, ":路径/file");
+    host.input(TerminalEvent::Key(key_with(
+        KeyCode::Char('u'),
+        KeyModifiers::CONTROL,
+    )));
+    system.0.borrow_mut().1 = Some("other".into());
+    host.input(TerminalEvent::Key(key_with(
+        KeyCode::Char('y'),
+        KeyModifiers::CONTROL,
+    )));
+    assert_eq!(host.layer().unwrap().presentation().text, ":路径/file");
+    assert_eq!(document_text(&host), "");
+}
+
+#[test]
+fn search_yanks_the_internal_clipboard() {
+    let mut host = host();
+    host.command(Action::Named("set clipboard internal".into()));
+    host.dispatch(Event::SetClipboard("中🦀".into()));
+    host.input(TerminalEvent::Key(
+        KeyStroke::parse_sequence("C-s").unwrap()[0],
+    ));
+    host.input(TerminalEvent::Key(key_with(
+        KeyCode::Char('y'),
+        KeyModifiers::CONTROL,
+    )));
+    assert!(host.layer().unwrap().presentation().text.ends_with("中🦀"));
+    assert_eq!(document_text(&host), "");
+}

@@ -387,7 +387,7 @@ Insert 和输入框共享一组 readline 风格的命令。名字只定义一次
 | `C-k` | `kill-line-end` | 剪切到行尾；位于行尾时剪切换行 |
 | `C-y` | `yank` | 粘贴 |
 
-Shift 加方向键、Home、End 扩展选区，对应 `extend-` 前缀的同名命令。Insert 中 `kill-*` 写入 kill ring，连续剪切合并成一条（见[剪贴板](#剪贴板)），与 Emacs 的 `kill-line`、`kill-word` 一样从光标算起，不管选区。输入框使用组件自己的剪切缓冲。`pairs` 模块在 Insert 中替换了其中几个键，见[结构化编辑](#结构化编辑)。
+Shift 加方向键、Home、End 扩展选区，对应 `extend-` 前缀的同名命令。Insert 中 `kill-*` 写入 kill ring，连续剪切合并成一条（见[剪贴板](#剪贴板)），与 Emacs 的 `kill-line`、`kill-word` 一样从光标算起，不管选区。输入框的 `C-y` 优先粘贴当前组件剪切的文字；当前组件还没有剪切文字时，读取编辑器剪贴板，`clipboard=system` 时先从系统剪贴板更新。`pairs` 模块在 Insert 中替换了其中几个键，见[结构化编辑](#结构化编辑)。
 
 Insert 中 Tab 是 `indent-for-tab`，同 Emacs 的 TAB（`indent-for-tab-command`，`tab-always-indent` 为默认的 t）：不管光标在行中哪里，都按语言重新缩进本行，光标在前导空白中时移到第一个非空字符；有选区时重新缩进所选各行（选区终点恰在下一行开头时不含该行）。语言没有缩进分析时（C++ 和 Rust 之外的大多数语言）退回 `insert-tab`：有选区时缩进所选行，否则按文档的 tab/space 策略插入缩进。Shift-Tab 是 `outdent`；Enter 是语言感知的 `newline`。详见[缩进](indentation.md#输入重新缩进与其他来源)。
 

@@ -373,6 +373,9 @@ impl Runtime {
             return;
         }
         self.popup = None;
+        if self.layers.prompt_yanks(&input) {
+            self.load_clipboard();
+        }
         self.app.clear_indicator();
         let result = self
             .layers

@@ -1348,7 +1348,7 @@ impl CommandLine {
             }) if self.delete_directory(&self.locate()) => self.edited(app),
             input => {
                 let typed = matches!(input, Input::Text(InputKey::Char(_)));
-                match edit_field(&mut self.input, input) {
+                match edit_field(&mut self.input, input, app.clipboard()) {
                     Some(update) if update.text_changed || update.selection_changed => {
                         if typed {
                             self.tidy_shadowed();
