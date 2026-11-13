@@ -21,6 +21,36 @@ pub struct GrepRequest {
     pub root: std::path::PathBuf,
 }
 
+/// A project search for one of the background search engines.
+#[derive(Clone, Debug)]
+pub enum SearchRequest {
+    Grep(GrepRequest),
+    Ripgrep(RipgrepRequest),
+}
+
+/// A ripgrep search assembled by the interactive frontend.
+#[derive(Clone, Debug)]
+pub struct RipgrepRequest {
+    pub pattern: String,
+    pub files: String,
+    pub root: std::path::PathBuf,
+    pub literal: bool,
+    pub case: String,
+    pub hidden: bool,
+    pub no_ignore: bool,
+}
+
+impl RipgrepRequest {
+    pub(crate) fn case_insensitive(&self) -> Result<bool, String> {
+        match self.case.as_str() {
+            "smart" => Ok(!self.pattern.chars().any(char::is_uppercase)),
+            "insensitive" => Ok(true),
+            "sensitive" => Ok(false),
+            _ => Err("rg: case must be smart, sensitive or insensitive".into()),
+        }
+    }
+}
+
 /// The path, zero-based line and zero-based byte column of a result line,
 /// `path:line:column:` or `path:line:`; a missing column is the first.
 pub fn location(line: &str) -> Option<(&str, usize, usize)> {

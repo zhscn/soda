@@ -52,6 +52,7 @@ mod plain;
 mod preprocessor;
 mod project_replace;
 mod recent;
+mod rg;
 mod rules;
 mod runtime;
 mod session;

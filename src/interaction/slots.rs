@@ -177,4 +177,6 @@ pub enum Asked {
     Items(Vec<Item>),
     /// What an argument of this kind takes.
     Kind(SlotKind),
+    /// A typed argument with editable initial text.
+    KindInitial(SlotKind, String),
 }

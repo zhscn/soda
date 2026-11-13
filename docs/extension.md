@@ -151,10 +151,11 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 | `soda.keys(notation)` | 按 Emacs 记法输入按键，如 `soda.keys("foo RET")`，走与键盘相同的路径；要原样输入一段文字时把字符用空格隔开，免得 `RET` 这样的词被读成键 |
 | `soda.prompt(text)` | 打开命令行并预填 `text` |
 | `soda.input(title, [initial], fn, [history])` | 在命令行里要一行文字，回车后以它调用 `fn`；取消时不调用。给了 `history` 时，`M-p` / `M-n` 翻这份历史，回答记入其中，相当于 `read-string` 的 HIST 参数；没给时不翻也不记 |
-| `soda.choose(title, items, fn, [history])` | 在命令行里选一项，相当于 `completing-read`。`items` 是项的数组（文字或 `{ 文字, 说明 }`），以 `fn(文字, 从 1 起的序号)` 调用；或者是参数位类型名（如 `"theme"`、`"file"`、`"buffer"`，见下文），候选、匹配、默认选中和预览都与这种参数位相同，以 `fn(文字)` 调用。取消时不调用。给了 `history` 时选中的项记入这份历史，较近选过的排在同分项之前，`M-p` 翻出它的文字；类型名没给 `history` 时用这种参数位自己的历史 |
+| `soda.choose(title, items, fn, [history], [initial])` | 在命令行里选一项，相当于 `completing-read`。`items` 是项的数组（文字或 `{ 文字, 说明 }`），以 `fn(文字, 从 1 起的序号)` 调用；或者是参数位类型名（如 `"theme"`、`"file"`、`"buffer"`，见下文），候选、匹配、默认选中和预览都与这种参数位相同，以 `fn(文字)` 调用。取消时不调用。给了 `history` 时选中的项记入这份历史，较近选过的排在同分项之前，`M-p` 翻出它的文字；类型名没给 `history` 时用这种参数位自己的历史；`initial` 为类型名形式预填可编辑的文字，如目录路径 |
 | `soda.hook(event, filter, fn)` / `soda.unhook(id)` | 事件发生时以事件参数调用 `fn`，返回编号；`unhook` 只去掉这一个 |
 | `soda.define_command(name, [doc], fn, [options])` | 定义命令，参数文本整体传给 `fn`；`doc` 显示在按键提示、帮助和补全里，省略时显示命令名；`options.args` 见下文 |
 | `soda.tree(spec)` | 在 `*name*` 文档里显示一棵树，见[树](#树) |
+| `soda.ripgrep(spec)` | 后台运行 ripgrep，写入 `*rg*`；`spec` 含 `pattern`、`directory`、`files`（默认 `everything`，类型名或 `glob:模式`）、`literal`、`case`（`smart`、`sensitive`、`insensitive`）、`hidden` 和 `no_ignore`，返回实际是否忽略大小写。交互搜索和重跑用 `rg` 模块 |
 | `soda.results(kind, lines)` | 把结果行写入 `*kind*` 并设为最近的结果，回车和 `M-g n`/`M-g p` 与 `grep` 相同；行可以是 `路径:行:列:`，或文件名行加缩进的 `行:列  文本`，其他行留作标题 |
 | `soda.open(path, [line], [column])` | 打开文件并放置光标（列按字节）；打开是异步的，内容要在之后的请求里读 |
 | `soda.clipboard([text])` | 带文字时替换剪贴板并同步到系统剪贴板；不带时返回粘贴会用的内容 |
@@ -211,6 +212,7 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 | `snippets` | snippet 作为补全候选，见[补全](completion.md#snippet) | 无 |
 | `clang-format` | 用 clang-format 格式化文档或选中的行，只替换有变化的行 | 无 |
 | `git` | 只读查询：`root(path)` 找工作树顶层；`status(path, fn)` 在后台得到根目录、分支、提交、上游和前后差几个提交，以及路径的跟踪、忽略、暂存、修改、冲突状态 | 无 |
+| `rg` | ripgrep 的交互搜索、文件类型与目录选择、重跑和选项菜单，见[项目搜索](interaction.md#ripgrep) | 无 |
 | `git-changes` | `git-changes` 命令：把 `git diff` 的改动块列入 `*changes*` | 无 |
 
 插件：

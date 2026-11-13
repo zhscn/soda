@@ -18,6 +18,7 @@ const MATCH_LIMIT: usize = 10_000;
 const LINE_LIMIT: usize = 400;
 
 pub struct GrepCompletion {
+    pub kind: &'static str,
     pub pattern: String,
     pub regex: regex::Regex,
     /// What the paths in the result are relative to.
@@ -85,6 +86,7 @@ impl GrepRunner {
         };
         let running = self.running.take().unwrap();
         Some(GrepCompletion {
+            kind: "grep",
             pattern: running.pattern,
             regex: running.regex,
             root: running.root,
@@ -143,7 +145,7 @@ fn search(
     Ok((out, count, false))
 }
 /// The text a result shows: without indentation, cut at the limit.
-fn shown(line: &str) -> &str {
+pub(super) fn shown(line: &str) -> &str {
     let line = line.trim_start();
     let mut end = line.len().min(LINE_LIMIT);
     while !line.is_char_boundary(end) {
@@ -153,7 +155,7 @@ fn shown(line: &str) -> &str {
 }
 /// Writes a file's name and its matches below it, numbers aligned, with an
 /// empty line before every file but the first.
-fn group(out: &mut String, path: &Path, rows: &[(usize, usize, &str)]) {
+pub(super) fn group(out: &mut String, path: &Path, rows: &[(usize, usize, &str)]) {
     if rows.is_empty() {
         return;
     }

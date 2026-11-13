@@ -21,6 +21,7 @@ mod grep;
 mod lsp;
 mod lua;
 mod process;
+mod rg;
 mod run;
 mod shell;
 mod state;
@@ -71,6 +72,7 @@ pub struct Runtime {
     files: FileRunner,
     shell: shell::ShellRunner,
     grep: grep::GrepRunner,
+    rg: rg::RgRunner,
     /// The files a replacement over the project goes through, being found.
     file_search: grep::FileSearch,
     file_loop: Option<FileLoop>,
@@ -168,6 +170,7 @@ impl Runtime {
             files: FileRunner::new()?,
             shell: shell::ShellRunner::default(),
             grep: grep::GrepRunner::default(),
+            rg: rg::RgRunner::default(),
             file_search: grep::FileSearch::default(),
             file_loop: None,
             completions: completion::Completions::default(),
@@ -255,7 +258,7 @@ impl Runtime {
         self.shell.busy()
     }
     pub fn grep_running(&self) -> bool {
-        self.grep.busy()
+        self.grep.busy() || self.rg.busy()
     }
     pub fn run_running(&self) -> bool {
         self.run.busy()
@@ -1064,7 +1067,12 @@ impl Runtime {
             self.paths.submit(request);
         }
         if let Some(request) = response.grep {
-            self.message = match self.grep.submit(*request) {
+            use crate::interaction::grep::SearchRequest;
+            let result = match *request {
+                SearchRequest::Grep(request) => self.grep.submit(request),
+                SearchRequest::Ripgrep(request) => self.rg.submit(request),
+            };
+            self.message = match result {
                 Ok(()) => "Searching…".into(),
                 Err(error) => error,
             };
@@ -1109,7 +1117,12 @@ impl Runtime {
             }
         }
         if response.stop {
-            let stopped = [self.run.stop(), self.shell.stop(), self.grep.stop()];
+            let stopped = [
+                self.run.stop(),
+                self.shell.stop(),
+                self.grep.stop(),
+                self.rg.stop(),
+            ];
             // Quiet otherwise: Ctrl-C also cancels pending keys.
             if stopped.contains(&true) {
                 self.message = "Stopped".into();
@@ -1438,6 +1451,9 @@ impl Runtime {
         if let Some(completion) = self.shell.poll() {
             self.shell_finished(completion);
         }
+        if let Some(completion) = self.rg.poll() {
+            self.grep_finished(completion);
+        }
         if let Some(completion) = self.grep.poll() {
             self.grep_finished(completion);
         }
@@ -1472,20 +1488,22 @@ impl Runtime {
     fn grep_finished(&mut self, completion: grep::GrepCompletion) {
         self.dirty = true;
         let pattern = completion.pattern;
+        let name = format!("*{}*", completion.kind);
         match completion.result {
-            Ok((_, 0, _)) => self.message = format!("No matches for {pattern}"),
+            Ok((_, 0, _)) if completion.kind == "grep" => {
+                self.message = format!("No matches for {pattern}")
+            }
             Ok((text, count, truncated)) => {
+                self.dispatch(Event::ResultsDisplay {
+                    kind: completion.kind.into(),
+                });
                 let shown = self.dispatch(Event::Scratch {
-                    name: crate::interaction::grep::SCRATCH.into(),
+                    name: name.clone(),
                     text,
                     directory: completion.root,
                 });
                 if shown {
-                    if let Some(document) = self
-                        .app
-                        .workspace()
-                        .scratch(crate::interaction::grep::SCRATCH)
-                    {
+                    if let Some(document) = self.app.workspace().scratch(&name) {
                         let _ = self.app.dispatch(Event::GrepPattern {
                             document,
                             pattern: completion.regex,

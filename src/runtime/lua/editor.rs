@@ -219,7 +219,14 @@ pub(super) fn register<'scope, 'r: 'scope>(
     soda.set(
         "choose",
         scope.create_function(
-            |_, (title, items, function, history): (String, Value, Function, Option<String>)| {
+            |_,
+             (title, items, function, history, initial): (
+                String,
+                Value,
+                Function,
+                Option<String>,
+                Option<String>,
+            )| {
                 // Items, or the name of a kind of argument whose
                 // candidates to choose among.
                 let asked = match items {
@@ -231,7 +238,10 @@ pub(super) fn register<'scope, 'r: 'scope>(
                                 slots::names()
                             ))
                         })?;
-                        Asked::Kind(kind)
+                        match initial {
+                            Some(initial) => Asked::KindInitial(kind, initial),
+                            None => Asked::Kind(kind),
+                        }
                     }
                     Value::Table(items) => Asked::Items(
                         items
@@ -316,6 +326,36 @@ pub(super) fn register<'scope, 'r: 'scope>(
                     Ok(Some(runtime.app.clipboard().to_owned()))
                 }
             }
+        })?,
+    )?;
+    soda.set(
+        "ripgrep",
+        scope.create_function(|_, spec: Table| {
+            let mut runtime = runtime.borrow_mut();
+            let directory: String = spec.get("directory")?;
+            let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+            let root = crate::interaction::path::resolve_path(
+                &runtime.app.root(),
+                home.as_deref(),
+                std::path::Path::new(&directory),
+            )
+            .map_err(mlua::Error::runtime)?;
+            let request = crate::interaction::grep::RipgrepRequest {
+                pattern: spec.get("pattern")?,
+                files: spec
+                    .get::<Option<String>>("files")?
+                    .unwrap_or_else(|| "everything".into()),
+                root,
+                literal: spec.get::<Option<bool>>("literal")?.unwrap_or(false),
+                case: spec
+                    .get::<Option<String>>("case")?
+                    .unwrap_or_else(|| "smart".into()),
+                hidden: spec.get::<Option<bool>>("hidden")?.unwrap_or(false),
+                no_ignore: spec.get::<Option<bool>>("no_ignore")?.unwrap_or(false),
+            };
+            let insensitive = request.case_insensitive().map_err(mlua::Error::runtime)?;
+            runtime.command(Command::Ripgrep(Box::new(request)));
+            Ok(insensitive)
         })?,
     )?;
     soda.set(

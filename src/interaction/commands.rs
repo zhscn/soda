@@ -96,6 +96,7 @@ pub enum Command {
     Window(WindowCommand),
     /// Searches the project; results go to the `*grep*` document.
     Grep(String),
+    Ripgrep(Box<super::grep::RipgrepRequest>),
     /// Opens the location on the caret line, or moves to the next line's
     /// first non-blank.
     Jump,
@@ -656,7 +657,8 @@ impl Layers {
                 .with_keymaps(self.keymap.names())
                 .with_items(self.question.as_ref().map_or(vec![], |(_, i)| i.clone()))
                 .with_histories(self.history.clone())
-                .with_history(asked_history);
+                .with_history(asked_history)
+                .with_directory_input(asked_kind == Some(super::SlotKind::Path));
                 if let Some(note) = note {
                     line = line.with_note(note);
                 }
@@ -1212,12 +1214,18 @@ impl Layers {
                     response.quit = true;
                 }
             }
+            Command::Ripgrep(request) => {
+                self.set_results("*rg*".into());
+                response.grep = Some(Box::new(super::grep::SearchRequest::Ripgrep(*request)));
+            }
             Command::Grep(pattern) => {
                 self.set_results(super::grep::SCRATCH.to_owned());
-                response.grep = Some(Box::new(super::grep::GrepRequest {
-                    pattern,
-                    root: file_root.to_owned(),
-                }));
+                response.grep = Some(Box::new(super::grep::SearchRequest::Grep(
+                    super::grep::GrepRequest {
+                        pattern,
+                        root: file_root.to_owned(),
+                    },
+                )));
             }
             Command::Jump => {
                 // Enter on the results visits that line, as `]q` would.
@@ -1296,6 +1304,9 @@ impl Layers {
                     Asked::Text(initial) => (format!("answer {initial}"), vec![], None),
                     Asked::Items(items) => ("choose ".to_owned(), items, None),
                     Asked::Kind(kind) => ("answer ".to_owned(), vec![], Some(kind)),
+                    Asked::KindInitial(kind, initial) => {
+                        (format!("answer {initial}"), vec![], Some(kind))
+                    }
                 };
                 self.question = Some((id, items));
                 self.asked_history = history.or_else(|| {

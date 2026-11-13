@@ -120,6 +120,7 @@ pub struct CommandLine {
     /// The history a question names for its answer, as the HIST argument
     /// of `read-string`; other questions have none.
     asked_history: Option<String>,
+    directory_input: bool,
     /// What the line adds to the histories, once it has run.
     records: Vec<(String, String)>,
 }
@@ -276,6 +277,7 @@ impl CommandLine {
             recall: Recall::default(),
             recalled: None,
             asked_history: None,
+            directory_input: false,
             records: vec![],
         }
     }
@@ -287,6 +289,11 @@ impl CommandLine {
     /// The history a question's answer is recalled from and added to.
     pub fn with_history(mut self, name: Option<String>) -> Self {
         self.asked_history = name;
+        self
+    }
+    /// A path question may take the current directory as its answer.
+    pub fn with_directory_input(mut self, accepts: bool) -> Self {
+        self.directory_input = accepts;
         self
     }
     /// Recently used files for a `recent` slot, newest first.
@@ -1207,6 +1214,7 @@ impl CommandLine {
             return self.close(vec![]);
         }
         if !accepted
+            && !self.directory_input
             && location.target == Some(Target::Slot(SlotKind::Path))
             && self.input.text()[location.range.clone()].ends_with('/')
         {

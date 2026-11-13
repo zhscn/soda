@@ -133,7 +133,7 @@ pub struct Response {
     pub effects: Vec<PickerEffect>,
     pub path_requests: Vec<path::PathRequest>,
     pub shell: Option<Box<shell::ShellRequest>>,
-    pub grep: Option<Box<grep::GrepRequest>>,
+    pub grep: Option<Box<grep::SearchRequest>>,
     /// A command for `run`, whose output streams into `*run*`.
     pub run: Option<Box<shell::ShellRequest>>,
     /// Stop background work.

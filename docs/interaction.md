@@ -673,6 +673,51 @@ scratch 文档只由编辑器写入：grep、run、`soda.results` 的结果，�
 - 位置行有两种格式。`路径:行:列:` 或 `路径:行:` 是编译器常见的格式，列缺省为 1，路径不能含空白。分组格式是缩进的 `行:列  文本`，路径取上方最近的非缩进行，可以含空白；`*run*` 和普通文档不认分组格式。相对路径以结果文档的目录为基准。
 - 打开位置使用 `OpenAt` 事件：文件还没加载时，行列随打开请求保存，加载完成后再放置光标。
 
+### ripgrep
+
+`rg` 调用 PATH 中的 `rg` 程序，交互方式参考 [Emacs rg.el](https://rgel.readthedocs.io/en/latest/usage.html)：先输入搜索词，再选择文件类型，最后确认目录。搜索词预填光标处的单词，文件类型根据当前文件建议，目录默认是当前文件所在目录；没有文件时使用项目根目录。目录框支持路径补全，任何一步都可以用 `C-g` 取消。`rg PATTERN` 预先给出搜索词，之后仍选择文件范围和目录。
+
+文件范围中的类型来自 `rg --type-list`，例如 `c`、`cpp`、`rust`；`everything` 搜索所有符合忽略规则的文件，`all` 只搜索 ripgrep 已知的文件类型，`custom` 输入 glob，如 `*.{c,h}`。查询、文件范围、glob 和目录各有历史，可用 `M-p` / `M-n` 调出。
+
+| 命令 | 作用 |
+| --- | --- |
+| `rg` | 交互式正则搜索 |
+| `rg-literal` | 同样选择范围，按字面文字匹配 |
+| `rg-project` | 输入正则并选择文件类型，在项目根目录搜索 |
+| `rg-dwim` | 直接在项目中搜索光标处的单词，按当前文件类型筛选 |
+| `rg-menu` | 选择搜索入口、设置新搜索的大小写与隐藏／忽略选项，或修改上一次搜索 |
+| `rg-rerun` | 使用上一次的查询、范围和选项重新搜索 |
+| `rg-rerun-change-regexp` | 修改上一次的查询后重跑，保留其正则或字面匹配方式 |
+| `rg-rerun-change-files` / `rg-rerun-change-dir` | 修改文件范围或目录后重跑 |
+| `rg-rerun-toggle-case` | 切换上一次搜索的大小写敏感性并重跑 |
+| `rg-rerun-toggle-literal` | 切换正则／字面匹配并重跑 |
+| `rg-rerun-toggle-ignore` / `rg-rerun-toggle-hidden` | 切换忽略规则或隐藏文件选项并重跑 |
+
+新搜索默认使用智能大小写和 ripgrep 的忽略规则；`everything` 默认跳过隐藏文件。文件类型和 glob 遵循 ripgrep 的筛选优先级，显式匹配文件名的过滤条件也可能选入隐藏文件。智能大小写在开始搜索时根据查询确定，重跑时保留已确定的大小写行为。结果写入独立的 `*rg*`，顶部记录查询、文件范围、目录和选项，下面沿用 grep 的分组、匹配高亮与字节列跳转；Enter、`M-g n` / `M-g p` 同样可用。无匹配时也更新结果文档，避免留下上一次的匹配。`display rg bottom 12` 等命令可调整结果窗口。
+
+搜索在后台运行。新的 rg 搜索取消上一次 rg 搜索，`stop` 或 `C-c C-c` 停止当前搜索；停止后到达的旧结果会丢弃。最多显示 10,000 条匹配行，超过时停止 rg 并注明截断；单行展示上限为 400 字节。非 UTF-8 文件名或匹配行会跳过。为了保持 JSON 输出格式和交互选项一致，搜索不读取 ripgrep 配置文件。
+
+命令默认没有按键，可以在 `init.lua` 中绑定：
+
+```lua
+soda.map("global", "C-c s", "rg-menu")
+soda.map("global", "C-c r", "rg-project")
+```
+
+Lua 可以直接给出条件，搜索结束后仍可用上述命令修改和重跑：
+
+```lua
+require("rg").search({
+  pattern = "TODO|FIXME",
+  files = "glob:*.{c,h}",
+  directory = "src",          -- 相对项目根目录，也接受绝对路径和 ~/
+  case = "smart",            -- 也可用 sensitive 或 insensitive
+  literal = false,
+  hidden = false,
+  no_ignore = false,
+})
+```
+
 ## 剪贴板
 
 Application 拥有一个跨文档共享的剪贴板，它是 Emacs 式的 kill ring：每次复制、剪切或从系统剪贴板读回新内容加一条，最新一条就是剪贴板，最多 120 条，与最新一条相同的文字不重复加入。`copy`、`cut` 有选区时作用于选区，否则作用于光标所在整行（保留原换行字节）；`kill-line-*`、`kill-word-*` 总是从光标剪到行尾、行首或词边界。剪切在事务成功后才替换剪贴板。粘贴是一次独立的可撤销编辑；撤销不改变剪贴板。

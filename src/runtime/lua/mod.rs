@@ -71,6 +71,7 @@ const FUNCTIONS: &[&str] = &[
     "defer",
     "cancel",
     "results",
+    "ripgrep",
     "tree_show",
     "tree_children",
     "open",
