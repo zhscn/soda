@@ -361,6 +361,42 @@ fn styled_row(
     width: usize,
     walk: Walk,
 ) -> Vec<Span> {
+    styled_row_from(
+        text,
+        byte_start,
+        marks,
+        left,
+        width,
+        walk,
+        RowSlice {
+            bytes: 0..text.len(),
+            x: 0,
+            trailing_from: text
+                .trim_end_matches(['\n', '\r'])
+                .trim_end_matches([' ', '\t'])
+                .len(),
+        },
+    )
+}
+
+struct RowSlice {
+    bytes: std::ops::Range<usize>,
+    x: usize,
+    trailing_from: usize,
+}
+
+/// Start at a known grapheme boundary and measured coordinate. Wrapped
+/// rows already have these, so drawing a continuation need not walk its
+/// entire prefix again. Style ranges remain relative to the whole line.
+fn styled_row_from(
+    text: &str,
+    byte_start: usize,
+    marks: Marks,
+    left: usize,
+    width: usize,
+    walk: Walk,
+    slice: RowSlice,
+) -> Vec<Span> {
     let Marks {
         selection,
         grab,
@@ -388,17 +424,17 @@ fn styled_row(
             Mark::None
         }
     };
-    // Spaces and tabs from here to the end of the line trail.
-    let trailing_from = text.trim_end_matches(['\n', '\r']);
-    let trailing_from = trailing_from.trim_end_matches([' ', '\t']).len();
+    let from = slice.bytes.start;
+    let last = slice.bytes.end == text.len();
+    let trailing_from = slice.trailing_from;
     let mut spans = Vec::<Span>::new();
     // Whether the last span's text fills it, so that more text can follow
     // in it.
     let mut filled = false;
     // Where the next span starts on screen.
     let mut at = 0;
-    let mut next_category = 0;
-    let mut x = 0;
+    let mut next_category = categories.partition_point(|(range, _)| range.end <= from);
+    let mut x = slice.x;
     let mut right = left.saturating_add(width);
     let mut next_inlay = 0;
     // Each hint shown leaves that much less room for the text.
@@ -437,7 +473,8 @@ fn styled_row(
             *filled = false;
         }
     };
-    for (offset, cluster) in text.grapheme_indices(true) {
+    for (offset, cluster) in text[slice.bytes].grapheme_indices(true) {
+        let offset = from + offset;
         hint(x, x, &mut right, &mut at, &mut spans, &mut filled);
         let end = x + walk.advance(cluster, x);
         if x >= right {
@@ -535,7 +572,7 @@ fn styled_row(
     let line_end = byte_start + text.trim_end_matches(['\n', '\r']).len();
     let mark = mark_of(line_end, line_end + 1);
     let selected = selection.start <= line_end && line_end < selection.end;
-    if x >= left && x < right && (selected || mark != Mark::None) {
+    if last && x >= left && x < right && (selected || mark != Mark::None) {
         let width = measure.column().min(right - x);
         spans.push(Span {
             x: at,
@@ -555,7 +592,7 @@ fn styled_row(
         x += width;
         filled = false;
     }
-    if x < right {
+    if last && x < right {
         hint(usize::MAX, x, &mut right, &mut at, &mut spans, &mut filled);
     }
     spans
@@ -681,31 +718,6 @@ fn segments(text: &str, width: Option<usize>, walk: Walk) -> Vec<Segment> {
     });
     out
 }
-/// Lines longer than this, minified code most often, are not wrapped:
-/// wrapping measures a whole line again for each row it shows, so a long
-/// one costs a frame seconds, while an unwrapped line costs what is seen.
-const WRAP_LIMIT: usize = 4096;
-/// Rows a screen may show on either side of a place, more than any has.
-const WRAP_REACH: usize = 256;
-/// Whether a line too long to wrap could be on screen around `places`,
-/// the viewport's top and the caret: `wrap` falls back to unwrapped rows
-/// while one is.
-fn long_line_near(snapshot: &crate::core::Snapshot, places: &[usize]) -> bool {
-    places.iter().any(|offset| {
-        let line = snapshot
-            .line_of((*offset).min(snapshot.len_bytes()))
-            .unwrap_or(0);
-        let first = line.saturating_sub(WRAP_REACH);
-        let last = (line + WRAP_REACH).min(snapshot.line_count());
-        let mut start = snapshot.line_start(first).unwrap_or(0);
-        (first + 1..=last).any(|next| {
-            let end = snapshot.line_start(next).unwrap_or(snapshot.len_bytes());
-            let long = end - start > WRAP_LIMIT;
-            start = end;
-            long
-        })
-    })
-}
 /// A screen row: a line and which of its segments.
 type Place = (usize, usize);
 /// How one view's lines meet its text area.
@@ -736,15 +748,7 @@ impl<'a> Rows<'a> {
         let wrap = app
             .options()
             .bool(Some(view.document_id), "wrap")
-            .then_some(width)
-            .filter(|_| {
-                let session = app
-                    .workspace()
-                    .editor(view.document_id)
-                    .and_then(|editor| editor.model().session(view.session_id));
-                let head = session.map_or(0, |session| session.state().selection().head);
-                !long_line_near(snapshot, &[view.viewport.anchor.offset.0, head])
-            });
+            .then_some(width);
         let walk = Walk::new(measure, document.whitespace().tab_width);
         let hints = match app.options().bool(Some(view.document_id), "inlay-hints") {
             true => app.inlays(view.document_id),
@@ -774,7 +778,11 @@ impl<'a> Rows<'a> {
                         .iter()
                         .take_while(|(offset, _)| *offset <= end)
                         .map(|(offset, hint)| Inlay {
-                            x: self.walk.x_of(&text, offset - start),
+                            x: if self.wrap.is_some() {
+                                usize::MAX
+                            } else {
+                                self.walk.x_of(&text, offset - start)
+                            },
                             text: hint.chars().filter(|c| !c.is_control()).collect(),
                             face: None,
                             font: Font::Hint,
@@ -845,20 +853,42 @@ impl<'a> Rows<'a> {
         let offset = offset.min(self.snapshot.len_bytes());
         let line = self.snapshot.line_of(offset).unwrap().min(self.lines - 1);
         let within = offset - self.snapshot.line_start(line).unwrap();
-        let x = self
-            .walk
-            .x_of(&self.snapshot.line(line).unwrap_or_default(), within);
-        let row = self
-            .segments(line)
-            .iter()
-            .rposition(|segment| segment.start <= within)
-            .unwrap_or(0);
+        if self.wrap.is_none() {
+            let text = self.snapshot.line(line).unwrap_or_default();
+            return ((line, 0), self.walk.x_of(&text, within));
+        }
+        let segments = self.segments(line);
+        let row = segments.partition_point(|segment| segment.start <= within) - 1;
+        let segment = &segments[row];
+        let text = self.snapshot.line(line).unwrap_or_default();
+        let x = text[segment.start..within]
+            .graphemes(true)
+            .fold(segment.xs.start, |x, cluster| {
+                x + self.walk.advance(cluster, x)
+            });
         ((line, row), x)
     }
     /// The offset of the character `x` from a line's start.
     fn offset(&self, line: usize, x: usize) -> usize {
         let text = self.snapshot.line(line).unwrap_or_default();
-        self.snapshot.line_start(line).unwrap() + self.walk.byte_at(&text, x)
+        if self.wrap.is_none() {
+            return self.snapshot.line_start(line).unwrap() + self.walk.byte_at(&text, x);
+        }
+        let segments = self.segments(line);
+        let row = segments.partition_point(|segment| segment.xs.start <= x) - 1;
+        let segment = &segments[row];
+        let mut at = segment.xs.start;
+        for (offset, cluster) in text[segment.start..]
+            .trim_end_matches(['\n', '\r'])
+            .grapheme_indices(true)
+        {
+            let end = at + self.walk.advance(cluster, at);
+            if x < end {
+                return self.snapshot.line_start(line).unwrap() + segment.start + offset;
+            }
+            at = end;
+        }
+        self.snapshot.line_start(line).unwrap() + text.trim_end_matches(['\n', '\r']).len()
     }
     /// The offset where a row starts.
     fn start(&self, (line, row): Place) -> usize {
@@ -1171,40 +1201,47 @@ pub(crate) fn frame(
     }
     let inline_notes = options.bool(Some(view.document_id), "inline-notes");
     let mut text = std::borrow::Cow::Borrowed("");
+    let mut faces = vec![];
+    let mut categories = vec![];
+    let mut trailing_from = 0;
     for ((number, row), segment) in &shown {
         let number = *number;
+        let start = snapshot.line_start(number).unwrap();
         if *row == 0 || output.is_empty() {
             text = snapshot.line(number).unwrap();
+            trailing_from = text
+                .trim_end_matches(['\n', '\r'])
+                .trim_end_matches([' ', '\t'])
+                .len();
+            faces = patterns
+                .iter()
+                .flat_map(|h| {
+                    h.pattern
+                        .find_iter(&text)
+                        .filter(|m| !m.is_empty())
+                        .map(|m| (m.range(), h.face))
+                })
+                .collect();
+            faces.sort_by_key(|(range, _)| range.start);
+            faces.extend(paints.iter().filter_map(|(range, face)| {
+                let from = range.start.max(start) - start;
+                let to = range.end.min(start + text.len()).checked_sub(start)?;
+                (from < to).then_some((from..to, *face))
+            }));
+            // Last, so the worst note's underline wins over everything else.
+            faces.extend(notes.iter().filter_map(|note| {
+                let from = note.range.start.max(start) - start;
+                let to = note.range.end.min(start + text.len()).checked_sub(start)?;
+                (from < to).then_some((from..to, Face::Note(note.severity)))
+            }));
+            // flash's search shows only its matches over the text receding.
+            if let Some(flash) = &modal.flash {
+                faces = flash_faces(flash, start, text.len());
+            }
+            let base = highlights.get(number - top).map_or(&[][..], Vec::as_slice);
+            let semantic = app.tokens(view.document_id, start..start + text.len());
+            categories = overlay(base, &semantic);
         }
-        let mut faces: Vec<_> = patterns
-            .iter()
-            .flat_map(|h| {
-                h.pattern
-                    .find_iter(&text)
-                    .filter(|m| !m.is_empty())
-                    .map(|m| (m.range(), h.face))
-            })
-            .collect();
-        faces.sort_by_key(|(range, _)| range.start);
-        let start = snapshot.line_start(number).unwrap();
-        faces.extend(paints.iter().filter_map(|(range, face)| {
-            let from = range.start.max(start) - start;
-            let to = range.end.min(start + text.len()).checked_sub(start)?;
-            (from < to).then_some((from..to, *face))
-        }));
-        // Last, so the worst note's underline wins over everything else.
-        faces.extend(notes.iter().filter_map(|note| {
-            let from = note.range.start.max(start) - start;
-            let to = note.range.end.min(start + text.len()).checked_sub(start)?;
-            (from < to).then_some((from..to, Face::Note(note.severity)))
-        }));
-        // flash's search shows only its matches over the text receding.
-        if let Some(flash) = &modal.flash {
-            faces = flash_faces(flash, start, text.len());
-        }
-        let base = highlights.get(number - top).map_or(&[][..], Vec::as_slice);
-        let semantic = app.tokens(view.document_id, start..start + text.len());
-        let categories = overlay(base, &semantic);
         // A wrapped line would lose what hints push past the edge, so they
         // wait at its end, on a row of their own width.
         let last_row = layout
@@ -1295,7 +1332,11 @@ pub(crate) fn frame(
         };
         let highlight_end =
             (number + 1 == snapshot.line_count() && last_row != Some(false)).then(|| {
-                let end = walk.x_of(&text, content);
+                let end = if layout.wrap.is_some() {
+                    segment.xs.end
+                } else {
+                    walk.x_of(&text, content)
+                };
                 let hints = if layout.wrap.is_none() {
                     layout
                         .inlays(number)
@@ -1322,7 +1363,23 @@ pub(crate) fn frame(
                 .iter()
                 .find(|(line, _)| *line == number && *row == 0)
                 .map(|(_, digit)| *digit),
-            spans: styled_row(&text, start, marks, first, room, walk),
+            spans: styled_row_from(
+                &text,
+                start,
+                marks,
+                first,
+                room,
+                walk,
+                RowSlice {
+                    bytes: segment.start
+                        ..layout
+                            .segments(number)
+                            .get(*row + 1)
+                            .map_or(text.len(), |next| next.start),
+                    x: segment.xs.start,
+                    trailing_from,
+                },
+            ),
         });
     }
     let line_of = |offset| snapshot.line_of(offset);
@@ -1902,49 +1959,173 @@ mod tests {
         assert_eq!(rows("abc", 3), [(0, 0..3)]);
     }
     #[test]
-    fn lines_too_long_to_wrap_turn_wrapping_off_while_near() {
-        let long = "x ".repeat(super::WRAP_LIMIT);
-        let mut near = app(
+    fn long_lines_wrap_without_disabling_neighboring_lines() {
+        let long = "x ".repeat(10_000);
+        let mut app = app(
             &format!("short words here\n{long}\nend"),
             Language::PlainText,
         );
-        near.dispatch(Event::SetOption {
+        app.dispatch(Event::SetOption {
             scope: crate::options::Scope::Global,
             name: "wrap",
             value: crate::options::Value::Bool(true),
         })
         .unwrap();
-        // The long line is on screen: every line takes one row, as unwrapped.
-        let shown = frame(&mut near, 10, 5).unwrap();
+        let view = app.active_view().unwrap();
+        app.dispatch(Event::Edit {
+            view,
+            command: Command::SetSelection(Selection::caret(0)),
+            time: Duration::ZERO,
+        })
+        .unwrap();
+        let shown = frame(&mut app, 10, 5).unwrap();
         let lines: Vec<_> = shown
             .rows
             .iter()
             .map(|row| (row.line, row.continued))
             .collect();
-        assert_eq!(lines, [(0, false), (1, false), (2, false)]);
-        // Far from it, lines wrap again.
-        let text = format!(
-            "{long}\n{}short words here",
-            "\n".repeat(2 * super::WRAP_REACH)
+        assert_eq!(
+            lines,
+            [(0, false), (0, true), (1, false), (1, true), (1, true)]
         );
-        let mut far = app(&text, Language::PlainText);
-        far.dispatch(Event::SetOption {
+    }
+    #[test]
+    fn wrapping_measures_each_line_once_and_only_draws_visible_suffixes() {
+        struct Counted(std::cell::Cell<usize>);
+        impl Measure for Counted {
+            fn width(&self, cluster: &str, font: Font) -> usize {
+                self.0.set(self.0.get() + 1);
+                Cells.width(cluster, font)
+            }
+            fn column(&self) -> usize {
+                1
+            }
+        }
+        let text = "a ".repeat(100_000);
+        let mut app = app(&text, Language::PlainText);
+        app.dispatch(Event::SetOption {
             scope: crate::options::Scope::Global,
             name: "wrap",
             value: crate::options::Value::Bool(true),
         })
         .unwrap();
-        let view = far.active_view().unwrap();
-        far.dispatch(Event::Edit {
+        let view = app.active_view().unwrap();
+        app.dispatch(Event::SetViewport {
             view,
-            command: Command::SetSelection(Selection::caret(text.len())),
+            anchor: ByteOffset(190_000),
+            horizontal_scroll: 0,
+        })
+        .unwrap();
+        let measure = Counted(std::cell::Cell::new(0));
+        let shown = super::frame(
+            &app,
+            view,
+            &mut Highlighter::default(),
+            &measure,
+            80,
+            0,
+            None,
+            100,
+            &Overlay::default(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(shown.rows.len(), 100);
+        assert!(shown.rows.iter().all(|row| row.continued));
+        // One whole-line measurement, then at most the visible text plus
+        // a row for locating each of the viewport and caret.
+        assert!(
+            measure.0.get() <= text.len() + 80 * 103,
+            "{} measurements",
+            measure.0.get()
+        );
+    }
+
+    #[test]
+    fn wrapped_coordinates_and_styles_survive_tabs_unicode_edits_and_resize() {
+        let mut app = app("a\t中e\u{301}🦀 words\r\nend", Language::PlainText);
+        app.dispatch(Event::SetOption {
+            scope: crate::options::Scope::Global,
+            name: "wrap",
+            value: crate::options::Value::Bool(true),
+        })
+        .unwrap();
+        let view = app.active_view().unwrap();
+        for width in [1, 4, 7, 12] {
+            let layout = Rows::new(&app, app.view(view).unwrap(), &Cells, width).unwrap();
+            let text = layout.snapshot.line(0).unwrap();
+            for (offset, cluster) in text.grapheme_indices(true) {
+                if cluster.chars().any(char::is_control) {
+                    continue;
+                }
+                let ((line, _), x) = layout.place(offset);
+                assert_eq!(layout.offset(line, x), offset, "width {width}");
+            }
+        }
+        app.dispatch(Event::Edit {
+            view,
+            command: Command::SetSelection(Selection::caret(0)),
             time: Duration::ZERO,
         })
         .unwrap();
-        frame(&mut far, 10, 5).unwrap();
-        let shown = frame(&mut far, 10, 5).unwrap();
-        assert!(shown.rows.iter().any(|row| row.continued));
+        app.dispatch(Event::Edit {
+            view,
+            command: Command::InsertText("prefix ".into()),
+            time: Duration::ZERO,
+        })
+        .unwrap();
+        let shown = frame(&mut app, 7, 20).unwrap();
+        assert_eq!(joined_row(&shown.rows[0]), "prefix ");
+        assert_eq!(shown.rows[1].line, 0);
+        assert!(shown.rows[1].continued);
+        assert_eq!(shown.cursor, Some((0, 1)));
     }
+
+    #[test]
+    fn wrapped_rows_keep_selection_and_preview_within_their_segment() {
+        let mut app = app("aaa bbb ccc", Language::PlainText);
+        app.dispatch(Event::SetOption {
+            scope: crate::options::Scope::Global,
+            name: "wrap",
+            value: crate::options::Value::Bool(true),
+        })
+        .unwrap();
+        let view = app.active_view().unwrap();
+        app.dispatch(Event::Edit {
+            view,
+            command: Command::SetSelection(Selection { anchor: 2, head: 6 }),
+            time: Duration::ZERO,
+        })
+        .unwrap();
+        let shown = frame(&mut app, 6, 10).unwrap();
+        let selected: String = shown
+            .rows
+            .iter()
+            .flat_map(|row| &row.spans)
+            .filter(|span| span.selected)
+            .map(|span| span.text.as_str())
+            .collect();
+        assert_eq!(selected, "a bb");
+        let shown = super::frame(
+            &app,
+            view,
+            &mut Highlighter::default(),
+            &Cells,
+            6,
+            0,
+            None,
+            10,
+            &Overlay {
+                preview: Some((0, "!".into())),
+                ..Overlay::default()
+            },
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(joined_row(&shown.rows[0]), "!aaa ");
+        assert_eq!(joined_row(&shown.rows[1]), "bbb ");
+    }
+
     #[test]
     fn wrapping_shows_long_lines_on_several_rows() {
         let mut app = app("one two three four\nshort\nlast", Language::PlainText);
