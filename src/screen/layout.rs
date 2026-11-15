@@ -693,13 +693,18 @@ fn segments(text: &str, width: Option<usize>, walk: Walk) -> Vec<Segment> {
             xs: 0..usize::MAX,
         }];
     };
+    // Spaces at a row boundary stay with the preceding text, even when
+    // they extend past the edge. Breaking before such a space lets the
+    // next word break after it again, leaving a whitespace-only row.
+    let content_end = text.trim_end_matches(['\n', '\r']).len();
     let mut out = vec![];
     let (mut start, mut first) = (0, 0);
     let mut space = None;
     let mut x = 0;
     for (offset, cluster) in text.grapheme_indices(true) {
         let end = x + walk.advance(cluster, x);
-        while end - first > width && x > first {
+        let whitespace = cluster == " " || cluster == "\t";
+        while offset < content_end && !whitespace && end - first > width && x > first {
             let (at, at_x) = space.take().unwrap_or((offset, x));
             out.push(Segment {
                 start,
@@ -707,7 +712,7 @@ fn segments(text: &str, width: Option<usize>, walk: Walk) -> Vec<Segment> {
             });
             (start, first) = (at, at_x);
         }
-        if cluster == " " || cluster == "\t" {
+        if whitespace {
             space = Some((offset + cluster.len(), end));
         }
         x = end;
@@ -1326,7 +1331,7 @@ pub(crate) fn frame(
             inlays: &hints,
         };
         let (first, room) = match layout.wrap {
-            Some(_) if hints.is_empty() => (segment.xs.start, segment.xs.len()),
+            Some(_) if hints.is_empty() => (segment.xs.start, segment.xs.len().min(width)),
             Some(_) => (segment.xs.start, width),
             None => (left, width),
         };
@@ -1958,6 +1963,71 @@ mod tests {
         assert_eq!(rows("", 5), [(0, 0..0)]);
         assert_eq!(rows("abc", 3), [(0, 0..3)]);
     }
+    #[test]
+    fn overflowing_word_separator_stays_on_the_preceding_row() {
+        let walk = Walk::new(&Cells, NonZeroUsize::new(4).unwrap());
+        for separator in [" ", "  ", "\t"] {
+            let text = format!("abcPL{separator}提供了描述这些问题的工具");
+            let rows = segments(&text, Some(5), walk);
+            assert_eq!(rows[0].start, 0);
+            assert_eq!(rows[1].start, "abcPL".len() + separator.len());
+            for (index, row) in rows.iter().enumerate() {
+                let end = rows.get(index + 1).map_or(text.len(), |next| next.start);
+                assert!(
+                    !text[row.start..end].trim().is_empty(),
+                    "{text:?}: {rows:?}"
+                );
+            }
+        }
+        let text = "Blob/Log 可以视为一门存储领域语言：它有身份与内容、操作与依赖、资源与保留责任，以及正常执行和崩溃恢复的规则。PL 提供了描述这些问题的工具，但不同问题需要不同工具。所有权类型只处理其中一部分；整个设计还涉及资源协议、表示独立性、效果解释和带恢复的精化。";
+        for width in 1..160 {
+            let rows = segments(text, Some(width), walk);
+            for (index, row) in rows.iter().enumerate() {
+                let end = rows.get(index + 1).map_or(text.len(), |next| next.start);
+                assert!(
+                    !text[row.start..end].trim().is_empty(),
+                    "width {width}: {row:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn trailing_whitespace_does_not_create_an_empty_continuation() {
+        let walk = Walk::new(&Cells, NonZeroUsize::new(4).unwrap());
+        for ending in ["", "\n", "\r\n"] {
+            for spaces in [" ", "  ", "\t", " \t "] {
+                let text = format!("abcPL{spaces}{ending}");
+                let rows = segments(&text, Some(5), walk);
+                assert_eq!(rows.len(), 1, "{text:?}");
+                assert_eq!(rows[0].start, 0);
+            }
+        }
+        let mut app = app("abcPL \nnext", Language::PlainText);
+        app.dispatch(Event::SetOption {
+            scope: crate::options::Scope::Global,
+            name: "wrap",
+            value: crate::options::Value::Bool(true),
+        })
+        .unwrap();
+        let view = app.active_view().unwrap();
+        app.dispatch(Event::Edit {
+            view,
+            command: Command::SetSelection(Selection::caret(6)),
+            time: Duration::ZERO,
+        })
+        .unwrap();
+        let shown = frame(&mut app, 5, 5).unwrap();
+        assert_eq!(shown.rows.len(), 2);
+        assert_eq!(joined_row(&shown.rows[0]), "abcPL");
+        assert_eq!(joined_row(&shown.rows[1]), "next");
+        assert_eq!(shown.cursor, Some((4, 0)));
+        assert_eq!(
+            super::position_of(&app, view, &Cells, 5, 5, 7),
+            Some((1, 0))
+        );
+    }
+
     #[test]
     fn long_lines_wrap_without_disabling_neighboring_lines() {
         let long = "x ".repeat(10_000);
