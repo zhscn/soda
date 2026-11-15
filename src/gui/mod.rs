@@ -30,7 +30,7 @@ use winit::{
 };
 
 /// How long the caret takes to glide to a new place.
-const GLIDE: Duration = Duration::from_millis(80);
+const GLIDE: Duration = Duration::from_millis(50);
 
 /// The caret gliding from where it was to where it goes, as IntelliJ's
 /// smooth caret movement does: the caret itself moves, with no trail.
