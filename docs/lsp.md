@@ -179,6 +179,35 @@ require("ccls").setup({
 
 `$ccls/publishSkippedRanges`（没参与编译的预处理分支）用 `dim` 画出，随编辑移动。
 
+## clice
+
+```lua
+require("clice").setup()
+soda.map("clice", "C-c v c", "clice-callers")
+soda.map("clice", "C-c v C", "clice-callees")
+soda.map("clice", "C-c h", "clice-switch")
+soda.map("clice", "C-c v x", "clice-switch-context")
+soda.map("clice", "C-c v f", "clice-configuration")
+```
+
+`setup` 默认以 `clice serve` 服务 C++，由 `lsp-start` 启动。`command` 可以换成程序路径或包装脚本的参数表；`languages` 默认 `{ "cpp" }`，`init`、`settings`、`auto` 与通用服务器配置相同。`roots` 默认查找 `clice.toml`、`.clice/config.toml`、`compile_commands.json` 和 Git 工作树标记；项目的编译数据库与构建配置由 clice 读取。`setup` 声明的 `clice` 键位表只在它服务的文档里生效，命令默认不绑定按键。
+
+标准补全、诊断、导航、类型层级、重命名和代码动作沿用通用 LSP。clice 的字符、转义、基本类型、预处理指令等扩展语义类型映射到 soda 的高亮分类，带 `inactive` 修饰符的代码显示为注释。
+
+| 命令 | 作用 |
+| --- | --- |
+| `clice-callers [CALL_TYPE]` / `clice-callees [CALL_TYPE]` | 用 `$clice/caller` / `$clice/callee` 显示逐层展开的调用树；参数 0 只取直接调用，1 包含基类，2 包含派生类，3 包含两者。默认 3，可用 `setup({ call_type = 1 })` 修改 |
+| `clice-base` / `clice-derived` | 显示标准类型层级的基类 / 派生类 |
+| `clice-context` | 显示当前编译上下文、实际编译参数及其来源 |
+| `clice-switch-context` | 分页读取上下文并选择，保留头文件的包含位置和源文件的编译命令标识；列表变化时拒绝应用过期选择 |
+| `clice-reset-context` | 恢复自动选择上下文 |
+| `clice-other-contexts` | 切换导航是否包含其他编译上下文 |
+| `clice-configuration` | 选择 `clice.toml` 声明的构建配置 |
+| `clice-switch` | 打开 clice 推荐的源文件、头文件或模块对应文件；没有首选项时显示候选及匹配理由 |
+| `clice-refactor [KIND]` | 请求选区处的重构动作，默认 `refactor`，也可指定 `refactor.` 下的具体种类；复用代码动作的解析与编辑应用流程 |
+
+clice 在配置文件或构建配置变化后会发出 `clice/restartServer`。soda 写出请求响应后结束对应进程，等待旧连接关闭，再按原配置启动并重新打开它服务的文档。这个处理按服务器所属的语言和根目录定位，切换到其他项目也不会改变重启对象。
+
 ## 限制
 
 - 没有 `roots` 时根目录就是项目根目录（版本库标记），不按 `compile_commands.json` 找；clangd 自己会找。

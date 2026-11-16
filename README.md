@@ -37,7 +37,7 @@ scripts/bundle-macos.sh      # macOS：生成 target/release/Soda.app，拷到 /
 - [交互缩进设计与契约](docs/indentation.md)、[clang-format 配置](docs/clang-format.md)
 - [交互层：键位、命令与配置](docs/interaction.md)、[扩展模型：选项、展开与钩子](docs/extension.md)
 - [终端界面](docs/ui.md)、[图形界面](docs/gui.md)
-- [语法高亮与导航](docs/syntax.md)
+- [语法高亮与导航](docs/syntax.md)、[语言服务器与 clice / ccls](docs/lsp.md)
 
 ## 构建与验证
 

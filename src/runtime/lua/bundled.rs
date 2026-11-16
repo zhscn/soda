@@ -4,6 +4,7 @@
 
 /// Every module, by the name `require` takes.
 pub(super) const MODULES: &[(&str, &str)] = &[
+    ("clice", include_str!("../../../lua/clice.lua")),
     ("ccls", include_str!("../../../lua/ccls.lua")),
     (
         "clang-format",
@@ -42,6 +43,7 @@ pub(super) const STARTUP: &[&str] = &[
     "git-changes",
     "git-flags",
     "ccls",
+    "clice",
     "meow",
     "puni",
     "surround",

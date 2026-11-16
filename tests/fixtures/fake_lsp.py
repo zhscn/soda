@@ -300,6 +300,7 @@ while True:
         }})
     elif method == "textDocument/codeAction":
         uri = params["textDocument"]["uri"]
+        log.write("codeAction only %s\n" % json.dumps(params["context"].get("only")))
         # A real server refuses anything but an array here.
         log.write("codeAction %s\n" % json.dumps(params["context"]["diagnostics"])[:1])
         log.write("codeAction %d\n" % len(params["context"]["diagnostics"]))
@@ -347,7 +348,7 @@ while True:
         derived = {"name": "Derived", "uri": uri, "range": spot(uri, 1, 0)["range"],
                    "selectionRange": spot(uri, 1, 2)["range"]}
         answer(message, [derived] if params["item"]["name"] == "Base" else [])
-    elif method in ("$ccls/call", "$ccls/inheritance", "$ccls/member"):
+    elif method in ("$ccls/call", "$ccls/inheritance", "$ccls/member", "$clice/caller", "$clice/callee"):
         log.write("%s %s\n" % (method, json.dumps({k: v for k, v in params.items()
                                                     if k not in ("textDocument", "position")},
                                                    sort_keys=True)))
@@ -360,6 +361,29 @@ while True:
             answer(message, item("1", "root", 0, 2, [item("2", "first", 1, 1), item("3", "second", 2, 0)]))
         else:
             answer(message, item(params["id"], "x", 0, 1, [item("4", "deeper", 1, 0)]))
+    elif method.startswith("clice/"):
+        log.write("%s %s\n" % (method, json.dumps(params, sort_keys=True)))
+        uri = "file://" + os.path.dirname(os.environ["FAKE_LSP_LOG"]) + "/a.cpp"
+        if method == "clice/queryContext":
+            offset = params.get("offset", 0)
+            answer(message, {"epoch": 7, "total": 2, "contexts": [{
+                "label": "context" + str(offset), "description": "host", "uri": uri,
+                "occurrence": offset, "commandHash": "hash" + str(offset)}]})
+        elif method == "clice/currentContext":
+            answer(message, {"automatic": True, "otherContexts": True,
+                             "command": {"source": "database", "directory": "/build",
+                                         "arguments": ["clang++", "a.cpp"]}})
+        elif method == "clice/listConfigurations":
+            answer(message, {"configurations": ["debug", "release"],
+                             "active": "debug", "defaultConfiguration": "debug"})
+        elif method == "clice/switchConfiguration":
+            answer(message, {"success": True})
+            write({"jsonrpc": "2.0", "id": "restart", "method": "clice/restartServer",
+                   "params": {"reason": "configuration changed"}})
+        elif method == "clice/counterparts":
+            answer(message, {"preferred": uri, "candidates": []})
+        else:
+            answer(message, {"success": True})
     elif method == "$ccls/vars":
         uri = params["textDocument"]["uri"]
         answer(message, [spot(uri, 1, 0)])

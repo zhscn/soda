@@ -468,6 +468,10 @@ local token_categories = {
   constructor = "function", macro = "macro", comment = "comment",
   variable = "variable", property = "property", field = "property",
   bracket = "punctuation.bracket",
+  character = "string", escape = "escape", formatSpecifier = "constant",
+  primitive = "type.builtin", directive = "macro", header = "string",
+  module = "namespace", union = "type", templateParameter = "type",
+  label = "constant", macroParameter = "parameter", attribute = "attribute",
 }
 -- The category a token shows in, from its type and the set of its
 -- modifiers; nil keeps the highlighting it has. Names where they are
@@ -475,6 +479,9 @@ local token_categories = {
 -- `.call`; what the standard library gives is `.builtin`, and a read-only
 -- variable reads as a constant.
 function module.token_category(type, modifiers)
+  if modifiers.inactive then
+    return "comment"
+  end
   local category = token_categories[type]
   local defines = modifiers.declaration or modifiers.definition
   if category == "function" then
@@ -1167,7 +1174,8 @@ local function perform(action, origin)
   end
 end
 
-soda.define_command("lsp-code-action", "Pick one of the server's code actions", function()
+local function code_action(kind)
+  kind = kind and kind:match("%S+")
   local buf = soda.buffer()
   local info = soda.lsp.info()
   if not info then
@@ -1194,7 +1202,7 @@ soda.define_command("lsp-code-action", "Pick one of the server's code actions", 
   local origin = { buffer = buf, revision = buf:revision() }
   ask("textDocument/codeAction", {
     range = { start = first, ["end"] = last },
-    context = { diagnostics = soda.lsp.array(nearby) },
+    context = { diagnostics = soda.lsp.array(nearby), only = kind and soda.lsp.array({ kind }) or nil },
   }, function(result)
     local actions, titles = {}, {}
     for _, action in ipairs(result or {}) do
@@ -1211,7 +1219,9 @@ soda.define_command("lsp-code-action", "Pick one of the server's code actions", 
       perform(actions[index], origin)
     end)
   end)
-end)
+end
+module.code_action = code_action
+soda.define_command("lsp-code-action", "Pick one of the server's code actions", code_action)
 
 soda.define_command("lsp-format", "Format the selection, or else the buffer, with the language server", function()
   local buf = soda.buffer()

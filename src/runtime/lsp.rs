@@ -28,6 +28,7 @@ const CRASHES: usize = 3;
 const CRASH_WINDOW: Duration = Duration::from_secs(180);
 
 enum Outgoing {
+    Restart(Value),
     Message(Value),
     /// A document's text, turned into JSON on the writer thread.
     Open {
@@ -46,7 +47,7 @@ impl Outgoing {
     fn value(self) -> Value {
         let notification = |method: &str, params: Value| json!({ "jsonrpc": "2.0", "method": method, "params": params });
         match self {
-            Self::Message(value) => value,
+            Self::Message(value) | Self::Restart(value) => value,
             Self::Open {
                 uri,
                 language,
@@ -78,6 +79,7 @@ impl Outgoing {
 
 /// What a server said, or that it is gone.
 enum Incoming {
+    Restart(Key),
     Message(Key, Value),
     Closed(Key),
 }
@@ -151,6 +153,7 @@ struct Opened {
     edited: Option<Instant>,
 }
 struct Client {
+    restarting: bool,
     process: Child,
     writer: Sender<Outgoing>,
     next: i64,
@@ -278,6 +281,7 @@ fn initialize(root: &Path, init: &Value) -> Value {
             "processId": std::process::id(),
             "rootUri": uri(root),
             "capabilities": {
+                "experimental": { "restartServer": true },
                 "general": { "positionEncodings": ["utf-8", "utf-16"] },
                 "textDocument": {
                     "synchronization": { "didSave": true },
@@ -310,11 +314,15 @@ fn initialize(root: &Path, init: &Value) -> Value {
                             "typeParameter", "parameter", "variable", "property", "enumMember",
                             "function", "method", "macro", "keyword", "modifier", "comment",
                             "string", "number", "regexp", "operator", "decorator",
+                            "character", "escape", "formatSpecifier", "primitive", "bracket",
+                            "directive", "header", "module", "union", "typeAlias",
+                            "templateParameter", "concept", "field", "label", "macroParameter",
+                            "attribute", "plain",
                         ],
                         "tokenModifiers": [
                             "declaration", "definition", "readonly", "static", "deprecated",
                             "abstract", "async", "modification", "documentation",
-                            "defaultLibrary",
+                            "defaultLibrary", "inactive",
                         ],
                         "formats": ["relative"],
                     },
@@ -500,14 +508,22 @@ impl Lsp {
         let mut stdin = process.stdin.take().unwrap();
         let stdout = process.stdout.take().unwrap();
         let (writer, outgoing) = mpsc::channel::<Outgoing>();
+        let restart_incoming = self.incoming.0.clone();
+        let restart_key = key.clone();
         std::thread::spawn(move || {
             for message in outgoing {
+                let restart = matches!(&message, Outgoing::Restart(_));
                 let bytes = frame(&message.value());
                 if stdin
                     .write_all(&bytes)
                     .and_then(|()| stdin.flush())
                     .is_err()
                 {
+                    break;
+                }
+                if restart {
+                    let _ = restart_incoming.send(Incoming::Restart(restart_key.clone()));
+                    crate::wake::wake();
                     break;
                 }
             }
@@ -532,6 +548,7 @@ impl Lsp {
         self.clients.insert(
             key.clone(),
             Client {
+                restarting: false,
                 process,
                 writer,
                 next: 1,
@@ -747,8 +764,20 @@ impl Lsp {
         let mut failure = None;
         while let Ok(incoming) = self.incoming.1.try_recv() {
             match incoming {
+                Incoming::Restart(key) => {
+                    if let Some(client) = self.clients.get_mut(&key) {
+                        // Wait for the reader's Closed event before replacing this
+                        // client, so its EOF cannot remove the new process.
+                        client.restarting = true;
+                        let _ = client.process.kill();
+                    }
+                }
                 Incoming::Closed(key) => {
-                    if self.clients.remove(&key).is_some() {
+                    if let Some(client) = self.clients.remove(&key) {
+                        if client.restarting {
+                            self.crashes.remove(&key);
+                            continue;
+                        }
                         let crashes = self.crashes.entry(key.clone()).or_default();
                         crashes.retain(|at| at.elapsed() < CRASH_WINDOW);
                         crashes.push(Instant::now());
@@ -797,6 +826,12 @@ impl Lsp {
             (Some(id), Some(method)) => {
                 let params = &message["params"];
                 match method {
+                    "clice/restartServer" => {
+                        client.send(Outgoing::Restart(json!({
+                            "jsonrpc": "2.0", "id": id, "result": null,
+                        })));
+                        return None;
+                    }
                     "client/registerCapability" => {
                         for registration in params["registrations"].as_array().into_iter().flatten()
                         {

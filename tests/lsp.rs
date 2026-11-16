@@ -1641,3 +1641,165 @@ fn rust_analyzer_keeps_compiler_and_native_diagnostics() {
                 .any(|n| n.text.starts_with("expected u32, found"))
     });
 }
+
+#[test]
+fn clice_call_trees_expand_with_the_original_server() {
+    let Some(mut f) = open_with(
+        "one\ntwo\nthree\nfour\n",
+        r#"{ name = "clice" }"#,
+        r#"require("clice").setup()
+        soda.map("clice", "C-c c", "clice-callers 1")"#,
+    ) else {
+        return;
+    };
+    keys(&mut f.r, "C-c c");
+    wait(&mut f.r, |r| text(r).starts_with("▾ root"));
+    keys(&mut f.r, "j TAB");
+    wait(&mut f.r, |r| text(r).contains("deeper"));
+    assert!(
+        f.log().contains(
+            r#"$clice/caller {"callType": 1, "hierarchy": true, "id": "2", "levels": 1}"#
+        ),
+        "{}",
+        f.log()
+    );
+}
+
+#[test]
+fn clice_context_pages_preserve_the_selected_occurrence_and_hash() {
+    let Some(mut f) = open_with("one\n", r#"{ name = "clice" }"#, "") else {
+        return;
+    };
+    f.r.command(Command::Named("clice-switch-context".into()));
+    wait(&mut f.r, |r| {
+        matches!(r.layer(), Some(soda::interaction::Layer::CommandLine(_)))
+    });
+    // Automatic is first, followed by the two pages of contexts.
+    keys(&mut f.r, "C-n C-n RET");
+    let log = f.log.clone();
+    wait(&mut f.r, move |_| {
+        std::fs::read_to_string(&log)
+            .unwrap()
+            .contains("clice/switchContext")
+    });
+    assert!(f.log().contains(r#""commandHash": "hash1""#), "{}", f.log());
+    assert!(f.log().contains(r#""epoch": 7"#), "{}", f.log());
+    assert!(f.log().contains(r#""occurrence": 1"#), "{}", f.log());
+}
+
+#[test]
+fn clice_configuration_request_restarts_and_reopens_documents() {
+    let Some(mut f) = open_with("one\n", r#"{ name = "clice" }"#, "") else {
+        return;
+    };
+    f.r.command(Command::Named("clice-configuration".into()));
+    wait(&mut f.r, |r| {
+        matches!(r.layer(), Some(soda::interaction::Layer::CommandLine(_)))
+    });
+    keys(&mut f.r, "RET");
+    let log = f.log.clone();
+    wait(&mut f.r, move |_| {
+        std::fs::read_to_string(&log)
+            .unwrap()
+            .matches("didOpen")
+            .count()
+            >= 2
+    });
+    assert!(f.log().contains("clice/switchConfiguration"));
+    assert_eq!(f.log().matches("initialize ").count(), 2);
+    assert_eq!(text(&f.r), "one\n");
+}
+
+#[test]
+fn clice_semantic_tokens_cover_extended_types_and_inactive_code() {
+    let mut r = Runtime::new(std::env::temp_dir()).unwrap();
+    r.load_startup_lua();
+    r.source_lua(
+        "clice tokens",
+        r#"
+        local category = require("lsp").token_category
+        assert(category("primitive", {}) == "type.builtin")
+        assert(category("templateParameter", {}) == "type")
+        assert(category("escape", {}) == "escape")
+        assert(category("directive", {}) == "macro")
+        assert(category("function", { inactive = true }) == "comment")
+    "#,
+    )
+    .unwrap();
+}
+
+#[test]
+#[ignore = "requires installed clice and C++ toolchain"]
+fn clice_serves_a_compilation_database_and_reports_context() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("a.cpp");
+    std::fs::write(&path, "int value;\n").unwrap();
+    std::fs::write(
+        dir.path().join("compile_commands.json"),
+        serde_json::json!([{
+            "directory": dir.path(), "file": path,
+            "arguments": ["clang++", "-c", path],
+        }])
+        .to_string(),
+    )
+    .unwrap();
+    let mut r = Runtime::new(dir.path().to_owned()).unwrap();
+    r.load_startup_lua();
+    r.enable_lsp();
+    r.source_lua("clice setup", r#"require("clice").setup({ auto = true })"#)
+        .unwrap();
+    r.start(Some(path));
+    wait(&mut r, |r| {
+        r.app().active_view().is_some() && text(r) == "int value;\n"
+    });
+    wait(&mut r, |r| {
+        r.source_lua("ready", r#"
+            local info = soda.lsp.info()
+            if info and info.capabilities.semanticTokensProvider then soda.message("clice ready") end
+        "#).unwrap();
+        r.message() == "clice ready"
+    });
+    r.source_lua(
+        "context",
+        r#"
+        soda.lsp.request("clice/currentContext", { uri = soda.lsp.uri() }, function(result, failure)
+            assert(not failure, failure and failure.message)
+            assert(result.command.source == "database")
+            soda.message("clice context received")
+        end)
+    "#,
+    )
+    .unwrap();
+    wait(&mut r, |r| r.message() == "clice context received");
+}
+
+#[test]
+fn clice_counterparts_context_visibility_and_refactor_use_the_extensions() {
+    let Some(mut f) = open_with("one\n", r#"{ name = "clice" }"#, "") else {
+        return;
+    };
+    f.r.command(Command::Named("clice-other-contexts".into()));
+    let log = f.log.clone();
+    wait(&mut f.r, move |_| {
+        std::fs::read_to_string(&log)
+            .unwrap()
+            .contains("clice/showOtherContexts")
+    });
+    assert!(f.log().contains(r#""show": false"#));
+    f.r.command(Command::Named("clice-switch".into()));
+    let log = f.log.clone();
+    wait(&mut f.r, move |_| {
+        std::fs::read_to_string(&log)
+            .unwrap()
+            .contains("clice/counterparts")
+    });
+    f.r.command(Command::Named("clice-refactor refactor.extract".into()));
+    wait(&mut f.r, |r| {
+        matches!(r.layer(), Some(soda::interaction::Layer::CommandLine(_)))
+    });
+    assert!(
+        f.log().contains(r#"codeAction only ["refactor.extract"]"#),
+        "{}",
+        f.log()
+    );
+}
