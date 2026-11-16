@@ -687,6 +687,15 @@ struct Segment {
 /// space that fits and inside a word only when none does. Without a width
 /// the line is one row, cut at the edge and scrolled sideways.
 fn segments(text: &str, width: Option<usize>, walk: Walk) -> Vec<Segment> {
+    segments_with_inlays(text, width, walk, &[])
+}
+
+fn segments_with_inlays(
+    text: &str,
+    width: Option<usize>,
+    walk: Walk,
+    inlays: &[Inlay],
+) -> Vec<Segment> {
     let Some(width) = width.map(|w| w.max(1)) else {
         return vec![Segment {
             start: 0,
@@ -704,7 +713,17 @@ fn segments(text: &str, width: Option<usize>, walk: Walk) -> Vec<Segment> {
     for (offset, cluster) in text.grapheme_indices(true) {
         let end = x + walk.advance(cluster, x);
         let whitespace = cluster == " " || cluster == "\t";
-        while offset < content_end && !whitespace && end - first > width && x > first {
+        while offset < content_end
+            && !whitespace
+            && end - first
+                + inlays
+                    .iter()
+                    .filter(|hint| (first..=x).contains(&hint.x))
+                    .map(|hint| text_width(walk.measure, &hint.text, hint.font))
+                    .sum::<usize>()
+                > width
+            && x > first
+        {
             let (at, at_x) = space.take().unwrap_or((offset, x));
             out.push(Segment {
                 start,
@@ -783,11 +802,7 @@ impl<'a> Rows<'a> {
                         .iter()
                         .take_while(|(offset, _)| *offset <= end)
                         .map(|(offset, hint)| Inlay {
-                            x: if self.wrap.is_some() {
-                                usize::MAX
-                            } else {
-                                self.walk.x_of(&text, offset - start)
-                            },
+                            x: self.walk.x_of(&text, offset - start),
                             text: hint.chars().filter(|c| !c.is_control()).collect(),
                             face: None,
                             font: Font::Hint,
@@ -800,12 +815,8 @@ impl<'a> Rows<'a> {
         placed
     }
     /// The room hints take from `left` up to a character `x` from its
-    /// line's start. A wrapped line keeps its hints at the end, so it has
-    /// none to count.
+    /// line's start.
     fn hinted(&self, line: usize, left: usize, x: usize) -> usize {
-        if self.wrap.is_some() {
-            return 0;
-        }
         self.inlays(line)
             .iter()
             .filter(|hint| (left..=x).contains(&hint.x))
@@ -816,21 +827,19 @@ impl<'a> Rows<'a> {
     /// right of `left`; a hint counts as the character after it.
     fn unhinted(&self, line: usize, left: usize, across: usize) -> usize {
         let mut used = 0;
-        if self.wrap.is_none() {
-            for hint in self.inlays(line).iter() {
-                if hint.x < left {
-                    continue;
-                }
-                let start = hint.x - left + used;
-                if across < start {
-                    break;
-                }
-                let width = text_width(self.walk.measure, &hint.text, hint.font);
-                if across < start + width {
-                    return hint.x;
-                }
-                used += width;
+        for hint in self.inlays(line).iter() {
+            if hint.x < left {
+                continue;
             }
+            let start = hint.x - left + used;
+            if across < start {
+                break;
+            }
+            let width = text_width(self.walk.measure, &hint.text, hint.font);
+            if across < start + width {
+                return hint.x;
+            }
+            used += width;
         }
         left + across - used
     }
@@ -844,10 +853,11 @@ impl<'a> Rows<'a> {
             .borrow_mut()
             .entry(line)
             .or_insert_with(|| {
-                segments(
+                segments_with_inlays(
                     &self.snapshot.line(line).unwrap_or_default(),
                     self.wrap,
                     self.walk,
+                    &self.inlays(line),
                 )
                 .into()
             })
@@ -1047,7 +1057,9 @@ pub(crate) fn offset_at(
         // Past the end of a row that continues, stay on its last character.
         let last = index + 1 < segments.len();
         let room = segment.xs.len().saturating_sub(usize::from(last));
-        segment.xs.start + across.min(room)
+        layout
+            .unhinted(line, segment.xs.start, across)
+            .min(segment.xs.start + room)
     } else {
         layout.unhinted(line, view.viewport.horizontal_scroll, across)
     };
@@ -1247,8 +1259,6 @@ pub(crate) fn frame(
             let semantic = app.tokens(view.document_id, start..start + text.len());
             categories = overlay(base, &semantic);
         }
-        // A wrapped line would lose what hints push past the edge, so they
-        // wait at its end, on a row of their own width.
         let last_row = layout
             .wrap
             .is_some()
@@ -1259,13 +1269,16 @@ pub(crate) fn frame(
             face,
             font,
         };
-        let mut hints: Vec<Inlay> = match last_row {
-            None => layout.inlays(number).to_vec(),
-            Some(false) => vec![],
-            Some(true) => (layout.inlays(number).iter())
-                .map(|hint| after(format!(" {}", hint.text), None, hint.font))
-                .collect(),
-        };
+        let mut hints: Vec<Inlay> = layout
+            .inlays(number)
+            .iter()
+            .filter(|hint| {
+                layout.wrap.is_none()
+                    || (hint.x >= segment.xs.start
+                        && (hint.x < segment.xs.end || last_row == Some(true)))
+            })
+            .cloned()
+            .collect();
         // A digit at the end of a line has no character to stand on, so it
         // stands after the text, as the indicator does.
         let content = text.trim_end_matches(['\n', '\r']).len();
@@ -1342,16 +1355,12 @@ pub(crate) fn frame(
                 } else {
                     walk.x_of(&text, content)
                 };
-                let hints = if layout.wrap.is_none() {
-                    layout
-                        .inlays(number)
-                        .iter()
-                        .filter(|hint| first <= hint.x && hint.x < end)
-                        .map(|hint| text_width(measure, &hint.text, hint.font))
-                        .sum::<usize>()
-                } else {
-                    0
-                };
+                let hints = layout
+                    .inlays(number)
+                    .iter()
+                    .filter(|hint| first <= hint.x && hint.x < end)
+                    .map(|hint| text_width(measure, &hint.text, hint.font))
+                    .sum::<usize>();
                 end.saturating_sub(first).saturating_add(hints).min(room)
             });
         output.push(Row {
@@ -2312,6 +2321,46 @@ mod tests {
             10
         }
     }
+    #[test]
+    fn wrapped_parameter_hints_stay_before_arguments() {
+        let mut app = app("call(ARG);", Language::PlainText);
+        let view = app.active_view().unwrap();
+        let document = app.view(view).unwrap().document_id;
+        app.dispatch(Event::SetOption {
+            scope: crate::options::Scope::Global,
+            name: "wrap",
+            value: crate::options::Value::Bool(true),
+        })
+        .unwrap();
+        app.dispatch(Event::Inlays {
+            document,
+            hints: vec![(0, 5, "arg: ".into())],
+        })
+        .unwrap();
+        let shown = frame(&mut app, 80, 3).unwrap();
+        assert_eq!(
+            shown.rows[0]
+                .spans
+                .iter()
+                .map(|span| span.text.as_str())
+                .collect::<String>(),
+            "call(arg: ARG);"
+        );
+        let shown = frame(&mut app, 10, 3).unwrap();
+        let text: String = shown
+            .rows
+            .iter()
+            .flat_map(|row| row.spans.iter())
+            .map(|span| span.text.as_str())
+            .collect();
+        assert_eq!(text, "call(arg: ARG);");
+        assert_eq!(
+            super::position_of(&app, view, &Cells, 10, 3, 5),
+            Some((1, 5))
+        );
+        assert_eq!(super::offset_at(&app, &Cells, 10, 1, 2), Some(5));
+    }
+
     #[test]
     fn other_measures_place_text_hints_and_the_caret_by_their_widths() {
         let mut app = app("a\t中x", Language::PlainText);

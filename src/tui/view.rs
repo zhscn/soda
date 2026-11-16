@@ -1737,10 +1737,10 @@ mod tests {
         assert!(screen(&mut r, 40, 8).contains("call(1, 2)"));
         r.command(Command::Named("set inlay-hints true".into()));
 
-        // Wrapped text keeps its columns, and the hints wait at the end.
+        // Wrapping preserves hints at their argument positions.
         r.command(Command::Named("set wrap true".into()));
         let text = screen(&mut r, 40, 8);
-        assert!(text.contains("call(1, 2) a:  b:"), "{text}");
+        assert!(text.contains("call(a: 1, b: 2)"), "{text}");
     }
 
     #[test]
