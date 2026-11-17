@@ -93,4 +93,4 @@ cargo run --features gui --example gui_snapshot -- \
 - **Linux**：`scripts/install-linux.sh` 把 `soda`、`soda-gui`、`packaging/linux/io.github.zhscn.soda.desktop` 和 `assets/icon.svg`（装成 hicolor 的 scalable 图标）放到 `PREFIX`，默认 `~/.local`。
 - **macOS**：`scripts/bundle-macos.sh` 构建 `soda-gui`，用 `packaging/macos/Info.plist` 和已提交的 `soda.icns` 组装 `Soda.app` 并做临时签名。`scripts/make-icons.sh` 从 `assets/icon.svg` 渲染 `.icns`，只在图标改动后运行。
 
-从启动器或 Finder 打开时，工作目录若是根目录就换成主目录，项目从主目录找起。macOS 上从 Finder 启动的程序拿不到 shell 的 `PATH`，语言服务器的命令要写绝对路径；Finder 里“用 Soda 打开”文件还不支持。
+从启动器或 Finder 打开时，工作目录若是根目录就换成主目录，项目从主目录找起。macOS 打包脚本把执行打包时终端的 `PATH` 写入 `Info.plist` 的 `LSEnvironment` 字典，由 Launch Services 启动应用时设置，供语言服务器等外部工具使用。终端的 `PATH` 变化后需重新打包；分发到其他机器时，其中的目录也需在目标机器上存在。直接运行包内二进制时继承启动进程的环境。Finder 里“用 Soda 打开”文件还不支持。
