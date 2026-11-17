@@ -1510,14 +1510,18 @@ end)
 
 -- By hand, as eglot does: a server in a directory takes the documents of
 -- its language below it, whatever their markers say.
-soda.define_command("lsp-start", "Start the language server, in DIR or where the document's root is", function(dir)
+local function start_server(dir)
   local root = soda.lsp.start(dir)
   if root then
     soda.message("Language server for " .. relative(root))
   else
     soda.message("No language server for this document")
   end
-end, { args = { { name = "DIR", kind = "path", optional = true } } })
+end
+for _, name in ipairs({ "lsp-start", "lsp" }) do
+  soda.define_command(name, "Start the language server, in DIR or where the document's root is", start_server,
+    { args = { { name = "DIR", kind = "path", optional = true } } })
+end
 soda.define_command("lsp-stop", "Stop the document's language server until lsp-start", function()
   local uris = soda.lsp.stop()
   if not uris then
