@@ -1344,7 +1344,9 @@ pub(crate) fn frame(
             inlays: &hints,
         };
         let (first, room) = match layout.wrap {
-            Some(_) if hints.is_empty() => (segment.xs.start, segment.xs.len().min(width)),
+            Some(_) if last_row == Some(false) && hints.is_empty() => {
+                (segment.xs.start, segment.xs.len().min(width))
+            }
             Some(_) => (segment.xs.start, width),
             None => (left, width),
         };
@@ -1785,6 +1787,39 @@ mod tests {
         assert_eq!(width(row("", 5, 0..5, 0, 8, tab)), 0);
         // Not when the line is scrolled past.
         assert_eq!(width(row("ab", 0, 0..3, 4, 8, tab)), 0);
+    }
+    #[test]
+    fn wrapped_selection_marks_only_selected_line_breaks() {
+        let mut app = app("aaa bbb\n\nccc", Language::PlainText);
+        app.dispatch(Event::SetOption {
+            scope: crate::options::Scope::Global,
+            name: "wrap",
+            value: crate::options::Value::Bool(true),
+        })
+        .unwrap();
+        let view = app.active_view().unwrap();
+        for (head, expected) in [
+            (7, vec![]),
+            (8, vec![(1, 3, 1)]),
+            (10, vec![(1, 3, 1), (2, 0, 1)]),
+        ] {
+            app.dispatch(Event::Edit {
+                view,
+                command: Command::SetSelection(Selection { anchor: 0, head }),
+                time: Duration::ZERO,
+            })
+            .unwrap();
+            let shown = frame(&mut app, 5, 10).unwrap();
+            let mut blanks = Vec::new();
+            for (row, line) in shown.rows.iter().enumerate() {
+                for span in &line.spans {
+                    if span.selected && span.text.is_empty() {
+                        blanks.push((row, span.x, span.width));
+                    }
+                }
+            }
+            assert_eq!(blanks, expected);
+        }
     }
     #[test]
     fn frame_uses_document_tab_width_and_reveals_caret_after_resize() {
