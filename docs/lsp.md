@@ -139,7 +139,7 @@ result:numbers(key)   -- 数字数组留在 Rust，得到 numbers 句柄；不�
 result:decode()       -- 整个回答转成 Lua 值
 numbers:edited(edits) -- semanticTokens/full/delta 的 edits 做在旧数据上，得到新句柄；#numbers、numbers[i] 可读
 soda.lsp.tokens(data, encoding, function(type, bits) return category, struck end)  -- 解码并替换当前文档的语义高亮；每种 (type, bits) 只问一次，返回划掉的范围给 soda.paint
-soda.lsp.inlays(result, encoding)  -- 替换当前文档的 inlay hint，result 是 inlayHint 的回答（句柄或表）
+soda.lsp.inlays(result, encoding, buffer)  -- 替换 buffer 的 inlay hint，省略 buffer 时使用当前文档；result 是 inlayHint 的回答（句柄或表）
 ```
 
 inlay hint 按偏移排序保存，编辑时和语义高亮一样一次映射；绘制只为排到的行放置 hint，不每帧走全文档的 hint。

@@ -7,6 +7,7 @@ import time
 
 log = open(os.environ["FAKE_LSP_LOG"], "a", buffering=1)
 texts = {}
+held_inlays = []
 
 
 def read():
@@ -196,6 +197,15 @@ while True:
         log.write("delta %s\n" % params["previousResultId"])
         answer(message, {"resultId": "2",
                          "edits": [{"start": 1, "deleteCount": 2, "data": [2, 1]}]})
+    elif method == "textDocument/inlayHint" and "delayed hints" in texts.get(
+            params["textDocument"]["uri"], ""):
+        held_inlays.append(message)
+        log.write("held inlays\n")
+    elif method == "$fake/release-inlays":
+        for request in held_inlays:
+            answer(request, [{"position": {"line": 0, "character": 2},
+                              "label": "original: "}])
+        held_inlays.clear()
     elif method == "textDocument/inlayHint":
         answer(message, [{"position": {"line": 0, "character": 2}, "label": "a:",
                           "paddingRight": True},

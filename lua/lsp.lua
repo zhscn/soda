@@ -546,7 +546,7 @@ local function ask_tokens(buf, uri, info, revision)
     end
     token_results[uri] = { id = result:get("resultId"), data = data }
     -- Kept even for text that has changed: the server counts from it.
-    if buf:revision() == revision then
+    if soda.buffer() == buf and buf:revision() == revision then
       show_tokens(data, provider.legend, info.encoding)
     end
   end, nil, true)
@@ -574,7 +574,7 @@ local function decorate()
     local params = { textDocument = document, range = whole }
     send("inlays " .. uri, "textDocument/inlayHint", params, function(result)
       if buf:revision() == revision then
-        soda.lsp.inlays(result, info.encoding)
+        soda.lsp.inlays(result, info.encoding, buf)
       end
     end, nil, true)
   end

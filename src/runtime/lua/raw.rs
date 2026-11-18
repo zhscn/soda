@@ -198,57 +198,61 @@ pub(super) fn register<'scope, 'r: 'scope>(
             },
         )?,
     )?;
-    // Inlay hints for the current document, as `textDocument/inlayHint`
-    // answers them.
+    // Inlay hints for the supplied buffer, or the current document.
     soda.set(
         "lsp_inlays",
-        scope.create_function(|lua, (hints, encoding): (Value, String)| {
-            let hints = json_of(lua, hints)?;
-            let (document, snapshot) = {
-                let runtime = runtime.borrow();
-                let document = runtime.document().map_err(mlua::Error::runtime)?;
-                let editor = runtime.app.workspace().editor(document).unwrap();
-                (document, editor.model().document().snapshot().clone())
-            };
-            let mut out = vec![];
-            let mut walk = snapshot.walk_lines();
-            let mut row: Option<(usize, &str)> = None;
-            for hint in hints.as_array().into_iter().flatten() {
-                let position = &hint["position"];
-                let (Some(line), Some(character)) =
-                    (position["line"].as_u64(), position["character"].as_u64())
-                else {
-                    continue;
+        scope.create_function(
+            |lua, (hints, encoding, buffer): (Value, String, Option<Table>)| {
+                let hints = json_of(lua, hints)?;
+                let (document, snapshot) = {
+                    let runtime = runtime.borrow();
+                    let document = match buffer {
+                        Some(buffer) => super::buffer::document(&runtime, buffer.get("id")?)?,
+                        None => runtime.document().map_err(mlua::Error::runtime)?,
+                    };
+                    let editor = runtime.app.workspace().editor(document).unwrap();
+                    (document, editor.model().document().snapshot().clone())
                 };
-                let line = line as usize;
-                if line >= snapshot.line_count() {
-                    continue;
+                let mut out = vec![];
+                let mut walk = snapshot.walk_lines();
+                let mut row: Option<(usize, &str)> = None;
+                for hint in hints.as_array().into_iter().flatten() {
+                    let position = &hint["position"];
+                    let (Some(line), Some(character)) =
+                        (position["line"].as_u64(), position["character"].as_u64())
+                    else {
+                        continue;
+                    };
+                    let line = line as usize;
+                    if line >= snapshot.line_count() {
+                        continue;
+                    }
+                    let mut text = match &hint["label"] {
+                        serde_json::Value::String(label) => label.clone(),
+                        serde_json::Value::Array(parts) => parts
+                            .iter()
+                            .filter_map(|part| part["value"].as_str())
+                            .collect(),
+                        _ => continue,
+                    };
+                    if hint["paddingLeft"].as_bool() == Some(true) {
+                        text.insert(0, ' ');
+                    }
+                    if hint["paddingRight"].as_bool() == Some(true) {
+                        text.push(' ');
+                    }
+                    if row.is_none_or(|(at, _)| at != line) {
+                        row = Some((line, walk.content(line).map_or("", |(_, text)| text)));
+                    }
+                    let column = byte_of(row.unwrap().1, character as usize, &encoding);
+                    out.push((line, column, text));
                 }
-                let mut text = match &hint["label"] {
-                    serde_json::Value::String(label) => label.clone(),
-                    serde_json::Value::Array(parts) => parts
-                        .iter()
-                        .filter_map(|part| part["value"].as_str())
-                        .collect(),
-                    _ => continue,
-                };
-                if hint["paddingLeft"].as_bool() == Some(true) {
-                    text.insert(0, ' ');
-                }
-                if hint["paddingRight"].as_bool() == Some(true) {
-                    text.push(' ');
-                }
-                if row.is_none_or(|(at, _)| at != line) {
-                    row = Some((line, walk.content(line).map_or("", |(_, text)| text)));
-                }
-                let column = byte_of(row.unwrap().1, character as usize, &encoding);
-                out.push((line, column, text));
-            }
-            runtime.borrow_mut().edit_event(Event::Inlays {
-                document,
-                hints: out,
-            })
-        })?,
+                runtime.borrow_mut().edit_event(Event::Inlays {
+                    document,
+                    hints: out,
+                })
+            },
+        )?,
     )?;
     Ok(())
 }

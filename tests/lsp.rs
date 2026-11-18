@@ -274,6 +274,41 @@ fn tokens_and_hints_arrive_after_the_diagnostics_and_move_with_the_text() {
     assert_eq!(f.r.app().inlays(document)[0].0, 5);
 }
 #[test]
+fn delayed_inlay_hints_update_the_requested_document_after_switching_files() {
+    let Some(mut f) = open("// delayed hints\n") else {
+        return;
+    };
+    let original =
+        f.r.app()
+            .view(f.r.app().active_view().unwrap())
+            .unwrap()
+            .document_id;
+    let log = f.log.clone();
+    wait(&mut f.r, move |_| {
+        std::fs::read_to_string(&log).is_ok_and(|text| text.contains("held inlays"))
+    });
+    let other = f.dir.path().join("other.cpp");
+    std::fs::write(&other, "void other();\n").unwrap();
+    f.r.command(Command::OpenPath(other));
+    wait(&mut f.r, |r| text(r) == "void other();\n");
+    let current =
+        f.r.app()
+            .view(f.r.app().active_view().unwrap())
+            .unwrap()
+            .document_id;
+    f.r.source_lua("release", r#"soda.lsp.notify("$fake/release-inlays", {})"#)
+        .unwrap();
+    wait(&mut f.r, |r| !r.app().inlays(original).is_empty());
+    assert_eq!(f.r.app().inlays(original), &[(2, "original: ".to_owned())]);
+    assert!(
+        f.r.app()
+            .inlays(current)
+            .iter()
+            .all(|(_, label)| label != "original: ")
+    );
+}
+
+#[test]
 fn a_call_shows_its_signature_until_it_closes() {
     let Some(mut f) = open("\n") else { return };
     f.r.command(Command::SetMode(EditMode::Insert));
