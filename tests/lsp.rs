@@ -1682,8 +1682,8 @@ fn clice_call_trees_expand_with_the_original_server() {
     let Some(mut f) = open_with(
         "one\ntwo\nthree\nfour\n",
         r#"{ name = "clice" }"#,
-        r#"require("clice").setup()
-        soda.map("clice", "C-c c", "clice-callers 1")"#,
+        r#"require("clice").setup({ call_type = 1 })
+        soda.map("clice", "C-c c", "clice-callers 3")"#,
     ) else {
         return;
     };
@@ -1691,9 +1691,31 @@ fn clice_call_trees_expand_with_the_original_server() {
     wait(&mut f.r, |r| text(r).starts_with("▾ root"));
     keys(&mut f.r, "j TAB");
     wait(&mut f.r, |r| text(r).contains("deeper"));
+    let contents = text(&f.r);
+    let document =
+        f.r.app()
+            .view(f.r.app().active_view().unwrap())
+            .unwrap()
+            .document_id;
+    let paints = f.r.app().paints(document);
+    let detail = soda::application::faces::index("detail").unwrap();
+    let mut colored_labels = Vec::new();
+    for (range, face) in paints {
+        if face != soda::application::Face::Named(detail) {
+            colored_labels.push((&contents[range], face));
+        }
+    }
+    let face = |name| soda::application::Face::Named(f.r.app().faces().index(name).unwrap());
+    assert_eq!(
+        colored_labels,
+        [
+            ("first [base]", face("clice.call-base")),
+            ("deeper [derived]", face("clice.call-derived")),
+        ],
+    );
     assert!(
         f.log().contains(
-            r#"$clice/caller {"callType": 1, "hierarchy": true, "id": "2", "levels": 1}"#
+            r#"$clice/caller {"callType": 3, "hierarchy": true, "id": "2", "levels": 1}"#
         ),
         "{}",
         f.log()
@@ -1724,7 +1746,11 @@ fn clice_context_pages_preserve_the_selected_occurrence_and_hash() {
 
 #[test]
 fn clice_configuration_request_restarts_and_reopens_documents() {
-    let Some(mut f) = open_with("one\n", r#"{ name = "clice" }"#, "") else {
+    let Some(mut f) = open_with(
+        "one\n",
+        r#"{ name = "clice", restart_request = "clice/restartServer" }"#,
+        "",
+    ) else {
         return;
     };
     f.r.command(Command::Named("clice-configuration".into()));

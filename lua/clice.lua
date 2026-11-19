@@ -3,6 +3,9 @@ local lsp = require("lsp")
 local M = {}
 local call_type = 3
 
+soda.define_face("clice.call-base", { fg = "#ff4500" })
+soda.define_face("clice.call-derived", { fg = "#ffa500" })
+
 local function request(method, params, done, origin)
   return lsp.send(method, method, params, function(result, failure)
     if failure then
@@ -51,7 +54,13 @@ local function node(item)
     local place = lsp.location_entry(item.location)
     detail = lsp.relative(place.path) .. ":" .. (place.line + 1)
   end
-  return { label = item.name or "", detail = detail, children = children,
+  local name, style = item.name or "", nil
+  if item.callType == 1 then
+    name, style = name .. " [base]", "clice.call-base"
+  elseif item.callType == 2 then
+    name, style = name .. " [derived]", "clice.call-derived"
+  end
+  return { label = name, style = style, detail = detail, children = children,
     expanded = children ~= nil, leaf = (item.numChildren or 0) == 0, item = item }
 end
 
@@ -234,6 +243,7 @@ function M.setup(options)
   for _, language in ipairs(options.languages or { "cpp" }) do
     soda.lsp.server(language, options.command or { "clice", "serve" }, {
       init = options.init, settings = options.settings, auto = options.auto, name = "clice",
+      restart_request = "clice/restartServer",
       roots = options.roots or { "clice.toml", ".clice/config.toml", "compile_commands.json", "git" },
     })
   end

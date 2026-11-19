@@ -137,6 +137,8 @@ soda.set("theme", "paper")
 
 名字有界面部分（`text`、`selection`、`cursor-line`、`gutter`、`gutter-current`、`status`、`mode-normal`、`mode-insert`、`mode-beacon`、`mode-prompt`、`secondary-selection`、`beacon-selection`、`beacon-cursor`、`title`、`border`、`paren-match`、`inactive-window`、`float`、`float-border`、`label`、`flash-match`、`flash-current`、`flash-backdrop`、`todo`、`note-error`、`note-warning`、`note-info`、`reference`、`reference-write`、`snippet`、`unnecessary`、`deprecated`、`mark1`…`mark8` 等，完整列表和说明见 `src/application/faces.rs`，命令行可补全）和语法分类 `syntax.comment`、`syntax.keyword`、`syntax.function.definition` 等。带点的语法 face 继承点前面的那个（见[语法分类](syntax.md#分类)）：`face syntax.function bold` 也作用于没单独设置的 `syntax.function.call`。
 
+扩展可用 `soda.define_face` 声明具名样式。声明之后，主题的 `faces` 表可覆盖扩展默认值，用户的 `face` 命令可进一步覆盖。清除用户覆盖时恢复当前主题的值，主题未设置时使用扩展默认值。
+
 光标形状跟随模式：Normal 和 Beacon 为方块，Insert 和输入框为竖线。
 
 ## 测试

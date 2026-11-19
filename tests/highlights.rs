@@ -82,6 +82,30 @@ fn patterns_highlight_globally_or_in_one_document() {
 }
 
 #[test]
+fn style_and_mark_key_routing_are_independent() {
+    let mut r = runtime("alpha beta");
+    r.source_lua(
+        "extension",
+        r##"
+        soda.define_face("plugin.match", { fg = "#123456" })
+        assert(soda.command("face plugin.match bold"))
+        assert(soda.command("highlight-local plugin.match alpha"))
+        assert(soda.command("flag-lines plugin plugin.match + 1"))
+        soda.highlight("beta", { underline = true }, { mark = true })
+        soda.highlight("alpha", "mark1")
+        "##,
+    )
+    .unwrap();
+    let view = r.app().view(r.app().active_view().unwrap()).unwrap();
+    let named = r.app().faces().resolve("plugin.match").unwrap();
+    let flag = r.app().flags(view.document_id)[&0];
+    assert_eq!(flag.face, named);
+    assert!(!r.app().on_mark());
+    line(&mut r, "goto 1:7");
+    assert!(r.app().on_mark());
+}
+
+#[test]
 fn symbols_are_marked_in_turn_and_taken_off_without_touching_the_rest() {
     let mut r = runtime("alpha beta gamma\n");
     r.load_startup_lua();

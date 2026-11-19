@@ -179,7 +179,7 @@ pub enum Command {
     /// Highlights a pattern everywhere, or in the current document.
     Highlight {
         local: bool,
-        face: Option<crate::application::Face>,
+        face: String,
         pattern: regex::Regex,
     },
     /// Removes the highlights of a pattern, or all of them.
@@ -187,7 +187,8 @@ pub enum Command {
     /// Flags zero-based lines of the current document in a group.
     FlagLines {
         group: String,
-        flag: crate::application::Flag,
+        face: String,
+        sign: String,
         lines: Vec<usize>,
     },
     /// Removes a group's flags, or all, from the current document.
@@ -1346,11 +1347,26 @@ impl Layers {
                 if local && document.is_none() {
                     response.message = Message::Set("No document to highlight in".into());
                 } else {
-                    response.events.push(Event::Highlight {
-                        document: document.filter(|_| local),
-                        face,
-                        pattern,
-                    });
+                    let face = if face == "mark" {
+                        Ok(None)
+                    } else {
+                        app.faces()
+                            .resolve(&face)
+                            .map(Some)
+                            .ok_or_else(|| format!("unknown face {face}"))
+                    };
+                    match face {
+                        Ok(face) => response.events.push(Event::Highlight {
+                            document: document.filter(|_| local),
+                            mark: matches!(face, None | Some(crate::application::Face::Mark(_))),
+                            face,
+                            pattern,
+                        }),
+                        Err(error) => {
+                            response.failed = true;
+                            response.message = Message::Set(error);
+                        }
+                    }
                 }
             }
             Command::Unhighlight(pattern) => {
@@ -1359,15 +1375,37 @@ impl Layers {
                     .events
                     .push(Event::Unhighlight { document, pattern });
             }
-            Command::FlagLines { group, flag, lines } => match active(app) {
-                Some(view) => response.events.push(Event::Flag {
-                    document: view.document_id,
-                    group,
-                    flag,
-                    lines,
-                }),
-                None => response.message = Message::Set("No document to flag".into()),
-            },
+            Command::FlagLines {
+                group,
+                face,
+                sign,
+                lines,
+            } => {
+                let flag = app
+                    .faces()
+                    .resolve(&face)
+                    .ok_or_else(|| {
+                        if face == "mark" {
+                            "flags need a face".to_owned()
+                        } else {
+                            format!("unknown face {face}")
+                        }
+                    })
+                    .and_then(|face| crate::application::Flag::new(face, &sign));
+                match (flag, active(app)) {
+                    (Ok(flag), Some(view)) => response.events.push(Event::Flag {
+                        document: view.document_id,
+                        group,
+                        flag,
+                        lines,
+                    }),
+                    (Err(error), _) => {
+                        response.failed = true;
+                        response.message = Message::Set(error);
+                    }
+                    (Ok(_), None) => response.message = Message::Set("No document to flag".into()),
+                }
+            }
             Command::UnflagLines(group) => {
                 if let Some(view) = active(app) {
                     response.events.push(Event::Unflag {

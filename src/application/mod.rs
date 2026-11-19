@@ -126,6 +126,10 @@ pub enum Event {
         name: String,
         spec: Option<faces::FaceSpec>,
     },
+    DefineFace {
+        name: String,
+        spec: faces::FaceSpec,
+    },
     /// Defines a theme the `theme` option may name, or replaces one.
     DefineTheme {
         name: String,
@@ -258,6 +262,7 @@ pub enum Event {
         document: Option<DocumentId>,
         face: Option<Face>,
         pattern: regex::Regex,
+        mark: bool,
     },
     /// Removes the highlights of a pattern, or all, from a document and
     /// everywhere.
@@ -651,7 +656,7 @@ impl Application {
         let text = snapshot.line(line).unwrap();
         let at = head - start;
         self.highlights(view.document_id)
-            .filter(|highlight| matches!(highlight.face, Face::Mark(_)))
+            .filter(|highlight| highlight.mark)
             .any(|highlight| {
                 highlight
                     .pattern
@@ -1622,6 +1627,10 @@ impl Application {
                 self.faces.set(&name, spec).map_err(Error::Setting)?;
                 update.options_changed = true;
             }
+            Event::DefineFace { name, spec } => {
+                self.faces.define(name, spec).map_err(Error::Setting)?;
+                update.options_changed = true;
+            }
             Event::DefineTheme { name, spec } => {
                 self.faces
                     .define_theme(&name, spec)
@@ -1794,8 +1803,9 @@ impl Application {
                 document,
                 face,
                 pattern,
+                mark,
             } => {
-                self.highlights.add(document, face, pattern);
+                self.highlights.add(document, face, pattern, mark);
                 update.options_changed = true;
             }
             Event::Unhighlight { document, pattern } => {

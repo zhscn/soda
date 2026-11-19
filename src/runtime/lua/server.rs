@@ -67,6 +67,10 @@ pub(super) fn register<'scope, 'r: 'scope>(
                             init: json("init")?,
                             settings: json("settings")?,
                             auto,
+                            restart_request: match options.as_ref() {
+                                Some(options) => options.get("restart_request")?,
+                                None => None,
+                            },
                             roots: function,
                         })
                     })

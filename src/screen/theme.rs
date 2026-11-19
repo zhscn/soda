@@ -200,7 +200,17 @@ impl Theme {
             theme.beacon_cursor.bg = mixed(theme.mode_visual.bg, secondary);
         }
         theme.named = crate::application::faces::names()
-            .map(|name| theme.slot(&name).copied().unwrap_or_default())
+            .map(|name| *theme.slot(&name).expect("built-in face has a theme slot"))
+            .chain(faces.custom().map(|(name, default)| {
+                [
+                    Some(default),
+                    defined.and_then(|theme| theme.faces.get(name)),
+                    faces.get(name),
+                ]
+                .into_iter()
+                .flatten()
+                .fold(Style::new(), |style, spec| apply(style, spec))
+            }))
             .collect();
         theme
     }
@@ -241,65 +251,15 @@ impl Theme {
         if let Some(category) = name.strip_prefix("syntax.") {
             return Some(&mut self.syntax[index_of(Category::named(category)?)]);
         }
-        if let Some(n) = name.strip_prefix("mark") {
-            let n: usize = n.parse().ok()?;
-            return self.marks.get_mut(n.checked_sub(1)?);
+        macro_rules! slot {
+            ($theme:ident; $(($name:literal, $field:ident $([$index:literal])?, $doc:literal),)*) => {
+                match name {
+                    $($name => Some(&mut $theme.$field$([$index])?),)*
+                    _ => None,
+                }
+            };
         }
-        Some(match name {
-            "text" => &mut self.text,
-            "dim" => &mut self.dim,
-            "gutter" => &mut self.gutter,
-            "gutter-current" => &mut self.gutter_current,
-            "cursor-line" => &mut self.cursor_line,
-            "selection" => &mut self.selection,
-            "secondary-selection" => &mut self.secondary_selection,
-            "beacon-selection" => &mut self.beacon_selection,
-            "beacon-cursor" => &mut self.beacon_cursor,
-            "status" => &mut self.status,
-            "status-strong" => &mut self.status_strong,
-            "modified" => &mut self.modified,
-            "error" => &mut self.error,
-            "mode-normal" => &mut self.mode_normal,
-            "mode-insert" => &mut self.mode_insert,
-            "mode-beacon" => &mut self.mode_visual,
-            "mode-prompt" => &mut self.mode_prompt,
-            "tabs" => &mut self.tabs,
-            "tab-active" => &mut self.tab_active,
-            "border" => &mut self.border,
-            "paren-match" => &mut self.paren_match,
-            "inactive-window" => &mut self.inactive_window,
-            "title" => &mut self.title,
-            "panel" => &mut self.panel,
-            "float" => &mut self.float,
-            "float-border" => &mut self.float_border,
-            "candidate-selected" => &mut self.candidate_selected,
-            "marker" => &mut self.marker,
-            "inlay" => &mut self.inlay,
-            "reference" => &mut self.reference,
-            "reference-write" => &mut self.reference_write,
-            "snippet" => &mut self.snippet,
-            "unnecessary" => &mut self.unnecessary,
-            "deprecated" => &mut self.deprecated,
-            "note-info" => &mut self.notes[0],
-            "note-warning" => &mut self.notes[1],
-            "note-error" => &mut self.notes[2],
-            "status-error" => &mut self.status_error,
-            "status-warning" => &mut self.status_warning,
-            "info" => &mut self.info,
-            "matched" => &mut self.matched,
-            "detail" => &mut self.detail,
-            "whitespace" => &mut self.whitespace,
-            "ruler" => &mut self.ruler,
-            "scrollbar" => &mut self.scrollbar,
-            "key" => &mut self.key,
-            "label" => &mut self.label,
-            "flash-match" => &mut self.flash_match,
-            "flash-current" => &mut self.flash_current,
-            "flash-backdrop" => &mut self.flash_backdrop,
-            "todo" => &mut self.todo,
-            "expand-digit" => &mut self.digit,
-            _ => return None,
-        })
+        crate::application::faces::ui_faces!(slot, self)
     }
     fn new(p: &Palette) -> Self {
         let c = color;
@@ -431,6 +391,7 @@ impl Theme {
 impl Theme {
     pub fn face(&self, face: crate::application::Face) -> Style {
         match face {
+            crate::application::Face::Styled(spec) => apply(Style::new(), &spec),
             crate::application::Face::Todo => self.todo,
             crate::application::Face::Digit => self.digit,
             crate::application::Face::Error => self.error,
@@ -461,7 +422,10 @@ impl Theme {
     pub fn sign(&self, face: crate::application::Face) -> Style {
         let colour = match face {
             crate::application::Face::Mark(n) => self.marks[usize::from(n)].bg,
-            face => self.face(face).fg,
+            face => {
+                let style = self.face(face);
+                style.fg.or(style.bg)
+            }
         };
         Style::new()
             .fg(colour.unwrap_or_default())
@@ -614,6 +578,48 @@ mod tests {
         // A theme no longer named gives the default.
         let theme = Theme::build("gone", &faces);
         assert_eq!(theme.text.bg, Some(color(0x1a1b26)));
+    }
+    #[test]
+    fn built_in_and_extension_faces_keep_theme_and_user_overrides() {
+        use crate::application::Face;
+        let mut faces = Faces::default();
+        let default = FaceSpec::parse("fg:#112233").unwrap();
+        faces.define("plugin.label".into(), default).unwrap();
+        let label = Face::Named(faces.index("plugin.label").unwrap());
+        let mut theme = ThemeSpec::default();
+        theme.faces.insert(
+            "plugin.label".into(),
+            FaceSpec::parse("fg:#223344").unwrap(),
+        );
+        faces.define_theme("custom", theme).unwrap();
+        assert_eq!(
+            Theme::build("tokyonight", &faces).face(label).fg,
+            Some(color(0x112233))
+        );
+        assert_eq!(
+            Theme::build("custom", &faces).face(label).fg,
+            Some(color(0x223344))
+        );
+
+        let user = FaceSpec::parse("fg:#334455").unwrap();
+        faces.set("plugin.label", Some(user)).unwrap();
+        faces.set("marker", Some(user)).unwrap();
+        faces
+            .define(
+                "plugin.label".into(),
+                FaceSpec::parse("fg:#445566 bold").unwrap(),
+            )
+            .unwrap();
+        assert_eq!(faces.resolve("plugin.label"), Some(label));
+        let theme = Theme::build("custom", &faces);
+        assert_eq!(theme.marker.fg, Some(color(0x334455)));
+        assert_eq!(theme.face(label).fg, Some(color(0x334455)));
+        assert!(theme.face(label).add_modifier.contains(Modifier::BOLD));
+        faces.set("plugin.label", None).unwrap();
+        assert_eq!(
+            Theme::build("custom", &faces).face(label).fg,
+            Some(color(0x223344))
+        );
     }
     #[test]
     fn refined_categories_inherit_their_parent_as_emacs_faces_do() {

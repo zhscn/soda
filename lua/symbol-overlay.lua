@@ -100,7 +100,7 @@ end
 
 local function put(buf, word, colour)
   marks(buf)[word] = colour
-  soda.command("highlight-local mark" .. colour .. " " .. pattern_of(word))
+  soda.highlight(pattern_of(word), "mark" .. colour, { mark = true })
 end
 local function remove(buf, word)
   marks(buf)[word] = nil

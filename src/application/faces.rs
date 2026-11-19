@@ -34,102 +34,83 @@ pub const PALETTE: &[&str] = &[
     "on-accent",
 ];
 
-/// Faces of the screen, besides `syntax.CATEGORY` for each syntax category.
-pub const UI_FACES: &[(&str, &str)] = &[
-    ("text", "Text, and the background of the editing area"),
-    (
-        "dim",
-        "Text that matters less, such as the empty-buffer page",
-    ),
-    ("gutter", "Line numbers"),
-    ("gutter-current", "The caret line's number"),
-    ("cursor-line", "The caret line"),
-    ("selection", "Selected text"),
-    (
-        "secondary-selection",
-        "The grab, as Emacs's secondary selection",
-    ),
-    (
-        "beacon-selection",
-        "Beacon's other selections; unset, a mix of selection and secondary-selection",
-    ),
-    (
-        "beacon-cursor",
-        "Beacon's other carets; unset, a mix of mode-beacon and secondary-selection",
-    ),
-    ("status", "The status line"),
-    ("status-strong", "The path on the status line"),
-    ("modified", "Unsaved markers"),
-    ("error", "Errors"),
-    ("mode-normal", "The NORMAL badge"),
-    ("mode-insert", "The INSERT badge"),
-    ("mode-beacon", "The BEACON badge"),
-    ("mode-prompt", "Badges of prompts and other layers"),
-    ("tabs", "The tab row"),
-    ("tab-active", "The current document's tab"),
-    ("border", "Separators between windows"),
-    (
-        "paren-match",
-        "The bracket at the caret and the one that matches it, as show-paren-mode",
-    ),
-    (
-        "inactive-window",
-        "Windows other than the focused one; their background, bg:default to leave them as it",
-    ),
-    ("title", "Window titles"),
-    ("panel", "Help and lists"),
-    ("float", "Floating boxes such as hover"),
-    ("float-border", "Their borders"),
-    ("candidate-selected", "The selected candidate"),
-    ("marker", "Line markers in the gutter"),
-    ("inlay", "Inlay hints"),
-    ("reference", "Other places of the symbol at the caret"),
-    (
-        "reference-write",
-        "Places where the symbol at the caret is written",
-    ),
-    (
-        "snippet",
-        "Other places of the snippet being filled in, and copies",
-    ),
-    ("unnecessary", "Code a language server finds unused"),
-    (
-        "deprecated",
-        "Uses of what a language server finds deprecated",
-    ),
-    ("note-error", "Error notes after the text of their line"),
-    ("note-warning", "Warning notes after the text of their line"),
-    ("note-info", "Other notes after the text of their line"),
-    ("status-error", "Error counts on the status line"),
-    ("status-warning", "Warning counts on the status line"),
-    ("info", "Information"),
-    ("matched", "Matched characters of candidates"),
-    ("detail", "Candidate details"),
-    ("whitespace", "Tab and trailing space marks"),
-    ("ruler", "The ruler column"),
-    (
-        "scrollbar",
-        "The scroll bar of the graphical frontend; its background colors the thumb",
-    ),
-    ("key", "Keys in hints"),
-    ("label", "Jump labels"),
-    ("flash-match", "What flash's search matches"),
-    ("flash-current", "The match RET goes to in flash's search"),
-    (
-        "flash-backdrop",
-        "Text of the windows flash searches, while it does; see the flash-backdrop option",
-    ),
-    ("todo", "The todo highlight"),
-    ("expand-digit", "Digits that extend the selection"),
-    ("mark1", "First mark background"),
-    ("mark2", "Second mark background"),
-    ("mark3", "Third mark background"),
-    ("mark4", "Fourth mark background"),
-    ("mark5", "Fifth mark background"),
-    ("mark6", "Sixth mark background"),
-    ("mark7", "Seventh mark background"),
-    ("mark8", "Eighth mark background"),
-];
+// A built-in role declares its name, theme slot, and help together.
+macro_rules! ui_faces {
+    ($emit:ident $(, $theme:ident)?) => {
+        $emit! {
+            $($theme;)?
+            ("text", text, "Text, and the background of the editing area"),
+            ("dim", dim, "Text that matters less, such as the empty-buffer page"),
+            ("gutter", gutter, "Line numbers"),
+            ("gutter-current", gutter_current, "The caret line's number"),
+            ("cursor-line", cursor_line, "The caret line"),
+            ("selection", selection, "Selected text"),
+            ("secondary-selection", secondary_selection, "The grab, as Emacs's secondary selection"),
+            ("beacon-selection", beacon_selection, "Beacon's other selections; unset, a mix of selection and secondary-selection"),
+            ("beacon-cursor", beacon_cursor, "Beacon's other carets; unset, a mix of mode-beacon and secondary-selection"),
+            ("status", status, "The status line"),
+            ("status-strong", status_strong, "The path on the status line"),
+            ("modified", modified, "Unsaved markers"),
+            ("error", error, "Errors"),
+            ("mode-normal", mode_normal, "The NORMAL badge"),
+            ("mode-insert", mode_insert, "The INSERT badge"),
+            ("mode-beacon", mode_visual, "The BEACON badge"),
+            ("mode-prompt", mode_prompt, "Badges of prompts and other layers"),
+            ("tabs", tabs, "The tab row"),
+            ("tab-active", tab_active, "The current document's tab"),
+            ("border", border, "Separators between windows"),
+            ("paren-match", paren_match, "The bracket at the caret and the one that matches it, as show-paren-mode"),
+            ("inactive-window", inactive_window, "Windows other than the focused one; their background, bg:default to leave them as it"),
+            ("title", title, "Window titles"),
+            ("panel", panel, "Help and lists"),
+            ("float", float, "Floating boxes such as hover"),
+            ("float-border", float_border, "Their borders"),
+            ("candidate-selected", candidate_selected, "The selected candidate"),
+            ("marker", marker, "Line markers in the gutter"),
+            ("inlay", inlay, "Inlay hints"),
+            ("reference", reference, "Other places of the symbol at the caret"),
+            ("reference-write", reference_write, "Places where the symbol at the caret is written"),
+            ("snippet", snippet, "Other places of the snippet being filled in, and copies"),
+            ("unnecessary", unnecessary, "Code a language server finds unused"),
+            ("deprecated", deprecated, "Uses of what a language server finds deprecated"),
+            ("note-error", notes[2], "Error notes after the text of their line"),
+            ("note-warning", notes[1], "Warning notes after the text of their line"),
+            ("note-info", notes[0], "Other notes after the text of their line"),
+            ("status-error", status_error, "Error counts on the status line"),
+            ("status-warning", status_warning, "Warning counts on the status line"),
+            ("info", info, "Information"),
+            ("matched", matched, "Matched characters of candidates"),
+            ("detail", detail, "Candidate details"),
+            ("whitespace", whitespace, "Tab and trailing space marks"),
+            ("ruler", ruler, "The ruler column"),
+            ("scrollbar", scrollbar, "The scroll bar of the graphical frontend; its background colors the thumb"),
+            ("key", key, "Keys in hints"),
+            ("label", label, "Jump labels"),
+            ("flash-match", flash_match, "What flash's search matches"),
+            ("flash-current", flash_current, "The match RET goes to in flash's search"),
+            ("flash-backdrop", flash_backdrop, "Text of the windows flash searches, while it does; see the flash-backdrop option"),
+            ("todo", todo, "The todo highlight"),
+            ("expand-digit", digit, "Digits that extend the selection"),
+            ("mark1", marks[0], "First mark background"),
+            ("mark2", marks[1], "Second mark background"),
+            ("mark3", marks[2], "Third mark background"),
+            ("mark4", marks[3], "Fourth mark background"),
+            ("mark5", marks[4], "Fifth mark background"),
+            ("mark6", marks[5], "Sixth mark background"),
+            ("mark7", marks[6], "Seventh mark background"),
+            ("mark8", marks[7], "Eighth mark background"),
+        }
+    };
+}
+pub(crate) use ui_faces;
+
+macro_rules! face_names {
+    ($(($name:literal, $slot:ident $([$index:literal])?, $doc:literal),)*) => {
+        /// Faces of the screen, besides the syntax categories.
+        pub const UI_FACES: &[(&str, &str)] = &[$(($name, $doc)),*];
+    };
+}
+ui_faces!(face_names);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Color {
@@ -171,10 +152,20 @@ pub fn names() -> impl Iterator<Item = String> {
             .map(|c| format!("syntax.{}", c.name())),
     )
 }
-/// A face's place among `names`, which `Face::Named` holds.
+/// A built-in face's place among `names`.
 pub fn index(name: &str) -> Option<u16> {
-    names().position(|known| known == name).map(|i| i as u16)
+    if let Some(category) = name.strip_prefix("syntax.") {
+        return crate::syntax::Category::ALL
+            .iter()
+            .position(|known| known.name() == category)
+            .map(|index| (UI_FACES.len() + index) as u16);
+    }
+    UI_FACES
+        .iter()
+        .position(|(known, _)| *known == name)
+        .map(|index| index as u16)
 }
+const BUILTIN_COUNT: usize = UI_FACES.len() + crate::syntax::Category::ALL.len();
 /// A theme an extension defines: a built-in theme under it, palette
 /// colors that replace that theme's, and faces over what they make.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -195,7 +186,7 @@ impl Default for ThemeSpec {
 }
 impl ThemeSpec {
     /// Checks its base and the names of its palette colors and faces.
-    pub fn check(&self) -> Result<(), String> {
+    fn check(&self, faces: &Faces) -> Result<(), String> {
         if themes::builtin(&self.base).is_none() {
             return Err(format!("base {} is not a built-in theme", self.base));
         }
@@ -209,7 +200,7 @@ impl ThemeSpec {
                 PALETTE.join(", ")
             ));
         }
-        if let Some(name) = self.faces.keys().find(|name| !known(name)) {
+        if let Some(name) = self.faces.keys().find(|name| faces.index(name).is_none()) {
             return Err(format!("unknown face {name}"));
         }
         Ok(())
@@ -268,10 +259,56 @@ impl FaceSpec {
 #[derive(Debug, Default)]
 pub struct Faces {
     specs: BTreeMap<String, FaceSpec>,
+    custom: Vec<(String, FaceSpec)>,
     themes: BTreeMap<String, ThemeSpec>,
     revision: u64,
 }
 impl Faces {
+    /// Defines an extension face. Redefinition preserves its ID and overrides.
+    pub fn define(&mut self, name: String, spec: FaceSpec) -> Result<(), String> {
+        if !name.contains('.')
+            || name.starts_with("syntax.")
+            || known(&name)
+            || name.split('.').any(|part| {
+                part.is_empty()
+                    || !part
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+            })
+        {
+            return Err(format!(
+                "invalid extension face name {name}: use a qualified name such as plugin.label"
+            ));
+        }
+        if let Some((_, default)) = self.custom.iter_mut().find(|(key, _)| key == &name) {
+            *default = spec;
+        } else {
+            if u16::try_from(BUILTIN_COUNT + self.custom.len()).is_err() {
+                return Err("too many named faces".into());
+            }
+            self.custom.push((name, spec));
+        }
+        self.revision += 1;
+        Ok(())
+    }
+    pub fn index(&self, name: &str) -> Option<u16> {
+        index(name).or_else(|| {
+            self.custom
+                .iter()
+                .position(|(key, _)| key == name)
+                .map(|i| (BUILTIN_COUNT + i) as u16)
+        })
+    }
+    pub fn resolve(&self, name: &str) -> Option<super::Face> {
+        super::Face::legacy(name).or_else(|| self.index(name).map(super::Face::Named))
+    }
+    pub fn names(&self) -> impl Iterator<Item = String> + '_ {
+        names().chain(self.custom.iter().map(|(name, _)| name.clone()))
+    }
+    pub fn custom(&self) -> impl Iterator<Item = (&str, &FaceSpec)> {
+        self.custom.iter().map(|(name, spec)| (name.as_str(), spec))
+    }
+
     /// Defines a theme, or replaces one defined before; the built-in
     /// names cannot be taken.
     pub fn define_theme(&mut self, name: &str, spec: ThemeSpec) -> Result<(), String> {
@@ -287,7 +324,7 @@ impl Faces {
         if themes::builtin(name).is_some() {
             return Err(format!("{name} is a built-in theme"));
         }
-        spec.check()?;
+        spec.check(self)?;
         self.themes.insert(name.to_owned(), spec);
         self.revision += 1;
         Ok(())
@@ -307,7 +344,7 @@ impl Faces {
     }
     /// Sets a face, or with `None` gives it back to the theme.
     pub fn set(&mut self, name: &str, spec: Option<FaceSpec>) -> Result<(), String> {
-        if !known(name) {
+        if self.index(name).is_none() {
             return Err(format!("unknown face {name}"));
         }
         match spec {

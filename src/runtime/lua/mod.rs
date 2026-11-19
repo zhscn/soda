@@ -43,6 +43,7 @@ const FUNCTIONS: &[&str] = &[
     "unflag",
     "note",
     "paint",
+    "highlight",
     "popup",
     "prompt",
     "choose",
@@ -58,6 +59,7 @@ const FUNCTIONS: &[&str] = &[
     "unmap",
     "keymap",
     "face",
+    "define_face",
     "theme",
     "themes",
     "language",
@@ -172,7 +174,7 @@ local tree_show, tree_children = soda.tree_show, soda.tree_children
 soda.tree_show, soda.tree_children = nil, nil
 local tree_ids = 0
 -- A tree in the document `*name*`. Nodes are tables with `label`, and
--- `detail`, `children`, `expanded` or `leaf`; without children, `expand`
+-- `detail`, `style`, `children`, `expanded` or `leaf`; without children, `expand`
 -- is asked for them when the node first opens, unless it is a leaf.
 -- `open(node)` takes Enter on a node. The functions get the tables given.
 function soda.tree(spec)
@@ -188,6 +190,7 @@ function soda.tree(spec)
       table.insert(out, {
         id = tree_ids,
         label = tostring(node.label or ""),
+        style = node.style,
         detail = node.detail ~= nil and tostring(node.detail) or nil,
         children = node.children ~= nil and convert(node.children) or nil,
         more = node.children == nil and spec.expand ~= nil and not node.leaf,

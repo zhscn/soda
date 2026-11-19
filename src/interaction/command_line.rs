@@ -542,7 +542,9 @@ impl CommandLine {
                     .map(|(name, doc)| Entry::new(&name, doc))
                     .collect()
             }
-            SlotKind::Face => crate::application::faces::names()
+            SlotKind::Face => app
+                .faces()
+                .names()
                 .map(|name| Entry::new(&name, String::new()))
                 .collect(),
             SlotKind::Theme => {

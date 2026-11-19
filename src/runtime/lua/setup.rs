@@ -46,6 +46,17 @@ pub(super) fn register<'scope, 'r: 'scope>(
         })?,
     )?;
     soda.set(
+        "define_face",
+        scope.create_function(|_, (name, spec): (String, Value)| {
+            runtime
+                .borrow_mut()
+                .edit_event(crate::application::Event::DefineFace {
+                    name,
+                    spec: face_spec(spec)?,
+                })
+        })?,
+    )?;
+    soda.set(
         "theme",
         scope.create_function(|_, (name, spec): (String, Table)| {
             use crate::application::faces::{ThemeSpec, rgb};
@@ -319,9 +330,24 @@ fn slots(args: &Table, host: &Host) -> mlua::Result<&'static [crate::interaction
     Ok(Box::leak(out.into_boxed_slice()))
 }
 
+pub(super) fn resolve_face(
+    faces: &crate::application::faces::Faces,
+    value: Value,
+) -> mlua::Result<crate::application::Face> {
+    use crate::application::Face;
+    if let Value::String(name) = &value {
+        let name = name.to_str()?;
+        if let Some(face) = faces.resolve(&name) {
+            return Ok(face);
+        }
+        return Err(mlua::Error::runtime(format!("unknown face {name}")));
+    }
+    face_spec(value).map(Face::Styled)
+}
+
 /// A face as Lua gives it: the words of `face`, or a table such as
 /// `{ fg = "#rrggbb", bold = true }`, which reads as the words.
-fn face_spec(spec: Value) -> mlua::Result<crate::application::faces::FaceSpec> {
+pub(super) fn face_spec(spec: Value) -> mlua::Result<crate::application::faces::FaceSpec> {
     let words = match spec {
         Value::String(spec) => spec.to_str()?.to_owned(),
         Value::Table(table) => {

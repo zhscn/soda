@@ -122,6 +122,8 @@ pub(super) struct Server {
     /// `workspace/didChangeConfiguration` sends once the server is up.
     pub settings: Value,
     pub auto: Auto,
+    /// A server request to acknowledge before restarting the connection.
+    pub restart_request: Option<String>,
     /// A Lua function that chooses a document's root, instead of markers.
     pub roots: Option<u64>,
 }
@@ -154,6 +156,7 @@ struct Opened {
 }
 struct Client {
     restarting: bool,
+    restart_request: Option<String>,
     process: Child,
     writer: Sender<Outgoing>,
     next: i64,
@@ -549,6 +552,7 @@ impl Lsp {
             key.clone(),
             Client {
                 restarting: false,
+                restart_request: server.restart_request.clone(),
                 process,
                 writer,
                 next: 1,
@@ -825,13 +829,13 @@ impl Lsp {
             // as applied before it is.
             (Some(id), Some(method)) => {
                 let params = &message["params"];
+                if client.restart_request.as_deref() == Some(method) {
+                    client.send(Outgoing::Restart(json!({
+                        "jsonrpc": "2.0", "id": id, "result": null,
+                    })));
+                    return None;
+                }
                 match method {
-                    "clice/restartServer" => {
-                        client.send(Outgoing::Restart(json!({
-                            "jsonrpc": "2.0", "id": id, "result": null,
-                        })));
-                        return None;
-                    }
                     "client/registerCapability" => {
                         for registration in params["registrations"].as_array().into_iter().flatten()
                         {

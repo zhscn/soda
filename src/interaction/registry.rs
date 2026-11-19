@@ -155,7 +155,7 @@ fn flag_lines(args: &str) -> Result<Command, String> {
     let (Some(group), Some(face), Some(sign)) = (words.next(), words.next(), words.next()) else {
         return Err("flag-lines needs GROUP FACE SIGN LINES".into());
     };
-    let flag = crate::application::Flag::new(face, sign)?;
+
     let mut lines = vec![];
     for word in words {
         let number = |text: &str| {
@@ -178,13 +178,14 @@ fn flag_lines(args: &str) -> Result<Command, String> {
     }
     Ok(Command::FlagLines {
         group: group.to_owned(),
-        flag,
+        face: face.to_owned(),
+        sign: sign.to_owned(),
         lines,
     })
 }
 fn highlight(args: &str, local: bool) -> Result<Command, String> {
     let (face, pattern) = split(args);
-    let face = crate::application::Face::parse(face)?;
+    let face = face.to_owned();
     let pattern = regex::Regex::new(&required(pattern)?).map_err(|e| e.to_string())?;
     Ok(Command::Highlight {
         local,
@@ -1431,9 +1432,6 @@ pub static BUILTINS: &[Builtin] = &[
         "Set a face: fg:#rrggbb bg:#rrggbb bold italic underline dim reverse; without SPEC, the theme's",
         |a| {
             let (name, spec) = split(a.trim());
-            if !crate::application::faces::known(name) {
-                return Err(format!("unknown face {name}"));
-            }
             let spec = match spec {
                 "" => None,
                 spec => Some(crate::application::faces::FaceSpec::parse(spec)?),

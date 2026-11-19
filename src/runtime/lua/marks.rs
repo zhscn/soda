@@ -1,7 +1,7 @@
 //! `soda` functions that mark a document: line flags, notes, end-of-line
 //! indicators, semantic tokens and inlay hints.
 use super::Runtime;
-use mlua::{Scope, Table};
+use mlua::{Scope, Table, Value};
 use std::cell::RefCell;
 
 pub(super) fn register<'scope, 'r: 'scope>(
@@ -20,10 +20,10 @@ pub(super) fn register<'scope, 'r: 'scope>(
                         let [line, column]: [usize; 2] = item.get(name)?;
                         Ok((line.saturating_sub(1), column.saturating_sub(1)))
                     };
-                    let face: String = item.get("face")?;
-                    let face = crate::application::faces::index(&face)
-                        .map(crate::application::Face::Named)
-                        .ok_or_else(|| mlua::Error::runtime(format!("unknown face {face}")))?;
+                    let face = super::setup::resolve_face(
+                        runtime.borrow().app.faces(),
+                        item.get("face")?,
+                    )?;
                     Ok(crate::application::PaintSpan {
                         start: place("from")?,
                         end: place("to")?,
@@ -41,11 +41,45 @@ pub(super) fn register<'scope, 'r: 'scope>(
         })?,
     )?;
     soda.set(
+        "highlight",
+        scope.create_function(
+            |_, (pattern, style, options): (String, Value, Option<Table>)| {
+                let pattern = regex::Regex::new(&pattern).map_err(mlua::Error::runtime)?;
+                let mut runtime = runtime.borrow_mut();
+                let face = super::setup::resolve_face(runtime.app.faces(), style)?;
+                let (document, mark) = match options {
+                    Some(options) => {
+                        let document = if options.get::<Option<bool>>("global")?.unwrap_or(false) {
+                            None
+                        } else {
+                            Some(runtime.document().map_err(mlua::Error::runtime)?)
+                        };
+                        (
+                            document,
+                            options.get::<Option<bool>>("mark")?.unwrap_or(false),
+                        )
+                    }
+                    None => (
+                        Some(runtime.document().map_err(mlua::Error::runtime)?),
+                        false,
+                    ),
+                };
+                runtime.edit_event(crate::application::Event::Highlight {
+                    document,
+                    face: Some(face),
+                    pattern,
+                    mark,
+                })
+            },
+        )?,
+    )?;
+    soda.set(
         "flag",
         scope.create_function(
-            |_, (group, face, sign, lines): (String, String, String, Vec<usize>)| {
+            |_, (group, face, sign, lines): (String, Value, String, Vec<usize>)| {
+                let face = super::setup::resolve_face(runtime.borrow().app.faces(), face)?;
                 let flag =
-                    crate::application::Flag::new(&face, &sign).map_err(mlua::Error::runtime)?;
+                    crate::application::Flag::new(face, &sign).map_err(mlua::Error::runtime)?;
                 let lines = lines
                     .into_iter()
                     .filter(|line| *line > 0)

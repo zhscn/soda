@@ -1680,6 +1680,7 @@ mod tests {
         app.dispatch(Event::Highlight {
             document: None,
             face: Some(crate::application::Face::Todo),
+            mark: false,
             pattern: regex::Regex::new("TODO").unwrap(),
         })
         .unwrap();

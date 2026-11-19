@@ -132,7 +132,8 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 | `soda.unmap(keymap, keys)` | 去掉用户绑定，恢复默认（内置的或插件的） |
 | `soda.keymap(name, { server = NAME, doc = ... })` | 声明服务器的键位表：在名为 `NAME` 的语言服务器服务的文档里生效，`"*"` 表示任一服务器；再次调用更新说明和范围 |
 | `soda.bindings(keymap)` | 当前生效的绑定：`{ {keys = "C-x o", command = "window-next"}, ... }` |
-| `soda.face(name, spec)` | 设置界面或语法分类的颜色，见[终端界面](ui.md#主题) |
+| `soda.face(name, spec)` | 覆盖内置或扩展 face 的样式，见[终端界面](ui.md#主题) |
+| `soda.define_face(name, spec)` | 声明扩展 face 的默认样式，使用 `plugin.label` 这样的名称 |
 | `soda.theme(name, { base, palette, faces })` / `soda.themes()` | 定义主题、列出主题名；用 `soda.set("theme", name)` 或命令 `theme` 切换，见[终端界面](ui.md#主题) |
 | `soda.language(name, language)` | 同 `language-map` |
 | `soda.thing(key, kind)` | 让 `,`、`.` 之后的 `key` 选中一种 thing：`round`、`square`、`curly`、`angle`、`string`、`symbol`、`word`、`paragraph`、`line`、`buffer`；`kind` 为 nil 时去掉。初始是 meow 的 `r s c g e w p l b` |
@@ -147,6 +148,7 @@ kakoune 没有脚本语言，只能用 `%sh{}` 和 `evaluate-commands` 把 shell
 | `soda.indicator(line, text)` | 在当前文档第 `line` 行行尾显示文字，下一个按键清除 |
 | `soda.popup(text)` | 在光标旁的浮窗里显示文字，下一个按键关闭 |
 | `soda.paint(group, items)` | 给当前文档的一组范围上色：`{from, to, face}`；同组再调用时替换，空表去掉。范围随编辑移动 |
+| `soda.highlight(pattern, face, [options])` | 高亮正则表达式。默认作用于当前文档，`global = true` 时作用于所有文档，`mark = true` 时匹配范围启用 `mark` 键位 |
 | `soda.note(group, items)` | 给当前文档的一组范围加注（诊断）：`{from, to, severity, text}` |
 | `soda.keys(notation)` | 按 Emacs 记法输入按键，如 `soda.keys("foo RET")`，走与键盘相同的路径；要原样输入一段文字时把字符用空格隔开，免得 `RET` 这样的词被读成键 |
 | `soda.prompt(text)` | 打开命令行并预填 `text` |
@@ -269,6 +271,10 @@ soda.map("ccls", "C-c v c", "ccls-callers")   -- ccls 表在 setup 之后才有
 - **选区**：选区是半开区间，属于视图；`anchor` 与 `head` 相同时没有选区。请求所在的视图显示该文档时用它，否则用屏幕上的视图，再否则用任一视图。
 - **结构**：条目是词、字面量、注释、预处理指令或整个分组，标点不属于条目；位置在条目中间时返回位置一侧的部分。C++ 的结构来自语法树，能区分模板的 `<` 和比较，未闭合的分组和被 `#if` 分支拆开的分组不算分组。Rust 来自自有的词法和配对（`src/rust/`）：泛型的 `<>` 和闭包参数的 `|…|` 也是分组，生命周期是词，原始字符串和嵌套块注释是字面量和注释，未闭合的分组不算。其他语言按 `(`、`[`、`{` 配对，字面量和注释来自 TextMate，跨行的按行算；纯文本没有字面量。
 
+### 扩展样式
+
+`soda.paint`、`soda.flag`、`soda.status` 和 `soda.highlight` 的 `face` 参数，以及树节点的 `style` 字段，都接受具名 face 或内联样式表，例如 `{ fg = "#ff4500", bold = true }`。如果样式需要随主题变化或由用户覆盖，可以先用 `soda.define_face("plugin.label", { fg = "#ff4500" })` 声明默认值，再用名称引用它。重新声明会更新默认值，已经使用该名称的标注会随下一次重绘更新。
+
 ### 树
 
 `soda.tree` 把一棵树显示在文档 `*name*` 里，位置规则与结果文档相同（`display` 可以改）。节点是普通的 Lua 表：
@@ -286,7 +292,7 @@ soda.tree({
 })
 ```
 
-- 每行是缩进、`▸`/`▾`、`label` 和灰色的 `detail`。`expanded = true` 的节点一开始就展开。
+- 每行是缩进、`▸`/`▾`、`label` 和灰色的 `detail`。可在节点上用 `style` 设置标签的外观，值可以是已声明的 face 名称或样式表。`expanded = true` 的节点一开始就展开。
 - 有 `expand` 时，没有 `children` 也不是 `leaf` 的节点可以展开：第一次展开时调用 `expand`，等待期间节点后显示 `…`；`add` 给出的子节点之后一直保留，给空表则节点成为叶子。
 - `open` 和 `expand` 收到传进去的那张表，节点上可以放任何字段（位置、服务器的原始对象）。
 - `tree` 键位表：`Tab`（`tree-toggle`）展开或收起，`Enter`（`tree-open`）调用 `open`，`Backspace`（`tree-collapse`）收起节点、已收起时回到父节点；其他键照常是 Normal 的。可以用 `soda.map("tree", ...)` 改。

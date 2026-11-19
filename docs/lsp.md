@@ -122,6 +122,8 @@ soda.lsp.array(t)                             -- 标记 t 是数组
 
 服务器发来的请求交给 `soda.lsp.on` 的函数，依次调用，第一个非 nil 的返回值作为回答；都是 nil 或出错时回答默认值：`workspace/applyEdit` 为 `{ applied = true }`，`workspace/configuration` 按 `settings`，其余 null。服务器在等，所以函数要立刻返回。
 
+若服务器通过专用请求要求客户端重启，可在 `soda.lsp.server` 的选项中用 `restart_request` 指定该方法名。客户端先回复 JSON `null`，再重启发出请求的连接并重新打开其文档。
+
 JSON 的 `null` 在 Lua 里是 `nil`。Lua 的空表发出去是对象 `{}`，要空数组时用 `soda.lsp.array({})`；收到的数组不需要标记。
 
 LSP 模块用的显示原语是通用的（`soda.note`、`soda.hint`、`soda.popup`、`soda.choose`、`soda.prompt`，见[扩展](extension.md#lua)），另有两个专用的：
@@ -205,6 +207,8 @@ soda.map("clice", "C-c v f", "clice-configuration")
 | `clice-configuration` | 选择 `clice.toml` 声明的构建配置 |
 | `clice-switch` | 打开 clice 推荐的源文件、头文件或模块对应文件；没有首选项时显示候选及匹配理由 |
 | `clice-refactor [KIND]` | 请求选区处的重构动作，默认 `refactor`，也可指定 `refactor.` 下的具体种类；复用代码动作的解析与编辑应用流程 |
+
+调用树用橙红色标记 `[base]` 节点，用橙色标记 `[derived]` 节点。两种样式分别可以通过 `face clice.call-base` 和 `face clice.call-derived` 覆盖。
 
 clice 在配置文件或构建配置变化后会发出 `clice/restartServer`。soda 写出请求响应后结束对应进程，等待旧连接关闭，再按原配置启动并重新打开它服务的文档。这个处理按服务器所属的语言和根目录定位，切换到其他项目也不会改变重启对象。
 

@@ -6,13 +6,16 @@
 //! The document is a scratch document whose text is the visible rows; it is
 //! rewritten whenever a node opens or closes, and the caret stays on the
 //! node it was on.
+use crate::application::{Event, Face, PaintSpan, faces};
 use std::collections::HashMap;
+use std::ops::Range;
 
 /// A node as Lua gives it; `id` is Lua's, to name it in callbacks.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NodeSpec {
     pub id: u64,
     pub label: String,
+    pub style: Option<Face>,
     pub detail: String,
     /// Known children; none for a node whose children come when asked.
     pub children: Option<Vec<NodeSpec>>,
@@ -22,6 +25,7 @@ pub struct NodeSpec {
 }
 struct Node {
     label: String,
+    style: Option<Face>,
     detail: String,
     parent: Option<u64>,
     depth: usize,
@@ -35,7 +39,8 @@ struct Node {
 pub struct Row {
     pub node: u64,
     pub label: usize,
-    pub detail: Option<std::ops::Range<usize>>,
+    label_paint: Option<(Range<usize>, Face)>,
+    pub detail: Option<Range<usize>>,
 }
 /// What a key on a row asks of Lua.
 #[derive(Debug, PartialEq)]
@@ -71,6 +76,7 @@ impl Tree {
                 spec.id,
                 Node {
                     label: spec.label,
+                    style: spec.style,
                     detail: spec.detail,
                     parent,
                     depth,
@@ -120,6 +126,7 @@ impl Tree {
             );
             let label = text.len();
             text.push_str(&node.label.replace('\n', " "));
+            let label_end = text.len();
             if node.loading {
                 text.push_str(" …");
             }
@@ -134,6 +141,9 @@ impl Tree {
             self.rows.push(Row {
                 node: id,
                 label: label - line,
+                label_paint: node
+                    .style
+                    .map(|face| (label - line..label_end - line, face)),
                 detail: detail.map(|d| d.start - line..d.end - line),
             });
             if node.expanded {
@@ -186,7 +196,6 @@ impl super::Runtime {
     /// Shows a tree in the document `*name*`, replacing one there, with the
     /// caret on its first row.
     pub(super) fn show_tree(&mut self, name: String, mut tree: Tree) {
-        use crate::application::Event;
         let buffer = format!("*{name}*");
         let text = tree.render();
         let caret = tree.rows().first().map_or(0, |row| row.label);
@@ -224,24 +233,27 @@ impl super::Runtime {
             open
         });
     }
-    /// Colours the details of a tree's rows.
+    /// Colours the labels and details of the visible rows.
     fn paint_tree(&mut self, document: crate::editor::DocumentId, tree: &Tree) {
-        let face = crate::application::faces::index("detail").map(crate::application::Face::Named);
-        let Some(face) = face else { return };
+        let detail_face = faces::index("detail").map(Face::Named);
         let paints = tree
             .rows()
             .iter()
             .enumerate()
-            .filter_map(|(line, row)| {
-                let detail = row.detail.clone()?;
-                Some(crate::application::PaintSpan {
-                    start: (line, detail.start),
-                    end: (line, detail.end),
-                    face,
-                })
+            .flat_map(|(line, row)| {
+                let detail = row.detail.clone().zip(detail_face);
+                row.label_paint
+                    .clone()
+                    .into_iter()
+                    .chain(detail)
+                    .map(move |(range, face)| PaintSpan {
+                        start: (line, range.start),
+                        end: (line, range.end),
+                        face,
+                    })
             })
             .collect();
-        self.dispatch(crate::application::Event::Paint {
+        self.dispatch(Event::Paint {
             document,
             group: "tree".into(),
             paints,
@@ -339,6 +351,7 @@ mod tests {
         NodeSpec {
             id,
             label: label.into(),
+            style: None,
             detail: String::new(),
             children,
             more: true,

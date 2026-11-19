@@ -27,10 +27,9 @@ pub(super) const MODULES: &[(&str, &str)] = &[
         include_str!("../../../lua/symbol-overlay.lua"),
     ),
 ];
-/// Modules loaded at startup, which is every one: loading one defines its
-/// commands, and the built-in ones bind Emacs's keys. A plugin changes
-/// nothing else until its `setup` (see docs/extension.md), so loading them
-/// all costs only their commands.
+/// Modules loaded at startup so their commands and face defaults are
+/// available to user configuration. Built-in modules also bind Emacs's
+/// keys. Plugins enable document behavior through their setup functions.
 pub(super) const STARTUP: &[&str] = &[
     "clang-format",
     "comment",

@@ -21,36 +21,30 @@ pub enum Face {
     Note(super::Severity),
     /// Any face by its place in `faces::names`, for paints.
     Named(u16),
+    /// An explicit style supplied by an extension.
+    Styled(super::faces::FaceSpec),
 }
 pub const MARKS: u8 = 8;
 impl Face {
-    /// `todo`, `error`, `info`, `mark1` to `mark8`, or `mark` for the next mark
-    /// colour.
-    pub fn parse(name: &str) -> Result<Option<Self>, String> {
-        Ok(Some(match name {
-            "todo" => Self::Todo,
-            "error" => Self::Error,
-            "info" => Self::Info,
-            "mark" => return Ok(None),
-            _ => match name
+    /// Legacy highlight and flag names with their own rendering behavior.
+    pub(super) fn legacy(name: &str) -> Option<Self> {
+        match name {
+            "todo" => Some(Self::Todo),
+            "error" => Some(Self::Error),
+            "info" => Some(Self::Info),
+            _ => name
                 .strip_prefix("mark")
                 .and_then(|n| n.parse::<u8>().ok())
                 .filter(|n| (1..=MARKS).contains(n))
-            {
-                Some(n) => Self::Mark(n - 1),
-                None => {
-                    return Err(format!(
-                        "unknown face {name}: use todo, error, info, mark or mark1 to mark{MARKS}"
-                    ));
-                }
-            },
-        }))
+                .map(|n| Self::Mark(n - 1)),
+        }
     }
 }
 #[derive(Clone, Debug)]
 pub struct Highlight {
     pub face: Face,
     pub pattern: Regex,
+    pub mark: bool,
 }
 #[derive(Default)]
 pub(super) struct Highlights {
@@ -60,20 +54,34 @@ pub(super) struct Highlights {
 impl Highlights {
     /// Adds a highlight, replacing one with the same pattern. Without a
     /// face, a document mark takes the colour after the last one.
-    pub fn add(&mut self, document: Option<DocumentId>, face: Option<Face>, pattern: Regex) {
+    pub fn add(
+        &mut self,
+        document: Option<DocumentId>,
+        face: Option<Face>,
+        pattern: Regex,
+        mark: bool,
+    ) {
         let list = match document {
             Some(document) => self.documents.entry(document).or_default(),
             None => &mut self.global,
         };
         list.retain(|h| h.pattern.as_str() != pattern.as_str());
         let face = face.unwrap_or_else(|| {
-            let last = list.iter().rev().find_map(|h| match h.face {
-                Face::Mark(n) => Some(n),
-                _ => None,
-            });
+            let last = list
+                .iter()
+                .rev()
+                .filter(|h| h.mark)
+                .find_map(|h| match h.face {
+                    Face::Mark(n) => Some(n),
+                    _ => None,
+                });
             Face::Mark(last.map_or(0, |n| (n + 1) % MARKS))
         });
-        list.push(Highlight { face, pattern });
+        list.push(Highlight {
+            face,
+            pattern,
+            mark,
+        });
     }
     /// Removes the highlights with this pattern, or all of them, from a
     /// document and globally. Returns how many went.

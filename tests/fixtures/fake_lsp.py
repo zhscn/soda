@@ -363,14 +363,19 @@ while True:
                                                     if k not in ("textDocument", "position")},
                                                    sort_keys=True)))
         uri = "file://" + os.path.dirname(os.environ["FAKE_LSP_LOG"]) + "/a.cpp"
-        def item(id, name, line, count, children=()):
-            return {"id": id, "name": name, "fieldName": name + "_field", "kind": 2,
-                    "location": spot(uri, line, 0), "numChildren": count,
-                    "children": list(children)}
+        def item(id, name, line, count, children=(), call_type=0):
+            result = {"id": id, "name": name, "fieldName": name + "_field", "kind": 2,
+                      "location": spot(uri, line, 0), "numChildren": count,
+                      "children": list(children)}
+            if method.startswith("$clice/"):
+                result["callType"] = call_type
+            return result
         if "id" not in params:
-            answer(message, item("1", "root", 0, 2, [item("2", "first", 1, 1), item("3", "second", 2, 0)]))
+            answer(message, item("1", "root", 0, 2, [
+                item("2", "first", 1, 1, call_type=1), item("3", "second", 2, 0)]))
         else:
-            answer(message, item(params["id"], "x", 0, 1, [item("4", "deeper", 1, 0)]))
+            answer(message, item(params["id"], "x", 0, 1, [
+                item("4", "deeper", 1, 0, call_type=2)]))
     elif method.startswith("clice/"):
         log.write("%s %s\n" % (method, json.dumps(params, sort_keys=True)))
         uri = "file://" + os.path.dirname(os.environ["FAKE_LSP_LOG"]) + "/a.cpp"

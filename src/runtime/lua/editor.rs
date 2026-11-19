@@ -17,13 +17,9 @@ pub(super) fn register<'scope, 'r: 'scope>(
     soda.set(
         "status",
         scope.create_function(
-            |_, (name, text, face): (String, Option<String>, Option<String>)| {
+            |_, (name, text, face): (String, Option<String>, Option<Value>)| {
                 let face = face
-                    .map(|face| {
-                        crate::application::faces::index(&face)
-                            .map(crate::application::Face::Named)
-                            .ok_or_else(|| mlua::Error::runtime(format!("unknown face {face}")))
-                    })
+                    .map(|face| super::setup::resolve_face(runtime.borrow().app.faces(), face))
                     .transpose()?;
                 let mut runtime = runtime.borrow_mut();
                 let segments = &mut runtime.status;
@@ -377,7 +373,7 @@ pub(super) fn register<'scope, 'r: 'scope>(
             if name.is_empty() || name == "file" || name.contains(['*', ' ']) {
                 return Err(mlua::Error::runtime(format!("{name:?} cannot name a tree")));
             }
-            let roots = nodes(&roots)?;
+            let roots = nodes(&roots, runtime.borrow().app.faces())?;
             let function = host.keep(function)?;
             runtime
                 .borrow_mut()
@@ -388,7 +384,7 @@ pub(super) fn register<'scope, 'r: 'scope>(
     soda.set(
         "tree_children",
         scope.create_function(|_, (name, id, children): (String, u64, Table)| {
-            let children = nodes(&children)?;
+            let children = nodes(&children, runtime.borrow().app.faces())?;
             runtime.borrow_mut().tree_children(&name, id, children);
             Ok(())
         })?,
@@ -469,18 +465,25 @@ pub(super) fn register<'scope, 'r: 'scope>(
 }
 
 /// Tree nodes as the prelude hands them over: `{ id, label, detail,
-/// children, more, expanded }`.
-fn nodes(list: &Table) -> mlua::Result<Vec<crate::runtime::tree::NodeSpec>> {
+/// style, children, more, expanded }`.
+fn nodes(
+    list: &Table,
+    faces: &crate::application::faces::Faces,
+) -> mlua::Result<Vec<crate::runtime::tree::NodeSpec>> {
     list.sequence_values::<Table>()
         .map(|node| {
             let node = node?;
             Ok(crate::runtime::tree::NodeSpec {
                 id: node.get("id")?,
                 label: node.get::<Option<String>>("label")?.unwrap_or_default(),
+                style: node
+                    .get::<Option<Value>>("style")?
+                    .map(|value| super::setup::resolve_face(faces, value))
+                    .transpose()?,
                 detail: node.get::<Option<String>>("detail")?.unwrap_or_default(),
                 children: node
                     .get::<Option<Table>>("children")?
-                    .map(|children| nodes(&children))
+                    .map(|children| nodes(&children, faces))
                     .transpose()?,
                 more: node.get::<Option<bool>>("more")?.unwrap_or(false),
                 expanded: node.get::<Option<bool>>("expanded")?.unwrap_or(false),
