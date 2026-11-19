@@ -26,6 +26,8 @@ const SETTLE: Duration = Duration::from_millis(150);
 /// within `CRASH_WINDOW`: then it waits for `lsp-restart`.
 const CRASHES: usize = 3;
 const CRASH_WINDOW: Duration = Duration::from_secs(180);
+const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
+const SHUTDOWN_ID: &str = "soda/shutdown";
 
 enum Outgoing {
     Restart(Value),
@@ -158,7 +160,7 @@ struct Client {
     restarting: bool,
     restart_request: Option<String>,
     process: Child,
-    writer: Sender<Outgoing>,
+    writer: Option<Sender<Outgoing>>,
     next: i64,
     /// Waiting for the answer to `initialize`.
     held: Option<Vec<Outgoing>>,
@@ -181,7 +183,9 @@ impl Client {
         match &mut self.held {
             Some(held) => held.push(message),
             None => {
-                let _ = self.writer.send(message);
+                if let Some(writer) = &self.writer {
+                    let _ = writer.send(message);
+                }
             }
         }
     }
@@ -386,6 +390,44 @@ fn initialize(root: &Path, init: &Value) -> Value {
     message
 }
 impl Lsp {
+    pub fn shutdown(&mut self) {
+        let mut clients = std::mem::take(&mut self.clients);
+        for client in clients.values_mut() {
+            if client.held.is_some() || client.restarting {
+                // Close stdin if the connection cannot take new requests.
+                client.writer.take();
+            } else {
+                client.send(Outgoing::Message(json!({
+                    "jsonrpc": "2.0", "id": SHUTDOWN_ID, "method": "shutdown",
+                })));
+            }
+        }
+        let deadline = Instant::now() + SHUTDOWN_TIMEOUT;
+        while !clients.is_empty() && Instant::now() < deadline {
+            clients.retain(|_, client| matches!(client.process.try_wait(), Ok(None)));
+            if clients.is_empty() {
+                break;
+            }
+            // A descendant may keep stdout open after the server exits.
+            // Check the process as well as reading its replies.
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if let Ok(Incoming::Message(key, message)) = self
+                .incoming
+                .1
+                .recv_timeout(remaining.min(Duration::from_millis(10)))
+                && message.get("method").is_none()
+                && message.get("id").and_then(Value::as_str) == Some(SHUTDOWN_ID)
+                && let Some(writer) = clients
+                    .get_mut(&key)
+                    .and_then(|client| client.writer.take())
+            {
+                let _ = writer.send(Outgoing::Message(json!({
+                    "jsonrpc": "2.0", "method": "exit",
+                })));
+            }
+        }
+    }
+
     /// Lets documents start servers; frontends turn this on, so that
     /// headless runs start none.
     pub fn enable(&mut self) {
@@ -554,7 +596,7 @@ impl Lsp {
                 restarting: false,
                 restart_request: server.restart_request.clone(),
                 process,
-                writer,
+                writer: Some(writer),
                 next: 1,
                 held: Some(vec![]),
                 waiting: HashMap::new(),

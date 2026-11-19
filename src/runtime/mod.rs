@@ -421,6 +421,10 @@ impl Runtime {
         }
         self.dirty |= changed;
     }
+    pub(crate) fn shutdown_lsp(&mut self) {
+        self.lsp.shutdown();
+    }
+
     /// Lets documents start language servers.
     pub fn enable_lsp(&mut self) {
         self.lsp.enable();
