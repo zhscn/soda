@@ -186,7 +186,7 @@ pub fn guard(event_loop: impl FnOnce() -> io::Result<()>) -> Result<io::Result<(
 /// unwinding after its report.
 pub fn finish(runtime: &mut Runtime, outcome: Result<io::Result<()>, Panic>) -> io::Result<()> {
     // A successful exec replaces this process before Runtime can be dropped.
-    runtime.shutdown_lsp();
+    runtime.shutdown_processes();
     // After a hangup nobody reads stderr, and writing may fail.
     use io::Write;
     let mut stderr = io::stderr();

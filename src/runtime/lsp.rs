@@ -5,6 +5,7 @@
 //! A server is started for the first document of a language under a root,
 //! so two projects have two servers. Documents are sent whole, shortly
 //! after typing stops and before any request. Bytes are written on a thread, so that a large document costs the editor nothing.
+use super::process::ManagedChild;
 use crate::{
     application::{Application, RootSource},
     core::Snapshot,
@@ -15,7 +16,7 @@ use std::{
     collections::HashMap,
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
+    process::{Command, Stdio},
     sync::mpsc::{self, Receiver, Sender},
     time::{Duration, Instant},
 };
@@ -159,7 +160,7 @@ struct Opened {
 struct Client {
     restarting: bool,
     restart_request: Option<String>,
-    process: Child,
+    process: ManagedChild,
     writer: Option<Sender<Outgoing>>,
     next: i64,
     /// Waiting for the answer to `initialize`.
@@ -171,12 +172,6 @@ struct Client {
     opened: HashMap<DocumentId, Opened>,
     /// The file watchers the server registered, by registration id.
     watchers: Vec<(String, Vec<Value>)>,
-}
-impl Drop for Client {
-    fn drop(&mut self) {
-        let _ = self.process.kill();
-        let _ = self.process.wait();
-    }
 }
 impl Client {
     fn send(&mut self, message: Outgoing) {
@@ -542,14 +537,15 @@ impl Lsp {
         let (language, root) = key;
         let server = &self.servers[language];
         let command = &server.command;
-        let mut process = Command::new(&command[0])
+        let mut launch = Command::new(&command[0]);
+        launch
             .args(&command[1..])
             .current_dir(root)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|error| format!("{}: {error}", command[0]))?;
+            .stderr(Stdio::null());
+        let mut process =
+            ManagedChild::spawn(&mut launch).map_err(|error| format!("{}: {error}", command[0]))?;
         let mut stdin = process.stdin.take().unwrap();
         let stdout = process.stdout.take().unwrap();
         let (writer, outgoing) = mpsc::channel::<Outgoing>();
@@ -815,7 +811,7 @@ impl Lsp {
                         // Wait for the reader's Closed event before replacing this
                         // client, so its EOF cannot remove the new process.
                         client.restarting = true;
-                        let _ = client.process.kill();
+                        client.process.force_stop();
                     }
                 }
                 Incoming::Closed(key) => {

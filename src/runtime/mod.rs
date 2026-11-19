@@ -421,7 +421,8 @@ impl Runtime {
         }
         self.dirty |= changed;
     }
-    pub(crate) fn shutdown_lsp(&mut self) {
+    pub(crate) fn shutdown_processes(&mut self) {
+        self.rg.shutdown();
         self.lsp.shutdown();
     }
 

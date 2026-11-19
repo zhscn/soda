@@ -769,8 +769,7 @@ fn spawn(
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    #[cfg(unix)]
-    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    crate::runtime::process::isolate(&mut command);
     let failed = |error: std::io::Error| Job {
         id,
         code: None,

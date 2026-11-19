@@ -1,20 +1,23 @@
 //! Ripgrep runs outside the editor thread. JSON output keeps file names and
 //! byte columns unambiguous; the result renderer shares grep's grouped layout.
-use super::grep::{GrepCompletion, group, shown};
+use super::{
+    grep::{GrepCompletion, group, shown},
+    process::{Cancellation, ManagedChild},
+};
 use crate::interaction::grep::RipgrepRequest;
 use serde_json::Value;
 use std::{
     collections::BTreeMap,
     io::{BufRead, BufReader, Read},
     path::PathBuf,
-    process::{Child, Command, Stdio},
+    process::{Command, Stdio},
     sync::mpsc::{self, Receiver, TryRecvError},
 };
 
 const MATCH_LIMIT: usize = 10_000;
 type SearchResult = Result<(String, usize, bool), String>;
 struct Running {
-    pid: u32,
+    cancellation: Cancellation,
     request: RipgrepRequest,
     regex: regex::Regex,
     result: Receiver<SearchResult>,
@@ -74,18 +77,16 @@ impl RgRunner {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        #[cfg(unix)]
-        std::os::unix::process::CommandExt::process_group(&mut command, 0);
         self.stop();
-        let child = command.spawn().map_err(|error| format!("rg: {error}"))?;
-        let pid = child.id();
+        let child = ManagedChild::spawn(&mut command).map_err(|error| format!("rg: {error}"))?;
+        let cancellation = child.cancellation();
         let (sender, result) = mpsc::channel();
         std::thread::spawn(move || {
             let _ = sender.send(search(child));
             crate::wake::wake();
         });
         self.running = Some(Running {
-            pid,
+            cancellation,
             request,
             regex,
             result,
@@ -94,10 +95,15 @@ impl RgRunner {
     }
     pub fn stop(&mut self) -> bool {
         if let Some(running) = self.running.take() {
-            super::process::terminate(running.pid);
+            running.cancellation.force_stop();
             true
         } else {
             false
+        }
+    }
+    pub fn shutdown(&mut self) {
+        if let Some(running) = self.running.take() {
+            running.cancellation.stop_and_wait();
         }
     }
     pub fn poll(&mut self) -> Option<GrepCompletion> {
@@ -128,7 +134,7 @@ impl RgRunner {
     }
 }
 
-fn search(mut child: Child) -> SearchResult {
+fn search(mut child: ManagedChild) -> SearchResult {
     let stderr = child.stderr.take().unwrap();
     let errors = std::thread::spawn(move || {
         let mut reader = BufReader::new(stderr);
@@ -139,7 +145,7 @@ fn search(mut child: Child) -> SearchResult {
     });
     let output = read_matches(BufReader::new(child.stdout.take().unwrap()));
     if !output.as_ref().is_ok_and(|(_, _, truncated)| !*truncated) {
-        let _ = child.kill();
+        child.force_stop();
     }
     let status = child.wait().map_err(|error| format!("rg: {error}"));
     let errors = errors.join().unwrap_or_default();
