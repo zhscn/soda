@@ -116,6 +116,23 @@ fn lines_select_without_their_break_and_extend() {
     ]);
 }
 #[test]
+fn digits_extend_to_the_last_available_target() {
+    cases(&[
+        ("|ab\ncd\nef", "e0", "[ab\ncd\nef]|"),
+        ("|ab\ncd\nef\n", "e9", "[ab\ncd\nef\n]|"),
+        ("ab\ncd\n|ef\n", "-e0", "|[ab\ncd\nef]\n"),
+        ("|ab\ncd\nef\n", "e00", "[ab\ncd\nef\n]|"),
+        ("|ab cd ef\n", "w0", "[ab cd ef]|\n"),
+        ("|a.b.c\n", "f.0", "[a.b.]|c\n"),
+        ("|a.b.c\n", "t.9", "[a.b]|.c\n"),
+        (
+            "|0\n1\n2\n3\n4\n5\n6\n7\n8\n9\na\nb\n",
+            "e0",
+            "[0\n1\n2\n3\n4\n5\n6\n7\n8\n9\na]|\nb\n",
+        ),
+    ]);
+}
+#[test]
 fn reverse_turns_the_selection_around_and_later_keys_follow() {
     cases(&[
         ("|ab\n", "LL;", "|[ab]\n"),

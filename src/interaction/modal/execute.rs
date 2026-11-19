@@ -735,13 +735,17 @@ impl Layers {
         }
         hints
     }
-    /// A digit: the same command again that many times, keeping the far end.
+    /// A digit extends by up to that many targets, keeping the anchor.
     fn expand_selection(&mut self, at: &Place, digit: usize, mut response: Response) -> Response {
         let Some(tag) = self.modal.tag(at.selection) else {
             return response;
         };
         let count = if digit == 0 { 10 } else { digit };
-        let Some(to) = self.reach(at, tag, count) else {
+        let Some(to) = (1..=count)
+            .rev()
+            .find_map(|count| self.reach(at, tag, count))
+            .filter(|to| *to != at.selection.head)
+        else {
             return self.fail(response, "Nothing to expand to");
         };
         self.select(

@@ -1220,7 +1220,7 @@ pub static BUILTINS: &[Builtin] = &[
     builtin!(
         "expand",
         [slot("N", SlotKind::Word)],
-        "More of what the selection covers; without one, a count",
+        "Extend to the Nth target or the last available one (0 means 10). With no selection, enter a count",
         |a| Ok(Command::Modal(Action::Expand(digit(a)?)))
     ),
     builtin!(
