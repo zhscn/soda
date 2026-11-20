@@ -3,7 +3,8 @@ use crate::{
     cpp::{CppRules, CppSession},
     language::{
         Analyzer, EnterAdvice, Group, IndentAdvice, IndentRequest, IndentTrigger, Item, ItemKind,
-        Profile, Scanner, Side, WhitespacePolicy, catalog, materialize,
+        NativeAnalyzer, NativeSession, Profile, Scanner, Side, WhitespacePolicy, catalog,
+        materialize,
     },
     rust::RustSession,
     syntax::Tokens,
@@ -50,10 +51,16 @@ enum Session {
         tokens: Tokens,
         /// Structure and indentation where soda knows the language beyond
         /// its grammar.
-        rust: Option<RustSession>,
+        native: Option<Box<dyn NativeSession>>,
     },
     Cpp(CppSession),
 }
+fn start_native(analyzer: NativeAnalyzer) -> Box<dyn NativeSession> {
+    match analyzer {
+        NativeAnalyzer::Rust => Box::<RustSession>::default(),
+    }
+}
+
 /// Plain text indents with four spaces until options say otherwise.
 pub(crate) fn plain_whitespace() -> WhitespacePolicy {
     WhitespacePolicy {
@@ -76,7 +83,7 @@ impl LanguageSession {
                         Analyzer::TextMate { scope } => scope,
                         _ => "",
                     }),
-                    rust: (profile.id == "rust").then(RustSession::default),
+                    native: profile.native.map(start_native),
                     profile,
                     whitespace: plain_whitespace(),
                 },
@@ -162,8 +169,9 @@ impl LanguageSession {
         match &mut self.inner {
             Session::Cpp(session) => session.in_literal(snapshot, position),
             Session::TextMate {
-                rust: Some(rust), ..
-            } => rust.in_literal(snapshot, position),
+                native: Some(native),
+                ..
+            } => native.in_literal(snapshot, position),
             Session::TextMate { tokens, .. } => {
                 if !snapshot.is_char_boundary(position) {
                     return Err(EditError::InvalidRange);
@@ -194,8 +202,9 @@ impl LanguageSession {
         match &mut self.inner {
             Session::Cpp(session) => session.enclosing(snapshot, at),
             Session::TextMate {
-                rust: Some(rust), ..
-            } => rust.enclosing(snapshot, at),
+                native: Some(native),
+                ..
+            } => native.enclosing(snapshot, at),
             _ => self.scanned(snapshot, |scanner| scanner.enclosing(at)),
         }
     }
@@ -205,8 +214,9 @@ impl LanguageSession {
         match &mut self.inner {
             Session::Cpp(session) => session.item(snapshot, at, side),
             Session::TextMate {
-                rust: Some(rust), ..
-            } => rust.item(snapshot, at, side),
+                native: Some(native),
+                ..
+            } => native.item(snapshot, at, side),
             _ => self.scanned(snapshot, |scanner| scanner.item(at, side)),
         }
     }
@@ -299,8 +309,9 @@ impl LanguageSession {
         match &self.inner {
             Session::Cpp(session) => session.triggers(ch),
             Session::TextMate {
-                rust: Some(rust), ..
-            } => rust.triggers(ch),
+                native: Some(native),
+                ..
+            } => native.triggers(ch),
             _ => false,
         }
     }
@@ -312,8 +323,9 @@ impl LanguageSession {
         match &mut self.inner {
             Session::Cpp(session) => session.enter_advice(snapshot, position),
             Session::TextMate {
-                rust: Some(rust), ..
-            } => rust.enter_advice(snapshot, position),
+                native: Some(native),
+                ..
+            } => native.enter_advice(snapshot, position),
             _ => Ok(EnterAdvice {
                 expand_pair: self.between_pair(snapshot, position),
                 ..EnterAdvice::default()
@@ -328,10 +340,10 @@ impl LanguageSession {
         match &mut self.inner {
             Session::Cpp(session) => session.indent(snapshot, request),
             Session::TextMate {
-                rust: Some(rust),
+                native: Some(native),
                 whitespace,
                 ..
-            } => rust.indent(snapshot, request, whitespace),
+            } => native.indent(snapshot, request, whitespace),
             _ => Ok(self.bracket_indent(snapshot, request)),
         }
     }

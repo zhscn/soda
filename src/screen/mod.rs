@@ -13,6 +13,7 @@ pub(crate) mod chrome;
 pub(crate) mod content;
 mod highlight;
 mod layout;
+pub(crate) mod popup;
 mod results;
 mod style;
 mod theme;

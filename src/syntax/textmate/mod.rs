@@ -15,7 +15,7 @@ pub(super) use scan::State;
 pub use tokens::Tokens;
 
 use super::{Category, scope};
-use crate::bundled_grammars::PACKAGES;
+use crate::language::bundled_grammars::PACKAGES;
 use onig::{Regex, RegexOptions, Syntax};
 use serde_json::{Map, Value};
 use std::{collections::HashMap, sync::Arc};

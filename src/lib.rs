@@ -5,12 +5,11 @@
 //! draws what a frontend shows, `host` starts and ends a session, and `tui`
 //! is the terminal frontend.
 pub mod config;
-pub mod core;
+pub use soda_core as core;
 pub mod cpp;
 
-mod bundled_grammars;
 pub mod editor;
-pub mod language;
+pub use soda_language as language;
 pub mod options;
 pub(crate) mod rust;
 

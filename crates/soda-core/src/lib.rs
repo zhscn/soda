@@ -1,6 +1,6 @@
 mod word;
 pub use word::word_boundary;
-pub(crate) use word::word_edge;
+pub use word::word_edge;
 mod coordinate;
 pub use coordinate::{ByteOffset, LogicalColumn, TextPoint};
 mod position;
@@ -9,10 +9,10 @@ pub use position::{
     offset_at_logical_column, step_grapheme,
 };
 mod history;
-pub(crate) use history::History;
+pub use history::History;
 mod changes;
 pub use changes::compose_changes;
-pub(crate) use changes::{ValidatedChanges, compose_validated, invert_changes};
+pub use changes::{ValidatedChanges, compose_validated, invert_changes};
 mod state;
 mod text;
 

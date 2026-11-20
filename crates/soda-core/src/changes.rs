@@ -69,7 +69,7 @@ pub fn compose_changes(
 }
 
 /// Inputs have already been validated against their corresponding snapshots.
-pub(crate) fn compose_validated(
+pub fn compose_validated(
     base: &Snapshot,
     first: &[Change],
     middle_len: usize,
@@ -105,7 +105,7 @@ pub(crate) fn compose_validated(
 }
 
 /// Invert validated, sorted changes using only replaced slices of the base.
-pub(crate) fn invert_changes(base: &Snapshot, changes: &[Change]) -> Vec<Change> {
+pub fn invert_changes(base: &Snapshot, changes: &[Change]) -> Vec<Change> {
     let mut removed = 0;
     let mut inserted = 0;
     let mut inverse: Vec<Change> = Vec::new();
@@ -133,7 +133,7 @@ pub(crate) fn invert_changes(base: &Snapshot, changes: &[Change]) -> Vec<Change>
 }
 
 /// Canonical sorted changes and their mapping, validated without editing text.
-pub(crate) struct ValidatedChanges {
+pub struct ValidatedChanges {
     pub changes: Vec<Change>,
     pub mapping: ChangeMap,
 }

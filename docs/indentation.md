@@ -57,7 +57,7 @@ C++ 分析容忍未完成的输入：词法确定字符串、注释和预处理�
 
 ## 3 查询契约
 
-定义在 `src/language.rs`：
+定义在 `crates/soda-language/src/lib.rs`：
 
 ```text
 IndentRequest { line, position, trigger: Enter | Typed(char) | Reindent }
@@ -109,7 +109,7 @@ C++ 的空白策略来自 `CppRules`；其他语言来自选项 `indent-width`�
 3. 新行得到 `Set` 时，拆行后上一行若只剩空白则清空，不留行尾空白。注释续行标记接在新行的缩进之后，取代拆开处后面的空白。
 4. 所有修改经统一的修改组合与位置映射转换到基准版本，成为一个事务：换行、空白、括号展开和光标一次撤销。caret 位于新行缩进之后、原后缀之前。不按换行长度平移建议。
 
-注释续行由 `src/language/comment.rs` 计算，C++ 与 Rust 共用，与 CLion 一致：
+注释续行由 `crates/soda-language/src/comment.rs` 计算，C++ 与 Rust 共用，与 CLion 一致：
 
 - 行首的行注释（`//`、`///`、`//!` 连同其后一个空格）在光标位于标记之后时延续到新行；代码之后的行尾注释不延续。
 - 块注释在行首开始时，新行在 `/*` 下对齐为 ` * `；以 `*` 开头的行延续 `* `；光标后紧跟 `*/` 时只对齐，不加星号。不以 `*` 开头的行不加前缀。

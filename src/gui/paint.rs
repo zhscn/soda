@@ -1343,9 +1343,8 @@ fn key_hints(painter: &mut Painter, runtime: &Runtime, areas: &Areas) {
         .fold(0.0, f32::max);
     let column = (key_width + cell * 1.5 + doc_width).min(cell * 56.0);
     let area = areas.editor;
-    let max_rows = ((area.h / line) as usize).saturating_sub(3).clamp(1, 12);
-    let columns = entries.len().div_ceil(max_rows);
-    let rows = entries.len().div_ceil(columns);
+    let (columns, rows) =
+        screen::popup::hint_grid(entries.len(), ((area.h / line) as usize).saturating_sub(3));
     let room = (area.w - 4.0 * cell) / columns as f32;
     let column = column.min(room - 2.0 * cell);
     if column <= key_width + cell * 2.0 {
@@ -1399,25 +1398,14 @@ fn completions(
         .map(|r| painter.fonts.width(&r.detail, Face::UI))
         .fold(0.0, f32::max);
     let w = (label + detail + 4.0 * cell).min(area.w);
-    let (above, below) = (caret.y - area.y, area.bottom() - caret.bottom());
-    let wanted = popup.rows.len() as f32 * line + 10.0;
-    let fits_below = below >= wanted || below >= above;
-    let h = wanted.min(if fits_below { below } else { above } - 4.0);
-    if h < line + 10.0 {
+    let left = caret.x - (popup.typed as f32 + 1.0) * cell;
+    let Some((rect, visible)) = caret_panel(area, caret, left, w, popup.rows.len(), line, true)
+    else {
         return;
-    }
-    let x = (caret.x - (popup.typed as f32 + 1.0) * cell)
-        .max(area.x)
-        .min(area.right() - w);
-    let y = if fits_below {
-        caret.bottom() + 3.0
-    } else {
-        caret.y - h - 3.0
     };
-    let rect = Rect::new(x, y, w, h);
+    let (x, y, w) = (rect.x, rect.y, rect.w);
     panel(painter, rect);
     painter.clip_to(rect);
-    let visible = ((h - 10.0) / line).floor() as usize;
     for (row, candidate) in popup.rows.iter().take(visible).enumerate() {
         let ry = y + 5.0 + row as f32 * line;
         let base = if candidate.selected {
@@ -1469,8 +1457,8 @@ fn completions(
 fn documentation(painter: &mut Painter, area: Rect, list: Rect, doc: &str) {
     let theme = painter.theme;
     let (cell, line) = (painter.fonts.cell, painter.fonts.line);
-    let (left, right) = (list.x - area.x, area.right() - list.right());
-    let room = left.max(right);
+    let side = screen::popup::Beside::new(popup_bounds(area), popup_bounds(list), 6.0);
+    let room = side.width;
     if room < 16.0 * cell {
         return;
     }
@@ -1487,11 +1475,7 @@ fn documentation(painter: &mut Painter, area: Rect, list: Rect, doc: &str) {
         .unwrap_or(0)
         .min(widest);
     let w = (inner + 2) as f32 * cell;
-    let x = if right >= left {
-        list.right() + 6.0
-    } else {
-        list.x - w - 6.0
-    };
+    let x = side.x(w);
     let rect = Rect::new(x, list.y, w, h);
     panel(painter, rect);
     painter.clip_to(rect);
@@ -1502,6 +1486,42 @@ fn documentation(painter: &mut Painter, area: Rect, list: Rect, doc: &str) {
         painter.words(x + cell, y, text, style, Kind::Text, w - 2.0 * cell, false);
     }
     painter.unclip();
+}
+
+fn popup_bounds(rect: Rect) -> screen::popup::Bounds {
+    screen::popup::Bounds {
+        left: rect.x,
+        top: rect.y,
+        right: rect.right(),
+        bottom: rect.bottom(),
+    }
+}
+
+fn caret_panel(
+    area: Rect,
+    caret: Rect,
+    left: f32,
+    width: f32,
+    rows: usize,
+    line: f32,
+    prefer_below: bool,
+) -> Option<(Rect, usize)> {
+    use screen::popup::{Request, place};
+    let panel = place(Request {
+        area: popup_bounds(area),
+        caret: popup_bounds(caret),
+        left,
+        width,
+        rows,
+        row_height: line,
+        padding: 10.0,
+        gap: 3.0,
+        prefer_below,
+    })?;
+    Some((
+        Rect::new(panel.x, panel.y, panel.width, panel.height),
+        panel.rows,
+    ))
 }
 
 /// Words in a box by the caret, on whichever side has more room; they
@@ -1521,27 +1541,19 @@ fn floating(
     }
     let lines = screen::wrap(words, widest);
     let caret = caret.unwrap_or(Rect::new(area.x, area.y, cell, line));
-    let (above, below) = (caret.y - area.y, area.bottom() - caret.bottom());
-    let room = ((above.max(below) - 10.0) / line).floor().max(0.0) as usize;
-    if room == 0 {
-        return screen::PopupViewport::default();
-    }
-    let shown = lines.len().min(room);
-    let first = runtime.popup_scroll(shown, lines.len());
     let inner = lines
         .iter()
         .map(|l| Cells.width_of(l))
         .max()
         .unwrap_or(0)
         .min(widest);
-    let (w, h) = ((inner + 2) as f32 * cell, shown as f32 * line + 10.0);
-    let y = if below >= above {
-        caret.bottom() + 3.0
-    } else {
-        caret.y - h - 3.0
+    let width = (inner + 2) as f32 * cell;
+    let Some((rect, shown)) = caret_panel(area, caret, caret.x, width, lines.len(), line, false)
+    else {
+        return screen::PopupViewport::default();
     };
-    let x = caret.x.min(area.right() - w).max(area.x);
-    let rect = Rect::new(x, y, w, h);
+    let first = runtime.popup_scroll(shown, lines.len());
+    let (x, y, w, h) = (rect.x, rect.y, rect.w, rect.h);
     panel(painter, rect);
     painter.clip_to(rect);
     for (row, text) in lines[first..first + shown].iter().enumerate() {

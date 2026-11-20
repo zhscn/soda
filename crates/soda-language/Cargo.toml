@@ -1,0 +1,9 @@
+[package]
+name = "soda-language"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+soda-core = { path = "../soda-core" }
+serde_json = "1"

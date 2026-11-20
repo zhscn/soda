@@ -380,6 +380,45 @@ pub(super) fn render(
     }
 }
 
+fn caret_panel(
+    area: Rect,
+    caret: Position,
+    left: u16,
+    width: u16,
+    rows: usize,
+    prefer_below: bool,
+) -> Option<(Rect, usize)> {
+    use screen::popup::{Bounds, Request, place};
+    let panel = place(Request {
+        area: Bounds {
+            left: area.x.into(),
+            top: area.y.into(),
+            right: area.right().into(),
+            bottom: area.bottom().into(),
+        },
+        caret: Bounds {
+            left: caret.x.into(),
+            top: caret.y.into(),
+            right: caret.x.into(),
+            bottom: f32::from(caret.y) + 1.0,
+        },
+        left: left.into(),
+        width: width.into(),
+        rows,
+        row_height: 1.0,
+        padding: 2.0,
+        gap: 0.0,
+        prefer_below,
+    })?;
+    let rect = Rect::new(
+        panel.x as u16,
+        panel.y as u16,
+        panel.width as u16,
+        panel.height as u16,
+    );
+    Some((rect, panel.rows))
+}
+
 /// Text in a box by the caret, on whichever side has more room. Text that
 /// does not fit scrolls, with its place shown on the border.
 fn floating(
@@ -396,26 +435,18 @@ fn floating(
     }
     let lines = screen::wrap(words, usize::from(widest));
     let caret = caret.unwrap_or(Position::new(area.x, area.y));
-    let (above, below) = (caret.y - area.y, area.bottom().saturating_sub(caret.y + 1));
-    let room = above.max(below).saturating_sub(2);
-    if room == 0 {
-        return screen::PopupViewport::default();
-    }
-    let shown = lines.len().min(usize::from(room));
-    let first = runtime.popup_scroll(shown, lines.len());
     let inner = lines
         .iter()
         .map(|line| screen::plain(line, 0, usize::from(widest)).chars().count())
         .max()
         .unwrap_or(0) as u16;
-    let (wide, high) = (inner + 4, shown as u16 + 2);
-    let y = if below >= above {
-        caret.y + 1
-    } else {
-        caret.y - high
+    let Some((rect, shown)) = caret_panel(area, caret, caret.x, inner + 4, lines.len(), false)
+    else {
+        return screen::PopupViewport::default();
     };
-    let x = caret.x.min(area.right().saturating_sub(wide)).max(area.x);
-    float_box(buf, Rect::new(x, y, wide, high), theme);
+    let first = runtime.popup_scroll(shown, lines.len());
+    let (x, y, wide, high) = (rect.x, rect.y, rect.width, rect.height);
+    float_box(buf, rect, theme);
     for (row, line) in lines[first..first + shown].iter().enumerate() {
         buf.set_stringn(
             x + 2,
@@ -462,26 +493,14 @@ fn completions(
     // Border, marker and a gap on the left; the same on the right, less the
     // marker, so the labels line up with the word being typed.
     let wide = ((label + detail + 5) as u16).min(area.width);
-    let (above, below) = (caret.y - area.y, area.bottom().saturating_sub(caret.y + 1));
-    let wanted = popup.rows.len() as u16 + 2;
-    let fits_below = below >= wanted || below >= above;
-    let high = wanted.min(if fits_below { below } else { above });
-    if high < 3 {
+    let left = caret.x.saturating_sub(popup.typed as u16 + 2);
+    let Some((rect, visible)) = caret_panel(area, caret, left, wide, popup.rows.len(), true) else {
         return;
-    }
-    let x = caret
-        .x
-        .saturating_sub(popup.typed as u16 + 2)
-        .max(area.x)
-        .min(area.right().saturating_sub(wide));
-    let y = if fits_below {
-        caret.y + 1
-    } else {
-        caret.y - high
     };
-    float_box(buf, Rect::new(x, y, wide, high), theme);
+    let (x, y) = (rect.x, rect.y);
+    float_box(buf, rect, theme);
     let name = wide.saturating_sub(detail as u16 + 5) as usize;
-    for (row, candidate) in popup.rows.iter().take(usize::from(high - 2)).enumerate() {
+    for (row, candidate) in popup.rows.iter().take(visible).enumerate() {
         let y = y + 1 + row as u16;
         let style = if candidate.selected {
             let band = Rect::new(x + 1, y, wide - 2, 1);
@@ -508,15 +527,21 @@ fn completions(
         );
     }
     if let Some(doc) = popup.rows.iter().find(|r| r.selected && !r.doc.is_empty()) {
-        documentation(buf, area, Rect::new(x, y, wide, high), &doc.doc, theme);
+        documentation(buf, area, rect, &doc.doc, theme);
     }
 }
 
 /// The selected candidate's documentation, in a box beside the list on
 /// whichever side has more room, from the list's top row down.
 fn documentation(buf: &mut Buffer, area: Rect, list: Rect, doc: &str, theme: &Theme) {
-    let (left, right) = (list.x - area.x, area.right().saturating_sub(list.right()));
-    let room = left.max(right);
+    let bounds = |rect: Rect| screen::popup::Bounds {
+        left: rect.x.into(),
+        top: rect.y.into(),
+        right: rect.right().into(),
+        bottom: rect.bottom().into(),
+    };
+    let side = screen::popup::Beside::new(bounds(area), bounds(list), 0.0);
+    let room = side.width as u16;
     if room < 16 {
         return;
     }
@@ -532,11 +557,7 @@ fn documentation(buf: &mut Buffer, area: Rect, list: Rect, doc: &str, theme: &Th
         .max()
         .unwrap_or(0) as u16;
     let wide = inner + 4;
-    let x = if right >= left {
-        list.right()
-    } else {
-        list.x - wide
-    };
+    let x = side.x(wide.into()) as u16;
     float_box(buf, Rect::new(x, list.y, wide, high), theme);
     for (row, line) in lines.iter().take(usize::from(high - 2)).enumerate() {
         buf.set_stringn(
@@ -1065,9 +1086,10 @@ fn key_hints(buf: &mut Buffer, areas: &Areas, runtime: &Runtime, theme: &Theme) 
             .max()
             .unwrap_or(0))
     .min(56);
-    let max_rows = usize::from(areas.editor.height.saturating_sub(2)).clamp(1, 12);
-    let columns = entries.len().div_ceil(max_rows);
-    let rows = entries.len().div_ceil(columns);
+    let (columns, rows) = screen::popup::hint_grid(
+        entries.len(),
+        usize::from(areas.editor.height.saturating_sub(2)),
+    );
     // Narrow columns cut their words rather than hide what the keys are.
     let room = usize::from(areas.editor.width).saturating_sub(2) / columns;
     let column_width = column_width.min(room.saturating_sub(2));

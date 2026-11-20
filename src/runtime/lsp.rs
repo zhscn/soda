@@ -3,8 +3,8 @@
 //! what to do with its answers, is Lua's: `lua/lsp.lua`.
 //!
 //! A server is started for the first document of a language under a root,
-//! so two projects have two servers. Documents are sent whole, shortly
-//! after typing stops and before any request. Bytes are written on a thread, so that a large document costs the editor nothing.
+//! so two projects have two servers. Document changes are debounced and
+//! flushed before requests. The writer thread prepares and serializes each update.
 use super::process::ManagedChild;
 use crate::{
     application::{Application, RootSource},
@@ -20,6 +20,9 @@ use std::{
     sync::mpsc::{self, Receiver, Sender},
     time::{Duration, Instant},
 };
+
+mod sync;
+use sync::Sync;
 
 /// How long after an edit a document goes out without a request needing it.
 const SETTLE: Duration = Duration::from_millis(150);
@@ -40,10 +43,14 @@ enum Outgoing {
         version: u64,
         snapshot: Snapshot,
     },
+    Close {
+        uri: String,
+    },
     Change {
         uri: String,
-        version: u64,
+        previous: Snapshot,
         snapshot: Snapshot,
+        sync: Sync,
     },
 }
 impl Outgoing {
@@ -65,17 +72,29 @@ impl Outgoing {
                     "text": snapshot.text(),
                 }}),
             ),
+            Self::Close { uri } => notification(
+                "textDocument/didClose",
+                json!({ "textDocument": { "uri": uri } }),
+            ),
             Self::Change {
                 uri,
-                version,
+                previous,
                 snapshot,
-            } => notification(
-                "textDocument/didChange",
-                json!({
-                    "textDocument": { "uri": uri, "version": version },
-                    "contentChanges": [{ "text": snapshot.text() }],
-                }),
-            ),
+                sync,
+            } => {
+                let change = match sync {
+                    Sync::Full => json!({ "text": snapshot.text() }),
+                    Sync::Incremental(encoding) => sync::change(&previous, &snapshot, encoding),
+                    Sync::None => unreachable!("disabled changes are not sent"),
+                };
+                notification(
+                    "textDocument/didChange",
+                    json!({
+                        "textDocument": { "uri": uri, "version": snapshot.version() },
+                        "contentChanges": [change],
+                    }),
+                )
+            }
         }
     }
 }
@@ -154,7 +173,7 @@ pub(super) type Key = (String, PathBuf);
 
 struct Opened {
     uri: String,
-    version: u64,
+    sent: Snapshot,
     edited: Option<Instant>,
 }
 struct Client {
@@ -168,16 +187,29 @@ struct Client {
     /// The function each answer goes to, and whether it goes raw.
     waiting: HashMap<i64, (u64, bool)>,
     encoding: String,
+    sync: Sync,
+    open_close: bool,
     capabilities: Value,
     opened: HashMap<DocumentId, Opened>,
     /// The file watchers the server registered, by registration id.
     watchers: Vec<(String, Vec<Value>)>,
 }
 impl Client {
-    fn send(&mut self, message: Outgoing) {
+    fn send(&mut self, mut message: Outgoing) {
         match &mut self.held {
             Some(held) => held.push(message),
             None => {
+                if !self.open_close
+                    && matches!(message, Outgoing::Open { .. } | Outgoing::Close { .. })
+                {
+                    return;
+                }
+                if let Outgoing::Change { sync, .. } = &mut message {
+                    if matches!(self.sync, Sync::None) {
+                        return;
+                    }
+                    *sync = self.sync;
+                }
                 if let Some(writer) = &self.writer {
                     let _ = writer.send(message);
                 }
@@ -623,6 +655,8 @@ impl Lsp {
                 held: Some(vec![]),
                 waiting: HashMap::new(),
                 encoding: "utf-16".into(),
+                sync: Sync::Full,
+                open_close: true,
                 capabilities: json!({}),
                 opened: HashMap::new(),
                 watchers: vec![],
@@ -706,11 +740,7 @@ impl Lsp {
                 && opened.uri != current
             {
                 let old = client.opened.remove(&document).unwrap();
-                client.send(Outgoing::Message(json!({
-                    "jsonrpc": "2.0",
-                    "method": "textDocument/didClose",
-                    "params": { "textDocument": { "uri": old.uri } },
-                })));
+                client.send(Outgoing::Close { uri: old.uri });
             }
             let Some(opened) = client.opened.get_mut(&document) else {
                 let uri = current;
@@ -719,7 +749,7 @@ impl Lsp {
                     document,
                     Opened {
                         uri: uri.clone(),
-                        version,
+                        sent: snapshot.clone(),
                         edited: None,
                     },
                 );
@@ -731,18 +761,19 @@ impl Lsp {
                 });
                 continue;
             };
-            if opened.version == version {
+            if opened.sent.version() == version {
                 continue;
             }
             let edited = *opened.edited.get_or_insert_with(Instant::now);
             if now || edited.elapsed() >= SETTLE {
-                opened.version = version;
+                let previous = std::mem::replace(&mut opened.sent, snapshot.clone());
                 opened.edited = None;
                 let uri = opened.uri.clone();
                 client.send(Outgoing::Change {
                     uri,
-                    version,
+                    previous,
                     snapshot: snapshot.clone(),
+                    sync: Sync::Full,
                 });
             }
         }
@@ -762,11 +793,7 @@ impl Lsp {
             self.serving_changed |= !closed.is_empty();
             for document in closed {
                 let opened = client.opened.remove(&document).unwrap();
-                client.send(Outgoing::Message(json!({
-                    "jsonrpc": "2.0",
-                    "method": "textDocument/didClose",
-                    "params": { "textDocument": { "uri": opened.uri } },
-                })));
+                client.send(Outgoing::Close { uri: opened.uri });
             }
         }
         failure
@@ -982,6 +1009,13 @@ impl Lsp {
                 {
                     client.encoding = encoding.to_owned();
                 }
+                client.sync = Sync::negotiate(&client.capabilities, &client.encoding);
+                let sync = &client.capabilities["textDocumentSync"];
+                client.open_close = if sync.is_object() {
+                    sync["openClose"].as_bool().unwrap_or(false)
+                } else {
+                    sync.as_u64() != Some(0)
+                };
                 let held = client.held.take().unwrap_or_default();
                 client.send(Outgoing::Message(
                     json!({ "jsonrpc": "2.0", "method": "initialized", "params": {} }),

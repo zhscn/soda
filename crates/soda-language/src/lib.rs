@@ -1,14 +1,18 @@
 //! What languages are, and language-neutral suggestions in the request
 //! snapshot's UTF-8 coordinates.
+#[doc(hidden)]
+pub mod bundled_grammars;
 mod comment;
+mod native;
 mod profile;
+pub use native::NativeSession;
 mod structure;
 mod whitespace;
-use crate::core::Change;
-pub(crate) use comment::{Comment, continuation};
-pub(crate) use profile::plain_json;
-pub use profile::{Analyzer, Catalog, Profile, catalog};
-pub(crate) use structure::Scanner;
+pub use comment::{Comment, continuation};
+pub use profile::plain_json;
+pub use profile::{Analyzer, Catalog, NativeAnalyzer, Profile, catalog};
+use soda_core::Change;
+pub use structure::Scanner;
 pub use structure::{Group, Item, ItemKind, Side};
 pub use whitespace::{TabPolicy, WhitespacePolicy, materialize};
 

@@ -1875,3 +1875,45 @@ fn clice_counterparts_context_visibility_and_refactor_use_the_extensions() {
         f.log()
     );
 }
+
+#[test]
+fn incremental_sync_applies_debounced_edits_to_the_server_snapshot() {
+    let Some(mut f) = open_with(
+        "😀abc\r\n",
+        r#"{ init = { initializeResult = { capabilities = {
+            textDocumentSync = { openClose = true, change = 2 },
+            positionEncoding = "utf-16"
+        } } } }"#,
+        "",
+    ) else {
+        return;
+    };
+    f.r.command(Command::Edit(Edit::InsertText("x".into())));
+    f.r.command(Command::Edit(Edit::InsertText("y".into())));
+    assert!(text(&f.r).starts_with("xy"), "{:?}", text(&f.r));
+    let log = f.log.clone();
+    wait(&mut f.r, |_| {
+        std::fs::read_to_string(&log).is_ok_and(|text| {
+            text.lines()
+                .any(|line| line.starts_with("textDocument/didChange "))
+        })
+    });
+    let log = f.log();
+    let changes: Vec<_> = log
+        .lines()
+        .filter_map(|line| line.strip_prefix("incremental "))
+        .collect();
+    assert_eq!(changes.len(), 1, "{log}");
+    let change: serde_json::Value = serde_json::from_str(changes[0]).unwrap();
+    assert_eq!(change["text"], "xy");
+    assert_eq!(
+        change["range"]["start"],
+        serde_json::json!({"line":0,"character":0})
+    );
+    assert!(
+        log.lines()
+            .any(|line| line.starts_with("textDocument/didChange ")
+                && line.contains(r#" "xy\ud83d\ude00abc\r\n""#)),
+        "{log}"
+    );
+}

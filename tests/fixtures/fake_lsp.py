@@ -8,6 +8,7 @@ import time
 log = open(os.environ["FAKE_LSP_LOG"], "a", buffering=1)
 texts = {}
 held_inlays = []
+encoding = "utf-16"
 
 
 def read():
@@ -44,6 +45,23 @@ def replacement(line, start, end, text):
                       "end": {"line": line, "character": end}}, "newText": text}
 
 
+def sync_offset(text, position):
+    # LSP line boundaries recognise CR, LF and CRLF.
+    import re
+    lines = [0] + [match.end() for match in re.finditer(r"\r\n|\r|\n", text)]
+    start = lines[position["line"]]
+    units = position["character"]
+    end = start
+    while units:
+        ch = text[end]
+        units -= (len(ch.encode("utf-8")) if encoding == "utf-8"
+                  else 2 if encoding == "utf-16" and ord(ch) > 0xffff
+                  else 1)
+        end += 1
+        assert units >= 0
+    return end
+
+
 while True:
     message = read()
     method = message.get("method", "")
@@ -60,6 +78,8 @@ while True:
                    "error": {"code": -32603, "message": "index unavailable"}})
             continue
         if "initializeResult" in options:
+            encoding = (options["initializeResult"].get("capabilities") or {})
+            encoding = encoding.get("positionEncoding", "utf-16") if isinstance(encoding, dict) else "utf-16"
             answer(message, options["initializeResult"])
             continue
         # A question first, as real servers ask, to see that it is answered.
@@ -121,7 +141,16 @@ while True:
         log.write("didClose %s\n" % params["textDocument"]["uri"].rsplit("/", 1)[1])
     elif method in ("textDocument/didOpen", "textDocument/didChange"):
         document = params["textDocument"]
-        text = params.get("contentChanges", [{}])[0].get("text", document.get("text"))
+        text = document.get("text", texts.get(document["uri"], ""))
+        for change in params.get("contentChanges", []):
+            if "range" in change:
+                bounds = change["range"]
+                start = sync_offset(text, bounds["start"])
+                end = sync_offset(text, bounds["end"])
+                text = text[:start] + change["text"] + text[end:]
+                log.write("incremental %s\n" % json.dumps(change))
+            else:
+                text = change["text"]
         log.write("%s %d %s\n" % (method, document["version"], json.dumps(text)))
         texts[document["uri"]] = text
         if method == "textDocument/didOpen":

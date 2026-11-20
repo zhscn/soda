@@ -9,7 +9,7 @@
 //!
 //! This file also answers for languages with no parser, from the text and
 //! the literals of each line.
-use crate::core::Snapshot;
+use soda_core::Snapshot;
 use std::ops::Range;
 
 /// Lines one question may read; a further partner counts as missing.
@@ -65,7 +65,7 @@ enum Piece {
 }
 /// Walks text as pieces. Each line is cut on its own: `literals` gives the
 /// literal and comment spans of a line, relative to its start.
-pub(crate) struct Scanner<'a, F> {
+pub struct Scanner<'a, F> {
     pub snapshot: &'a Snapshot,
     /// Delimiters, one character each.
     pub brackets: &'a [(char, char)],

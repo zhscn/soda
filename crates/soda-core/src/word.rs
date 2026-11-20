@@ -3,7 +3,7 @@
 use super::{Association, ByteOffset, EditError, Snapshot, clip_grapheme_offset};
 use unicode_segmentation::UnicodeSegmentation;
 
-pub(crate) fn word_edge(text: &str, offset: usize, backward: bool) -> Option<usize> {
+pub fn word_edge(text: &str, offset: usize, backward: bool) -> Option<usize> {
     if backward {
         text.unicode_word_indices()
             .map(|(start, _)| start)

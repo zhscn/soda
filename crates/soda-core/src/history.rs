@@ -13,7 +13,7 @@ struct Entry<Owner> {
 }
 /// Shared history algorithm. Owners provide identity; history only handles
 /// edit grouping, inverse changes and branch transitions.
-pub(crate) struct History<Owner> {
+pub struct History<Owner> {
     undo: Vec<Entry<Owner>>,
     redo: Vec<Entry<Owner>>,
     group: Option<(Owner, u64, Option<super::UserEvent>)>,
@@ -27,7 +27,7 @@ impl<Owner> Default for History<Owner> {
         }
     }
 }
-pub(crate) struct HistoryRestore<Owner> {
+pub struct HistoryRestore<Owner> {
     pub state: EditorState,
     pub changes: Vec<Change>,
     pub mapping: ChangeMap,

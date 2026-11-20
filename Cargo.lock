@@ -2984,12 +2984,31 @@ dependencies = [
  "serde_json",
  "signal-hook",
  "smithay-clipboard",
+ "soda-core",
+ "soda-language",
  "tempfile",
  "unicode-script",
  "unicode-segmentation",
  "unicode-width",
  "wgpu",
  "winit",
+]
+
+[[package]]
+name = "soda-core"
+version = "0.1.0"
+dependencies = [
+ "ropey",
+ "unicode-segmentation",
+ "unicode-width",
+]
+
+[[package]]
+name = "soda-language"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "soda-core",
 ]
 
 [[package]]

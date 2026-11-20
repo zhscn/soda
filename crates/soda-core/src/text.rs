@@ -58,7 +58,7 @@ pub struct Snapshot {
     version: u64,
 }
 impl Snapshot {
-    pub(crate) fn new(text: String, version: u64) -> Self {
+    pub fn new(text: String, version: u64) -> Self {
         Self::from_rope(Rope::from_str(&text), version)
     }
     fn from_rope(rope: Rope, version: u64) -> Self {
@@ -192,7 +192,7 @@ impl Snapshot {
             None => Cow::Owned(slice.to_string()),
         })
     }
-    pub(crate) fn shared_text(&self) -> Arc<str> {
+    pub fn shared_text(&self) -> Arc<str> {
         self.contiguous().clone()
     }
     pub(crate) fn with_version(&self, version: u64) -> Self {
@@ -203,13 +203,13 @@ impl Snapshot {
     }
 
     /// History retains the rope, not an optional full-text parser allocation.
-    pub(crate) fn for_history(&self) -> Self {
+    pub fn for_history(&self) -> Self {
         Self::from_rope(self.storage.rope.clone(), self.version)
     }
 
     /// Applies validated, ordered base-coordinate changes backwards so later
     /// replacements cannot move the byte positions of earlier replacements.
-    pub(crate) fn edited(&self, changes: &[Change], version: u64) -> Self {
+    pub fn edited(&self, changes: &[Change], version: u64) -> Self {
         let mut rope = self.storage.rope.clone();
         for change in changes.iter().rev() {
             let start = rope.byte_to_char(change.range.start);
@@ -254,7 +254,7 @@ mod tests {
             }
         }
     }
-    use crate::core::{EditorState, Selection, StandaloneEditor, Transaction};
+    use crate::{EditorState, Selection, StandaloneEditor, Transaction};
 
     #[test]
     fn chunked_queries_edits_and_history_do_not_flatten_text() {
@@ -298,7 +298,7 @@ mod tests {
 
     #[test]
     fn coordinates_and_navigation_leave_contiguous_cache_uninitialized() {
-        use crate::core::{
+        use crate::{
             Association, ByteOffset, LogicalColumn, clip_grapheme_offset, logical_column_at,
             offset_at_logical_column, step_grapheme,
         };

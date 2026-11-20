@@ -10,8 +10,8 @@ mod structure;
 use crate::{
     core::{EditError, Snapshot},
     language::{
-        Comment, EnterAdvice, Group, IndentAdvice, IndentRequest, IndentTrigger, Item, Side,
-        WhitespacePolicy, continuation,
+        Comment, EnterAdvice, Group, IndentAdvice, IndentRequest, IndentTrigger, Item,
+        NativeSession, Side, WhitespacePolicy, continuation,
     },
 };
 use lexer::Kind;
@@ -32,7 +32,14 @@ impl RustSession {
             _ => self.analysis.insert(Arc::new(Structure::new(text))).clone(),
         }
     }
-    pub fn triggers(&self, ch: char) -> bool {
+}
+
+impl NativeSession for RustSession {
+    fn fork(&self) -> Box<dyn NativeSession> {
+        Box::new(self.clone())
+    }
+
+    fn triggers(&self, ch: char) -> bool {
         matches!(
             ch,
             '}' | ')' | ']' | '{' | '.' | '?' | 'e' | '&' | '|' | '>'
@@ -40,7 +47,7 @@ impl RustSession {
     }
     /// Whether a position is inside a comment or a literal; the end of a
     /// line comment counts as inside.
-    pub fn in_literal(&mut self, snapshot: &Snapshot, position: usize) -> Result<bool, EditError> {
+    fn in_literal(&mut self, snapshot: &Snapshot, position: usize) -> Result<bool, EditError> {
         if !snapshot.is_char_boundary(position) {
             return Err(EditError::InvalidRange);
         }
@@ -57,13 +64,13 @@ impl RustSession {
                 _ => false,
             }))
     }
-    pub fn enclosing(&mut self, snapshot: &Snapshot, at: usize) -> Option<Group> {
+    fn enclosing(&mut self, snapshot: &Snapshot, at: usize) -> Option<Group> {
         self.analyze(snapshot).enclosing(at)
     }
-    pub fn item(&mut self, snapshot: &Snapshot, at: usize, side: Side) -> Option<Item> {
+    fn item(&mut self, snapshot: &Snapshot, at: usize, side: Side) -> Option<Item> {
         self.analyze(snapshot).item(at, side)
     }
-    pub fn enter_advice(
+    fn enter_advice(
         &mut self,
         snapshot: &Snapshot,
         position: usize,
@@ -100,7 +107,7 @@ impl RustSession {
             continuation: continuation(snapshot, comment, position),
         })
     }
-    pub fn indent(
+    fn indent(
         &mut self,
         snapshot: &Snapshot,
         request: IndentRequest,

@@ -16,6 +16,14 @@ pub enum Analyzer {
     Cpp,
     TextMate { scope: String },
 }
+/// Structural editing that supplements a language's highlighting grammar.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NativeAnalyzer {
+    Rust,
+}
+
+const NATIVE_ANALYZERS: &[(&str, NativeAnalyzer)] = &[("rust", NativeAnalyzer::Rust)];
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Profile {
     pub id: String,
@@ -27,6 +35,7 @@ pub struct Profile {
     /// Quotes typed in pairs.
     pub quotes: Vec<char>,
     pub analyzer: Analyzer,
+    pub native: Option<NativeAnalyzer>,
 }
 impl Profile {
     /// The brackets structure follows. `<` is left out: only a parser can
@@ -87,7 +96,7 @@ fn text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
 }
 /// JSON from the JSONC of language configurations: comments and trailing
 /// commas go, strings stay as they are.
-pub(crate) fn plain_json(source: &str) -> String {
+pub fn plain_json(source: &str) -> String {
     let mut out = String::with_capacity(source.len());
     let mut chars = source.chars().peekable();
     while let Some(c) = chars.next() {
@@ -174,6 +183,7 @@ impl Catalog {
             brackets: round_brackets(),
             quotes: vec!['"', '\''],
             analyzer: Analyzer::Cpp,
+            native: None,
         };
         let mut entries = vec![Entry {
             profile: Arc::new(cpp.clone()),
@@ -220,6 +230,9 @@ impl Catalog {
                         analyzer: Analyzer::TextMate {
                             scope: scope.to_owned(),
                         },
+                        native: NATIVE_ANALYZERS
+                            .iter()
+                            .find_map(|(name, analyzer)| (*name == id).then_some(*analyzer)),
                     }),
                     extensions: strings(language, "extensions"),
                     filenames: strings(language, "filenames"),
@@ -234,6 +247,7 @@ impl Catalog {
                 brackets: round_brackets(),
                 quotes: vec![],
                 analyzer: Analyzer::Plain,
+                native: None,
             },
             cpp,
             entries,

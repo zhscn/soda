@@ -100,7 +100,7 @@ pub struct ChangeMap {
     spans: Vec<(Range<usize>, usize)>,
 }
 impl ChangeMap {
-    pub(crate) fn from_sorted(changes: &[Change]) -> Self {
+    pub fn from_sorted(changes: &[Change]) -> Self {
         Self {
             spans: changes
                 .iter()

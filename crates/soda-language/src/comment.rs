@@ -1,5 +1,5 @@
 //! What continues a comment on the line Enter opens, whatever lexed it.
-use crate::core::Snapshot;
+use soda_core::Snapshot;
 use std::ops::Range;
 
 /// A comment as a lexer found it.
