@@ -1,4 +1,5 @@
 //! The client against a small fake server, and `lua/lsp.lua` over it.
+use soda::interaction::FileCommand;
 use soda::{
     core::Selection,
     editor::Command as Edit,
@@ -289,7 +290,7 @@ fn delayed_inlay_hints_update_the_requested_document_after_switching_files() {
     });
     let other = f.dir.path().join("other.cpp");
     std::fs::write(&other, "void other();\n").unwrap();
-    f.r.command(Command::OpenPath(other));
+    f.r.command(Command::File(FileCommand::OpenPath(other)));
     wait(&mut f.r, |r| text(r) == "void other();\n");
     let current =
         f.r.app()
@@ -379,7 +380,7 @@ fn formatting_edits_and_saving_tells_the_server() {
     let Some(mut f) = open("one\n") else { return };
     f.r.command(Command::Named("lsp-format".into()));
     wait(&mut f.r, |r| text(r) == "formatted\n");
-    f.r.command(Command::Save { choose_path: false });
+    f.r.command(Command::File(FileCommand::Save { choose_path: false }));
     let log = f.log.clone();
     wait(&mut f.r, move |_| {
         std::fs::read_to_string(&log).is_ok_and(|log| log.contains("didSave"))
@@ -668,7 +669,7 @@ fn each_project_has_a_server_and_a_jump_stays_with_its_own() {
     r.start(Some(base.join("one/a.cpp")));
     let seen = read.clone();
     wait(&mut r, move |_| seen().contains("// one"));
-    r.command(Command::OpenPath(base.join("two/a.cpp")));
+    r.command(Command::File(FileCommand::OpenPath(base.join("two/a.cpp"))));
     let seen = read.clone();
     wait(&mut r, move |_| seen().contains("// two"));
     let count = roots.clone();
@@ -1390,11 +1391,15 @@ fn by_default_a_server_waits_for_lsp_start_then_serves_its_root_as_eglot() {
     }
     // `auto` left out: the default.
     let (mut r, log) = server_in(&base, "repo/a.c", "{ auto = nil }");
-    r.command(Command::OpenPath(base.join("repo/b.cpp")));
-    r.command(Command::OpenPath(base.join("other/d.cpp")));
+    r.command(Command::File(FileCommand::OpenPath(
+        base.join("repo/b.cpp"),
+    )));
+    r.command(Command::File(FileCommand::OpenPath(
+        base.join("other/d.cpp"),
+    )));
     settle(&mut r);
     assert!(initialized(&log).is_empty(), "nothing starts on opening");
-    r.command(Command::OpenPath(base.join("repo/a.c")));
+    r.command(Command::File(FileCommand::OpenPath(base.join("repo/a.c"))));
     r.command(Command::Named("lsp-start".into()));
     let opened = |log: &std::path::Path| -> Vec<String> {
         let mut names: Vec<_> = std::fs::read_to_string(log)
@@ -1412,7 +1417,9 @@ fn by_default_a_server_waits_for_lsp_start_then_serves_its_root_as_eglot() {
     // The documents of its root already open join it; another root's not.
     assert_eq!(opened(&log), ["a.c", "b.cpp"]);
     // Nor does one opened later under its root wait for another start.
-    r.command(Command::OpenPath(base.join("repo/c.cpp")));
+    r.command(Command::File(FileCommand::OpenPath(
+        base.join("repo/c.cpp"),
+    )));
     let seen = log.clone();
     wait(&mut r, move |_| opened(&seen).len() == 3);
     settle(&mut r);

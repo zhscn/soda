@@ -308,9 +308,6 @@ pub(in crate::interaction) struct State {
     pub universal: Option<UniversalArgument>,
     /// Where `recenter` put the caret's line last: middle, top, bottom.
     pub recenter_step: u8,
-    /// The buffers `previous-buffer` and `next-buffer` go through, in the
-    /// order of use when the first of them ran, and the place among them.
-    pub buffer_cycle: Option<(Vec<crate::editor::DocumentId>, usize)>,
 }
 impl State {
     /// Forgets what was typed toward a command.

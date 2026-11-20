@@ -1097,6 +1097,7 @@ pub(crate) fn trace(step: &str) {
 #[cfg(test)]
 mod tests {
     use super::{BAR, FADE, GLIDE, Glide, SCROLL, Scrolling, paint::Rect};
+    use crate::interaction::FileCommand;
     use std::time::{Duration, Instant};
 
     fn rect(x: f32) -> Rect {
@@ -1191,7 +1192,7 @@ mod tests {
     fn an_edge_between_windows_is_found_and_dragged_by_whole_cells() {
         use crate::{application::Axis, interaction::Command, runtime::Runtime};
         let mut runtime = Runtime::new(std::path::PathBuf::from("/")).unwrap();
-        runtime.command(crate::interaction::Command::New);
+        runtime.command(crate::interaction::Command::File(FileCommand::New));
         runtime.command(Command::Named("vsplit".into()));
         let fonts = super::Fonts::new(super::text::Settings {
             size: 14.0,

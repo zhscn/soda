@@ -1,3 +1,4 @@
+use soda::interaction::FileCommand;
 use soda::{
     interaction::{Command, KeyStroke, Layer, UserInput},
     runtime::Runtime,
@@ -17,7 +18,7 @@ fn runtime(root: &Path) -> Option<Runtime> {
     }
     let mut r = Runtime::new(root.to_owned()).unwrap();
     r.load_startup_lua();
-    r.command(Command::New);
+    r.command(Command::File(FileCommand::New));
     Some(r)
 }
 fn wait(r: &mut Runtime, done: impl Fn(&Runtime) -> bool) {

@@ -4,6 +4,7 @@
 //! newer edits arrived. Failure reopens the command line to retry. Cancelling
 //! stops the departure only; the write itself continues.
 use super::{Command, Input, Presentation, Response, session::Transition};
+use crate::interaction::PromptCommand;
 use crate::{
     application::{Application, Effect, Operation, Update, ViewId},
     editor::DocumentId,
@@ -46,10 +47,10 @@ impl SaveWait {
     }
     fn failed(&self, error: String) -> Transition {
         Transition::Closed(Response {
-            commands: vec![Command::Ask {
+            commands: vec![Command::Prompt(PromptCommand::Ask {
                 line: self.retry.clone(),
                 note: format!("save failed: {error}"),
-            }],
+            })],
             redraw: true,
             ..Response::default()
         })

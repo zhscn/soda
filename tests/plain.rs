@@ -1,5 +1,6 @@
 //! soda with no configuration edits as Emacs does: Insert alone, Emacs's
 //! keys, no mode on the status line. Plugins turn on with their setup.
+use soda::interaction::FileCommand;
 use soda::{
     core::Selection,
     editor::Command as Edit,
@@ -12,7 +13,7 @@ fn runtime(text: &str) -> Runtime {
     let caret = text.find('|').expect("a caret");
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
     r.load_startup_lua();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     r.command(Command::Edit(Edit::InsertText(text.replacen('|', "", 1))));
     r.command(Command::Edit(Edit::SetSelection(Selection::caret(caret))));
     r

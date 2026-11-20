@@ -1,3 +1,4 @@
+use soda::interaction::FileCommand;
 use soda::{
     application::{Application, Event, Update, ViewId},
     core::{ByteOffset, Change, Selection, Transaction},
@@ -269,7 +270,7 @@ fn modal_routing_blocks_unknown_input_and_requires_explicit_discard() {
     // Leaving a dirty document asks; Enter alone chooses save, never discard.
     let InputResult::Handled(response) = layers
         .execute(
-            soda::interaction::Command::Quit(None),
+            soda::interaction::Command::File(FileCommand::Quit(None)),
             &app,
             Duration::ZERO,
             std::path::Path::new("/"),

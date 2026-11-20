@@ -6,6 +6,7 @@
 //! appends to the last macro, before `<f4>` plays the second. After a key
 //! sequence that played a macro, its last key alone plays it again.
 use super::{execute::Place, replay::format_counter};
+use crate::interaction::PromptCommand;
 use crate::{
     editor::Command as Edit,
     interaction::{Command, EditMode, Layers, Message, Response, UserInput},
@@ -71,7 +72,7 @@ impl Layers {
         mut response: Response,
     ) -> Response {
         let recording = self.modal.replay.recording();
-        let executing = self.command.executing;
+        let executing = self.keys.command.executing;
         match action {
             MacroAction::StartOrCounter if recording || executing => {
                 self.insert_counter(at, &prefix, &mut response);
@@ -102,7 +103,7 @@ impl Layers {
             }
             MacroAction::EndOrCall | MacroAction::EndOrCallRepeat => {
                 if action == MacroAction::EndOrCallRepeat {
-                    self.command.repeat_on_last_key(RING_REPEATS);
+                    self.keys.command.repeat_on_last_key(RING_REPEATS);
                 }
                 if recording {
                     return self.end_macro(&prefix, response);
@@ -138,26 +139,28 @@ impl Layers {
                         return response;
                     }
                 }
-                self.command.repeat_on_last_key(&["macro-end-and-call"]);
+                self.keys
+                    .command
+                    .repeat_on_last_key(&["macro-end-and-call"]);
                 let before = std::mem::replace(&mut response.message, Message::Clear);
                 response = self.call_macro(prefix.count, response);
                 // A failure says so; else what ending said; else the hint,
                 // as Emacs gives it when the echo area is free.
                 if matches!(response.message, Message::Set(_)) {
-                    self.command.transient = None;
+                    self.keys.command.transient = None;
                 } else if matches!(before, Message::Set(_)) {
                     response.message = before;
-                } else if let Some(key) = self.command.repeat_key() {
+                } else if let Some(key) = self.keys.command.repeat_key() {
                     response.message =
                         Message::Set(format!("(Type {} to repeat macro)", key.emacs()));
                 }
             }
             MacroAction::CallSecond => {
-                self.command.repeat_on_last_key(RING_REPEATS);
+                self.keys.command.repeat_on_last_key(RING_REPEATS);
                 return self.call_second(prefix.count, response);
             }
             MacroAction::RingNext | MacroAction::RingPrevious => {
-                self.command.repeat_on_last_key(RING_REPEATS);
+                self.keys.command.repeat_on_last_key(RING_REPEATS);
                 let previous = action == MacroAction::RingPrevious;
                 if let Err(message) = self.modal.replay.cycle(previous) {
                     return response.modal_failure(message);
@@ -171,7 +174,7 @@ impl Layers {
                 response.message = Message::Set(self.describe_macro("Macro"));
             }
             MacroAction::RingDelete => {
-                self.command.repeat_on_last_key(RING_REPEATS);
+                self.keys.command.repeat_on_last_key(RING_REPEATS);
                 if let Err(message) = self.modal.replay.delete_head() {
                     return response.modal_failure(message);
                 }
@@ -182,7 +185,7 @@ impl Layers {
                 });
             }
             MacroAction::View => {
-                self.command.repeat_on_last_key(RING_REPEATS);
+                self.keys.command.repeat_on_last_key(RING_REPEATS);
                 response.message = Message::Set(if self.modal.replay.last().is_empty() {
                     "No keyboard macros defined".into()
                 } else {
@@ -341,10 +344,10 @@ impl Layers {
 }
 /// The command line, to ask for what a command needs.
 fn ask(mut response: Response, line: &str, note: &str) -> Response {
-    response.commands.push(Command::Ask {
+    response.commands.push(Command::Prompt(PromptCommand::Ask {
         line: line.into(),
         note: note.into(),
-    });
+    }));
     response
 }
 fn counter_message(replay: &super::replay::Replay, value: i64) -> String {

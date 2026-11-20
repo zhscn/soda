@@ -1,5 +1,7 @@
 //! The modal model: selections first, then what acts on them. `|` is the
 //! head; `[` and `]` around text are the selection when both are given.
+use soda::interaction::FileCommand;
+use soda::interaction::SetupCommand;
 use soda::{
     core::Selection,
     editor::Command as Edit,
@@ -11,7 +13,7 @@ fn runtime(text: &str) -> Runtime {
     let caret = text.find('|').expect("a caret");
     let plain = text.replacen('|', "", 1);
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     modal(&mut r);
     r.command(Command::SetMode(EditMode::Insert));
     r.command(Command::Edit(Edit::InsertText(plain)));
@@ -430,13 +432,13 @@ fn keypad_sequences_are_said_and_cancelled_and_step_back() {
 #[test]
 fn the_leader_is_ctrl_c_and_reaches_bindings_of_any_module() {
     let mut r = runtime("|a\n");
-    r.command(Command::Map {
+    r.command(Command::Setup(SetupCommand::Map {
         keymap: "global".into(),
         keys: KeyStroke::parse_sequence("C-c y").unwrap(),
         target: "append".into(),
         label: None,
         default: false,
-    });
+    }));
     keys(&mut r, "SPC y");
     assert_eq!(r.edit_mode(), EditMode::Insert);
 }

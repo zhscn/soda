@@ -13,6 +13,7 @@ use super::{
     execute::{Place, place, position},
     text,
 };
+use crate::interaction::MacroCommand;
 use crate::{
     application::ClipboardAction,
     application::{Application, Event},
@@ -378,7 +379,9 @@ impl Layers {
         let keys = self.modal.replay.last().to_vec();
         self.mode = EditMode::Normal;
         for _ in 0..count {
-            response.commands.push(Command::Replay(keys.clone()));
+            response
+                .commands
+                .push(Command::Macro(MacroCommand::Replay(keys.clone())));
         }
         self.modal.play = Some(BeaconPlay { entry: None, keys });
         response
@@ -438,7 +441,9 @@ impl Layers {
                 }
                 None => {}
             }
-            response.commands.push(Command::Replay(play.keys.clone()));
+            response
+                .commands
+                .push(Command::Macro(MacroCommand::Replay(play.keys.clone())));
             if play.entry.is_some() {
                 response.commands.push(Command::Modal(Action::Leave));
             }

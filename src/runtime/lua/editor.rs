@@ -1,6 +1,8 @@
 //! `soda` functions that run commands, read state, talk to the user and
 //! start processes.
 use super::{Host, Runtime};
+use crate::interaction::PromptCommand;
+use crate::interaction::SetupCommand;
 use crate::interaction::{
     Command, LuaCommand, ResultsCommand,
     slots::{self, Asked},
@@ -137,11 +139,11 @@ pub(super) fn register<'scope, 'r: 'scope>(
             let value = info.parse(&text).map_err(mlua::Error::runtime)?;
             let mut runtime = runtime.borrow_mut();
             runtime.failed = false;
-            runtime.command(Command::SetOption {
+            runtime.command(Command::Setup(SetupCommand::SetOption {
                 local: local.unwrap_or(false),
                 name: info.name,
                 value,
-            });
+            }));
             if runtime.failed {
                 return Err(mlua::Error::runtime(runtime.message.clone()));
             }
@@ -210,7 +212,9 @@ pub(super) fn register<'scope, 'r: 'scope>(
     soda.set(
         "prompt",
         scope.create_function(|_, text: String| {
-            runtime.borrow_mut().command(Command::Ex(text));
+            runtime
+                .borrow_mut()
+                .command(Command::Prompt(PromptCommand::Ex(text)));
             Ok(())
         })?,
     )?;

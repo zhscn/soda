@@ -1,5 +1,7 @@
 //! Lua extensions: the soda table, hooks and commands as Lua functions,
 //! background processes, errors and Lua started from Lua.
+use soda::interaction::FileCommand;
+use soda::interaction::PromptCommand;
 use soda::{
     application::Side,
     interaction::{Command, EditMode, KeyStroke, UserInput},
@@ -11,7 +13,7 @@ fn runtime() -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     r.command(Command::SetMode(EditMode::Insert));
     r.input(UserInput::Paste("one\ntwo\nthree".into()));
     r.command(Command::SetMode(EditMode::Normal));
@@ -173,7 +175,7 @@ fn process_functions_act_where_the_process_started() {
         end)
         "#,
     );
-    r.command(Command::New);
+    r.command(Command::File(FileCommand::New));
     let second = r
         .app()
         .view(r.app().active_view().unwrap())
@@ -350,7 +352,7 @@ fn buffer_edits_in_a_hook_undo_apart_from_what_insert_mode_types() {
 fn buffer_handles_outlive_requests_until_the_document_closes() {
     let mut r = runtime();
     lua(&mut r, "kept = soda.buffer()");
-    r.command(Command::New);
+    r.command(Command::File(FileCommand::New));
     lua(
         &mut r,
         r#"
@@ -402,7 +404,7 @@ fn clang_format_extension_replaces_only_changed_lines() {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     r.command(Command::SetMode(EditMode::Insert));
     r.input(UserInput::Paste(
         "int  a;\nint b;\nint   c;\nint d;\n".into(),
@@ -435,7 +437,7 @@ fn clang_format_extension_formats_only_the_selected_lines() {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     r.command(Command::SetMode(EditMode::Insert));
     r.input(UserInput::Paste("int  a;\nint  b;\nint  c;\n".into()));
     r.command(Command::SetMode(EditMode::Normal));
@@ -457,7 +459,7 @@ fn clang_format_extension_drops_output_when_the_buffer_changed() {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     r.command(Command::SetMode(EditMode::Insert));
     r.input(UserInput::Paste("int  a;\n".into()));
     r.command(Command::SetMode(EditMode::Normal));
@@ -479,7 +481,7 @@ fn extension(lines: &str, source: &str) -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     r.command(Command::SetMode(EditMode::Insert));
     r.input(UserInput::Paste(lines.into()));
     r.command(Command::SetMode(EditMode::Normal));
@@ -601,7 +603,7 @@ fn lua_results_step_with_the_built_in_keys() {
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     lua(
         &mut r,
         r#"
@@ -632,7 +634,7 @@ fn lua_results_follow_the_shape_of_the_largest_window() {
         let mut r = Runtime::new(dir.path().to_owned()).unwrap();
         r.source_lua("modal", include_str!("fixtures/modal.lua"))
             .unwrap();
-        r.command(soda::interaction::Command::New);
+        r.command(soda::interaction::Command::File(FileCommand::New));
         r.set_editing_area(width, height);
         if !setup.is_empty() {
             r.command(Command::Named(setup.into()));
@@ -656,7 +658,7 @@ fn lua_results_use_the_side_window_already_open() {
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     r.set_editing_area(256, 26);
     lua(&mut r, r#"soda.results("lint", { "a.txt:1:1: first" })"#);
     r.set_editing_area(100, 26);
@@ -672,7 +674,7 @@ fn lua_results_keep_a_configured_placement() {
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     lua(
         &mut r,
         r#"
@@ -701,7 +703,7 @@ fn lua_opens_a_position_and_reports_a_bad_one() {
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     lua(&mut r, r#"soda.open("a.txt", 2, 3)"#);
     wait(&mut r, |r| active_name(r).ends_with("a.txt"));
     assert_eq!(caret(&r), 6);
@@ -737,7 +739,7 @@ fn git_changes_extension_lists_each_hunk() {
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     lua(&mut r, include_str!("../lua/git-changes.lua"));
     r.command(Command::Named("git-changes".into()));
     wait(&mut r, |r| {
@@ -1227,7 +1229,7 @@ fn files_are_created_renamed_and_deleted_and_documents_follow() {
     // Saving writes to the new name.
     r.command(Command::SetMode(EditMode::Insert));
     r.input(UserInput::Paste("x".into()));
-    r.command(Command::Save { choose_path: false });
+    r.command(Command::File(FileCommand::Save { choose_path: false }));
     for _ in 0..500 {
         r.poll();
         if std::fs::read_to_string(base.join("moved/c.txt")).unwrap() == "xa\n" {
@@ -1581,10 +1583,10 @@ fn arguments_take_every_kind_and_words_a_function_lists() {
           end } } })
         "#,
     );
-    r.command(Command::Ex("keys-of norm".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("keys-of norm".into())));
     keys(&mut r, "RET");
     assert_eq!(r.message(), "map normal");
-    r.command(Command::Ex("branch ".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("branch ".into())));
     let rows = listed(&mut r);
     assert_eq!(rows.len(), 2, "{rows:?}");
     assert!(rows[1].starts_with("dev  Where work goes on"), "{rows:?}");
@@ -1597,7 +1599,7 @@ fn arguments_take_every_kind_and_words_a_function_lists() {
     keys(&mut r, "RET");
     assert_eq!(r.message(), "branch dev");
     // A function may answer later.
-    r.command(Command::Ex("later ".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("later ".into())));
     assert_eq!(listed(&mut r), ["eventually"]);
     keys(&mut r, "RET");
     assert_eq!(r.message(), "later eventually");

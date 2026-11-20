@@ -1,3 +1,6 @@
+use soda::interaction::FileCommand;
+use soda::interaction::PromptCommand;
+use soda::interaction::SearchCommand;
 use soda::{
     application::{Application, Event},
     core::Selection,
@@ -117,7 +120,7 @@ fn copy_cut_paste_cross_documents_preserve_unicode_and_undo_selection() {
     editor.command(Command::Edit(Edit::Undo));
     assert_eq!(editor.text(), "a中🦀z");
     assert_eq!(editor.selection(), selection);
-    editor.command(Command::New);
+    editor.command(Command::File(FileCommand::New));
     editor.command(Command::Clipboard(
         soda::application::ClipboardAction::Paste,
     ));
@@ -156,7 +159,7 @@ fn internal_paste_replaces_selection_and_modal_shortcuts_are_blocked() {
     assert_eq!(editor.text(), "first first");
     editor.command(Command::Edit(Edit::Undo));
     assert_eq!(editor.text(), "first second");
-    editor.command(Command::Ex("open ".into()));
+    editor.command(Command::Prompt(PromptCommand::Ex("open ".into())));
     editor.command(Command::Clipboard(soda::application::ClipboardAction::Cut));
     editor.command(Command::Clipboard(
         soda::application::ClipboardAction::Paste,
@@ -249,7 +252,7 @@ fn page_navigation_uses_visible_rows_and_preserves_goal_column() {
 #[test]
 fn goto_validates_input_clamps_location_and_cancel_keeps_selection() {
     let mut editor = Editor::new("one\n中e\u{301}x\n");
-    editor.command(Command::Ex("goto ".into()));
+    editor.command(Command::Prompt(PromptCommand::Ex("goto ".into())));
     editor.input(UserInput::Paste("0:1".into()));
     editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
     assert!(editor.layers.active().is_some());
@@ -263,11 +266,11 @@ fn goto_validates_input_clamps_location_and_cancel_keeps_selection() {
     assert!(editor.layers.active().is_none());
     assert_eq!(editor.selection().head, "one\n中e\u{301}".len());
     let before = editor.selection();
-    editor.command(Command::Ex("goto ".into()));
+    editor.command(Command::Prompt(PromptCommand::Ex("goto ".into())));
     editor.input(UserInput::Paste("999:999".into()));
     editor.input(UserInput::Key(KeyStroke::plain(Key::Esc)));
     assert_eq!(editor.selection(), before);
-    editor.command(Command::Ex("goto ".into()));
+    editor.command(Command::Prompt(PromptCommand::Ex("goto ".into())));
     editor.input(UserInput::Paste("999:999".into()));
     editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
     // The last line is the empty one after the final newline.
@@ -276,13 +279,13 @@ fn goto_validates_input_clamps_location_and_cancel_keeps_selection() {
 #[test]
 fn goto_closes_when_external_focus_changes() {
     let mut editor = Editor::new("one");
-    editor.command(Command::Ex("goto ".into()));
+    editor.command(Command::Prompt(PromptCommand::Ex("goto ".into())));
     editor.event(Event::NewDocument(Language::PlainText));
     assert!(editor.layers.active().is_none());
 }
 
 fn replace_dialog(editor: &mut Editor, query: &str, replacement: &str) {
-    editor.command(Command::Replace);
+    editor.command(Command::Search(SearchCommand::Replace));
     editor.input(UserInput::Paste(query.into()));
     editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
     editor.input(UserInput::Paste(replacement.into()));
@@ -325,7 +328,7 @@ fn cancelling_each_replace_phase_restores_origin_without_edits() {
     for phase in 0..3 {
         let mut editor = Editor::new("foo foo");
         editor.select(Selection::caret(4));
-        editor.command(Command::Replace);
+        editor.command(Command::Search(SearchCommand::Replace));
         editor.input(UserInput::Paste("foo".into()));
         if phase > 0 {
             editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
@@ -347,7 +350,7 @@ fn replacement_dialog_refreshes_match_after_other_view_edits() {
     editor.event(Event::AddView(document));
     let other = editor.app.active_view().unwrap();
     editor.event(Event::Focus(target));
-    editor.command(Command::Replace);
+    editor.command(Command::Search(SearchCommand::Replace));
     editor.input(UserInput::Paste("foo".into()));
     editor.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
     editor.event(Event::Edit {
@@ -393,7 +396,7 @@ fn help_scrolls_and_returns_without_editing_or_moving_selection() {
 #[test]
 fn f4_replaces_all_only_in_replacement_review() {
     let mut editor = Editor::new("foo foo");
-    editor.command(Command::Search);
+    editor.command(Command::Search(SearchCommand::Search));
     editor.input(UserInput::Key(KeyStroke::plain(Key::F(4))));
     assert!(matches!(
         editor.layers.active(),

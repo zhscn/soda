@@ -307,6 +307,7 @@ fn recover(unsaved: &[(String, String)], directory: &Path) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use crate::interaction::FileCommand;
     #[test]
     fn the_session_argument_is_taken_out_and_the_rest_kept() {
         let mut args: Vec<std::ffi::OsString> = ["--no-config", "--session", "/s", "a.txt"]
@@ -323,7 +324,7 @@ mod tests {
     #[test]
     fn unsaved_documents_are_recovered_into_files() {
         let mut runtime = crate::runtime::Runtime::new(std::path::PathBuf::from("/")).unwrap();
-        runtime.command(crate::interaction::Command::New);
+        runtime.command(crate::interaction::Command::File(FileCommand::New));
         assert!(runtime.unsaved().is_empty());
         runtime.command(crate::interaction::Command::SetMode(
             crate::interaction::EditMode::Insert,

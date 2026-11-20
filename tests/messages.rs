@@ -1,3 +1,4 @@
+use soda::interaction::FileCommand;
 use soda::{interaction::Command, runtime::Runtime};
 use std::path::PathBuf;
 
@@ -24,7 +25,7 @@ fn messages_are_logged_once_and_shown_in_a_document() {
         r.source_lua("init.lua", r#"soda.set("mouse", "maybe")"#)
             .is_err()
     );
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     line(&mut r, "set tab-width 99");
     line(&mut r, "set tab-width 99");
     line(&mut r, "set tab-width 2");

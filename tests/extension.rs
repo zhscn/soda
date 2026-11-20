@@ -1,5 +1,6 @@
 //! Command registry, key notation, readline keys, configuration and external
 //! commands, exercised through the Runtime like a frontend would.
+use soda::interaction::FileCommand;
 use soda::{
     interaction::{Command, EditMode, KeyStroke, Layer, UserInput, emacs_notation},
     runtime::Runtime,
@@ -10,7 +11,7 @@ fn runtime(text: &str) -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     r.command(Command::SetMode(EditMode::Insert));
     r.input(UserInput::Paste(text.into()));
     r
@@ -132,7 +133,7 @@ fn open_accepts_a_path_argument() {
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     keys(&mut r, "M-x");
     r.input(UserInput::Paste("open a b.txt".into()));
     keys(&mut r, "RET");

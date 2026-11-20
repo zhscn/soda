@@ -1,3 +1,4 @@
+use soda::interaction::FileCommand;
 use soda::{
     core::Selection,
     editor::Command as Edit,
@@ -15,7 +16,7 @@ fn runtime(text: &str) -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     r.set_page_rows(10);
     r.command(Command::SetMode(EditMode::Insert));
     r.command(Command::Edit(Edit::InsertText(text.into())));

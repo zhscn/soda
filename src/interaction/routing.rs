@@ -4,8 +4,17 @@ use super::{
     keymap::{self, Resolution},
     modal::Action,
 };
+use crate::interaction::FileCommand;
+use crate::interaction::InsertCommand;
 use crate::{application::Application, core::EditError, editor::Command as EditCommand};
 use std::{path::Path, time::Duration};
+
+#[derive(Default)]
+pub(super) struct Keys {
+    pub(super) sequence: keymap::Sequence,
+    pub(super) keymap: super::Keymap,
+    pub(super) command: super::command_loop::CommandLoop,
+}
 
 /// The character Shift gives on a US keyboard.
 pub(crate) fn shifted(ch: char) -> char {
@@ -245,7 +254,7 @@ impl Layers {
     pub(crate) fn prompt_yanks(&self, input: &UserInput) -> bool {
         self.active().is_some()
             && matches!(input, UserInput::Key(key) if !key.release
-                && matches!(self.keymap.input(*key), Input::Text(super::InputKey::Yank)))
+                && matches!(self.keys.keymap.input(*key), Input::Text(super::InputKey::Yank)))
     }
     /// Route to the active modal layer before resolving document bindings.
     /// A consumed event is never replayed after a layer closes. Execute the
@@ -354,7 +363,7 @@ impl Layers {
         {
             let editor = app.workspace().editor(document).unwrap();
             let language = editor.model().document().language();
-            stack.extend(self.keymap.in_force(&language.profile().id, servers));
+            stack.extend(self.keys.keymap.in_force(&language.profile().id, servers));
         }
         // Emacs's keys hold in Normal where Normal's do not, as meow's
         // normal state map lies over the global map.
@@ -389,10 +398,10 @@ impl Layers {
         if !command {
             return self.route(input, app, time, file_root, servers);
         }
-        self.command.executing = replayed;
+        self.keys.command.executing = replayed;
         let begins = !self.reading_command();
         if begins {
-            self.command.begin();
+            self.keys.command.begin();
         }
         let mut result = None;
         if begins && !replayed {
@@ -419,16 +428,16 @@ impl Layers {
             None => self.route(input, app, time, file_root, servers),
         };
         if !self.reading_command() {
-            self.command.end();
+            self.keys.command.end();
             if !replayed {
-                self.command.ended = true;
+                self.keys.command.ended = true;
             }
         }
         result
     }
     /// A prefix argument or a key sequence is pending.
     fn reading_command(&self) -> bool {
-        self.sequence.active() || self.modal.active() || self.modal.universal.is_some()
+        self.keys.sequence.active() || self.modal.active() || self.modal.universal.is_some()
     }
     /// The key the transient keymap of the command before takes, as
     /// kmacro's repeat key; any other key ends the map.
@@ -440,19 +449,19 @@ impl Layers {
         file_root: &Path,
         servers: &[&str],
     ) -> Option<Result<InputResult, EditError>> {
-        let transient = self.command.transient.take()?;
+        let transient = self.keys.command.transient.take()?;
         let mut again = transient.keys[..transient.keys.len() - 1].to_vec();
         again.push(keymap::canonical(key).unwrap_or(key));
         let stack = self.stack(app, servers);
-        let Resolution::Complete(command) = self.keymap.resolve(&stack, &again, &|_| false).0
+        let Resolution::Complete(command) = self.keys.keymap.resolve(&stack, &again, &|_| false).0
         else {
             return None;
         };
         if !self.names_one_of(&command, transient.commands) {
             return None;
         }
-        self.command.keys = again;
-        self.command.this_command = Some(command.clone());
+        self.keys.command.keys = again;
+        self.keys.command.this_command = Some(command.clone());
         Some(self.execute(command, app, time, file_root))
     }
     fn route(
@@ -470,13 +479,18 @@ impl Layers {
             if self.active().is_some() {
                 return Ok(InputResult::Blocked);
             }
-            return self.execute(super::Command::CheckFiles, app, time, file_root);
+            return self.execute(
+                super::Command::File(FileCommand::CheckFiles),
+                app,
+                time,
+                file_root,
+            );
         }
         if matches!(input, UserInput::FocusLost) {
-            if !self.sequence.active() && !self.modal.active() {
+            if !self.keys.sequence.active() && !self.modal.active() {
                 return Ok(InputResult::Blocked);
             }
-            self.sequence.clear();
+            self.keys.sequence.clear();
             self.modal.clear();
             return Ok(pending(Message::Clear));
         }
@@ -495,7 +509,7 @@ impl Layers {
         }
         if self.active().is_some() {
             let input = match input {
-                UserInput::Key(key) => self.keymap.input(key),
+                UserInput::Key(key) => self.keys.keymap.input(key),
                 UserInput::Paste(text) => Input::Paste(text),
                 UserInput::Snippet(_)
                 | UserInput::Unrecognized
@@ -508,14 +522,19 @@ impl Layers {
         let key = match input {
             UserInput::Key(key) => key,
             UserInput::Paste(_) | UserInput::Snippet(_) | UserInput::Unrecognized
-                if self.sequence.active() || self.modal.active() =>
+                if self.keys.sequence.active() || self.modal.active() =>
             {
-                self.sequence.clear();
+                self.keys.sequence.clear();
                 self.modal.clear();
                 return Ok(pending(Message::Keep));
             }
             UserInput::Snippet(body) if self.mode == EditMode::Insert => {
-                return self.execute(Command::Snippet(body), app, time, file_root);
+                return self.execute(
+                    Command::Insert(InsertCommand::Snippet(body)),
+                    app,
+                    time,
+                    file_root,
+                );
             }
             UserInput::Paste(text) if self.mode == EditMode::Insert => {
                 let mut result = self.execute(
@@ -545,7 +564,7 @@ impl Layers {
         }
         // After C-u, digits and `-` make its count rather than text or keys.
         if let Some(universal) = self.modal.universal
-            && !self.sequence.active()
+            && !self.keys.sequence.active()
             && !key.alt
             && !key.control
             && let Key::Char(ch @ ('0'..='9' | '-')) = key.code
@@ -571,7 +590,7 @@ impl Layers {
         }
         // A count goes on with digits, as the transient map of `digit-argument`.
         if self.modal.count.is_some()
-            && !self.sequence.active()
+            && !self.keys.sequence.active()
             && !key.alt
             && !key.control
             && let Key::Char(ch) = key.code
@@ -587,20 +606,21 @@ impl Layers {
         // A commit character takes the chosen candidate, then goes in as
         // typed, unless the list itself binds it.
         if self.mode == EditMode::Insert
-            && !self.sequence.active()
+            && !self.keys.sequence.active()
             && !key.alt
             && !key.control
             && let Key::Char(ch) = key.code
             && self.completion.commits(ch)
             && matches!(
-                self.keymap
+                self.keys
+                    .keymap
                     .resolve(&[keymap::Context::Completion.into()], &[key], &|_| false)
                     .0,
                 Resolution::Pass
             )
         {
             let result = self.execute(
-                Command::Completion(super::completion::Action::Accept),
+                Command::Insert(InsertCommand::Completion(super::completion::Action::Accept)),
                 app,
                 time,
                 file_root,
@@ -615,16 +635,16 @@ impl Layers {
         // binding begins it, so `C-u C-c z` gives the count to `C-c z`.
         let leads = key.control
             && key.code == Key::Char('c')
-            && self.sequence.keys().is_empty()
+            && self.keys.sequence.keys().is_empty()
             && !matches!(
-                self.keymap.resolve(&stack, &[key], &|_| false).0,
+                self.keys.keymap.resolve(&stack, &[key], &|_| false).0,
                 Resolution::Pass
             );
         let cancel = keymap::is_cancel(&key)
             && !leads
-            && !self.sequence.continues(key, &stack, &self.keymap);
-        if cancel && (self.sequence.active() || self.modal.active()) {
-            self.sequence.clear();
+            && !self.keys.sequence.continues(key, &stack, &self.keys.keymap);
+        if cancel && (self.keys.sequence.active() || self.modal.active()) {
+            self.keys.sequence.clear();
             self.modal.clear();
             return Ok(pending(Message::Clear));
         }
@@ -634,15 +654,15 @@ impl Layers {
             !chosen
                 && matches!(
                     command,
-                    Command::Completion(super::completion::Action::Accept)
+                    Command::Insert(InsertCommand::Completion(super::completion::Action::Accept))
                 )
         };
         // What the keys read as, for when they turn out to mean nothing.
         let typed = {
-            let keys = super::emacs_notation(self.sequence.keys());
+            let keys = super::emacs_notation(self.keys.sequence.keys());
             let plain = matches!(key.code, Key::Char(_)) && !key.control && !key.alt;
             let hint = if plain {
-                self.sequence.keypad_hint()
+                self.keys.sequence.keypad_hint()
             } else {
                 ""
             };
@@ -653,23 +673,27 @@ impl Layers {
                 format!("{keys} {key}")
             }
         };
-        let mut sequence = self.sequence.keys().to_vec();
+        let mut sequence = self.keys.sequence.keys().to_vec();
         sequence.push(keymap::canonical(key).unwrap_or(key));
-        let resolution = if self.sequence.in_keypad() {
-            self.sequence.push_keypad(key, &stack, &self.keymap)
+        let resolution = if self.keys.sequence.in_keypad() {
+            self.keys
+                .sequence
+                .push_keypad(key, &stack, &self.keys.keymap)
         } else {
-            self.sequence.push(key, &stack, &self.keymap, &skip)
+            self.keys
+                .sequence
+                .push(key, &stack, &self.keys.keymap, &skip)
         };
         match resolution {
             Resolution::Complete(command) => {
-                self.command.keys = sequence;
-                self.command.this_command = Some(command.clone());
+                self.keys.command.keys = sequence;
+                self.keys.command.this_command = Some(command.clone());
                 // `repeat` runs again what a key ran, not what that went on
                 // to run, nor itself.
                 let repeat = matches!(&command, Command::Named(line) if line.trim() == "repeat");
                 // Keys a macro replays are not what was typed.
                 if !repeat
-                    && !self.command.executing
+                    && !self.keys.command.executing
                     && !matches!(
                         command,
                         Command::Keypad(_)
@@ -680,7 +704,7 @@ impl Layers {
                 }
                 // Choosing from a list is no use to a replay; moving
                 // through a snippet is, as it replays as one.
-                if self.sequence.source == Some(keymap::Context::Completion.into()) {
+                if self.keys.sequence.source == Some(keymap::Context::Completion.into()) {
                     self.modal.replay.unrecord();
                 }
                 if let Some(repeated) = self.repeat_by_prefix(&command, app) {
@@ -706,7 +730,7 @@ impl Layers {
         let plain = !key.alt && !key.control && !key.unsupported_modifiers;
         match key.code {
             Key::Char(ch) if plain => {
-                self.completion.typed = !self.command.executing;
+                self.completion.typed = !self.keys.command.executing;
                 let typed = Command::Edit(EditCommand::TypeChar(ch));
                 if let Some(repeated) = self.repeat_by_prefix(&typed, app) {
                     return Ok(InputResult::Handled(repeated));

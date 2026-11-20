@@ -1,3 +1,4 @@
+use soda::interaction::FileCommand;
 use soda::interaction::ResultsCommand;
 use soda::{
     application::{Axis, Event, Node},
@@ -12,7 +13,7 @@ fn runtime(text: &str) -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     r.command(Command::SetMode(EditMode::Insert));
     r.command(Command::Edit(Edit::InsertText(text.into())));
     r.command(Command::Edit(Edit::SetSelection(Selection::caret(2))));
@@ -97,13 +98,13 @@ fn documents_shown_in_a_window_replace_its_view_and_closing_repairs_windows() {
     r.command(Command::Window(WindowCommand::Split(Axis::Columns, None)));
     keys(&mut r, "C-x o");
     let right = r.app().active_view().unwrap();
-    r.command(Command::New);
+    r.command(Command::File(FileCommand::New));
     let new = r.app().active_view().unwrap();
     // The new document took the right window's place.
     assert_eq!(r.app().windows().views(), [first, new]);
     // Its own view of the first document is hidden, so switching back in
     // this window shows it here again rather than jumping left.
-    r.command(Command::NextView);
+    r.command(Command::Window(WindowCommand::NextView));
     assert_eq!(r.app().windows().views(), [first, right]);
     // Closing the new document leaves the windows as they are, since it is
     // not shown; closing a shown one fills its window with a hidden view.
@@ -113,7 +114,7 @@ fn documents_shown_in_a_window_replace_its_view_and_closing_repairs_windows() {
         discard: true,
     }));
     assert_eq!(r.app().windows().views(), [first, right]);
-    r.command(Command::New);
+    r.command(Command::File(FileCommand::New));
     let third = r.app().active_view().unwrap();
     let document = r.app().view(first).unwrap().document_id;
     assert!(r.dispatch(Event::CloseDocument {
@@ -175,7 +176,7 @@ fn grep_results_show_below_and_open_locations_in_the_other_window() {
     let mut r = Runtime::new(root.path().to_owned()).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     let main = r.app().active_view().unwrap();
     r.command(Command::Results(ResultsCommand::Grep("needle".into())));
     settle(&mut r, |r| active_name(r) == "*grep*");
@@ -218,7 +219,7 @@ fn grep_results_show_below_and_open_locations_in_the_other_window() {
 fn two_documents(first: &str, second: &str) -> (Runtime, Vec<soda::application::ViewId>) {
     let mut r = runtime(first);
     keys(&mut r, "C-x 2");
-    r.command(Command::New);
+    r.command(Command::File(FileCommand::New));
     r.command(Command::SetMode(soda::interaction::EditMode::Insert));
     r.input(UserInput::Paste(second.into()));
     r.command(Command::SetMode(soda::interaction::EditMode::Normal));
@@ -307,7 +308,7 @@ fn a_tab_shows_its_document_in_its_window_even_one_another_window_shows() {
     let first = r.app().active_view().unwrap();
     let a = document(&r, first);
     keys(&mut r, "C-x 3 C-x o");
-    r.command(Command::New);
+    r.command(Command::File(FileCommand::New));
     let second = r.app().active_view().unwrap();
     assert_ne!(document(&r, second), a);
     // The tab of the first window's document, in the second window's row.
@@ -330,7 +331,7 @@ fn each_window_has_the_tabs_of_what_it_showed_and_closing_one_keeps_the_document
     };
     let a = document(&r, r.app().active_view().unwrap());
     keys(&mut r, "C-x 3 C-x o");
-    r.command(Command::New);
+    r.command(Command::File(FileCommand::New));
     let b = document(&r, r.app().active_view().unwrap());
     // A document opened in one window is a tab there only.
     assert_eq!(tabs(&r, 0), [a]);

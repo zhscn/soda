@@ -1,5 +1,7 @@
 //! The command line: slot parsing, per-slot candidates, Tab/Enter/Backspace
 //! semantics and the M-x style flow from a command name into its arguments.
+use soda::interaction::FileCommand;
+use soda::interaction::PromptCommand;
 use soda::{
     interaction::{Command, EditMode, KeyStroke, Layer, UserInput},
     runtime::Runtime,
@@ -10,7 +12,7 @@ fn runtime(root: &Path) -> Runtime {
     let mut r = Runtime::new(root.to_owned()).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     r.command(Command::SetMode(EditMode::Normal));
     r
 }
@@ -92,7 +94,7 @@ fn a_row_chosen_by_hand_wins_over_an_exact_name() {
     let root = tree();
     let mut r = runtime(root.path());
     // `project` asks for a file; `project-root` runs at once.
-    r.command(Command::Ex("project".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("project".into())));
     assert!(rows(&r)[0].starts_with("project "), "{:?}", rows(&r));
     assert!(rows(&r)[1].starts_with("project-root "), "{:?}", rows(&r));
     keys(&mut r, "<down> RET");
@@ -106,7 +108,7 @@ fn a_row_chosen_by_hand_wins_over_an_exact_name() {
     );
     for path in [&a, &ab, &other] {
         std::fs::write(path, "").unwrap();
-        r.command(Command::OpenPath(path.clone()));
+        r.command(Command::File(FileCommand::OpenPath(path.clone())));
         wait(&mut r, |r| {
             r.app().views().any(|v| {
                 r.app().workspace().file(v.document_id).unwrap().path() == Some(path.as_path())
@@ -116,7 +118,10 @@ fn a_row_chosen_by_hand_wins_over_an_exact_name() {
     // Buffers are named by their paths; the exact name is that of `a`,
     // which comes first though ab was used after it, as vertico puts the
     // typed name first. Choosing ab by hand still wins over it.
-    r.command(Command::Ex(format!("buffer {}", a.display())));
+    r.command(Command::Prompt(PromptCommand::Ex(format!(
+        "buffer {}",
+        a.display()
+    ))));
     assert_eq!(rows(&r).len(), 2, "{:?}", rows(&r));
     assert!(rows(&r)[0].ends_with("/a"), "{:?}", rows(&r));
     keys(&mut r, "<down> RET");
@@ -135,12 +140,12 @@ fn the_input_is_selected_where_a_path_names_a_directory() {
         _ => panic!("command line is not open"),
     };
     // A buffer must be one of the rows: the first is selected.
-    r.command(Command::Ex("buffer ".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("buffer ".into())));
     assert!(!input(&r));
     keys(&mut r, "ESC");
     // As vertico-preselect `directory`: a path naming a directory selects
     // the input, a name being typed the first row.
-    r.command(Command::Ex("open ".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("open ".into())));
     wait(&mut r, |r| rows(r) == ["src/"]);
     assert!(input(&r));
     r.input(UserInput::Paste("s".into()));
@@ -158,7 +163,9 @@ fn a_typed_parent_lists_and_opens_though_it_is_no_candidate() {
     let root = tree();
     let path = root.path().join("src/main.cpp");
     let mut r = runtime(root.path());
-    r.command(Command::OpenPath(root.path().join("src/sub/a.h")));
+    r.command(Command::File(FileCommand::OpenPath(
+        root.path().join("src/sub/a.h"),
+    )));
     wait(&mut r, |r| {
         let view = r.app().view(r.app().active_view().unwrap()).unwrap();
         r.app()
@@ -168,7 +175,7 @@ fn a_typed_parent_lists_and_opens_though_it_is_no_candidate() {
             .path()
             .is_some()
     });
-    r.command(Command::Ex("open ".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("open ".into())));
     r.input(UserInput::Paste("../".into()));
     wait(&mut r, |r| rows(r) == ["sub/", "main.cpp"]);
     r.input(UserInput::Paste("main.cpp".into()));
@@ -186,7 +193,7 @@ fn rows_stay_in_view_until_the_worker_answers_and_cannot_be_chosen() {
     let shown = |r: &Runtime| matches!(r.layer(), Some(Layer::CommandLine(l)) if l.loading());
 
     // A project file: the query goes to a worker.
-    r.command(Command::Ex("project ".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("project ".into())));
     wait(&mut r, |r| rows(r).len() >= 2);
     let before = rows(&r);
     r.input(UserInput::Paste("a.h".into()));
@@ -203,7 +210,7 @@ fn rows_stay_in_view_until_the_worker_answers_and_cannot_be_chosen() {
     keys(&mut r, "ESC");
 
     // A new directory: the rows of the last one stay, and a typed name goes.
-    r.command(Command::Ex("open ".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("open ".into())));
     r.input(UserInput::Paste("src/".into()));
     wait(&mut r, |r| rows(r) == ["sub/", "main.cpp"]);
     r.input(UserInput::Paste("sub/".into()));
@@ -224,23 +231,23 @@ fn a_path_matches_anywhere_in_the_name_and_beginnings_come_first() {
         std::fs::write(root.path().join(name), "").unwrap();
     }
     let mut r = runtime(root.path());
-    r.command(Command::Ex("open ".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("open ".into())));
     r.input(UserInput::Paste("cc".into()));
     wait(&mut r, |r| {
         rows(r) == ["ccache.txt", "Notes.cc", "main.cc", "version.cc.in"]
     });
     // Words in any order; capitals make case count.
     keys(&mut r, "ESC");
-    r.command(Command::Ex("open ".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("open ".into())));
     r.input(UserInput::Paste("in cc".into()));
     wait(&mut r, |r| rows(r) == ["main.cc", "version.cc.in"]);
     keys(&mut r, "ESC");
-    r.command(Command::Ex("open ".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("open ".into())));
     r.input(UserInput::Paste("N".into()));
     wait(&mut r, |r| rows(r) == ["Notes.cc"]);
     // The typed text still names a new file.
     keys(&mut r, "ESC");
-    r.command(Command::Ex("open ".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("open ".into())));
     r.input(UserInput::Paste("cc".into()));
     keys(&mut r, "RET");
     wait(&mut r, |r| {
@@ -256,13 +263,13 @@ fn opening_the_focused_file_says_so() {
     let root = tree();
     let path = root.path().join("src/main.cpp");
     let mut r = runtime(root.path());
-    r.command(Command::OpenPath(path.clone()));
+    r.command(Command::File(FileCommand::OpenPath(path.clone())));
     wait(&mut r, |r| {
         r.app().views().any(|v| {
             r.app().workspace().file(v.document_id).unwrap().path() == Some(path.as_path())
         })
     });
-    r.command(Command::OpenPath(path));
+    r.command(Command::File(FileCommand::OpenPath(path)));
     wait(&mut r, |r| r.message().starts_with("Already at "));
 }
 
@@ -270,7 +277,7 @@ fn opening_the_focused_file_says_so() {
 fn path_slots_browse_directories_and_backspace_removes_one() {
     let root = tree();
     let mut r = runtime(root.path());
-    r.command(Command::Ex("open ".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("open ".into())));
     r.input(UserInput::Paste("s".into()));
     wait(&mut r, |r| rows(r) == ["src/"]);
     keys(&mut r, "TAB");
@@ -321,7 +328,7 @@ fn matching_slots_complete_by_cursor_position_and_require_a_candidate() {
     );
     keys(&mut r, "ESC");
     // Buffer names require a match: Enter takes the selected candidate.
-    r.command(Command::New);
+    r.command(Command::File(FileCommand::New));
     r.command(Command::Named("buffer".into()));
     r.input(UserInput::Paste("untitled".into()));
     let target = r.app().active_view();
@@ -364,7 +371,7 @@ fn project_slot_searches_files_and_opens_the_choice() {
 fn save_as_prefills_the_current_path() {
     let root = tree();
     let mut r = runtime(root.path());
-    r.command(Command::OpenPath("src/main.cpp".into()));
+    r.command(Command::File(FileCommand::OpenPath("src/main.cpp".into())));
     wait(&mut r, |r| {
         r.app().views().any(|v| {
             r.app()
@@ -450,7 +457,7 @@ fn a_typed_decision_leaves_room_for_its_path_and_a_question_takes_one_key() {
 fn every_key_context_is_offered_for_map() {
     let root = tempfile::tempdir().unwrap();
     let mut r = runtime(root.path());
-    r.command(Command::Ex("map tr".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("map tr".into())));
     let rows = rows(&r);
     // Fuzzy, as any list of words: typescript has t…r too.
     assert!(rows.len() > 1, "{rows:?}");
@@ -465,7 +472,7 @@ fn words_of_any_slot_match_fuzzily() {
     let mut r = runtime(root.path());
     // Not only by how a name begins: every light theme, by name and then
     // by description.
-    r.command(Command::Ex("theme light".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("theme light".into())));
     let themes = rows(&r);
     assert!(themes[0].contains("-light "), "{themes:?}");
     assert!(
@@ -478,18 +485,18 @@ fn words_of_any_slot_match_fuzzily() {
     );
     // Capitals ask for themselves in descriptions too.
     let mut r = runtime(root.path());
-    r.command(Command::Ex("theme Latte".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("theme Latte".into())));
     assert!(
         rows(&r)[0].starts_with("catppuccin-latte "),
         "{:?}",
         rows(&r)
     );
     let mut r = runtime(root.path());
-    r.command(Command::Ex("theme LATTE".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("theme LATTE".into())));
     assert!(rows(&r).is_empty(), "{:?}", rows(&r));
     // Options too, by any part of the name.
     let mut r = runtime(root.path());
-    r.command(Command::Ex("set trailing".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("set trailing".into())));
     assert!(
         rows(&r)[0].starts_with("show-trailing-whitespace "),
         "{:?}",
@@ -506,7 +513,7 @@ fn choosing_a_theme_previews_it_until_taken_or_cancelled() {
         _ => None,
     };
     let option = |r: &Runtime| r.app().options().text(None, "theme").to_owned();
-    r.command(Command::Ex("theme ".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("theme ".into())));
     assert!(rows(&r)[0].starts_with("tokyonight "), "{:?}", rows(&r));
     assert!(rows(&r).iter().any(|row| row.starts_with("gruvbox-dark ")));
     assert!(!rows(&r).iter().any(|row| row.starts_with("auto ")));
@@ -522,7 +529,7 @@ fn choosing_a_theme_previews_it_until_taken_or_cancelled() {
 
     // The list opens on the theme in force, and moves on from it.
     r.command(Command::Named("theme nord".into()));
-    r.command(Command::Ex("theme ".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("theme ".into())));
     assert_eq!(previewed(&r), None);
     let names: Vec<_> = rows(&r)
         .iter()
@@ -534,7 +541,7 @@ fn choosing_a_theme_previews_it_until_taken_or_cancelled() {
     keys(&mut r, "ESC");
     assert_eq!(option(&r), "nord");
 
-    r.command(Command::Ex("theme ".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("theme ".into())));
     keys(&mut r, "n o r");
     assert_eq!(previewed(&r).as_deref(), Some("nord"));
     keys(&mut r, "RET");
@@ -553,13 +560,13 @@ fn enter_takes_the_first_row_and_meta_enter_the_input_as_typed() {
     let mut r = runtime(root.path());
     let src = format!("open {}/src/", root.path().display());
     // As vertico: a typed prefix selects the first row, which Enter opens.
-    r.command(Command::Ex(src.clone()));
+    r.command(Command::Prompt(PromptCommand::Ex(src.clone())));
     r.input(UserInput::Paste("ma".into()));
     wait(&mut r, |r| rows(r) == ["main.cpp"]);
     keys(&mut r, "RET");
     wait(&mut r, |r| opened(r, &root.path().join("src/main.cpp")));
     // M-RET takes the input though a row is selected.
-    r.command(Command::Ex(src));
+    r.command(Command::Prompt(PromptCommand::Ex(src)));
     r.input(UserInput::Paste("ma".into()));
     wait(&mut r, |r| rows(r) == ["main.cpp"]);
     keys(&mut r, "M-RET");
@@ -570,7 +577,7 @@ fn a_row_moved_to_stays_selected_while_typing_narrows() {
     let root = tree();
     std::fs::write(root.path().join("src/mbin.cpp"), "").unwrap();
     let mut r = runtime(root.path());
-    r.command(Command::Ex("open src/".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("open src/".into())));
     r.input(UserInput::Paste("m".into()));
     wait(&mut r, |r| rows(r) == ["main.cpp", "mbin.cpp"]);
     keys(&mut r, "C-n");
@@ -596,7 +603,9 @@ fn paths_edit_as_vertico_directory_does() {
     let root = tree();
     let mut r = runtime(root.path());
     let base = root.path().display().to_string();
-    r.command(Command::Ex(format!("open {base}/src/")));
+    r.command(Command::Prompt(PromptCommand::Ex(format!(
+        "open {base}/src/"
+    ))));
     // M-DEL after a slash deletes a directory, as Backspace does.
     keys(&mut r, "M-DEL");
     assert_eq!(text(&r), format!("open {base}/"));

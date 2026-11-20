@@ -46,7 +46,7 @@ impl Layers {
         let Some(view) = app.active_view().and_then(|id| app.view(id)) else {
             return InputResult::Blocked;
         };
-        self.sequence.clear();
+        self.keys.sequence.clear();
         self.modal.clear();
         let mut response = Response {
             redraw: true,

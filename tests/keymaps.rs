@@ -1,3 +1,5 @@
+use soda::interaction::FileCommand;
+use soda::interaction::PromptCommand;
 use soda::{
     core::Selection,
     interaction::{Command, EditMode, Key, KeyStroke, Layer, UserInput},
@@ -17,7 +19,7 @@ fn runtime() -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     r
 }
 /// Runs `map`, as a configuration does; its error, if any, is the message.
@@ -88,7 +90,7 @@ fn prefixes_consume_invalid_input_and_reset_on_focus_loss_release_and_commands()
     send(&mut r, key('f'));
     assert_eq!(text(&r), "f");
     send(&mut r, ctrl('x'));
-    r.command(Command::Ex("open ".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("open ".into())));
     send(&mut r, KeyStroke::plain(Key::Esc));
     send(&mut r, key('f'));
     assert_eq!(text(&r), "ff");
@@ -100,7 +102,7 @@ fn defined_commands_and_prompt_keys_take_effect() {
     r.command(Command::Named("recursive".into()));
     assert!(r.message().contains("recursively"), "{}", r.message());
     map(&mut r, "prompt C-f char-right");
-    r.command(Command::Ex("open ".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("open ".into())));
     r.input(UserInput::Paste("path".into()));
     send(&mut r, KeyStroke::plain(Key::Home));
     send(&mut r, ctrl('f'));

@@ -206,6 +206,7 @@ impl Mouse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::interaction::FileCommand;
     use crate::interaction::{Command, KeyStroke};
     use crossterm::event::KeyModifiers;
 
@@ -248,7 +249,7 @@ mod tests {
     #[test]
     fn without_tabs_the_rule_between_windows_moves_their_edge() {
         let mut runtime = Runtime::new(std::path::PathBuf::from("/")).unwrap();
-        runtime.command(crate::interaction::Command::New);
+        runtime.command(crate::interaction::Command::File(FileCommand::New));
         runtime.command(Command::Named("split".into()));
         runtime.command(Command::Named("set tab-bar off".into()));
         let views = runtime.app().windows().views();
@@ -263,7 +264,7 @@ mod tests {
     #[test]
     fn dragging_a_separator_or_a_title_moves_that_edge() {
         let mut runtime = Runtime::new(std::path::PathBuf::from("/")).unwrap();
-        runtime.command(crate::interaction::Command::New);
+        runtime.command(crate::interaction::Command::File(FileCommand::New));
         // Splitting keeps focus, so the right window is split after
         // moving to it.
         for key in KeyStroke::parse_sequence("C-x 3 C-x o C-x 2").unwrap() {

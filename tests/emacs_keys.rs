@@ -1,5 +1,6 @@
 //! Emacs's keys that remember what ran before them, and the buffer and
 //! file commands of its C-x map.
+use soda::interaction::FileCommand;
 use soda::{
     application::Event,
     interaction::{Command, KeyStroke, Layer, UserInput},
@@ -9,7 +10,7 @@ use std::path::PathBuf;
 
 fn runtime() -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     r
 }
 fn keys(r: &mut Runtime, keys: &str) {
@@ -65,9 +66,9 @@ fn recenter_goes_middle_top_bottom_and_starts_over_after_other_keys() {
 fn previous_and_next_buffer_walk_the_order_of_use() {
     let mut r = runtime();
     let a = current(&r);
-    r.command(Command::New);
+    r.command(Command::File(FileCommand::New));
     let b = current(&r);
-    r.command(Command::New);
+    r.command(Command::File(FileCommand::New));
     let c = current(&r);
     // Used last: c, then b, then a.
     keys(&mut r, "C-x <left>");
@@ -125,9 +126,9 @@ fn save_some_buffers_asks_about_each_unsaved_file() {
         std::fs::write(path, "").unwrap();
     }
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     for path in &paths {
-        r.command(Command::OpenPath(path.clone()));
+        r.command(Command::File(FileCommand::OpenPath(path.clone())));
         for _ in 0..200 {
             r.poll();
             if r.app()

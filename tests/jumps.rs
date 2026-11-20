@@ -1,4 +1,5 @@
 //! Jump history: what counts as a jump and where going back lands.
+use soda::interaction::FileCommand;
 use soda::interaction::ResultsCommand;
 use soda::{
     interaction::{Command, EditMode, KeyStroke, UserInput},
@@ -192,9 +193,13 @@ fn places_follow_edits() {
 fn closed_documents_leave_the_list() {
     let Project { mut r, _dir } = project();
     goto(&mut r, 5);
-    r.command(Command::OpenPath(_dir.path().join("b.txt")));
+    r.command(Command::File(FileCommand::OpenPath(
+        _dir.path().join("b.txt"),
+    )));
     wait(&mut r, |r| name(r) == "b.txt");
-    r.command(Command::OpenPath(_dir.path().join("c.txt")));
+    r.command(Command::File(FileCommand::OpenPath(
+        _dir.path().join("c.txt"),
+    )));
     wait(&mut r, |r| name(r) == "c.txt");
     r.command(Command::Named("buffer ".to_owned() + &buffer(&r, "b.txt")));
     assert_eq!(name(&r), "b.txt");
@@ -219,7 +224,9 @@ fn going_back_focuses_the_window_that_holds_the_place() {
     goto(&mut r, 5);
     let first = r.app().active_view().unwrap();
     keys(&mut r, "C-x 2 C-x o");
-    r.command(Command::OpenPath(_dir.path().join("b.txt")));
+    r.command(Command::File(FileCommand::OpenPath(
+        _dir.path().join("b.txt"),
+    )));
     wait(&mut r, |r| name(r) == "b.txt");
     assert_eq!(r.app().windows().len(), 2);
     keys(&mut r, "C-o");

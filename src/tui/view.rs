@@ -1106,7 +1106,12 @@ fn key_hints(buf: &mut Buffer, areas: &Areas, runtime: &Runtime, theme: &Theme) 
 
 #[cfg(test)]
 mod tests {
+    use crate::interaction::SetupCommand;
+
+    use crate::interaction::PromptCommand;
+
     use super::*;
+    use crate::interaction::FileCommand;
     use crate::interaction::{Command, EditMode, KeyStroke, LuaCommand, UserInput};
 
     /// A frame as a frontend draws it: measured, prepared, then rendered.
@@ -1140,7 +1145,7 @@ mod tests {
     fn flash_labels_stand_after_matches_over_a_backdrop() {
         let root = tempfile::tempdir().unwrap();
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
-        r.command(Command::New);
+        r.command(Command::File(FileCommand::New));
         r.command(Command::Edit(crate::editor::Command::InsertText(
             "foo bar\nfoo".into(),
         )));
@@ -1186,11 +1191,11 @@ mod tests {
         );
         // Without the backdrop the rest keeps its own color.
         keys(&mut r, "ESC");
-        r.command(Command::SetOption {
+        r.command(Command::Setup(SetupCommand::SetOption {
             local: false,
             name: "flash-backdrop",
             value: crate::options::Value::Bool(false),
-        });
+        }));
         keys(&mut r, "M-x flash RET f");
         let buffer = draw(&mut r, 30, 6);
         assert_ne!(
@@ -1204,7 +1209,7 @@ mod tests {
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
         r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
             .unwrap();
-        r.command(crate::interaction::Command::New);
+        r.command(crate::interaction::Command::File(FileCommand::New));
         r.command(Command::Edit(crate::editor::Command::InsertText(
             "foo bar\nfoo qux\n".into(),
         )));
@@ -1268,7 +1273,7 @@ mod tests {
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
         r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
             .unwrap();
-        r.command(crate::interaction::Command::New);
+        r.command(crate::interaction::Command::File(FileCommand::New));
         r.command(Command::Edit(crate::editor::Command::InsertText(
             "first\n".into(),
         )));
@@ -1295,7 +1300,7 @@ mod tests {
         assert!(screen(&mut r, 60, 14).contains("Find a project file"));
         r.command(Command::Named("set splash off".into()));
         assert!(!screen(&mut r, 60, 14).contains("Find a project file"));
-        r.command(Command::New);
+        r.command(Command::File(FileCommand::New));
         r.command(Command::Edit(crate::editor::Command::InsertText(
             "abc".into(),
         )));
@@ -1332,7 +1337,7 @@ mod tests {
     #[test]
     fn the_bracket_at_the_caret_and_its_match_stand_out() {
         let mut r = Runtime::new(std::path::PathBuf::from("/")).unwrap();
-        r.command(Command::New);
+        r.command(Command::File(FileCommand::New));
         r.command(Command::Edit(crate::editor::Command::InsertText(
             "f(a [b])".into(),
         )));
@@ -1367,7 +1372,7 @@ mod tests {
     #[test]
     fn without_tabs_a_rule_parts_windows_above_one_another() {
         let mut r = Runtime::new(std::path::PathBuf::from("/")).unwrap();
-        r.command(Command::New);
+        r.command(Command::File(FileCommand::New));
         r.command(Command::Named("split".into()));
         let rules = |r: &mut Runtime| {
             screen(r, 60, 14)
@@ -1387,7 +1392,7 @@ mod tests {
     #[test]
     fn the_cursor_hides_under_the_key_hints() {
         let mut r = Runtime::new(std::path::PathBuf::from("/")).unwrap();
-        r.command(Command::New);
+        r.command(Command::File(FileCommand::New));
         // A dedicated prefix keeps the popup size independent of global bindings.
         r.command(Command::Named(r#"map global "C-c z z" nop"#.into()));
         let text = format!("{}{}", "a\n".repeat(11), "b".repeat(48));
@@ -1412,7 +1417,7 @@ mod tests {
     #[test]
     fn windows_other_than_the_focused_one_are_on_a_darker_ground() {
         let mut r = Runtime::new(std::path::PathBuf::from("/")).unwrap();
-        r.command(Command::New);
+        r.command(Command::File(FileCommand::New));
         r.command(Command::Named("vsplit".into()));
         let theme = Theme::build(crate::application::themes::DEFAULT, &Default::default());
         let ground = theme.inactive_window.bg;
@@ -1438,7 +1443,7 @@ mod tests {
         r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
             .unwrap();
         assert!(screen(&mut r, 60, 14).contains("Find a project file"));
-        r.command(crate::interaction::Command::New);
+        r.command(crate::interaction::Command::File(FileCommand::New));
         r.command(Command::Edit(crate::editor::Command::InsertText(
             "int main() {\n    return 0;\n}".into(),
         )));
@@ -1459,7 +1464,7 @@ mod tests {
         keys(&mut r, "SPC");
         assert!(screen(&mut r, 120, 14).contains("f  Open a project file"));
         keys(&mut r, "ESC");
-        r.command(Command::Close(None));
+        r.command(Command::File(FileCommand::Close(None)));
         let text = screen(&mut r, 60, 14);
         let rows: Vec<_> = text.lines().collect();
         // The input sits under the status line it pushed up, the question
@@ -1500,7 +1505,7 @@ mod tests {
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
         r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
             .unwrap();
-        r.command(crate::interaction::Command::New);
+        r.command(crate::interaction::Command::File(FileCommand::New));
         r.command(Command::Edit(crate::editor::Command::InsertText(
             "one two\nthree\n".into(),
         )));
@@ -1608,7 +1613,7 @@ mod tests {
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
         r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
             .unwrap();
-        r.command(crate::interaction::Command::New);
+        r.command(crate::interaction::Command::File(FileCommand::New));
         r.source_lua(
             "t",
             r#"soda.completion.register({ complete = function(context, sink)
@@ -1646,7 +1651,7 @@ mod tests {
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
         r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
             .unwrap();
-        r.command(crate::interaction::Command::New);
+        r.command(crate::interaction::Command::File(FileCommand::New));
         r.command(Command::SetMode(EditMode::Insert));
         r.command(Command::Named("snippet ${1:aa} ${2:bb}".into()));
         let text = screen(&mut r, 40, 10);
@@ -1668,7 +1673,7 @@ mod tests {
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
         r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
             .unwrap();
-        r.command(crate::interaction::Command::New);
+        r.command(crate::interaction::Command::File(FileCommand::New));
         r.command(Command::Edit(crate::editor::Command::InsertText(
             " end\n".into(),
         )));
@@ -1719,7 +1724,7 @@ mod tests {
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
         r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
             .unwrap();
-        r.command(crate::interaction::Command::New);
+        r.command(crate::interaction::Command::File(FileCommand::New));
         r.command(Command::Edit(crate::editor::Command::InsertText(
             "call(1, 2)\n".into(),
         )));
@@ -1773,7 +1778,7 @@ mod tests {
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
         r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
             .unwrap();
-        r.command(crate::interaction::Command::New);
+        r.command(crate::interaction::Command::File(FileCommand::New));
         r.command(Command::Edit(crate::editor::Command::InsertText(
             "one\ntwo\n".into(),
         )));
@@ -1794,7 +1799,7 @@ mod tests {
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
         r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
             .unwrap();
-        r.command(crate::interaction::Command::New);
+        r.command(crate::interaction::Command::File(FileCommand::New));
         let words: Vec<_> = (1..=30).map(|n| format!("line{n}")).collect();
         r.command(Command::Lua(LuaCommand::Chunk(format!(
             "soda.popup(\"{}\")",
@@ -1848,7 +1853,7 @@ mod tests {
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
         r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
             .unwrap();
-        r.command(crate::interaction::Command::New);
+        r.command(crate::interaction::Command::File(FileCommand::New));
         r.command(Command::Lua(LuaCommand::Chunk(
             r#"soda.popup("int value\n\nA long sentence that has to wrap")"#.into(),
         )));
@@ -1869,12 +1874,12 @@ mod tests {
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
         r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
             .unwrap();
-        r.command(crate::interaction::Command::New);
+        r.command(crate::interaction::Command::File(FileCommand::New));
         r.command(Command::Edit(crate::editor::Command::InsertText(
             format!("{}\n", "x".repeat(50)).repeat(12),
         )));
         r.command(Command::SetMode(EditMode::Normal));
-        r.command(Command::Ex("open ".into()));
+        r.command(Command::Prompt(PromptCommand::Ex("open ".into())));
         let text = screen(&mut r, 60, 14);
         let status = text
             .lines()
@@ -1889,7 +1894,7 @@ mod tests {
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
         r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
             .unwrap();
-        r.command(crate::interaction::Command::New);
+        r.command(crate::interaction::Command::File(FileCommand::New));
         r.command(Command::Edit(crate::editor::Command::InsertText(
             "a\nb\n".into(),
         )));
@@ -1916,7 +1921,7 @@ mod tests {
         let ground = ratatui::style::Color::from(theme.text.bg.unwrap());
         for text in ["abc", "abc\n", "abc\n\n", "abc\r\n"] {
             let mut r = Runtime::new(std::path::PathBuf::from("/")).unwrap();
-            r.command(Command::New);
+            r.command(Command::File(FileCommand::New));
             r.command(Command::Edit(crate::editor::Command::InsertText(
                 text.into(),
             )));
@@ -1967,7 +1972,7 @@ mod tests {
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
         r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
             .unwrap();
-        r.command(crate::interaction::Command::New);
+        r.command(crate::interaction::Command::File(FileCommand::New));
         r.command(Command::Edit(crate::editor::Command::InsertText(
             "ab\ncd ef gh\nij\n".into(),
         )));
@@ -2012,7 +2017,7 @@ mod tests {
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
         r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
             .unwrap();
-        r.command(crate::interaction::Command::New);
+        r.command(crate::interaction::Command::File(FileCommand::New));
         r.command(Command::Edit(crate::editor::Command::InsertText(
             "a\nb\nc".into(),
         )));
@@ -2043,7 +2048,7 @@ mod tests {
         let mut r = Runtime::new(root.path().to_owned()).unwrap();
         r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
             .unwrap();
-        r.command(crate::interaction::Command::New);
+        r.command(crate::interaction::Command::File(FileCommand::New));
         r.command(Command::Edit(crate::editor::Command::InsertText(
             "a\nb\nc\nd".into(),
         )));

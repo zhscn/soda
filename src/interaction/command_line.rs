@@ -2,13 +2,10 @@
 //! the cursor. The command name, slots and current slot are parsed from the
 //! text on every change; focus never leaves the input.
 use super::{
-    Command, Input, InputKey, Presentation, Response, TextInput,
+    Command, Input, InputKey, Layer, Presentation, Response, TextInput,
     history::{self, Histories, Recall},
     path::resolve_path,
-    picker::{
-        CandidateKey, CandidateListState, ListMotion, MatchedCandidate, PickerEffect,
-        PickerSession, PickerStatus,
-    },
+    picker::{CandidateKey, CandidateListState, ListMotion, MatchedCandidate, PickerSession},
     registry::{self, CommandInfo},
     session::{Transition, edit_field, field_presentation},
     slots::{PathForm, Preview, Slot, SlotKind, behavior},
@@ -22,7 +19,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-mod candidates;
+pub(super) mod candidates;
+pub(super) use candidates as sources;
+pub use candidates::CandidateReply;
 use candidates::{PendingSources, exact_first};
 
 /// Text a candidate puts into its slot; None for names that cannot be
@@ -41,6 +40,15 @@ enum Target {
     Name,
     Slot(SlotKind),
 }
+impl Target {
+    fn behavior(self) -> super::slots::Behavior {
+        match self {
+            Self::Name => super::slots::Behavior::TEXT,
+            Self::Slot(kind) => behavior(kind),
+        }
+    }
+}
+
 struct Location {
     target: Option<Target>,
     range: Range<usize>,
@@ -49,6 +57,13 @@ struct Location {
     /// Which slot of the command, when the target is one.
     slot: Option<usize>,
 }
+impl Location {
+    fn behavior(&self) -> super::slots::Behavior {
+        self.target
+            .map_or(super::slots::Behavior::TEXT, Target::behavior)
+    }
+}
+
 #[derive(PartialEq)]
 struct Query {
     target: Target,
@@ -258,10 +273,10 @@ impl CommandLine {
     }
     /// The project file search backing a `File` slot, once one was entered.
     pub fn files(&self) -> Option<&PickerSession> {
-        self.pending.files.as_ref()
+        self.pending.files()
     }
     pub fn picker(&self) -> Option<super::picker::PickerId> {
-        self.pending.files.as_ref().map(PickerSession::id)
+        self.pending.files().map(PickerSession::id)
     }
     pub fn note(&self) -> Option<&str> {
         self.note.as_deref()
@@ -363,10 +378,10 @@ impl CommandLine {
         let mut rows = rows;
         // Paths order their own; command names put an exact one first.
         if let Some(query) = &query
-            && matches!(query.target, Target::Slot(kind) if kind != SlotKind::Path)
+            && matches!(query.target, Target::Slot(kind) if !behavior(kind).source_order)
         {
             // An item answers with its number, which is not its name.
-            let named = query.target != Target::Slot(SlotKind::Item);
+            let named = !query.target.behavior().numbered_items;
             exact_first(&mut rows, &query.text, named);
         }
         let same_target = self.query.as_ref().map(|q| q.target) == query.as_ref().map(|q| q.target);
@@ -381,8 +396,12 @@ impl CommandLine {
                 .is_some_and(|(old, new)| {
                     old.target == new.target
                         && old.start == new.start
-                        && (new.target != Target::Slot(SlotKind::Path)
-                            || split_path(&old.text).0 == split_path(&new.text).0)
+                        && match new.target {
+                            Target::Slot(kind) => behavior(kind)
+                                .list_key
+                                .is_none_or(|key| key(&old.text) == key(&new.text)),
+                            Target::Name => true,
+                        }
                 });
         if rows.is_empty() && !self.rows.is_empty() && same_target && self.waiting(&query) {
             if !same_list {
@@ -491,36 +510,14 @@ impl CommandLine {
     }
     /// Whether a worker has yet to answer this query.
     fn waiting(&self, query: &Option<Query>) -> bool {
-        let target = query.as_ref().map(|q| q.target);
-        (target == Some(Target::Slot(SlotKind::Path))
-            && self
-                .pending
-                .directory
-                .as_ref()
-                .is_some_and(|d| d.pending.is_some()))
-            || (target == Some(Target::Slot(SlotKind::File))
-                && self
-                    .pending
-                    .files
-                    .as_ref()
-                    .is_some_and(|s| matches!(s.status(), PickerStatus::Loading)))
-            || (matches!(target, Some(Target::Slot(SlotKind::Computed(_))))
-                && self
-                    .pending
-                    .computed
-                    .as_ref()
-                    .is_some_and(|c| c.items.is_none()))
+        query
+            .as_ref()
+            .is_some_and(|query| self.pending.waiting(query.target))
     }
     fn close(&self, commands: Vec<Command>) -> Transition {
         Transition::Closed(Response {
             commands,
-            effects: self
-                .pending
-                .files
-                .as_ref()
-                .map(|s| super::ResponseEffect::Picker(PickerEffect::Cancel(s.id())))
-                .into_iter()
-                .collect(),
+            effects: self.pending.cancel().into_iter().collect(),
             redraw: true,
             ..Response::default()
         })
@@ -665,7 +662,7 @@ impl CommandLine {
                     let entry = match slot.kind {
                         // An item answers with its number; its history
                         // keeps the item.
-                        SlotKind::Item => text
+                        kind if behavior(kind).numbered_items => text
                             .parse::<usize>()
                             .ok()
                             .and_then(|n| self.items.get(n.checked_sub(1)?))?
@@ -759,11 +756,11 @@ impl CommandLine {
         if self.stale && selected.is_some() {
             return Transition::Blocked;
         }
-        if location.target == Some(Target::Slot(SlotKind::Project))
+        if let Some(hint) = location.behavior().empty_hint
             && slot_text.trim().is_empty()
             && self.rows.is_empty()
         {
-            self.error = Some("no remembered project; type a directory".into());
+            self.error = Some(hint.into());
             return Transition::redraw();
         }
         let mut accepted = false;
@@ -795,7 +792,7 @@ impl CommandLine {
         }
         if !accepted
             && !self.directory_input
-            && location.target == Some(Target::Slot(SlotKind::Path))
+            && location.behavior().browse_directories
             && self.input.text()[location.range.clone()].ends_with('/')
         {
             // A directory: keep browsing instead of opening it.
@@ -828,7 +825,7 @@ impl CommandLine {
     /// directory before the slash, Backspace deletes as usual.
     fn delete_directory(&mut self, location: &Location) -> bool {
         let cursor = self.input.cursor();
-        if location.target != Some(Target::Slot(SlotKind::Path))
+        if !location.behavior().browse_directories
             || !self.input.selection().range().is_empty()
             || cursor <= location.range.start
             || cursor > location.range.end
@@ -857,9 +854,7 @@ impl CommandLine {
     /// the home directory. Only typing at the end of the path does this.
     fn tidy_shadowed(&mut self) {
         let location = self.locate();
-        if location.target != Some(Target::Slot(SlotKind::Path))
-            || self.input.cursor() != location.range.end
-        {
+        if !location.behavior().browse_directories || self.input.cursor() != location.range.end {
             return;
         }
         let text = &self.input.text()[location.range.clone()];
@@ -1010,4 +1005,79 @@ pub(super) fn symbols(text: &str, caret: usize) -> Vec<String> {
         .into_iter()
         .map(|(symbol, _)| symbol.to_owned())
         .collect()
+}
+
+/// A command line opened for a command, a question or another project.
+#[derive(Clone, Debug)]
+pub enum PromptCommand {
+    /// Open the command line with initial text.
+    Ex(String),
+    /// Open the command line with a note on what it asks about.
+    Ask { line: String, note: String },
+    /// The command line for `project`, choosing among this project's files.
+    ProjectLine(std::path::PathBuf),
+}
+
+impl super::Layers {
+    pub(super) fn execute_prompt(
+        &mut self,
+        command: PromptCommand,
+        app: &Application,
+        time: std::time::Duration,
+        file_root: &Path,
+    ) -> Result<Response, crate::core::EditError> {
+        // Only the question Lua just put names a history.
+        let asked_history = self.lua_interaction.asked_history.take();
+        let asked_kind = self.lua_interaction.asked_kind.take();
+        let (text, note, project) = match command {
+            PromptCommand::Ask { line, note } => (line, Some(note), None),
+            PromptCommand::Ex(text) => (text, None, None),
+            PromptCommand::ProjectLine(project) => ("project ".to_owned(), None, Some(project)),
+        };
+        // A command line of its own answers no earlier question.
+        if note.is_none() {
+            self.forget_reply();
+        }
+        // A question of a kind answers as an argument of it would.
+        let mut catalog = self.registry.commands();
+        if let Some(kind) = asked_kind
+            && let Some(answer) = catalog.iter_mut().find(|info| info.name == "answer")
+        {
+            answer.slots = super::slots::answer_slots(kind);
+        }
+        let mut line = CommandLine::new(
+            &text,
+            catalog,
+            project.clone().unwrap_or_else(|| file_root.to_owned()),
+            app.directory(),
+            app,
+        )
+        .with_recent(self.prompt_history.recent_files.clone())
+        .with_projects(self.prompt_history.projects.clone())
+        .with_keymaps(self.keys.keymap.names())
+        .with_items(
+            self.lua_interaction
+                .question
+                .as_ref()
+                .map_or(vec![], |(_, i)| i.clone()),
+        )
+        .with_histories(self.prompt_history.history.clone())
+        .with_history(asked_history)
+        .with_directory_input(asked_kind.is_some_and(|kind| behavior(kind).browse_directories));
+        if let Some(note) = note {
+            line = line.with_note(note);
+        }
+        // Files of another project complete to absolute paths, which
+        // `project` opens whatever the active document's project.
+        if project.is_some() {
+            line = line.with_absolute_files();
+        }
+        let mut response = self.enter(Layer::CommandLine(Box::new(line)), app, time)?;
+        if let Some(Layer::CommandLine(line)) = &mut self.active {
+            let first = line.refresh(app, true);
+            response.effects.extend(first.effects);
+            response.lua.extend(first.lua);
+        }
+        Ok(response)
+    }
 }

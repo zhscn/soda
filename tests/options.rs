@@ -1,3 +1,4 @@
+use soda::interaction::FileCommand;
 use soda::{
     core::Selection,
     editor::Command as Edit,
@@ -10,7 +11,7 @@ fn runtime(text: &str) -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     r.command(Command::SetMode(EditMode::Insert));
     r.command(Command::Edit(Edit::InsertText(text.into())));
     r.command(Command::Edit(Edit::SetSelection(Selection::caret(0))));
@@ -50,7 +51,7 @@ fn indentation_options_shape_plain_text_and_local_values_win() {
     line(&mut r, "indent");
     assert_eq!(text(&r), "  a\n\tb");
     // A second document takes the global values; a local one only its own.
-    r.command(Command::New);
+    r.command(Command::File(FileCommand::New));
     r.command(Command::SetMode(EditMode::Insert));
     r.command(Command::Edit(Edit::InsertText("c".into())));
     r.command(Command::SetMode(EditMode::Normal));

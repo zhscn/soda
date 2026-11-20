@@ -1,3 +1,4 @@
+use soda::interaction::FileCommand;
 use soda::{
     core::Selection,
     editor::Command as Edit,
@@ -10,7 +11,7 @@ fn runtime(text: &str) -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/project")).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     r.command(Command::SetMode(EditMode::Insert));
     r.command(Command::Edit(Edit::InsertText(text.into())));
     r.command(Command::Edit(Edit::SetSelection(Selection::caret(0))));
@@ -105,7 +106,7 @@ fn the_column_limit_comes_from_clang_format() {
         std::thread::sleep(std::time::Duration::from_millis(2));
     }
     assert_eq!(int(&r, "ruler"), 100, "{}", r.message());
-    r.command(Command::New);
+    r.command(Command::File(FileCommand::New));
     line(&mut r, "set-local ruler %val{column-limit}");
     assert_eq!(int(&r, "ruler"), 0);
 }

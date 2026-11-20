@@ -1,6 +1,8 @@
 use super::*;
 use crate::editor::Command;
 use crate::interaction::Command as Action;
+use crate::interaction::FileCommand;
+use crate::interaction::PromptCommand;
 use crate::{
     editor::Language,
     interaction::{Key as KeyCode, KeyStroke, Layer as Prompt, UserInput as TerminalEvent},
@@ -23,7 +25,7 @@ fn host() -> Runtime {
     runtime
         .source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
         .unwrap();
-    runtime.command(crate::interaction::Command::New);
+    runtime.command(crate::interaction::Command::File(FileCommand::New));
     runtime.command(Action::SetMode(crate::interaction::EditMode::Insert));
     runtime
 }
@@ -36,7 +38,7 @@ fn command_line_owns_input_and_closes_when_focus_moves() {
     let mut host = host();
     let first = host.app.active_view().unwrap();
     let document = host.app.view(first).unwrap().document_id;
-    host.command(Action::Save { choose_path: true });
+    host.command(Action::File(FileCommand::Save { choose_path: true }));
     host.input(TerminalEvent::Paste("目录/file.txt".into()));
     let Some(Prompt::CommandLine(line)) = host.layers.active() else {
         panic!()
@@ -89,17 +91,17 @@ fn bracketed_paste_is_one_undoable_edit() {
 #[test]
 fn close_prompts_for_dirty_buffer_and_last_clean_buffer_can_close() {
     let mut host = host();
-    host.command(Action::Close(None));
+    host.command(Action::File(FileCommand::Close(None)));
     assert!(host.app.active_view().is_none());
-    host.command(Action::New);
+    host.command(Action::File(FileCommand::New));
     let view = host.app.active_view().unwrap();
     host.command(Action::Edit(Command::InsertText("unsaved".into())));
-    host.command(Action::Close(None));
+    host.command(Action::File(FileCommand::Close(None)));
     assert_eq!(host.app.active_view(), Some(view));
     assert!(matches!(host.layers.active(), Some(Prompt::CommandLine(_))));
     host.input(key(KeyCode::Esc));
     host.command(Action::Edit(Command::Undo));
-    host.command(Action::Close(None));
+    host.command(Action::File(FileCommand::Close(None)));
     assert!(host.app.active_view().is_none());
 }
 #[test]
@@ -113,7 +115,7 @@ fn quit_checks_hidden_documents_and_waits_for_pending_saves() {
         .unwrap()
         .document_id;
     host.dispatch(Event::NewDocument(Language::PlainText));
-    host.command(Action::Quit(None));
+    host.command(Action::File(FileCommand::Quit(None)));
     assert!(matches!(host.layers.active(), Some(Prompt::CommandLine(_))));
     host.input(key(KeyCode::Esc));
     assert!(!host.quit);
@@ -124,13 +126,13 @@ fn quit_checks_hidden_documents_and_waits_for_pending_saves() {
             target: Some(directory.path().join("a.txt")),
         })
         .unwrap();
-    host.command(Action::Quit(None));
+    host.command(Action::File(FileCommand::Quit(None)));
     assert!(host.layers.active().is_none());
     assert!(!host.quit);
     assert!(host.message.contains("Save in progress"));
     drop(update);
     host.dispatch(Event::PollFiles);
-    host.command(Action::Quit(None));
+    host.command(Action::File(FileCommand::Quit(None)));
     host.input(TerminalEvent::Paste("discard".into()));
     host.input(key(KeyCode::Enter));
     assert!(host.quit);
@@ -154,7 +156,7 @@ fn search_input_is_modal_and_cancel_restores_selection() {
             .unwrap()
             .selection()
     };
-    host.command(Action::Search);
+    host.command(Action::Search(SearchCommand::Search));
     host.input(TerminalEvent::Paste("one".into()));
     assert_eq!(state(&host), crate::core::Selection { anchor: 0, head: 3 });
     host.input(key(KeyCode::F(3)));
@@ -184,7 +186,7 @@ fn search_confirmation_repeats_in_editor_and_paste_replaces_match() {
     host.command(Action::Edit(Command::SetSelection(
         crate::core::Selection::caret(0),
     )));
-    host.command(Action::Search);
+    host.command(Action::Search(SearchCommand::Search));
     host.input(TerminalEvent::Paste("one".into()));
     host.input(key(KeyCode::Enter));
     host.command(Action::Edit(Command::Find {
@@ -207,7 +209,7 @@ fn search_confirmation_repeats_in_editor_and_paste_replaces_match() {
 #[test]
 fn prompt_selection_cursor_and_modifier_events_have_distinct_effects() {
     let mut host = host();
-    host.command(Action::Ex("open ".into()));
+    host.command(Action::Prompt(PromptCommand::Ex("open ".into())));
     host.input(TerminalEvent::Paste("路径/file".into()));
     host.dirty = false;
     host.input(TerminalEvent::Key(key_with(
@@ -366,7 +368,7 @@ fn pointer_clicks_place_the_caret_and_drags_select() {
     host.input(TerminalEvent::Pointer(Pointer::Click(3)));
     assert_eq!(selection(&host), crate::core::Selection::caret(3));
     // Modal layers keep the pointer away from the text.
-    host.command(Action::Save { choose_path: true });
+    host.command(Action::File(FileCommand::Save { choose_path: true }));
     host.input(TerminalEvent::Pointer(Pointer::Click(8)));
     assert_eq!(selection(&host), crate::core::Selection::caret(3));
 }
@@ -394,7 +396,7 @@ fn work_done_elsewhere_wakes_the_loop_and_deadlines_say_when_to_look() {
     let mut host = Runtime::new(PathBuf::from("/")).unwrap();
     host.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
         .unwrap();
-    host.command(crate::interaction::Command::New);
+    host.command(crate::interaction::Command::File(FileCommand::New));
     // Nothing typed, nothing running: nothing to look for.
     assert_eq!(host.deadline(), None);
     // A Lua timer is a deadline.

@@ -1,3 +1,5 @@
+use soda::interaction::CandidateReply;
+use soda::interaction::PromptCommand;
 use soda::interaction::ResponseEffect;
 use soda::{
     application::{Application, Event},
@@ -41,7 +43,7 @@ fn setup(root: &Path, app: &Application) -> (Layers, PickerTask) {
     let mut layers = insert_layers();
     let InputResult::Handled(response) = layers
         .execute(
-            soda::interaction::Command::Ex("project ".into()),
+            soda::interaction::Command::Prompt(PromptCommand::Ex("project ".into())),
             app,
             Duration::ZERO,
             root,
@@ -63,7 +65,7 @@ fn setup(root: &Path, app: &Application) -> (Layers, PickerTask) {
 fn start(layers: &mut Layers, root: &Path, app: &Application) -> soda::interaction::Response {
     let InputResult::Handled(response) = layers
         .execute(
-            soda::interaction::Command::Ex("project ".into()),
+            soda::interaction::Command::Prompt(PromptCommand::Ex("project ".into())),
             app,
             Duration::ZERO,
             root,
@@ -221,7 +223,10 @@ fn query_aba_rejects_old_result_and_loading_cannot_confirm() {
     assert!(!last_a.obsolete());
     assert!(
         !layers
-            .picker_finished(packet(&a, vec![row(1, "a", "/wrong")]))
+            .candidate_reply(
+                CandidateReply::ProjectFiles(packet(&a, vec![row(1, "a", "/wrong")])),
+                &app
+            )
             .redraw
     );
     let InputResult::Handled(response) =
@@ -233,7 +238,10 @@ fn query_aba_rejects_old_result_and_loading_cannot_confirm() {
     assert!(layers.active().is_some());
     assert!(
         layers
-            .picker_finished(packet(&last_a, vec![row(2, "a", "/right")]))
+            .candidate_reply(
+                CandidateReply::ProjectFiles(packet(&last_a, vec![row(2, "a", "/right")])),
+                &app
+            )
             .redraw
     );
     let InputResult::Handled(response) =
@@ -249,7 +257,10 @@ fn query_aba_rejects_old_result_and_loading_cannot_confirm() {
     assert!(last_a.obsolete());
     assert!(
         !layers
-            .picker_finished(packet(&last_a, vec![row(2, "a", "/right")]))
+            .candidate_reply(
+                CandidateReply::ProjectFiles(packet(&last_a, vec![row(2, "a", "/right")])),
+                &app
+            )
             .redraw
     );
 }
@@ -260,10 +271,13 @@ fn input_cursor_and_candidate_navigation_are_independent() {
     let root = tempfile::tempdir().unwrap();
     let (mut layers, _) = setup(root.path(), &app);
     let task = query(&mut layers, "query", &app);
-    layers.picker_finished(packet(
-        &task,
-        vec![row(1, "same", "/one"), row(2, "same", "/two")],
-    ));
+    layers.candidate_reply(
+        CandidateReply::ProjectFiles(packet(
+            &task,
+            vec![row(1, "same", "/one"), row(2, "same", "/two")],
+        )),
+        &app,
+    );
     layers
         .handle(Input::Text(InputKey::SelectAll), &app, Duration::ZERO)
         .unwrap();
@@ -285,10 +299,13 @@ fn input_cursor_and_candidate_navigation_are_independent() {
     assert!(response.events.is_empty());
     assert_eq!(line(&layers).input().selection(), selected);
     assert_eq!(selected_path(&layers).as_deref(), Some(Path::new("/two")));
-    layers.picker_finished(packet(
-        &task,
-        vec![row(2, "same", "/two"), row(1, "same", "/one")],
-    ));
+    layers.candidate_reply(
+        CandidateReply::ProjectFiles(packet(
+            &task,
+            vec![row(2, "same", "/two"), row(1, "same", "/one")],
+        )),
+        &app,
+    );
     assert_eq!(selected_path(&layers).as_deref(), Some(Path::new("/two")));
     assert_eq!(line(&layers).input().selection(), selected);
 }
@@ -319,7 +336,10 @@ fn cancellation_and_reopening_do_not_accept_previous_session() {
     start(&mut layers, root.path(), &app);
     assert!(
         !layers
-            .picker_finished(packet(&task, vec![row(1, "stale", "/stale")]))
+            .candidate_reply(
+                CandidateReply::ProjectFiles(packet(&task, vec![row(1, "stale", "/stale")])),
+                &app
+            )
             .redraw
     );
     assert!(matches!(session(&layers).status(), PickerStatus::Loading));
@@ -443,7 +463,11 @@ fn source_failure_and_long_query_are_visible_without_opening_files() {
     let (mut layers, task) = setup(&root.path().join("missing"), &app);
     let mut runner = PickerRunner::new().unwrap();
     runner.submit(task).unwrap();
-    assert!(layers.picker_finished(wait(&mut runner)).redraw);
+    assert!(
+        layers
+            .candidate_reply(CandidateReply::ProjectFiles(wait(&mut runner)), &app)
+            .redraw
+    );
     assert!(matches!(session(&layers).status(), PickerStatus::Failed(_)));
     let InputResult::Handled(response) = layers
         .handle(Input::Paste("x".repeat(4097)), &app, Duration::ZERO)
@@ -625,7 +649,7 @@ fn long_path_query_reports_limit_and_worker_remains_usable() {
     let (mut layers, initial) = setup(root.path(), &app);
     let mut runner = PickerRunner::new().unwrap();
     runner.submit(initial).unwrap();
-    layers.picker_finished(wait(&mut runner));
+    layers.candidate_reply(CandidateReply::ProjectFiles(wait(&mut runner)), &app);
     layers
         .handle(Input::Text(InputKey::SelectAll), &app, Duration::ZERO)
         .unwrap();
@@ -647,7 +671,11 @@ fn long_path_query_reports_limit_and_worker_remains_usable() {
     runner.submit(valid).unwrap();
     let completion = wait(&mut runner);
     assert_eq!(completion.result.as_ref().unwrap().matched, 1);
-    assert!(layers.picker_finished(completion).redraw);
+    assert!(
+        layers
+            .candidate_reply(CandidateReply::ProjectFiles(completion), &app)
+            .redraw
+    );
 }
 
 #[test]

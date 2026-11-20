@@ -24,17 +24,31 @@ use std::{
     },
 };
 
-#[derive(Default)]
-pub(super) struct PendingSources {
-    pub(super) directory: Option<Directory>,
-    pub(super) files: Option<PickerSession>,
-    pub(super) computed: Option<ComputedList>,
+mod builtin;
+pub(in crate::interaction) use builtin::{
+    BUFFER, CURRENT_BUFFER, FACE, FILE, ITEM, KEYMAP, LANGUAGE, OPTION, PATH, PROJECT, RECENT,
+    SYMBOL, THEME,
+};
+
+/// A candidate request's reply, delivered to the current command line.
+pub enum CandidateReply {
+    Directory(PathCompletion),
+    ProjectFiles(PickerCompletion),
+    ProjectFilesFailed(String),
+    Words { token: u64, items: Vec<slots::Item> },
 }
 
-pub(super) struct Directory {
+#[derive(Default)]
+pub(in crate::interaction) struct PendingSources {
+    directory: Option<Directory>,
+    files: Option<PickerSession>,
+    computed: Option<ComputedList>,
+}
+
+struct Directory {
     path: PathBuf,
     entries: Option<Vec<DirectoryEntry>>,
-    pub(super) pending: Option<Arc<AtomicBool>>,
+    pending: Option<Arc<AtomicBool>>,
 }
 impl Drop for Directory {
     fn drop(&mut self) {
@@ -44,11 +58,11 @@ impl Drop for Directory {
     }
 }
 
-pub(super) struct ComputedList {
+struct ComputedList {
     function: u64,
     /// Which request the answer is to.
     token: u64,
-    pub(super) items: Option<Vec<slots::Item>>,
+    items: Option<Vec<slots::Item>>,
 }
 
 fn row(
@@ -109,6 +123,30 @@ fn name_match(name: &str, text: &str) -> Option<(bool, Vec<Range<usize>>)> {
     let leading = folded.starts_with(wanted.trim_start());
     Some((leading, ranges))
 }
+impl PendingSources {
+    pub(super) fn files(&self) -> Option<&PickerSession> {
+        self.files.as_ref()
+    }
+
+    pub(super) fn cancel(&self) -> Option<ResponseEffect> {
+        self.files()
+            .map(|session| ResponseEffect::Picker(PickerEffect::Cancel(session.id())))
+    }
+
+    pub(super) fn waiting(&self, target: Target) -> bool {
+        match target {
+            Target::Slot(SlotKind::Source(source)) => {
+                source.waiting.is_some_and(|waiting| waiting(self))
+            }
+            Target::Slot(SlotKind::Computed(function)) => self
+                .computed
+                .as_ref()
+                .is_some_and(|list| list.function == function && list.items.is_none()),
+            _ => false,
+        }
+    }
+}
+
 impl CommandLine {
     /// The rows of the argument a query completes, matched against its
     /// text. Every list of words goes through `words_matching`; paths,
@@ -125,84 +163,19 @@ impl CommandLine {
             Target::Slot(kind) => kind,
         };
         let entries: Vec<Entry> = match kind {
-            SlotKind::Buffer | SlotKind::CurrentBuffer => {
-                return buffers(app, text, &mut self.matcher);
-            }
-            SlotKind::Recent => return recent(&self.recent, &self.root, text, &mut self.matcher),
-            SlotKind::Project => {
-                let home = self.home.as_deref();
-                return projects(&self.projects, home, text, &mut self.matcher);
-            }
-            SlotKind::Path => return self.paths(text, response),
-            SlotKind::File => return self.project_files(text, response),
+            SlotKind::Source(source) => match source.provider {
+                slots::Provider::Builtin(list) => return list(self, app, text, response),
+                slots::Provider::Words(list) => list(app, text)
+                    .into_iter()
+                    .map(|item| Entry::new(&item.text, item.doc))
+                    .collect(),
+            },
             SlotKind::Word | SlotKind::Rest => return vec![],
             SlotKind::Choice(choices) => choices
                 .iter()
                 .map(|choice| {
                     let key = choice.key.map_or_else(String::new, |k| format!("[{k}] "));
                     Entry::new(choice.word, format!("{key}{}", choice.doc))
-                })
-                .collect(),
-            SlotKind::Option => crate::options::all()
-                .into_iter()
-                .map(|option| Entry::new(option.name, option.doc.to_owned()))
-                .collect(),
-            SlotKind::Language => crate::language::catalog()
-                .ids()
-                .map(|id| Entry::new(id, String::new()))
-                .collect(),
-            SlotKind::Keymap => {
-                let mut names = self.keymaps.clone();
-                for id in crate::language::catalog().ids() {
-                    if !names.iter().any(|(name, _)| name == id) {
-                        names.push((id.to_owned(), format!("Keys of {id} documents")));
-                    }
-                }
-                names
-                    .into_iter()
-                    .map(|(name, doc)| Entry::new(&name, doc))
-                    .collect()
-            }
-            SlotKind::Face => app
-                .faces()
-                .names()
-                .map(|name| Entry::new(&name, String::new()))
-                .collect(),
-            SlotKind::Theme => {
-                use crate::application::themes;
-                let current = app.options().text(None, "theme");
-                app.faces()
-                    .theme_names()
-                    .map(|name| {
-                        let doc = match themes::builtin(name) {
-                            // Said once, where the name says it already.
-                            Some(theme) => {
-                                let shade = if theme.light { "light" } else { "dark" };
-                                match theme.doc.to_ascii_lowercase().contains(shade) {
-                                    true => theme.doc.to_owned(),
-                                    false => format!("{}, {shade}", theme.doc),
-                                }
-                            }
-                            None => "defined by soda.theme".to_owned(),
-                        };
-                        let mark = if name == current { "● " } else { "" };
-                        Entry::new(name, format!("{mark}{doc}"))
-                    })
-                    .collect()
-            }
-            SlotKind::Symbol => self
-                .symbols(app)
-                .iter()
-                .map(|s| Entry::new(s, String::new()))
-                .collect(),
-            // An item answers with its number, so its text may be anything.
-            SlotKind::Item => self
-                .items
-                .iter()
-                .enumerate()
-                .map(|(index, item)| Entry {
-                    replacement: Some((index + 1).to_string()),
-                    ..Entry::new(&printable(&item.text), item.doc.clone())
                 })
                 .collect(),
             SlotKind::Computed(function) => match &self.pending.computed {
@@ -227,11 +200,22 @@ impl CommandLine {
                 }
             },
         };
+        self.match_words(kind, text, entries)
+    }
+
+    fn match_words(
+        &mut self,
+        kind: SlotKind,
+        text: &str,
+        entries: Vec<Entry>,
+    ) -> Vec<MatchedCandidate<Completion>> {
         // The history orders the words, but a question's items by the
         // history it names, and the symbols by nearness alone, as
         // `consult-imenu` keeps the document's order.
         let used = match kind {
-            SlotKind::Item => self.asked_history.as_ref().map(|name| self.ranks(name)),
+            kind if kind == SlotKind::Item => {
+                self.asked_history.as_ref().map(|name| self.ranks(name))
+            }
             _ => self.slot_history(kind).map(|name| self.ranks(&name)),
         };
         let used = used.unwrap_or_default();
@@ -407,11 +391,33 @@ impl CommandLine {
             })
             .collect()
     }
-    pub(in crate::interaction) fn path_finished(
+    pub(in crate::interaction) fn candidate_reply(
         &mut self,
-        completion: PathCompletion,
+        reply: CandidateReply,
         app: &Application,
-    ) -> Option<Response> {
+    ) -> Response {
+        match reply {
+            CandidateReply::Directory(completion) => {
+                self.path_finished(completion, app).unwrap_or_default()
+            }
+            CandidateReply::Words { token, items } => self
+                .candidates_listed(token, items, app)
+                .unwrap_or_default(),
+            CandidateReply::ProjectFiles(completion) => Response {
+                redraw: self.picker_finished(completion),
+                ..Response::default()
+            },
+            CandidateReply::ProjectFilesFailed(error) => {
+                self.error = Some(error);
+                Response {
+                    redraw: true,
+                    ..Response::default()
+                }
+            }
+        }
+    }
+
+    fn path_finished(&mut self, completion: PathCompletion, app: &Application) -> Option<Response> {
         let directory = self.pending.directory.as_mut()?;
         if !directory
             .pending
@@ -432,7 +438,7 @@ impl CommandLine {
     }
     /// Takes the words a Lua function listed, if they answer the request
     /// this line made last.
-    pub(in crate::interaction) fn candidates_listed(
+    fn candidates_listed(
         &mut self,
         token: u64,
         items: Vec<slots::Item>,
@@ -446,7 +452,7 @@ impl CommandLine {
         list.items = Some(items);
         Some(self.refresh(app, true))
     }
-    pub(in crate::interaction) fn picker_finished(&mut self, completion: PickerCompletion) -> bool {
+    fn picker_finished(&mut self, completion: PickerCompletion) -> bool {
         let Some(session) = &mut self.pending.files else {
             return false;
         };
@@ -473,10 +479,10 @@ impl CommandLine {
         }
         true
     }
-    pub(in crate::interaction) fn picker_failed(&mut self, error: String) {
-        self.error = Some(error);
-    }
 }
+
+pub(in crate::interaction) type ListCandidates =
+    fn(&mut CommandLine, &Application, &str, &mut Response) -> Vec<MatchedCandidate<Completion>>;
 
 /// A word a list offers: what is matched, what the row shows for it and
 /// after it, and what it fills in. The list lays the rows out, so that

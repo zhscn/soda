@@ -1,5 +1,7 @@
 //! Owner-thread command loop shared by frontends. It owns application and modal
 //! state, reduces every update in order, and executes bounded background tasks.
+use crate::interaction::FileCommand;
+use crate::interaction::SearchCommand;
 use crate::{
     application::{
         Application, ClipboardAction, Event, MESSAGES, Notice, Operation, Update, ViewId,
@@ -7,7 +9,8 @@ use crate::{
     core::{ByteOffset, EditError},
     files::FileCompletion,
     interaction::{
-        Command, InputResult, Layer, Layers, Message, Response, ResponseEffect, UserInput,
+        CandidateReply, Command, InputResult, Layer, Layers, Message, Response, ResponseEffect,
+        UserInput,
         modal::{Action, Effect, Kind, Query},
         picker::PickerEffect,
     },
@@ -689,7 +692,7 @@ impl Runtime {
                     return;
                 };
                 file_loop.opening = Some(next.clone());
-                self.command(Command::OpenPath(next));
+                self.command(Command::File(FileCommand::OpenPath(next)));
                 continue;
             };
             // Wait until the file shows in the active window.
@@ -1219,7 +1222,10 @@ impl Runtime {
             ResponseEffect::Picker(effect) => match effect {
                 PickerEffect::Run(task) => {
                     if let Err(error) = self.workers.picker.submit(task) {
-                        let response = self.layers.picker_failed(error.to_string());
+                        let response = self.layers.candidate_reply(
+                            CandidateReply::ProjectFilesFailed(error.to_string()),
+                            &self.app,
+                        );
                         self.respond(response, time);
                     }
                 }
@@ -1250,7 +1256,10 @@ impl Runtime {
                 if groups.is_empty() {
                     return Some(Command::Fail("No group here".into()));
                 }
-                Some(Command::LabelGroups { groups, selection })
+                Some(Command::Search(SearchCommand::LabelGroups {
+                    groups,
+                    selection,
+                }))
             }
             Effect::Indicator(line, text) => {
                 self.app.set_indicator(document, line, text);
@@ -1432,12 +1441,17 @@ impl Runtime {
             }
             match self.workers.picker.poll() {
                 Ok(Some(completion)) => {
-                    let response = self.layers.picker_finished(completion);
+                    let response = self
+                        .layers
+                        .candidate_reply(CandidateReply::ProjectFiles(completion), &self.app);
                     self.respond(response, self.epoch.elapsed());
                 }
                 Ok(None) => break,
                 Err(error) => {
-                    let response = self.layers.picker_failed(error.to_string());
+                    let response = self.layers.candidate_reply(
+                        CandidateReply::ProjectFilesFailed(error.to_string()),
+                        &self.app,
+                    );
                     self.respond(response, self.epoch.elapsed());
                     break;
                 }
@@ -1452,7 +1466,9 @@ impl Runtime {
             let Some(completion) = self.workers.paths.poll() else {
                 break;
             };
-            let response = self.layers.path_finished(completion, &self.app);
+            let response = self
+                .layers
+                .candidate_reply(CandidateReply::Directory(completion), &self.app);
             self.respond(response, self.epoch.elapsed());
         }
         if let Some((generation, items)) = self.workers.completions.poll() {

@@ -1,3 +1,4 @@
+use soda::interaction::FileCommand;
 use soda::{
     interaction::{Command, KeyStroke, UserInput},
     runtime::Runtime,
@@ -41,7 +42,7 @@ fn carets_and_histories_outlive_the_session() {
     let mut r = Runtime::new(dir.path().to_owned()).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     open(&mut r, &a);
     keys(&mut r, "2jll");
     keys(&mut r, "M-x close RET");

@@ -1,5 +1,6 @@
 //! Keyboard macros, as Emacs's kmacro.el: the tests run without modal
 //! editing, as Emacs is. `|` is the caret.
+use soda::interaction::FileCommand;
 use soda::{
     core::Selection,
     editor::Command as Edit,
@@ -12,7 +13,7 @@ fn runtime(text: &str) -> Runtime {
     let caret = text.find('|').expect("a caret");
     let plain = text.replacen('|', "", 1);
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     r.command(Command::Edit(Edit::InsertText(plain)));
     r.command(Command::Edit(Edit::SetSelection(Selection::caret(caret))));
     r

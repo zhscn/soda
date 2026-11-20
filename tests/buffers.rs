@@ -1,3 +1,5 @@
+use soda::interaction::FileCommand;
+use soda::interaction::PromptCommand;
 use soda::{
     application::Event,
     interaction::{Command, Key, KeyStroke, Layer, UserInput},
@@ -6,7 +8,7 @@ use soda::{
 use std::path::PathBuf;
 fn runtime() -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     r.command(Command::SetMode(soda::interaction::EditMode::Insert));
     r
 }
@@ -17,7 +19,7 @@ fn key(r: &mut Runtime, code: Key) {
 fn switch_reuses_a_view_without_preview_and_cancel_leaves_focus() {
     let mut r = runtime();
     let first = r.app().active_view().unwrap();
-    r.command(Command::New);
+    r.command(Command::File(FileCommand::New));
     let second = r.app().active_view().unwrap();
     r.command(Command::Named("buffer".into()));
     assert_eq!(r.app().active_view(), Some(second));
@@ -64,14 +66,14 @@ fn filtering_no_matches_and_external_document_changes_are_safe() {
     let mut r = runtime();
     let view = r.app().active_view().unwrap();
     let document = r.app().view(view).unwrap().document_id;
-    r.command(Command::New);
+    r.command(Command::File(FileCommand::New));
     r.command(Command::Named("buffer".into()));
     r.input(UserInput::Paste("no such buffer".into()));
     key(&mut r, Key::Enter);
     assert!(r.layer().is_some());
     key(&mut r, Key::Esc);
     // Fuzzy, smart-case matching: lowercase letters in order.
-    r.command(Command::Ex("buffer untld".into()));
+    r.command(Command::Prompt(PromptCommand::Ex("buffer untld".into())));
     assert!(matches!(r.layer(), Some(Layer::CommandLine(s)) if s.rows().len() == 2));
     r.dispatch(Event::CloseDocument {
         document,
@@ -114,7 +116,7 @@ fn current(r: &Runtime) -> soda::editor::DocumentId {
 fn kill_buffer_asks_which_and_enter_alone_takes_the_current_one() {
     let mut r = runtime();
     let first = current(&r);
-    r.command(Command::New);
+    r.command(Command::File(FileCommand::New));
     assert_ne!(current(&r), first);
     // C-x k, as Emacs: the list opens on the current buffer.
     for key in KeyStroke::parse_sequence("C-x k").unwrap() {
@@ -135,7 +137,7 @@ fn kill_buffer_asks_which_and_enter_alone_takes_the_current_one() {
     assert_eq!(documents(&r), [first]);
 
     // Another buffer goes without the current one moving.
-    r.command(Command::New);
+    r.command(Command::File(FileCommand::New));
     let third = current(&r);
     r.command(Command::Named("kill-buffer".into()));
     key(&mut r, Key::Up);
@@ -148,7 +150,7 @@ fn killing_an_unsaved_buffer_elsewhere_shows_it_and_asks() {
     let mut r = runtime();
     let first = current(&r);
     r.input(UserInput::Paste("unsaved".into()));
-    r.command(Command::New);
+    r.command(Command::File(FileCommand::New));
     let second = current(&r);
     let name = r.app().document_name(first);
     r.command(Command::Named(format!("kill-buffer {name}")));
@@ -162,7 +164,7 @@ fn killing_an_unsaved_buffer_elsewhere_shows_it_and_asks() {
     }
     assert_eq!(documents(&r), [second]);
     // A saved one goes at once, from wherever it is.
-    r.command(Command::New);
+    r.command(Command::File(FileCommand::New));
     let name = r.app().document_name(second);
     let third = current(&r);
     r.command(Command::Named(format!("kill-buffer {name}")));
@@ -173,9 +175,9 @@ fn killing_an_unsaved_buffer_elsewhere_shows_it_and_asks() {
 fn switching_buffers_offers_the_one_used_last_first() {
     let mut r = runtime();
     let a = current(&r);
-    r.command(Command::New);
+    r.command(Command::File(FileCommand::New));
     let b = current(&r);
-    r.command(Command::New);
+    r.command(Command::File(FileCommand::New));
     let c = current(&r);
     for document in [b, a, c] {
         let name = r.app().document_name(document);

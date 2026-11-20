@@ -1,3 +1,4 @@
+use soda::interaction::FileCommand;
 use soda::{
     core::Selection,
     editor::Command as Edit,
@@ -32,7 +33,7 @@ fn plain() -> (tempfile::TempDir, Runtime) {
         .unwrap();
     r.source_lua("auto-pairs", r#"soda.set("auto-pairs", true)"#)
         .unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     (dir, r)
 }
 fn cpp() -> (tempfile::TempDir, Runtime) {

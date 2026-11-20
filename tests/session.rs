@@ -1,5 +1,6 @@
 //! `restart` carries the session into a new process: here, into a new
 //! Runtime, which is what the new process makes first.
+use soda::interaction::FileCommand;
 use soda::{
     application::Event,
     core::Selection,
@@ -82,7 +83,7 @@ fn a_session_comes_back_with_its_windows_and_unsaved_text_but_no_undo() {
     open(&mut r, &root.join("b.txt"));
     r.command(Command::Edit(Edit::InsertText("X".into())));
     // An untitled draft, hidden behind b.txt.
-    r.command(Command::New);
+    r.command(Command::File(FileCommand::New));
     r.command(Command::Edit(Edit::InsertText("draft".into())));
     r.command(Command::Named(format!(
         "buffer {}",
@@ -174,7 +175,7 @@ fn a_file_gone_is_said_and_its_unsaved_text_stays_under_its_name() {
 #[test]
 fn restart_quits_without_asking_about_unsaved_text() {
     let mut r = Runtime::new(std::path::PathBuf::from("/")).unwrap();
-    r.command(Command::New);
+    r.command(Command::File(FileCommand::New));
     r.command(Command::Edit(Edit::InsertText("draft".into())));
     r.command(Command::Named("restart".into()));
     assert!(r.quit_requested() && r.restart_requested());

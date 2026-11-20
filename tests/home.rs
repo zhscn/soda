@@ -1,10 +1,11 @@
 //! A home kept in Git is not a project. This sets `HOME`, so it is alone in
 //! its test binary.
+use soda::interaction::FileCommand;
 use soda::{interaction::Command, runtime::Runtime};
 use std::{fs, path::Path, time::Duration};
 
 fn open(runtime: &mut Runtime, path: &Path) {
-    runtime.command(Command::OpenPath(path.to_owned()));
+    runtime.command(Command::File(FileCommand::OpenPath(path.to_owned())));
     for _ in 0..500 {
         runtime.poll();
         let active = runtime
@@ -40,7 +41,7 @@ fn a_home_in_git_is_no_project_but_a_repository_inside_it_is() {
     // SAFETY: the only test here, before anything else reads the variable.
     unsafe { std::env::set_var("HOME", &home) };
     let mut runtime = Runtime::started_in(home.join("notes")).unwrap();
-    runtime.command(soda::interaction::Command::New);
+    runtime.command(soda::interaction::Command::File(FileCommand::New));
 
     open(&mut runtime, &home.join("notes/a.txt"));
     assert_eq!(runtime.app().project(), None);

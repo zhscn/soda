@@ -1,6 +1,7 @@
 //! `soda` functions that extend the editor: key bindings, hooks, commands
 //! and completion sources.
 use super::{Host, Runtime};
+use crate::interaction::SetupCommand;
 use crate::interaction::{Command, KeyStroke, emacs_notation};
 use mlua::{Function, Scope, Table, Value};
 use std::cell::RefCell;
@@ -119,13 +120,13 @@ pub(super) fn register<'scope, 'r: 'scope>(
                     runtime
                         .borrow_mut()
                         .layers
-                        .configure(Command::Map {
+                        .configure(Command::Setup(SetupCommand::Map {
                             keymap,
                             keys,
                             target,
                             label,
                             default,
-                        })
+                        }))
                         .map_err(mlua::Error::runtime)
                 },
             )?,
@@ -138,7 +139,7 @@ pub(super) fn register<'scope, 'r: 'scope>(
             runtime
                 .borrow_mut()
                 .layers
-                .configure(Command::Unmap { keymap, keys })
+                .configure(Command::Setup(SetupCommand::Unmap { keymap, keys }))
                 .map_err(mlua::Error::runtime)
         })?,
     )?;
@@ -237,12 +238,12 @@ pub(super) fn register<'scope, 'r: 'scope>(
                 runtime
                     .borrow_mut()
                     .layers
-                    .configure(Command::Define {
+                    .configure(Command::Setup(SetupCommand::Define {
                         name,
                         body: format!("lua-call {id} %arg{{@}}"),
                         doc: Some(doc),
                         slots,
-                    })
+                    }))
                     .map_err(mlua::Error::runtime)
             },
         )?,

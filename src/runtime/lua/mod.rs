@@ -989,7 +989,10 @@ impl Runtime {
                     doc,
                 } => self.layers.completion_resolved(source, key, detail, doc),
                 Answer::Candidates { token, items } => {
-                    let response = self.layers.candidates_listed(token, items, &self.app);
+                    let response = self.layers.candidate_reply(
+                        crate::interaction::CandidateReply::Words { token, items },
+                        &self.app,
+                    );
                     self.respond(response, self.epoch.elapsed());
                     true
                 }

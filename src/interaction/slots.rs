@@ -10,38 +10,83 @@ use crate::application::Application;
 /// one of the candidates.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SlotKind {
-    Path,
-    File,
-    Buffer,
-    /// One of fixed words.
+    Source(&'static Source),
     Choice(&'static [Choice]),
-    /// The name of an option.
-    Option,
-    /// An open document, starting on the current one, as Emacs's
-    /// `kill-buffer` offers it; `Buffer` starts on another.
-    CurrentBuffer,
-    /// The name of a face.
-    Face,
-    /// The name of a theme, built in or defined.
-    Theme,
-    /// A language id.
-    Language,
-    /// A key table: a context, a document keymap or a language's keymap.
-    Keymap,
-    /// A recently used file.
-    Recent,
-    /// A remembered project, or any directory.
-    Project,
-    /// One of the items of the question being asked.
-    Item,
-    /// A symbol of the current document.
-    Symbol,
-    /// Words a Lua function under this id lists as the argument is
-    /// reached.
     Computed(u64),
     Word,
     Rest,
 }
+
+#[allow(non_upper_case_globals)]
+impl SlotKind {
+    pub const Path: Self = Self::Source(&super::command_line::sources::PATH);
+    pub const File: Self = Self::Source(&super::command_line::sources::FILE);
+    pub const Buffer: Self = Self::Source(&super::command_line::sources::BUFFER);
+    pub const CurrentBuffer: Self = Self::Source(&super::command_line::sources::CURRENT_BUFFER);
+    pub const Option: Self = Self::Source(&super::command_line::sources::OPTION);
+    pub const Face: Self = Self::Source(&super::command_line::sources::FACE);
+    pub const Theme: Self = Self::Source(&super::command_line::sources::THEME);
+    pub const Language: Self = Self::Source(&super::command_line::sources::LANGUAGE);
+    pub const Keymap: Self = Self::Source(&super::command_line::sources::KEYMAP);
+    pub const Recent: Self = Self::Source(&super::command_line::sources::RECENT);
+    pub const Project: Self = Self::Source(&super::command_line::sources::PROJECT);
+    pub const Item: Self = Self::Source(&super::command_line::sources::ITEM);
+    pub const Symbol: Self = Self::Source(&super::command_line::sources::SYMBOL);
+}
+
+/// A reusable source for a command argument. A slot can reference a source
+/// directly from its declaration. Sources are identified by their address.
+pub struct Source {
+    pub name: &'static str,
+    pub behavior: Behavior,
+    pub(super) provider: Provider,
+    pub(super) waiting: Option<fn(&super::command_line::sources::PendingSources) -> bool>,
+}
+
+pub(super) enum Provider {
+    Words(fn(&Application, &str) -> Vec<Item>),
+    Builtin(super::command_line::sources::ListCandidates),
+}
+
+impl Source {
+    /// Defines a source of words and descriptions. The command line matches
+    /// the words against the input and applies the slot's history policy.
+    pub const fn words(
+        name: &'static str,
+        behavior: Behavior,
+        list: fn(&Application, &str) -> Vec<Item>,
+    ) -> Self {
+        Self {
+            name,
+            behavior: Behavior {
+                completes: true,
+                ..behavior
+            },
+            provider: Provider::Words(list),
+            waiting: None,
+        }
+    }
+    pub(super) const fn with_waiting(
+        mut self,
+        waiting: fn(&super::command_line::sources::PendingSources) -> bool,
+    ) -> Self {
+        self.waiting = Some(waiting);
+        self
+    }
+}
+
+impl std::fmt::Debug for Source {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Source").field(&self.name).finish()
+    }
+}
+impl PartialEq for Source {
+    fn eq(&self, other: &Self) -> bool {
+        std::ptr::eq(self, other)
+    }
+}
+impl Eq for Source {}
+
 /// A word of a `Choice` slot. A key makes the slot's keymap: typed while
 /// the slot is empty, it chooses the word and confirms at once.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -83,6 +128,16 @@ pub struct Behavior {
     pub live: bool,
     /// How the argument writes a file, if it names one.
     pub path: Option<PathForm>,
+    /// Keeps source order when the provider ranks its candidates.
+    pub source_order: bool,
+    /// The part of the input that identifies a candidate list.
+    pub list_key: Option<fn(&str) -> &str>,
+    /// Keep browsing when the slot contains a directory and has no chosen row.
+    pub browse_directories: bool,
+    /// What to report when both the input and candidate list are empty.
+    pub empty_hint: Option<&'static str>,
+    /// A row fills the slot with its index, while history keeps its text.
+    pub numbered_items: bool,
 }
 /// What choosing a row shows before it is taken.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -102,67 +157,39 @@ pub enum PathForm {
     Recent,
 }
 
+impl Behavior {
+    pub const TEXT: Self = Self {
+        requires_match: false,
+        history: None,
+        completes: false,
+        current: None,
+        input_first: None,
+        preview: None,
+        live: false,
+        path: None,
+        source_order: false,
+        list_key: None,
+        browse_directories: false,
+        empty_hint: None,
+        numbered_items: false,
+    };
+}
+
+pub(super) const fn words(history: Option<&'static str>) -> Behavior {
+    Behavior {
+        requires_match: true,
+        history,
+        completes: true,
+        ..Behavior::TEXT
+    }
+}
+
 /// The behavior of a kind.
 pub fn behavior(kind: SlotKind) -> Behavior {
-    let words = |history| Behavior {
-        requires_match: true,
-        history: Some(history),
-        completes: true,
-        ..Behavior::default()
-    };
     match kind {
-        SlotKind::Path => Behavior {
-            requires_match: false,
-            input_first: Some(|text| super::command_line::split_path(text).1.is_empty()),
-            path: Some(PathForm::Typed),
-            ..words(super::history::FILE)
-        },
-        SlotKind::File => Behavior {
-            path: Some(PathForm::Project),
-            ..words(super::history::FILE)
-        },
-        SlotKind::Recent => Behavior {
-            path: Some(PathForm::Recent),
-            ..words(super::history::FILE)
-        },
-        SlotKind::Project => Behavior {
-            requires_match: false,
-            input_first: Some(|text| text.starts_with(['/', '~', '.'])),
-            path: Some(PathForm::Typed),
-            ..words("project")
-        },
-        SlotKind::Buffer => Behavior {
-            live: true,
-            ..words("buffer")
-        },
-        SlotKind::CurrentBuffer => Behavior {
-            live: true,
-            current: Some(|app| {
-                let view = app.view(app.active_view()?)?;
-                Some(app.document_name(view.document_id))
-            }),
-            ..words("buffer")
-        },
-        SlotKind::Option => words("option"),
-        SlotKind::Face => words("face"),
-        SlotKind::Theme => Behavior {
-            current: Some(|app| Some(app.options().text(None, "theme").to_owned())),
-            preview: Some(Preview::Theme),
-            ..words("theme")
-        },
-        SlotKind::Language => words("language"),
-        SlotKind::Keymap => words("keymap"),
-        SlotKind::Symbol => Behavior {
-            requires_match: false,
-            ..words("symbol")
-        },
-        // Fixed words, a question's items and what Lua lists are not
-        // worth remembering across uses.
-        SlotKind::Choice(_) | SlotKind::Item | SlotKind::Computed(_) => Behavior {
-            history: None,
-            ..words("")
-        },
-        SlotKind::Word | SlotKind::Rest => Behavior::default(),
+        SlotKind::Source(source) => source.behavior,
+        SlotKind::Choice(_) | SlotKind::Computed(_) => words(None),
+        SlotKind::Word | SlotKind::Rest => Behavior::TEXT,
     }
 }
 

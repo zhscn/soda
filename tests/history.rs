@@ -1,3 +1,4 @@
+use soda::interaction::FileCommand;
 use soda::{
     interaction::{Command, KeyStroke, UserInput},
     runtime::Runtime,
@@ -15,7 +16,7 @@ fn prompt(r: &Runtime) -> String {
 }
 fn runtime() -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     r.command(Command::SetMode(soda::interaction::EditMode::Insert));
     r.input(UserInput::Paste("foo bar foo".into()));
     r.command(Command::SetMode(soda::interaction::EditMode::Normal));
@@ -62,7 +63,7 @@ fn search_recalls_earlier_searches() {
 
 fn project(root: &std::path::Path) -> Runtime {
     let mut r = Runtime::new(root.to_owned()).unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     r
 }
 fn line(r: &Runtime) -> String {

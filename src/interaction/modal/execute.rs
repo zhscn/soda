@@ -1,5 +1,6 @@
 //! What each key does to the selection, and what it does with one.
 use super::{Action, Effect, Entry, Grab, Kind, LastFind, Query, Read, Step, Tag, Thing, text};
+use crate::interaction::MacroCommand;
 use crate::{
     application::{Application, ClipboardAction, Event, View, ViewId},
     core::{
@@ -382,7 +383,7 @@ impl Layers {
             Action::Recenter => {
                 // As recenter-top-bottom: again and again, the line goes to
                 // the middle, the top and the bottom.
-                let again = self.command.after(
+                let again = self.keys.command.after(
                     |c| matches!(c, Command::Modal(Action::Recenter)),
                     &["recenter"],
                 );
@@ -429,17 +430,17 @@ impl Layers {
                 response
                     .commands
                     .push(if matches!(action, Action::MacroLines) {
-                        Command::EachLine(keys)
+                        Command::Macro(MacroCommand::EachLine(keys))
                     } else {
                         // The matches of the search as it is: a whole word stays
                         // whole, and a pattern stays a pattern.
                         let Some(query) = self.modal.search() else {
                             return response.modal_failure("No search");
                         };
-                        Command::EachAt {
+                        Command::Macro(MacroCommand::EachAt {
                             targets: query.cursor(at.text).map(|found| found.start).collect(),
                             keys,
-                        }
+                        })
                     });
             }
             Action::Repeat => match self.modal.last.clone() {

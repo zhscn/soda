@@ -2,13 +2,25 @@
 //! literal key sequences and session lifecycle;
 //! feature reducers return transitions and Runtime executes their responses.
 mod command_line;
-pub use command_line::{CommandLine, Completion};
+pub use command_line::{CandidateReply, CommandLine, Completion, PromptCommand};
 mod command_loop;
 mod commands;
+mod insert_commands;
+pub use insert_commands::InsertCommand;
+mod macro_commands;
+mod search_commands;
+mod setup_commands;
+pub use macro_commands::MacroCommand;
+pub use search_commands::SearchCommand;
+pub use setup_commands::SetupCommand;
 pub mod completion;
 pub mod modal;
 pub mod snippet;
-pub use commands::{Command, Departure, WindowCommand, show};
+pub use commands::Command;
+mod file_commands;
+pub use file_commands::{Departure, FileCommand, SaveAnswer, show};
+mod window_commands;
+pub use window_commands::WindowCommand;
 mod departure;
 pub use departure::SaveWait;
 pub mod expand;
@@ -28,7 +40,7 @@ pub use layer::Layer;
 pub use lua::LuaCommand;
 pub mod picker;
 pub mod shell;
-use picker::{ListMotion, PickerCompletion, PickerEffect};
+use picker::{ListMotion, PickerEffect};
 pub mod path;
 mod pointer;
 pub use pointer::Pointer;
@@ -183,7 +195,7 @@ pub enum LuaRequest {
     /// A function registered by `soda.hook` or `soda.define_command`.
     Call { id: u64, argument: String },
     /// A function of an argument's `candidates`, which lists its words;
-    /// the answer comes back with `token` to `Layers::candidates_listed`.
+    /// the answer comes back with `token` to `Layers::candidate_reply`.
     Candidates { function: u64, token: u64 },
     /// The function a question was asked with, given what was chosen or
     /// typed, and the number of an item chosen among items.
@@ -223,14 +235,12 @@ struct LayerGeometry {
 pub struct Layers {
     active: Option<Layer>,
     mode: EditMode,
-    sequence: keymap::Sequence,
-    keymap: Keymap,
+    keys: routing::Keys,
     modal: modal::State,
     completion: completion::State,
     retype: Option<KeyStroke>,
     snippet: snippet::State,
-    /// The command being read and run, and the one before.
-    command: command_loop::CommandLoop,
+
     jumps: jumps::Jumps,
     registry: Registry,
     hooks: hooks::Hooks,
@@ -240,9 +250,7 @@ pub struct Layers {
     result_navigation: grep::ResultNavigation,
     /// The `modal` option as last seen.
     modal_seen: bool,
-    /// The documents `save-some-buffers` has yet to ask about; the first is
-    /// the one being asked.
-    save_some: Vec<crate::editor::DocumentId>,
+    files: file_commands::FileInteraction,
 }
 impl Layers {
     /// Removes the hooks that run exactly this command, as a Lua hook is
@@ -253,11 +261,11 @@ impl Layers {
     /// Adds a hook by event name, as the `hook` command does.
     pub fn add_hook(&mut self, event: &str, filter: &str, command: String) -> Result<(), String> {
         let event = registry::hook_event(event)?;
-        self.configure(Command::Hook {
+        self.configure(Command::Setup(SetupCommand::Hook {
             event,
             filter: filter.to_owned(),
             command,
-        })
+        }))
     }
     /// Sets what `%val{hook}` expands to while a hook runs.
     pub fn set_hook(&mut self, parameter: Option<String>) {
@@ -287,7 +295,7 @@ impl Layers {
     /// Whether the user's last input ended a command, so that the work
     /// after a command is due; asking takes the answer.
     pub fn command_ended(&mut self) -> bool {
-        std::mem::take(&mut self.command.ended)
+        std::mem::take(&mut self.keys.command.ended)
     }
     /// The work after a command the user typed, as `post-command-hook`:
     /// Beacon follows the caret. Returns events the runtime applies.
@@ -346,11 +354,11 @@ impl Layers {
     }
     /// Keys typed toward an unfinished binding or command, if any.
     pub fn pending(&self) -> Option<String> {
-        if self.sequence.active() {
+        if self.keys.sequence.active() {
             // The keys as Emacs writes them, `C-x`, and the modifiers the
             // keypad holds for the next key, `C-x M-`.
-            let keys = emacs_notation(self.sequence.keys());
-            let next = self.sequence.keypad_hint();
+            let keys = emacs_notation(self.keys.sequence.keys());
+            let next = self.keys.sequence.keypad_hint();
             Some(match (keys.is_empty(), next.is_empty()) {
                 (true, _) => next.into(),
                 (false, true) => keys,
@@ -373,14 +381,18 @@ impl Layers {
         app: &Application,
         servers: &[&str],
     ) -> Vec<(String, String)> {
-        if !self.sequence.active() {
+        if !self.keys.sequence.active() {
             return vec![];
         }
         let stack = self.stack(app, servers);
-        let next = if self.sequence.in_keypad() {
-            self.sequence.keypad_continuations(&stack, &self.keymap)
+        let next = if self.keys.sequence.in_keypad() {
+            self.keys
+                .sequence
+                .keypad_continuations(&stack, &self.keys.keymap)
         } else {
-            self.keymap.continuations(&stack, self.sequence.keys())
+            self.keys
+                .keymap
+                .continuations(&stack, self.keys.sequence.keys())
         };
         next.into_iter()
             .map(|(key, label)| {
@@ -466,7 +478,7 @@ impl Layers {
         app: &Application,
         time: Duration,
     ) -> Result<Response, EditError> {
-        self.sequence.clear();
+        self.keys.sequence.clear();
         self.modal.clear();
         let mut response = self.close(app, time)?;
         response.events.extend(self.end_insert_group(app, time));
@@ -476,7 +488,7 @@ impl Layers {
         Ok(response)
     }
     pub fn close(&mut self, app: &Application, time: Duration) -> Result<Response, EditError> {
-        self.sequence.clear();
+        self.keys.sequence.clear();
         let Some(mut layer) = self.active.take() else {
             return Ok(Response::default());
         };
@@ -623,17 +635,17 @@ impl Layers {
         name: &str,
         servers: &[&str],
     ) -> Option<String> {
-        let keys = self.keymap.where_is(&self.stack(app, servers), name)?;
+        let keys = self.keys.keymap.where_is(&self.stack(app, servers), name)?;
         Some(emacs_notation(&keys))
     }
     /// The bindings in force in a context, user ones over defaults: keys
     /// and what they show.
     pub fn bindings(&self, keymap: &str) -> Option<Vec<(Vec<KeyStroke>, String)>> {
-        self.keymap.bindings_of(keymap)
+        self.keys.keymap.bindings_of(keymap)
     }
     /// Defines a keymap that holds in documents of its scope.
     pub fn define_keymap(&mut self, name: &str, scope: Scope, doc: String) -> Result<(), String> {
-        self.keymap.define(name, scope, doc)
+        self.keys.keymap.define(name, scope, doc)
     }
     /// Recently used files, newest first.
     pub fn set_recent_files(&mut self, files: Vec<std::path::PathBuf>) {
@@ -692,7 +704,7 @@ impl Layers {
                 .as_ref()
                 .is_some_and(|edit| edit.text_changed && Some(edit.document_id) == active_document)
         {
-            self.sequence.clear();
+            self.keys.sequence.clear();
             self.modal.clear();
             // Earlier selections are offsets into the text before this edit.
             self.modal.history.clear();
@@ -766,48 +778,9 @@ impl Layers {
             .and_then(|transition| self.transition(transition))
             .unwrap_or_default()
     }
-    pub fn picker_failed(&mut self, error: String) -> Response {
-        let Some(Layer::CommandLine(session)) = &mut self.active else {
-            return Response::default();
-        };
-        session.picker_failed(error);
-        Response {
-            redraw: true,
-            ..Response::default()
-        }
-    }
-    pub fn picker_finished(&mut self, completion: PickerCompletion) -> Response {
+    pub fn candidate_reply(&mut self, reply: CandidateReply, app: &Application) -> Response {
         match &mut self.active {
-            Some(Layer::CommandLine(session)) => Response {
-                redraw: session.picker_finished(completion),
-                ..Response::default()
-            },
-            _ => Response::default(),
-        }
-    }
-    pub fn path_finished(
-        &mut self,
-        completion: path::PathCompletion,
-        app: &Application,
-    ) -> Response {
-        match &mut self.active {
-            Some(Layer::CommandLine(session)) => {
-                session.path_finished(completion, app).unwrap_or_default()
-            }
-            _ => Response::default(),
-        }
-    }
-    /// What a Lua function listed for the argument being completed.
-    pub fn candidates_listed(
-        &mut self,
-        token: u64,
-        items: Vec<slots::Item>,
-        app: &Application,
-    ) -> Response {
-        match &mut self.active {
-            Some(Layer::CommandLine(session)) => session
-                .candidates_listed(token, items, app)
-                .unwrap_or_default(),
+            Some(Layer::CommandLine(session)) => session.candidate_reply(reply, app),
             _ => Response::default(),
         }
     }

@@ -1,3 +1,4 @@
+use soda::interaction::FileCommand;
 use soda::{
     application::Face,
     core::Selection,
@@ -19,7 +20,7 @@ fn runtime(text: &str) -> Runtime {
     let mut r = Runtime::new(PathBuf::from("/")).unwrap();
     r.source_lua("modal", include_str!("fixtures/modal.lua"))
         .unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     r.command(Command::SetMode(EditMode::Insert));
     r.command(Command::Edit(Edit::InsertText(text.into())));
     r.command(Command::Edit(Edit::SetSelection(Selection::caret(0))));
@@ -66,7 +67,7 @@ fn patterns_highlight_globally_or_in_one_document() {
         ]
     );
     // Another document sees only the global highlight.
-    r.command(Command::New);
+    r.command(Command::File(FileCommand::New));
     assert_eq!(shown(&r).len(), 1);
     line(&mut r, "mark-here");
     assert_eq!(r.message(), "%val{word}: no word at the caret");

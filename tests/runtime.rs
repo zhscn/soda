@@ -1,3 +1,6 @@
+use soda::interaction::FileCommand;
+use soda::interaction::PromptCommand;
+use soda::interaction::SearchCommand;
 use soda::{
     application::Event,
     editor::Language,
@@ -40,7 +43,7 @@ fn headless_runtime_opens_edits_saves_and_observes_completion() {
     });
     runtime.command(Command::Edit(soda::editor::Command::SelectAll));
     runtime.input(UserInput::Paste("new 中".into()));
-    runtime.command(Command::Save { choose_path: false });
+    runtime.command(Command::File(FileCommand::Save { choose_path: false }));
     let document = runtime
         .app()
         .view(runtime.app().active_view().unwrap())
@@ -59,7 +62,7 @@ fn headless_runtime_replaces_and_cancels_search_without_frontend_dependencies() 
     runtime.dispatch(Event::NewDocument(Language::PlainText));
     runtime.command(Command::SetMode(soda::interaction::EditMode::Insert));
     runtime.input(UserInput::Paste("foo foo".into()));
-    runtime.command(Command::Replace);
+    runtime.command(Command::Search(SearchCommand::Replace));
     runtime.input(UserInput::Paste("foo".into()));
     runtime.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
     runtime.input(UserInput::Paste("bar".into()));
@@ -82,7 +85,7 @@ fn headless_runtime_replaces_and_cancels_search_without_frontend_dependencies() 
             .text(),
         "bar bar"
     );
-    runtime.command(Command::Search);
+    runtime.command(Command::Search(SearchCommand::Search));
     runtime.input(UserInput::Paste("bar".into()));
     assert!(matches!(runtime.layer(), Some(Layer::Search(_))));
     runtime.input(UserInput::Key(KeyStroke::plain(Key::Esc)));
@@ -96,11 +99,11 @@ fn path_completion_opens_existing_files_and_saves_new_names() {
     let path = directory.path().join("src/main.cpp");
     std::fs::write(&path, "int main() {}\n").unwrap();
     let mut runtime = Runtime::new(directory.path().to_owned()).unwrap();
-    runtime.command(soda::interaction::Command::New);
+    runtime.command(soda::interaction::Command::File(FileCommand::New));
     runtime.command(soda::interaction::Command::SetMode(
         soda::interaction::EditMode::Insert,
     ));
-    runtime.command(Command::Ex("open ".into()));
+    runtime.command(Command::Prompt(PromptCommand::Ex("open ".into())));
     runtime.input(UserInput::Paste("sr".into()));
     let rows = |r: &Runtime| match r.layer() {
         Some(Layer::CommandLine(line)) => line
@@ -125,7 +128,7 @@ fn path_completion_opens_existing_files_and_saves_new_names() {
             r.app().workspace().file(v.document_id).unwrap().path() == Some(path.as_path())
         })
     });
-    runtime.command(Command::Save { choose_path: true });
+    runtime.command(Command::File(FileCommand::Save { choose_path: true }));
     assert!(
         matches!(runtime.layer(), Some(Layer::CommandLine(l)) if l.input().text() == "saveas main.cpp")
     );
@@ -148,12 +151,12 @@ fn departure_asks_for_a_path_through_the_command_line() {
     let directory = tempfile::tempdir().unwrap();
     std::fs::create_dir(directory.path().join("dest")).unwrap();
     let mut runtime = Runtime::new(directory.path().to_owned()).unwrap();
-    runtime.command(soda::interaction::Command::New);
+    runtime.command(soda::interaction::Command::File(FileCommand::New));
     runtime.command(soda::interaction::Command::SetMode(
         soda::interaction::EditMode::Insert,
     ));
     runtime.input(UserInput::Paste("content".into()));
-    runtime.command(Command::Close(None));
+    runtime.command(Command::File(FileCommand::Close(None)));
     runtime.input(UserInput::Paste("s".into()));
     runtime.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
     runtime.input(UserInput::Paste("de".into()));
@@ -181,7 +184,7 @@ fn departure_asks_for_a_path_through_the_command_line() {
 #[test]
 fn suspend_is_handed_to_the_frontend_once() {
     let mut runtime = Runtime::new(std::path::PathBuf::from("/")).unwrap();
-    runtime.command(soda::interaction::Command::New);
+    runtime.command(soda::interaction::Command::File(FileCommand::New));
     assert!(!runtime.take_suspend());
     runtime.input(soda::interaction::UserInput::Key(
         soda::interaction::KeyStroke::parse_sequence("C-z").unwrap()[0],
@@ -202,7 +205,7 @@ fn the_fallback_style_is_an_option_and_a_broken_file_is_reported() {
     std::fs::write(broken.join("b.cpp"), "int b;\n").unwrap();
     std::fs::write(broken.join(".clang-format"), "IndentWidth: [broken\n").unwrap();
     let mut runtime = Runtime::new(directory.path().to_owned()).unwrap();
-    runtime.command(soda::interaction::Command::New);
+    runtime.command(soda::interaction::Command::File(FileCommand::New));
     runtime.command(Command::Named("set cpp-fallback-style WebKit".into()));
     let width = |r: &Runtime| {
         let view = r.app().view(r.app().active_view().unwrap()).unwrap();
@@ -218,10 +221,10 @@ fn the_fallback_style_is_an_option_and_a_broken_file_is_reported() {
             _ => None,
         }
     };
-    runtime.command(Command::OpenPath(plain.join("a.cpp")));
+    runtime.command(Command::File(FileCommand::OpenPath(plain.join("a.cpp"))));
     wait(&mut runtime, |r| width(r).is_some());
     assert_eq!(width(&runtime), Some(4), "WebKit, where LLVM would be 2");
-    runtime.command(Command::OpenPath(broken.join("b.cpp")));
+    runtime.command(Command::File(FileCommand::OpenPath(broken.join("b.cpp"))));
     wait(&mut runtime, |r| {
         r.message().starts_with("Using WebKit style: ")
     });
@@ -234,7 +237,7 @@ fn query_replace_asks_at_each_match_and_stops_at_the_end() {
         r.dispatch(Event::NewDocument(Language::PlainText));
         r.command(Command::SetMode(soda::interaction::EditMode::Insert));
         r.input(UserInput::Paste(text.into()));
-        r.command(Command::Replace);
+        r.command(Command::Search(SearchCommand::Replace));
         r.input(UserInput::Paste("a".into()));
         r.input(UserInput::Key(KeyStroke::plain(Key::Enter)));
         r.input(UserInput::Paste("aa".into()));

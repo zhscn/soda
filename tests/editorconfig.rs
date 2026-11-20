@@ -1,3 +1,4 @@
+use soda::interaction::FileCommand;
 use soda::{
     editor::{Command as Edit, DocumentId},
     interaction::{Command, UserInput},
@@ -44,7 +45,7 @@ fn local(r: &mut Runtime, line: &str) {
 }
 fn save(r: &mut Runtime) {
     let doc = document(r);
-    r.command(Command::Save { choose_path: false });
+    r.command(Command::File(FileCommand::Save { choose_path: false }));
     wait(r, |r| !r.app().workspace().is_saving(doc));
     assert!(!r.app().workspace().is_dirty(doc), "{}", r.message());
 }
@@ -190,7 +191,7 @@ fn editorconfig_applies_to_new_files_and_save_as_targets() {
     save(&mut r);
     let target = dir.path().join("new.txt");
     let doc = document(&r);
-    r.command(Command::SavePath(target.clone()));
+    r.command(Command::File(FileCommand::SavePath(target.clone())));
     wait(&mut r, |r| !r.app().workspace().is_saving(doc));
     assert_eq!(std::fs::read(&target).unwrap(), b"\xef\xbb\xbfone");
     assert_eq!(
@@ -289,13 +290,13 @@ fn editorconfig_refreshes_on_reload_and_save_without_leaving_removed_defaults() 
     local(&mut r, "set indent-width 3");
     assert_eq!(r.app().options().int(Some(document(&r)), "indent-width"), 2);
     std::fs::write(&config, "root=true\n[*]\nindent_size=7\n").unwrap();
-    r.command(Command::Reload(None));
+    r.command(Command::File(FileCommand::Reload(None)));
     assert_eq!(r.app().options().int(Some(document(&r)), "indent-width"), 7);
     std::fs::write(&config, "root=true\n[*]\nindent_size=5\n").unwrap();
     save(&mut r);
     assert_eq!(r.app().options().int(Some(document(&r)), "indent-width"), 5);
     std::fs::remove_file(&config).unwrap();
-    r.command(Command::Reload(None));
+    r.command(Command::File(FileCommand::Reload(None)));
     assert_eq!(r.app().options().int(Some(document(&r)), "indent-width"), 3);
 }
 
@@ -342,7 +343,7 @@ fn editorconfig_failed_save_keeps_the_original_bom_baseline() {
     let mut r = open(&path);
     let doc = document(&r);
     std::fs::write(&path, "external\n").unwrap();
-    r.command(Command::Save { choose_path: false });
+    r.command(Command::File(FileCommand::Save { choose_path: false }));
     wait(&mut r, |r| !r.app().workspace().is_saving(doc));
     assert!(
         r.message().contains("disk content changed"),

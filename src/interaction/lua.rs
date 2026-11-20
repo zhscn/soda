@@ -1,5 +1,6 @@
 //! Lua commands and the prompt state they share with the command line.
 use super::{Command, InputResult, Layers, Message, Response, SlotKind, slots};
+use crate::interaction::PromptCommand;
 use crate::{application::Application, core::EditError};
 use std::{path::Path, time::Duration};
 
@@ -77,7 +78,7 @@ impl Layers {
                     slots::behavior(kind).history.map(str::to_owned)
                 });
                 self.lua_interaction.asked_kind = kind;
-                let ask = Command::Ask { line, note: title };
+                let ask = Command::Prompt(PromptCommand::Ask { line, note: title });
                 return self.execute(ask, app, time, file_root);
             }
             LuaCommand::Answer(text) => match self.lua_interaction.question.take() {

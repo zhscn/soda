@@ -1,4 +1,9 @@
+use soda::interaction::FileCommand;
+use soda::interaction::PromptCommand;
 use soda::interaction::ResponseEffect;
+use soda::interaction::SearchCommand;
+use soda::interaction::SetupCommand;
+use soda::interaction::WindowCommand;
 use soda::{
     application::{Application, Event},
     editor::{Command as EditCommand, Language},
@@ -112,7 +117,12 @@ fn modal_focus_blocks_both_keyboard_and_direct_application_commands() {
     ));
     assert!(matches!(
         layers
-            .execute(Command::New, &app, Duration::ZERO, Path::new("/"))
+            .execute(
+                Command::File(FileCommand::New),
+                &app,
+                Duration::ZERO,
+                Path::new("/")
+            )
             .unwrap(),
         InputResult::Blocked
     ));
@@ -185,7 +195,7 @@ fn picker_start_and_cancel_return_worker_effects() {
     let response = handled(
         layers
             .execute(
-                Command::Ex("project ".into()),
+                Command::Prompt(PromptCommand::Ex("project ".into())),
                 &app,
                 Duration::ZERO,
                 directory.path(),
@@ -218,7 +228,7 @@ fn invalid_picker_root_reports_error_in_the_command_line() {
     let response = handled(
         layers
             .execute(
-                Command::Ex("project ".into()),
+                Command::Prompt(PromptCommand::Ex("project ".into())),
                 &app,
                 Duration::ZERO,
                 Path::new("relative-root"),
@@ -264,10 +274,10 @@ fn commands_with_no_active_view_are_safe_and_new_document_recovers() {
     let app = Application::default();
     let mut layers = configured_layers();
     for command in [
-        Command::Close(None),
-        Command::NextView,
-        Command::Search,
-        Command::Save { choose_path: false },
+        Command::File(FileCommand::Close(None)),
+        Command::Window(WindowCommand::NextView),
+        Command::Search(SearchCommand::Search),
+        Command::File(FileCommand::Save { choose_path: false }),
         Command::Edit(EditCommand::Undo),
     ] {
         let response = handled(
@@ -321,14 +331,79 @@ fn configured_layers() -> Layers {
         ("C-_", "undo"),
     ] {
         layers
-            .configure(Command::Map {
+            .configure(Command::Setup(SetupCommand::Map {
                 keymap: "insert".into(),
                 keys: KeyStroke::parse_sequence(keys).unwrap(),
                 target: target.into(),
                 label: None,
                 default: false,
-            })
+            }))
             .unwrap();
     }
     layers
+}
+
+#[test]
+fn a_command_can_declare_its_own_candidate_source() {
+    use soda::interaction::{
+        Slot, SlotKind,
+        slots::{Behavior, Item, Source},
+    };
+
+    static SOURCE: Source = Source::words(
+        "target",
+        Behavior {
+            requires_match: true,
+            ..Behavior::TEXT
+        },
+        |_, _| {
+            vec![Item {
+                text: "preview".into(),
+                doc: "Preview target".into(),
+            }]
+        },
+    );
+    static SLOTS: &[Slot] = &[Slot {
+        name: "TARGET",
+        kind: SlotKind::Source(&SOURCE),
+        required: true,
+    }];
+
+    let (app, mut layers) = setup();
+    layers
+        .configure(Command::Setup(SetupCommand::Define {
+            name: "select-target".into(),
+            body: "echo target".into(),
+            doc: None,
+            slots: Some(SLOTS),
+        }))
+        .unwrap();
+    let response = handled(
+        layers
+            .execute(
+                Command::Prompt(PromptCommand::Ex("select-target pre".into())),
+                &app,
+                Duration::ZERO,
+                Path::new("/"),
+            )
+            .unwrap(),
+    );
+    assert!(response.effects.is_empty());
+    let Some(Layer::CommandLine(line)) = layers.active() else {
+        panic!("expected command line");
+    };
+    assert_eq!(line.rows().len(), 1);
+    assert_eq!(
+        line.rows()[0].candidate.payload.replacement.as_deref(),
+        Some("preview")
+    );
+    let response = handled(
+        layers
+            .handle(soda::interaction::Input::Confirm, &app, Duration::ZERO)
+            .unwrap(),
+    );
+    assert!(matches!(
+        response.commands.as_slice(),
+        [Command::Named(command)] if command == "select-target preview"
+    ));
 }

@@ -1,5 +1,6 @@
 //! Where documents stand: paths typed by hand follow the active document,
 //! project tools follow its project, and neither follows the start.
+use soda::interaction::FileCommand;
 use soda::interaction::ResultsCommand;
 use soda::{
     interaction::{Command, KeyStroke, Layer, UserInput},
@@ -50,7 +51,7 @@ fn tree() -> Tree {
 }
 fn started(tree: &Tree) -> Runtime {
     let mut r = Runtime::started_in(tree.base.join("elsewhere")).unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     r
 }
 fn wait(r: &mut Runtime, done: impl Fn(&Runtime) -> bool) {
@@ -69,7 +70,7 @@ fn path(r: &Runtime) -> Option<PathBuf> {
     file.path().map(Path::to_owned)
 }
 fn open(r: &mut Runtime, file: &Path) {
-    r.command(Command::OpenPath(file.to_owned()));
+    r.command(Command::File(FileCommand::OpenPath(file.to_owned())));
     let file = file.to_owned();
     wait(r, move |r| path(r).as_deref() == Some(&file));
 }
@@ -92,7 +93,7 @@ fn typed_paths_follow_the_active_document() {
     let mut r = started(&tree);
     open(&mut r, &tree.base.join("repo/src/a.txt"));
     assert_eq!(r.app().directory(), tree.base.join("repo/src"));
-    r.command(Command::OpenPath("b.txt".into()));
+    r.command(Command::File(FileCommand::OpenPath("b.txt".into())));
     let wanted = tree.base.join("repo/src/b.txt");
     wait(&mut r, |r| path(r).as_deref() == Some(&wanted));
 }
@@ -133,7 +134,7 @@ fn new_documents_stand_where_the_active_one_does() {
     let tree = tree();
     let mut r = started(&tree);
     open(&mut r, &tree.base.join("repo/src/a.txt"));
-    r.command(Command::New);
+    r.command(Command::File(FileCommand::New));
     assert_eq!(path(&r), None);
     assert_eq!(r.app().directory(), tree.base.join("repo/src"));
     assert_eq!(r.app().project(), Some(tree.base.join("repo")));
@@ -188,7 +189,7 @@ fn a_directory_can_be_made_the_project() {
     assert_eq!(r.app().project(), Some(tree.base.join("outside")));
     // Files below it follow, and a new runtime names one from the start.
     let mut r = Runtime::new(tree.base.join("elsewhere")).unwrap();
-    r.command(soda::interaction::Command::New);
+    r.command(soda::interaction::Command::File(FileCommand::New));
     assert_eq!(r.app().project(), Some(tree.base.join("elsewhere")));
 }
 #[test]
