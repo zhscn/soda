@@ -1,3 +1,4 @@
+use soda::interaction::ResponseEffect;
 use soda::{
     application::{Application, Event},
     editor::{Command as EditCommand, Language},
@@ -194,7 +195,7 @@ fn picker_start_and_cancel_return_worker_effects() {
     assert!(matches!(response.message, Message::Clear));
     assert!(matches!(
         response.effects.as_slice(),
-        [PickerEffect::Run(_)]
+        [ResponseEffect::Picker(PickerEffect::Run(_))]
     ));
     let Some(Layer::CommandLine(line)) = layers.active() else {
         panic!()
@@ -206,7 +207,7 @@ fn picker_start_and_cancel_return_worker_effects() {
         UserInput::Key(KeyStroke::plain(Key::Esc)),
     ));
     assert!(
-        matches!(response.effects.as_slice(), [PickerEffect::Cancel(cancelled)] if *cancelled == id)
+        matches!(response.effects.as_slice(), [ResponseEffect::Picker(PickerEffect::Cancel(cancelled))] if *cancelled == id)
     );
     assert!(layers.active().is_none());
 }

@@ -2,7 +2,6 @@
 //! languages use bundled TextMate grammars. Results are byte ranges with a
 //! fixed set of categories, which themes color without knowing any grammar.
 //! This layer computes from text alone and knows nothing above the core.
-pub(crate) mod bundled;
 pub(crate) mod cpp;
 mod scope;
 mod textmate;

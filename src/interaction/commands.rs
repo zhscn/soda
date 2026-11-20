@@ -94,22 +94,10 @@ pub enum Command {
     Quit(Option<Departure>),
     NextView,
     Window(WindowCommand),
-    /// Searches the project; results go to the `*grep*` document.
-    Grep(String),
-    Ripgrep(Box<super::grep::RipgrepRequest>),
-    /// Opens the location on the caret line, or moves to the next line's
-    /// first non-blank.
-    Jump,
+    Results(super::ResultsCommand),
     /// Goes back to where the caret jumped from, or forward again.
     JumpBack,
     JumpForward,
-    /// Opens the next or previous location in the latest results: search
-    /// matches or `run` output.
-    ResultStep {
-        backward: bool,
-    },
-    /// Fills the `*KIND*` document with result lines for `]q` to step
-    /// through; lines that name no location stay as headings.
     /// Opens a file named relative to the project.
     OpenProjectFile(std::path::PathBuf),
     /// Asks for a project file, or first for a project when the active
@@ -123,38 +111,12 @@ pub enum Command {
     OpenPrompt,
     /// Shows the project, or makes a directory it.
     ProjectRoot(Option<std::path::PathBuf>),
-    Results {
-        kind: String,
-        lines: Vec<String>,
-    },
-    /// Runs a command whose output streams into the `*run*` document.
-    Run(String),
     /// Stops background work: the run, the shell command and the search.
     Stop,
     /// Hands the terminal back to the shell until the editor is resumed.
     Suspend,
     Restart,
-    /// Asks in the command line, as `completing-read` and `read-string`
-    /// do; the Lua function under `id` gets the answer.
-    Question {
-        id: u64,
-        title: String,
-        asked: super::slots::Asked,
-        /// The history the answer is recalled from and added to; a kind
-        /// has its own otherwise.
-        history: Option<String>,
-    },
-    /// Answers `Question` with an item, from one.
-    Choose(usize),
-    /// Answers `Question` with text.
-    Answer(String),
-    /// Runs Lua code.
-    Lua(String),
-    /// Calls a Lua function registered under an id, with one argument.
-    LuaCall {
-        id: u64,
-        argument: String,
-    },
+    Lua(super::LuaCommand),
     /// Looks for open files changed on disk: reloads those without unsaved
     /// edits and reports the rest.
     CheckFiles,
@@ -508,10 +470,10 @@ impl Layers {
     }
     /// The rows of text each window shows.
     pub fn set_window_rows(&mut self, rows: Vec<(crate::application::ViewId, usize)>) {
-        self.window_rows = rows;
+        self.geometry.window_rows = rows;
     }
     pub fn set_page_rows(&mut self, rows: usize) {
-        self.page_rows = rows;
+        self.geometry.page_rows = rows;
     }
     /// Invoke a command independently of key bindings. Invocation is blocked
     /// while a modal layer owns focus; confirmation uses that layer's contract.
@@ -527,7 +489,7 @@ impl Layers {
         }
         // A hook runs between keys, not because of one: the keys of a
         // binding being typed stay.
-        if self.hook.is_none() {
+        if self.lua_interaction.hook.is_none() {
             self.sequence.clear();
         }
         // The prefix argument waits for the keypad to give it a command.
@@ -584,7 +546,9 @@ impl Layers {
             });
         }
         match &command {
-            Command::ResultStep { .. } => self.jumps.expect_result(),
+            Command::Results(super::ResultsCommand::ResultStep { .. }) => {
+                self.jumps.expect_result()
+            }
             Command::Modal(super::modal::Action::Found {
                 kind: super::modal::Kind::Block,
                 ..
@@ -620,15 +584,15 @@ impl Layers {
             }
             Command::Modal(action) => response = self.modal_execute(action, app, time),
             Command::Fail(message) => {
-                response = self.fail(response, &message);
                 response.failed = true;
+                response.message = Message::Set(message);
             }
             // Only the runtime can do these; it takes them from the response.
             effect @ Command::Effect(_) => response.commands.push(effect),
             Command::Ex(_) | Command::Ask { .. } | Command::ProjectLine(_) => {
                 // Only the question Lua just put names a history.
-                let asked_history = self.asked_history.take();
-                let asked_kind = self.asked_kind.take();
+                let asked_history = self.lua_interaction.asked_history.take();
+                let asked_kind = self.lua_interaction.asked_kind.take();
                 let (text, note, project) = match command {
                     Command::Ask { line, note } => (line, Some(note), None),
                     Command::Ex(text) => (text, None, None),
@@ -653,11 +617,16 @@ impl Layers {
                     app.directory(),
                     app,
                 )
-                .with_recent(self.recent_files.clone())
-                .with_projects(self.projects.clone())
+                .with_recent(self.prompt_history.recent_files.clone())
+                .with_projects(self.prompt_history.projects.clone())
                 .with_keymaps(self.keymap.names())
-                .with_items(self.question.as_ref().map_or(vec![], |(_, i)| i.clone()))
-                .with_histories(self.history.clone())
+                .with_items(
+                    self.lua_interaction
+                        .question
+                        .as_ref()
+                        .map_or(vec![], |(_, i)| i.clone()),
+                )
+                .with_histories(self.prompt_history.history.clone())
                 .with_history(asked_history)
                 .with_directory_input(asked_kind == Some(super::SlotKind::Path));
                 if let Some(note) = note {
@@ -672,7 +641,6 @@ impl Layers {
                 if let Some(Layer::CommandLine(line)) = &mut self.active {
                     let first = line.refresh(app, true);
                     response.effects.extend(first.effects);
-                    response.path_requests.extend(first.path_requests);
                     response.lua.extend(first.lua);
                 }
             }
@@ -747,14 +715,19 @@ impl Layers {
             Command::Pipe(shell) => {
                 if let Some(view) = active(app) {
                     let directory = app.directory();
-                    response.shell =
-                        Some(Box::new(super::shell::pipe(app, view, shell, &directory)));
+                    response.effects.push(super::ResponseEffect::Shell(Box::new(
+                        super::shell::pipe(app, view, shell, &directory),
+                    )));
                 }
             }
             Command::Shell(shell) => {
                 let view = active(app);
                 let directory = app.directory();
-                response.shell = Some(Box::new(super::shell::run(app, view, shell, &directory)));
+                response
+                    .effects
+                    .push(super::ResponseEffect::Shell(Box::new(super::shell::run(
+                        app, view, shell, &directory,
+                    ))));
             }
             Command::Nop => {}
             Command::OpenPrompt => {
@@ -865,7 +838,7 @@ impl Layers {
             }
             Command::Page { backward, extend } => {
                 if let Some(view) = active(app) {
-                    let count = self.page_rows.saturating_sub(1).max(1);
+                    let count = self.geometry.page_rows.saturating_sub(1).max(1);
                     let snapshot = app
                         .workspace()
                         .editor(view.document_id)
@@ -877,8 +850,11 @@ impl Layers {
                     let top = if backward {
                         top.saturating_sub(count)
                     } else {
-                        top.saturating_add(count)
-                            .min(snapshot.line_count().saturating_sub(self.page_rows.max(1)))
+                        top.saturating_add(count).min(
+                            snapshot
+                                .line_count()
+                                .saturating_sub(self.geometry.page_rows.max(1)),
+                        )
                     };
                     response.events.push(Event::Edit {
                         view: view.id,
@@ -1082,7 +1058,9 @@ impl Layers {
                         crate::editor::search::SearchQuery::new(regex::escape(&text))
                     };
                     self.modal.set_search(query.clone());
-                    self.history.record(super::history::SEARCH, &text);
+                    self.prompt_history
+                        .history
+                        .record(super::history::SEARCH, &text);
                     let head = editor
                         .model()
                         .session(state.session_id)
@@ -1130,7 +1108,7 @@ impl Layers {
                 // `next-line` and `forward-char` signal, which ends a macro
                 // played until something fails.
                 if let Some(message) = past_the_end(app, &command) {
-                    return Ok(super::InputResult::Handled(self.fail(response, message)));
+                    return Ok(super::InputResult::Handled(response.modal_failure(message)));
                 }
                 if let Some(view) = app.active_view() {
                     response.events.push(Event::Edit {
@@ -1215,64 +1193,10 @@ impl Layers {
                     response.quit = true;
                 }
             }
-            Command::Ripgrep(request) => {
-                self.set_results("*rg*".into());
-                response.grep = Some(Box::new(super::grep::SearchRequest::Ripgrep(*request)));
+            Command::Results(command) => {
+                self.execute_results(command, app, time, file_root, &mut response)
             }
-            Command::Grep(pattern) => {
-                self.set_results(super::grep::SCRATCH.to_owned());
-                response.grep = Some(Box::new(super::grep::SearchRequest::Grep(
-                    super::grep::GrepRequest {
-                        pattern,
-                        root: file_root.to_owned(),
-                    },
-                )));
-            }
-            Command::Jump => {
-                // Enter on the results visits that line, as `]q` would.
-                let document = active(app);
-                if document.map(|view| view.document_id) == app.workspace().scratch(&self.results) {
-                    self.results_fresh = false;
-                }
-                self.jumps.expect_result();
-                if !super::grep::jump(app, time, &mut response) {
-                    self.jumps.clear_pending();
-                    self.jumps.end_walk();
-                    response.commands.extend([
-                        Command::Modal(super::modal::Action::Move {
-                            step: super::modal::Step::Down,
-                            extend: false,
-                        }),
-                        Command::Named("line-start".into()),
-                    ]);
-                }
-            }
-            Command::ResultStep { backward } => {
-                let fresh = std::mem::take(&mut self.results_fresh);
-                super::grep::step(app, &self.results, fresh, backward, time, &mut response)
-            }
-            Command::Results { kind, lines } => {
-                if lines.iter().any(|line| {
-                    super::grep::location(line).is_some() || super::grep::row(line).is_some()
-                }) {
-                    let name = format!("*{kind}*");
-                    self.set_results(name.clone());
-                    response.events.push(Event::ResultsDisplay { kind });
-                    response.events.push(Event::Scratch {
-                        name,
-                        directory: file_root.to_owned(),
-                        text: lines.join("\n") + "\n",
-                    });
-                } else {
-                    response.message = Message::Set(format!("{kind}: no results"));
-                }
-            }
-            Command::Run(shell) => {
-                self.set_results(super::grep::RUN.to_owned());
-                let view = active(app);
-                response.run = Some(Box::new(super::shell::run(app, view, shell, file_root)));
-            }
-            Command::Stop => response.stop = true,
+            Command::Stop => response.effects.push(super::ResponseEffect::Stop),
             Command::Suspend => response.suspend = true,
             // Unsaved text goes along, so nothing is asked.
             Command::Restart => {
@@ -1287,56 +1211,10 @@ impl Layers {
                     response.restart = true;
                 }
             }
-            Command::Lua(code) => response.lua.push(super::LuaRequest::Chunk {
-                origin: "lua".into(),
-                code,
-            }),
-            Command::LuaCall { id, argument } => {
-                response.lua.push(super::LuaRequest::Call { id, argument })
+            Command::Lua(command) => {
+                return self.execute_lua(command, response, app, time, file_root);
             }
-            Command::Question {
-                id,
-                title,
-                asked,
-                history,
-            } => {
-                use super::slots::Asked;
-                let (line, items, kind) = match asked {
-                    Asked::Text(initial) => (format!("answer {initial}"), vec![], None),
-                    Asked::Items(items) => ("choose ".to_owned(), items, None),
-                    Asked::Kind(kind) => ("answer ".to_owned(), vec![], Some(kind)),
-                    Asked::KindInitial(kind, initial) => {
-                        (format!("answer {initial}"), vec![], Some(kind))
-                    }
-                };
-                self.question = Some((id, items));
-                self.asked_history = history.or_else(|| {
-                    let kind = kind?;
-                    super::slots::behavior(kind).history.map(str::to_owned)
-                });
-                self.asked_kind = kind;
-                let ask = Command::Ask { line, note: title };
-                return self.execute(ask, app, time, file_root);
-            }
-            Command::Answer(text) => match self.question.take() {
-                Some((id, _)) => response.lua.push(super::LuaRequest::Answer {
-                    id,
-                    text,
-                    index: None,
-                }),
-                None => response.message = Message::Set("Nothing to answer".into()),
-            },
-            Command::Choose(index) => match self.question.take() {
-                Some((id, items)) if (1..=items.len()).contains(&index) => {
-                    let text = items[index - 1].text.clone();
-                    let index = Some(index);
-                    response
-                        .lua
-                        .push(super::LuaRequest::Answer { id, text, index });
-                }
-                _ => response.message = Message::Set("Nothing to choose".into()),
-            },
-            Command::Messages => response.messages = true,
+            Command::Messages => response.effects.push(super::ResponseEffect::ShowMessages),
             Command::Echo(text) => response.message = Message::Set(text),
             Command::Highlight {
                 local,
@@ -1424,7 +1302,7 @@ impl Layers {
             }
             Command::MacroName(name) => {
                 if let Err(message) = self.modal.replay.name(&name) {
-                    response = self.fail(response, message);
+                    response = response.modal_failure(message);
                 } else {
                     response.commands.push(Command::Define {
                         body: format!("macro-call {name}"),
@@ -1446,8 +1324,12 @@ impl Layers {
             Command::JumpTo => {
                 if let Some(view) = app.active_view() {
                     let rows = |id: crate::application::ViewId| {
-                        let shown = self.window_rows.iter().find(|(view, _)| *view == id);
-                        shown.map_or(self.page_rows, |(_, rows)| *rows)
+                        let shown = self
+                            .geometry
+                            .window_rows
+                            .iter()
+                            .find(|(view, _)| *view == id);
+                        shown.map_or(self.geometry.page_rows, |(_, rows)| *rows)
                     };
                     let others = app.windows().views();
                     let others = others.into_iter().filter(|id| *id != view);
@@ -1462,8 +1344,12 @@ impl Layers {
             Command::Flash => {
                 if let Some(view) = app.active_view() {
                     let rows = |id: crate::application::ViewId| {
-                        let shown = self.window_rows.iter().find(|(view, _)| *view == id);
-                        shown.map_or(self.page_rows, |(_, rows)| *rows)
+                        let shown = self
+                            .geometry
+                            .window_rows
+                            .iter()
+                            .find(|(view, _)| *view == id);
+                        shown.map_or(self.geometry.page_rows, |(_, rows)| *rows)
                     };
                     let others = app.windows().views();
                     let others = others.into_iter().filter(|id| *id != view);
@@ -1632,12 +1518,6 @@ impl Layers {
         let carets = targets.into_iter().skip(skip);
         let carets = carets.map(crate::core::Selection::caret);
         replay_each(carets, None, &keys, document.history_depth())
-    }
-    /// Makes a results document the one `]q` and `[q` step through.
-    fn set_results(&mut self, name: String) {
-        self.results = name;
-        self.results_fresh = true;
-        self.jumps.end_walk();
     }
     /// Closes or reloads a document that needs no decision.
     fn leave(&self, document: DocumentId, reload: bool, app: &Application) -> Response {

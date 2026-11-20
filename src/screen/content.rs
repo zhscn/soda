@@ -2,13 +2,13 @@
 //! titles, the status line, the message row and the splash. A frontend
 //! decides how they look and where they go; the words and their roles are
 //! the same.
+use super::Style;
 use crate::{
     application::{Face, Severity, ViewId},
     editor::DocumentId,
     interaction::{CommandLine, EditMode, Layer, Presentation},
     runtime::Runtime,
 };
-use ratatui::style::Style;
 
 /// A document's name as it shows: the name of a scratch document, the path
 /// from the project root when `full`, else the file name.

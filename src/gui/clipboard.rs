@@ -1,7 +1,7 @@
 //! The window system's own clipboard: on Wayland through the window's
 //! connection, elsewhere (X11, macOS) through arboard. Without either the
 //! clipboard tools still serve, as in the terminal.
-use crate::runtime::SystemClipboard;
+use crate::clipboard::SystemClipboard;
 use winit::{raw_window_handle::HasDisplayHandle, window::Window};
 
 enum Native {

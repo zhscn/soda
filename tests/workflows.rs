@@ -34,7 +34,14 @@ impl Editor {
             .layers
             .observe(&self.app, &update, Duration::ZERO)
             .unwrap();
-        assert!(response.effects.is_empty());
+        // This driver applies application events only. Path candidates are read
+        // by a worker in the runtime and are unnecessary to submit typed paths.
+        assert!(
+            response
+                .effects
+                .iter()
+                .all(|effect| matches!(effect, soda::interaction::ResponseEffect::Path(_)))
+        );
         for event in response.events {
             self.event(event);
         }
@@ -55,7 +62,14 @@ impl Editor {
     }
     fn apply(&mut self, result: InputResult) {
         if let InputResult::Handled(response) = result {
-            assert!(response.effects.is_empty());
+            // This driver applies application events only. Path candidates are read
+            // by a worker in the runtime and are unnecessary to submit typed paths.
+            assert!(
+                response
+                    .effects
+                    .iter()
+                    .all(|effect| matches!(effect, soda::interaction::ResponseEffect::Path(_)))
+            );
             for event in response.events {
                 self.event(event);
             }

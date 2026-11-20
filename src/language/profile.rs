@@ -2,7 +2,7 @@
 //! covers and the facts commands ask about it. A profile is fixed data; the
 //! state of one document in a language lives in the editor's language
 //! session. Every question of which language a file is in ends here.
-use crate::syntax::bundled::PACKAGES;
+use crate::bundled_grammars::PACKAGES;
 use serde_json::Value;
 use std::{
     path::Path,

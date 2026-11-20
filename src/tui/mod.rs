@@ -4,6 +4,7 @@
 mod color;
 pub(crate) mod input;
 mod mouse;
+mod style;
 mod view;
 use crate::{host, interaction::EditMode, runtime::Runtime};
 use crossterm::{
@@ -253,7 +254,7 @@ fn release_input(fd: std::os::fd::RawFd) {
 /// cursor, as kitty's cursor trail, would show it sliding there.
 fn draw(
     terminal: &mut ratatui::DefaultTerminal,
-    runtime: &Runtime,
+    runtime: &mut Runtime,
     presenter: &mut Presenter,
     truecolor: bool,
     shown: &mut Option<(u16, u16)>,
@@ -267,13 +268,18 @@ fn draw(
         if !truecolor {
             color::downgrade(buffer);
         }
-        if let Ok(Some(Some(position))) = rendered {
+        if let Ok(Some(rendered)) = &rendered
+            && let Some(position) = rendered.cursor
+        {
             frame.set_cursor_position(position);
         }
     });
-    match &rendered {
-        Ok(Some(Some(position))) => *shown = Some(*position),
-        Ok(Some(None)) => {
+    match rendered
+        .as_ref()
+        .map(|frame| frame.as_ref().and_then(|frame| frame.cursor))
+    {
+        Ok(Some(position)) => *shown = Some(position),
+        Ok(None) => {
             if let Some((x, y)) = *shown {
                 execute!(io::stdout(), MoveTo(x, y))?;
             }
@@ -289,7 +295,9 @@ fn draw(
     };
     execute!(io::stdout(), shape, EndSynchronizedUpdate)?;
     drawn?;
-    rendered.map_err(io::Error::other)?;
+    if let Some(rendered) = rendered.map_err(io::Error::other)? {
+        runtime.update_popup_viewport(rendered.popup);
+    }
     Ok(())
 }
 /// Run the terminal frontend using the shared owner-thread runtime.
@@ -355,7 +363,7 @@ pub fn run(args: host::Args) -> io::Result<()> {
                     .map_err(io::Error::other)?;
                 draw(
                     &mut terminal,
-                    &runtime,
+                    &mut runtime,
                     &mut presenter,
                     truecolor,
                     &mut shown,

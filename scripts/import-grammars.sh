@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Imports TextMate grammars and language configurations from a pinned VS Code
-# release into grammars/, then regenerates src/syntax/bundled.rs. Upgrading
+# release into grammars/, then regenerates src/bundled_grammars.rs. Upgrading
 # means changing VSCODE_REF, rerunning, reviewing the diff and running tests.
 set -euo pipefail
 
@@ -82,7 +82,7 @@ trap - EXIT
 echo "$VSCODE_REF" >"$out/VERSION"
 
 # Embed every imported file.
-python3 -I - "$out" "$root/src/syntax/bundled.rs" <<'EOF'
+python3 -I - "$out" "$root/src/bundled_grammars.rs" <<'EOF'
 import os, sys
 out, target = sys.argv[1], sys.argv[2]
 lines = [
@@ -102,7 +102,7 @@ for name in sorted(os.listdir(out)):
         continue
     lines.append("    Package {")
     lines.append(f"        name: {name!r},".replace("'", '"'))
-    lines.append(f'        manifest: include_str!("../../grammars/{name}/package.json"),')
+    lines.append(f'        manifest: include_str!("../grammars/{name}/package.json"),')
     lines.append("        files: &[")
     for dirpath, _, filenames in sorted(os.walk(path)):
         for filename in sorted(filenames):
@@ -110,7 +110,7 @@ for name in sorted(os.listdir(out)):
             if relative in ("package.json", "cgmanifest.json"):
                 continue
             lines.append(
-                f'            ("{relative}", include_str!("../../grammars/{name}/{relative}")),'
+                f'            ("{relative}", include_str!("../grammars/{name}/{relative}")),'
             )
     lines.append("        ],")
     lines.append("    },")

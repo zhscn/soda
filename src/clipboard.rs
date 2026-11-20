@@ -2,7 +2,6 @@
 //! tools, which can also be read; otherwise, and over SSH, copies from a
 //! terminal go to it as OSC 52, which most terminals accept but few let
 //! programs read. A window without the tools keeps copies inside.
-use crate::runtime::SystemClipboard;
 use std::{
     io::{Read, Write},
     process::{Command, Stdio},
@@ -10,17 +9,26 @@ use std::{
     time::Duration,
 };
 
+/// The system clipboard as a frontend reaches it. Copies are stored after
+/// they happen; pastes load first, and text that differs from the
+/// application clipboard replaces it.
+pub trait SystemClipboard {
+    fn store(&mut self, text: &str);
+    fn load(&mut self) -> Option<String>;
+}
 pub(crate) enum Clipboard {
     Tools {
         copy: &'static [&'static str],
         paste: &'static [&'static str],
     },
+    #[cfg(feature = "tui")]
     Osc52,
     /// Nothing to reach the system clipboard with.
     Internal,
 }
 impl Clipboard {
     /// The clipboard of a terminal frontend: the tools, or OSC 52.
+    #[cfg(feature = "tui")]
     pub fn terminal() -> Self {
         match Self::local() {
             Self::Internal => Self::Osc52,
@@ -80,6 +88,7 @@ impl SystemClipboard for Clipboard {
                     let _ = child.wait();
                 });
             }
+            #[cfg(feature = "tui")]
             Self::Osc52 => {
                 let mut out = std::io::stdout();
                 let _ = write!(out, "\x1b]52;c;{}\x07", base64(text.as_bytes()));
@@ -124,6 +133,7 @@ fn on_path(name: &str) -> bool {
         .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(name).is_file()))
 }
 
+#[cfg(any(feature = "tui", test))]
 fn base64(bytes: &[u8]) -> String {
     const DIGITS: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);

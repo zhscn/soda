@@ -1,4 +1,5 @@
 //! Jump history: what counts as a jump and where going back lands.
+use soda::interaction::ResultsCommand;
 use soda::{
     interaction::{Command, EditMode, KeyStroke, UserInput},
     runtime::Runtime,
@@ -132,7 +133,7 @@ fn a_search_counts_once_from_where_it_started() {
 fn opening_results_returns_to_where_the_search_started() {
     let Project { mut r, _dir } = project();
     goto(&mut r, 5);
-    r.command(Command::Grep("needle".into()));
+    r.command(Command::Results(ResultsCommand::Grep("needle".into())));
     wait(&mut r, |r| r.message().starts_with("3 matches"));
     assert_eq!(name(&r), "*grep*");
     keys(&mut r, "M-g n");
@@ -151,13 +152,13 @@ fn opening_results_returns_to_where_the_search_started() {
 fn branches_of_results_unwind_one_at_a_time() {
     let Project { mut r, _dir } = project();
     goto(&mut r, 5);
-    r.command(Command::Grep("needle".into()));
+    r.command(Command::Results(ResultsCommand::Grep("needle".into())));
     wait(&mut r, |r| r.message().starts_with("3 matches"));
     keys(&mut r, "M-g n");
     wait(&mut r, |r| name(r) == "b.txt");
     assert_eq!(at(&r), here("b.txt", 2));
     // A second search, from the first one's result.
-    r.command(Command::Grep("line 7$".into()));
+    r.command(Command::Results(ResultsCommand::Grep("line 7$".into())));
     wait(&mut r, |r| r.message().starts_with("1 matches"));
     keys(&mut r, "M-g n");
     wait(&mut r, |r| name(r) == "a.txt");

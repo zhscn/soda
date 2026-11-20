@@ -1,3 +1,4 @@
+use soda::interaction::ResultsCommand;
 use soda::{
     application::{Axis, Event, Node},
     core::Selection,
@@ -176,7 +177,7 @@ fn grep_results_show_below_and_open_locations_in_the_other_window() {
         .unwrap();
     r.command(soda::interaction::Command::New);
     let main = r.app().active_view().unwrap();
-    r.command(Command::Grep("needle".into()));
+    r.command(Command::Results(ResultsCommand::Grep("needle".into())));
     settle(&mut r, |r| active_name(r) == "*grep*");
     assert!(r.message().starts_with("2 matches"), "{}", r.message());
     let results = r.app().active_view().unwrap();
@@ -195,12 +196,12 @@ fn grep_results_show_below_and_open_locations_in_the_other_window() {
     keys(&mut r, "M-g n");
     assert_eq!(r.message(), "At the last result");
     // A new search reuses the document and its side window.
-    r.command(Command::Grep("ONE".into()));
+    r.command(Command::Results(ResultsCommand::Grep("ONE".into())));
     settle(&mut r, |r| {
         active_name(r) == "*grep*" || r.message().starts_with("No")
     });
     assert_eq!(r.message(), "No matches for ONE");
-    r.command(Command::Grep("one".into()));
+    r.command(Command::Results(ResultsCommand::Grep("one".into())));
     settle(&mut r, |r| active_name(r) == "*grep*");
     assert_eq!(r.app().active_view(), Some(results));
     // Side windows close like others and cannot be split.

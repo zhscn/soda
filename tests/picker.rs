@@ -1,3 +1,4 @@
+use soda::interaction::ResponseEffect;
 use soda::{
     application::{Application, Event},
     interaction::{
@@ -53,7 +54,7 @@ fn setup(root: &Path, app: &Application) -> (Layers, PickerTask) {
         .effects
         .into_iter()
         .find_map(|effect| match effect {
-            PickerEffect::Run(task) => Some(task),
+            ResponseEffect::Picker(PickerEffect::Run(task)) => Some(task),
             _ => None,
         })
         .unwrap();
@@ -106,7 +107,7 @@ fn query(layers: &mut Layers, text: &str, app: &Application) -> PickerTask {
         .effects
         .into_iter()
         .find_map(|effect| match effect {
-            PickerEffect::Run(task) => Some(task),
+            ResponseEffect::Picker(PickerEffect::Run(task)) => Some(task),
             _ => None,
         })
         .unwrap()
@@ -733,7 +734,7 @@ fn managed_close_and_replacement_emit_cancellation_and_invalidate_tasks() {
         .unwrap();
     assert!(task.obsolete());
     assert!(
-        matches!(response.effects.as_slice(), [PickerEffect::Cancel(id)] if *id == task.key().source.session)
+        matches!(response.effects.as_slice(), [ResponseEffect::Picker(PickerEffect::Cancel(id))] if *id == task.key().source.session)
     );
     assert!(matches!(layers.active(), Some(Layer::Help(_))));
     let response = layers.close(&app, Duration::ZERO).unwrap();

@@ -7,14 +7,14 @@ use crate::{
     interaction::{CommandLine, Layer},
     runtime::Runtime,
     screen::{
-        self, Cells, Highlighter, Span, TextFrame, Theme,
+        self, Cells, Highlighter, Span, Style, TextFrame, Theme,
+        chrome::{Chrome, Header},
         content::{self, Message, Role},
     },
 };
 use ratatui::{
     buffer::Buffer,
     layout::{Position, Rect},
-    style::Style,
     text::{Line, Span as Text},
     widgets::{Block, BorderType, Clear, Widget},
 };
@@ -45,27 +45,34 @@ impl Areas {
     pub fn new(runtime: &Runtime, width: u16, height: u16) -> Self {
         let message = Rect::new(0, height.saturating_sub(1), width, height.min(1));
         let status = (height >= 2).then(|| Rect::new(0, height - 2, width, 1));
-        let options = runtime.app().options();
-        let tab_bar = options.bool(None, "tab-bar");
-        let alone = runtime.app().windows().is_empty();
-        let tabs = (height >= 4 && tab_bar && alone).then(|| Rect::new(0, 0, width, 1));
+        let app = runtime.app();
+        let chrome = Chrome::new(app);
+        let tabs = chrome
+            .splash_tabs(app, height >= 4)
+            .then(|| Rect::new(0, 0, width, 1));
         let top = u16::from(tabs.is_some());
         let bottom = height.saturating_sub(if status.is_some() { 2 } else { 1 });
         let editor = Rect::new(0, top, width, bottom.saturating_sub(top));
-        let app = runtime.app();
-        let layout = app.windows().layout(Area {
-            x: editor.x,
-            y: editor.y,
-            width: editor.width,
-            height: editor.height,
-        });
+        let layout = chrome.windows(
+            app,
+            Area {
+                x: editor.x,
+                y: editor.y,
+                width: editor.width,
+                height: editor.height,
+            },
+        );
         let windows = layout
             .into_iter()
-            .map(|(view, area)| {
+            .map(|(view, area, gutter)| {
                 let area = Rect::new(area.x, area.y, area.width, area.height);
-                let header = (tab_bar && area.height >= 2).then_some(Rect { height: 1, ..area });
-                let rule = (!tab_bar && area.y > editor.y && area.height >= 3)
-                    .then_some(Rect { height: 1, ..area });
+                let top = Rect { height: 1, ..area };
+                let (header, rule) =
+                    match chrome.header(area.height >= 2, area.y > editor.y && area.height >= 3) {
+                        Some(Header::Tabs) => (Some(top), None),
+                        Some(Header::Rule) => (None, Some(top)),
+                        None => (None, None),
+                    };
                 let body = match header.or(rule) {
                     Some(_) => Rect {
                         y: area.y + 1,
@@ -74,24 +81,10 @@ impl Areas {
                     },
                     None => area,
                 };
-                let document = app.view(view).map(|view| view.document_id);
-                let lines = document
-                    .and_then(|document| app.workspace().editor(document))
-                    .map_or(1, |editor| {
-                        editor.model().document().snapshot().text_lines()
-                    });
-                let digits = lines.max(1).ilog10() as u16 + 1;
-                // ` 123 │ ` keeps numbers right-aligned with a separator.
-                let gutter = digits.max(3) + 4;
-                let numbers = app.options().choice(document, "line-numbers") != "off";
-                // Without numbers, flags keep a column of their own.
-                let flagged = document.is_some_and(|d| !app.flags(d).is_empty());
-                let gutter = if numbers && body.width >= gutter + 16 {
-                    gutter
-                } else if flagged && body.width >= 18 {
-                    2
-                } else {
-                    0
+                let gutter = match gutter.numbered(body.width, 4) {
+                    Some(digits) => digits + 4,
+                    None if gutter.flagged && body.width >= 18 => 2,
+                    None => 0,
                 };
                 Window {
                     view,
@@ -212,13 +205,12 @@ impl Presenter {
         }
         Ok(())
     }
-    /// Draws a frame over the whole of `buffer`, whose area is the screen;
-    /// returns where the caret shows, if it does.
+    /// Draws a frame over the whole buffer and returns its layout feedback.
     pub fn render(
         &mut self,
         runtime: &Runtime,
         buffer: &mut Buffer,
-    ) -> Result<Option<(u16, u16)>, crate::application::Error> {
+    ) -> Result<Rendered, crate::application::Error> {
         let area = buffer.area;
         // The gutter widens with the line count, so measure again.
         let areas = Areas::new(runtime, area.width, area.height);
@@ -256,14 +248,19 @@ pub(super) fn frames(
         .collect()
 }
 
-/// Draws the screen into `buf`; returns where the caret shows, if it does.
+pub(super) struct Rendered {
+    pub cursor: Option<(u16, u16)>,
+    pub popup: screen::PopupViewport,
+}
+
+/// Draws the screen into `buf`.
 pub(super) fn render(
     buf: &mut Buffer,
     runtime: &Runtime,
     theme: &Theme,
     areas: &Areas,
     texts: &[Option<TextFrame>],
-) -> Option<(u16, u16)> {
+) -> Rendered {
     let screen = buf.area;
     buf.set_style(screen, theme.text);
     if let Some(area) = areas.tabs {
@@ -373,10 +370,14 @@ pub(super) fn render(
     {
         completions(buf, areas, position, popup, theme);
     }
-    if let (None, Some(words)) = (runtime.layer(), runtime.popup()) {
-        floating(buf, areas.editor, cursor, words, runtime, theme);
+    let popup = match (runtime.layer(), runtime.popup()) {
+        (None, Some(words)) => floating(buf, areas.editor, cursor, words, runtime, theme),
+        _ => screen::PopupViewport::default(),
+    };
+    Rendered {
+        cursor: cursor.map(|position| (position.x, position.y)),
+        popup,
     }
-    cursor.map(|position| (position.x, position.y))
 }
 
 /// Text in a box by the caret, on whichever side has more room. Text that
@@ -388,17 +389,17 @@ fn floating(
     words: &str,
     runtime: &Runtime,
     theme: &Theme,
-) {
+) -> screen::PopupViewport {
     let widest = area.width.saturating_sub(4).min(80);
     if widest < 8 || area.height < 3 {
-        return;
+        return screen::PopupViewport::default();
     }
     let lines = screen::wrap(words, usize::from(widest));
     let caret = caret.unwrap_or(Position::new(area.x, area.y));
     let (above, below) = (caret.y - area.y, area.bottom().saturating_sub(caret.y + 1));
     let room = above.max(below).saturating_sub(2);
     if room == 0 {
-        return;
+        return screen::PopupViewport::default();
     }
     let shown = lines.len().min(usize::from(room));
     let first = runtime.popup_scroll(shown, lines.len());
@@ -434,6 +435,10 @@ fn floating(
             usize::from(wide),
             theme.float_border,
         );
+    }
+    screen::PopupViewport {
+        shown,
+        total: lines.len(),
     }
 }
 
@@ -636,7 +641,7 @@ fn editor(
         let ground = theme
             .inactive_window
             .bg
-            .filter(|bg| *bg != ratatui::style::Color::Reset)
+            .filter(|bg| *bg != screen::Color::Reset)
             .map_or_else(Style::new, |bg| Style::new().bg(bg));
         let whole = Rect::new(left, area.y, area.width + window.gutter, area.height);
         buf.set_style(whole, ground);
@@ -798,9 +803,7 @@ fn tabs(
         let x = area.x + item.x;
         let style = match (item.active, current) {
             (true, true) => theme.tab_active,
-            (true, false) => theme
-                .tab_active
-                .remove_modifier(ratatui::style::Modifier::BOLD),
+            (true, false) => theme.tab_active.remove_modifier(screen::Modifier::BOLD),
             (false, _) => theme.tabs,
         };
         buf.set_stringn(x, area.y, &item.label, usize::from(area.right() - x), style);
@@ -1104,7 +1107,7 @@ fn key_hints(buf: &mut Buffer, areas: &Areas, runtime: &Runtime, theme: &Theme) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::interaction::{Command, EditMode, KeyStroke, UserInput};
+    use crate::interaction::{Command, EditMode, KeyStroke, LuaCommand, UserInput};
 
     /// A frame as a frontend draws it: measured, prepared, then rendered.
     fn draw(runtime: &mut Runtime, width: u16, height: u16) -> Buffer {
@@ -1112,7 +1115,8 @@ mod tests {
         presenter.measure(runtime, width, height);
         presenter.prepare(runtime, width, height).unwrap();
         let mut buffer = Buffer::empty(Rect::new(0, 0, width, height));
-        presenter.render(runtime, &mut buffer).unwrap();
+        let rendered = presenter.render(runtime, &mut buffer).unwrap();
+        runtime.update_popup_viewport(rendered.popup);
         buffer
     }
     fn screen(runtime: &mut Runtime, width: u16, height: u16) -> String {
@@ -1163,11 +1167,23 @@ mod tests {
             .find(|&x| buffer[(x, first)].symbol() == "f")
             .unwrap();
         let theme = Theme::build("tokyonight", &Default::default());
-        assert_eq!(buffer[(x + 1, first)].fg, theme.label.fg.unwrap());
+        assert_eq!(
+            buffer[(x + 1, first)].fg,
+            ratatui::style::Color::from(theme.label.fg.unwrap())
+        );
         // The match after the caret is the one Enter goes to.
-        assert_eq!(buffer[(x, first)].bg, theme.flash_match.bg.unwrap());
-        assert_eq!(buffer[(x, second)].bg, theme.flash_current.bg.unwrap());
-        assert_eq!(buffer[(x + 4, first)].fg, theme.flash_backdrop.fg.unwrap());
+        assert_eq!(
+            buffer[(x, first)].bg,
+            ratatui::style::Color::from(theme.flash_match.bg.unwrap())
+        );
+        assert_eq!(
+            buffer[(x, second)].bg,
+            ratatui::style::Color::from(theme.flash_current.bg.unwrap())
+        );
+        assert_eq!(
+            buffer[(x + 4, first)].fg,
+            ratatui::style::Color::from(theme.flash_backdrop.fg.unwrap())
+        );
         // Without the backdrop the rest keeps its own color.
         keys(&mut r, "ESC");
         r.command(Command::SetOption {
@@ -1177,7 +1193,10 @@ mod tests {
         });
         keys(&mut r, "M-x flash RET f");
         let buffer = draw(&mut r, 30, 6);
-        assert_ne!(buffer[(x + 4, first)].fg, theme.flash_backdrop.fg.unwrap());
+        assert_ne!(
+            buffer[(x + 4, first)].fg,
+            ratatui::style::Color::from(theme.flash_backdrop.fg.unwrap())
+        );
     }
     #[test]
     fn the_grab_and_beacon_selections_each_have_their_face() {
@@ -1212,10 +1231,10 @@ mod tests {
         };
         let theme = Theme::build("tokyonight", &Default::default());
         let (grab, cursor, beacon, selection) = (
-            theme.secondary_selection.bg.unwrap(),
-            theme.beacon_cursor.bg.unwrap(),
-            theme.beacon_selection.bg.unwrap(),
-            theme.selection.bg.unwrap(),
+            ratatui::style::Color::from(theme.secondary_selection.bg.unwrap()),
+            ratatui::style::Color::from(theme.beacon_cursor.bg.unwrap()),
+            ratatui::style::Color::from(theme.beacon_selection.bg.unwrap()),
+            ratatui::style::Color::from(theme.selection.bg.unwrap()),
         );
         assert!(grab != cursor && grab != beacon && beacon != selection);
         // The main caret ends the second line; the other ends the first,
@@ -1282,10 +1301,13 @@ mod tests {
         )));
         // The caret's line, below the tab row, on the band and then not.
         let theme = Theme::build(crate::application::themes::DEFAULT, &Default::default());
-        let band = theme.cursor_line.bg.unwrap();
+        let band = ratatui::style::Color::from(theme.cursor_line.bg.unwrap());
         assert_eq!(draw(&mut r, 60, 14)[(8, 1)].bg, band);
         r.command(Command::Named("set highlight-line off".into()));
-        assert_eq!(draw(&mut r, 60, 14)[(8, 1)].bg, theme.text.bg.unwrap());
+        assert_eq!(
+            draw(&mut r, 60, 14)[(8, 1)].bg,
+            theme.text.bg.unwrap().into()
+        );
         // Hints after a prefix.
         keys(&mut r, "C-x");
         assert!(!r.key_continuations().is_empty());
@@ -1315,7 +1337,7 @@ mod tests {
             "f(a [b])".into(),
         )));
         let theme = Theme::build(crate::application::themes::DEFAULT, &Default::default());
-        let lit = theme.paren_match.bg.unwrap();
+        let lit = ratatui::style::Color::from(theme.paren_match.bg.unwrap());
         // The row of text is below the tab row; columns past the gutter.
         let row = |r: &mut Runtime| -> Vec<bool> {
             let buffer = draw(r, 60, 14);
@@ -1375,7 +1397,7 @@ mod tests {
             presenter.measure(r, 60, 14);
             presenter.prepare(r, 60, 14).unwrap();
             let mut buffer = Buffer::empty(Rect::new(0, 0, 60, 14));
-            presenter.render(r, &mut buffer).unwrap()
+            presenter.render(r, &mut buffer).unwrap().cursor
         };
         // The caret is at the bottom right, where the hints go.
         assert!(cursor(&mut r).is_some());
@@ -1397,8 +1419,8 @@ mod tests {
         assert!(ground.is_some() && ground != theme.text.bg);
         let buffer = draw(&mut r, 60, 14);
         // Below the text, the focused left window and the right one.
-        assert_eq!(buffer[(10, 8)].bg, theme.text.bg.unwrap());
-        assert_eq!(buffer[(45, 8)].bg, ground.unwrap());
+        assert_eq!(buffer[(10, 8)].bg, theme.text.bg.unwrap().into());
+        assert_eq!(buffer[(45, 8)].bg, ground.unwrap().into());
         // The option turns it off, as does taking the face's background away.
         r.command(Command::Named("set dim-other-windows false".into()));
         let buffer = draw(&mut r, 60, 14);
@@ -1526,7 +1548,7 @@ mod tests {
         assert!(!underlined(first + 3) && underlined(first + 4) && underlined(first + 6));
         assert_eq!(
             cells[(first + 4, 1)].underline_color,
-            theme.todo.fg.unwrap()
+            theme.todo.fg.unwrap().into()
         );
     }
 
@@ -1756,7 +1778,9 @@ mod tests {
             "one\ntwo\n".into(),
         )));
         r.command(Command::SetMode(EditMode::Normal));
-        r.command(Command::Lua(r#"soda.indicator(2, "[2/3]")"#.into()));
+        r.command(Command::Lua(LuaCommand::Chunk(
+            r#"soda.indicator(2, "[2/3]")"#.into(),
+        )));
         let text = screen(&mut r, 40, 8);
         assert!(text.contains("two [2/3]"), "{text}");
         assert!(!text.contains("one ["), "{text}");
@@ -1772,10 +1796,10 @@ mod tests {
             .unwrap();
         r.command(crate::interaction::Command::New);
         let words: Vec<_> = (1..=30).map(|n| format!("line{n}")).collect();
-        r.command(Command::Lua(format!(
+        r.command(Command::Lua(LuaCommand::Chunk(format!(
             "soda.popup(\"{}\")",
             words.join("\\n")
-        )));
+        ))));
         let first = screen(&mut r, 40, 14);
         assert!(
             first.contains("line1 ") && !first.contains("line30"),
@@ -1783,6 +1807,16 @@ mod tests {
         );
         assert!(first.contains("/30 "), "{first}");
         r.scroll_popup(1000);
+        let mut presenter = Presenter::new();
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 40, 14));
+        let rendered = presenter.render(&r, &mut buffer).unwrap();
+        // The projection does not clamp the stored scroll until applied.
+        assert_eq!(r.popup_scroll(1, 2000), 1000);
+        r.update_popup_viewport(rendered.popup);
+        assert_eq!(
+            r.popup_scroll(1, 2000),
+            rendered.popup.total - rendered.popup.shown,
+        );
         let last = screen(&mut r, 40, 14);
         assert!(
             last.contains("line30") && !last.contains("line1 "),
@@ -1815,9 +1849,9 @@ mod tests {
         r.source_lua("modal", include_str!("../../tests/fixtures/modal.lua"))
             .unwrap();
         r.command(crate::interaction::Command::New);
-        r.command(Command::Lua(
+        r.command(Command::Lua(LuaCommand::Chunk(
             r#"soda.popup("int value\n\nA long sentence that has to wrap")"#.into(),
-        ));
+        )));
         let text = screen(&mut r, 24, 12);
         let rows: Vec<_> = text.lines().collect();
         assert!(rows.iter().any(|row| row.contains("╭")), "{text}");
@@ -1878,8 +1912,8 @@ mod tests {
     #[test]
     fn eof_line_background_stops_at_text_and_real_blank_lines_remain_numbered() {
         let theme = Theme::build(crate::application::themes::DEFAULT, &Default::default());
-        let band = theme.cursor_line.bg.unwrap();
-        let ground = theme.text.bg.unwrap();
+        let band = ratatui::style::Color::from(theme.cursor_line.bg.unwrap());
+        let ground = ratatui::style::Color::from(theme.text.bg.unwrap());
         for text in ["abc", "abc\n", "abc\n\n", "abc\r\n"] {
             let mut r = Runtime::new(std::path::PathBuf::from("/")).unwrap();
             r.command(Command::New);

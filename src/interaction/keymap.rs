@@ -3,7 +3,8 @@
 use super::{
     Command, Input, InputKey, InputMotion, Key, KeyStroke,
     picker::ListMotion,
-    registry::{Choice, Registry, word},
+    registry::{Registry, word},
+    slots::Choice,
 };
 use crate::{
     application::ClipboardAction,

@@ -3,7 +3,7 @@
 //! output to `*run*`, where compilers report `path:line[:column]: message`.
 //! Enter on such a line, or stepping through the latest results, opens the
 //! location.
-use super::{Message, Response};
+use super::{Command, Layers, Message, Response, ResponseEffect};
 use crate::{
     application::{Application, Event, ViewId},
     core::{Selection, Snapshot},
@@ -12,7 +12,136 @@ use crate::{
 use std::{path::Path, time::Duration};
 
 pub const SCRATCH: &str = "*grep*";
-pub const RUN: &str = "*run*";
+pub use crate::application::RUN;
+
+/// Commands that produce or visit a results document.
+#[derive(Clone, Debug)]
+pub enum ResultsCommand {
+    /// Searches the project; results go to the `*grep*` document.
+    Grep(String),
+    Ripgrep(Box<RipgrepRequest>),
+    /// Opens the location on the caret line, or moves to the next line's
+    /// first non-blank.
+    Jump,
+    /// Opens the next or previous location in the latest results: search
+    /// matches or `run` output.
+    ResultStep {
+        backward: bool,
+    },
+    /// Fills the latest results document with lines supplied by a command.
+    Fill {
+        kind: String,
+        lines: Vec<String>,
+    },
+    /// Runs a command whose output streams into the `*run*` document.
+    Run(String),
+}
+
+#[derive(Default)]
+pub(super) struct ResultNavigation {
+    /// The results document `]q` and `[q` step through: the latest filled.
+    results: String,
+    /// `]q` has not stepped through these results yet.
+    results_fresh: bool,
+}
+
+impl Layers {
+    pub(super) fn execute_results(
+        &mut self,
+        command: ResultsCommand,
+        app: &Application,
+        time: Duration,
+        file_root: &Path,
+        response: &mut Response,
+    ) {
+        match command {
+            ResultsCommand::Ripgrep(request) => {
+                self.set_results("*rg*".into());
+                response
+                    .effects
+                    .push(ResponseEffect::Search(Box::new(SearchRequest::Ripgrep(
+                        *request,
+                    ))));
+            }
+            ResultsCommand::Grep(pattern) => {
+                self.set_results(SCRATCH.to_owned());
+                response
+                    .effects
+                    .push(ResponseEffect::Search(Box::new(SearchRequest::Grep(
+                        GrepRequest {
+                            pattern,
+                            root: file_root.to_owned(),
+                        },
+                    ))));
+            }
+            ResultsCommand::Jump => {
+                // Enter on the results visits that line, as `]q` would.
+                let document = app.active_view().and_then(|view| app.view(view));
+                if document.map(|view| view.document_id)
+                    == app.workspace().scratch(&self.result_navigation.results)
+                {
+                    self.result_navigation.results_fresh = false;
+                }
+                self.jumps.expect_result();
+                if !jump(app, time, response) {
+                    self.jumps.clear_pending();
+                    self.jumps.end_walk();
+                    response.commands.extend([
+                        Command::Modal(super::modal::Action::Move {
+                            step: super::modal::Step::Down,
+                            extend: false,
+                        }),
+                        Command::Named("line-start".into()),
+                    ]);
+                }
+            }
+            ResultsCommand::ResultStep { backward } => {
+                let fresh = std::mem::take(&mut self.result_navigation.results_fresh);
+                step(
+                    app,
+                    &self.result_navigation.results,
+                    fresh,
+                    backward,
+                    time,
+                    response,
+                )
+            }
+            ResultsCommand::Fill { kind, lines } => {
+                if lines
+                    .iter()
+                    .any(|line| location(line).is_some() || row(line).is_some())
+                {
+                    let name = format!("*{kind}*");
+                    self.set_results(name.clone());
+                    response.events.push(Event::ResultsDisplay { kind });
+                    response.events.push(Event::Scratch {
+                        name,
+                        directory: file_root.to_owned(),
+                        text: lines.join("\n") + "\n",
+                    });
+                } else {
+                    response.message = Message::Set(format!("{kind}: no results"));
+                }
+            }
+            ResultsCommand::Run(shell) => {
+                self.set_results(RUN.to_owned());
+                let view = app.active_view().and_then(|view| app.view(view));
+                response
+                    .effects
+                    .push(ResponseEffect::Run(Box::new(super::shell::run(
+                        app, view, shell, file_root,
+                    ))));
+            }
+        }
+    }
+
+    /// Makes a results document the one `]q` and `[q` step through.
+    fn set_results(&mut self, name: String) {
+        self.result_navigation.results = name;
+        self.result_navigation.results_fresh = true;
+        self.jumps.end_walk();
+    }
+}
 
 /// A search for the Runtime to run.
 #[derive(Clone, Debug)]
@@ -82,11 +211,7 @@ pub fn row(line: &str) -> Option<(usize, usize)> {
     Some((number, column))
 }
 
-/// Whether a scratch document holds results, and if so whether rows under
-/// file names count: compiler output in `*run*` is not grouped.
-pub fn results_kind(name: &str) -> Option<bool> {
-    (name != "*messages*").then_some(name != RUN)
-}
+pub use crate::application::results_kind;
 fn grouped(app: &Application, document: DocumentId) -> bool {
     app.workspace()
         .file(document)

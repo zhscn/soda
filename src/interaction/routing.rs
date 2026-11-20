@@ -7,6 +7,37 @@ use super::{
 use crate::{application::Application, core::EditError, editor::Command as EditCommand};
 use std::{path::Path, time::Duration};
 
+/// The character Shift gives on a US keyboard.
+pub(crate) fn shifted(ch: char) -> char {
+    const PAIRS: [(char, char); 21] = [
+        ('1', '!'),
+        ('2', '@'),
+        ('3', '#'),
+        ('4', '$'),
+        ('5', '%'),
+        ('6', '^'),
+        ('7', '&'),
+        ('8', '*'),
+        ('9', '('),
+        ('0', ')'),
+        ('-', '_'),
+        ('=', '+'),
+        ('[', '{'),
+        (']', '}'),
+        ('\\', '|'),
+        (';', ':'),
+        ('\'', '"'),
+        ('`', '~'),
+        (',', '<'),
+        ('.', '>'),
+        ('/', '?'),
+    ];
+    match PAIRS.iter().find(|(plain, _)| *plain == ch) {
+        Some((_, shifted)) => *shifted,
+        None => ch.to_ascii_uppercase(),
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Key {
     Char(char),
@@ -718,7 +749,7 @@ impl Layers {
         };
         if !matches!(
             command,
-            Command::Edit(_) | Command::Clipboard(_) | Command::LuaCall { .. }
+            Command::Edit(_) | Command::Clipboard(_) | Command::Lua(super::LuaCommand::Call { .. })
         ) {
             // Modal commands read the count themselves, and the keypad goes
             // on building a key; anything else has no use for it.

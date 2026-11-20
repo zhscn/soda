@@ -76,7 +76,7 @@ pub(super) fn register<'scope, 'r: 'scope>(
                     })
                     .transpose()?;
                 let mut runtime = runtime.borrow_mut();
-                runtime.lsp.set_server(language.clone(), server);
+                runtime.workers.lsp.set_server(language.clone(), server);
                 runtime.edit_event(crate::application::Event::ServerRoots {
                     language,
                     markers: roots,
@@ -110,7 +110,8 @@ pub(super) fn register<'scope, 'r: 'scope>(
                     host.callbacks()?.set(id, Value::Nil)?;
                     return Ok(Value::Boolean(false));
                 };
-                let Runtime { lsp, app, .. } = &mut **runtime;
+                let Runtime { workers, app, .. } = &mut **runtime;
+                let lsp = &mut workers.lsp;
                 lsp.sync(app, true);
                 // The function's id names the request, for `soda.lsp.cancel`.
                 if lsp.request(&key, &method, params, id, raw.unwrap_or(false)) {
@@ -128,7 +129,7 @@ pub(super) fn register<'scope, 'r: 'scope>(
             let Some(request) = request else {
                 return Ok(false);
             };
-            let cancelled = runtime.borrow_mut().lsp.cancel(request);
+            let cancelled = runtime.borrow_mut().workers.lsp.cancel(request);
             if cancelled {
                 host.callbacks()?.set(request, Value::Nil)?;
             }
@@ -144,7 +145,7 @@ pub(super) fn register<'scope, 'r: 'scope>(
                 let Some(key) = key_for(&runtime, buffer)? else {
                     return Ok(false);
                 };
-                Ok(runtime.lsp.notify(&key, &method, params))
+                Ok(runtime.workers.lsp.notify(&key, &method, params))
             },
         )?,
     )?;
@@ -152,7 +153,7 @@ pub(super) fn register<'scope, 'r: 'scope>(
         "lsp_on",
         scope.create_function(|_, (method, function): (String, Function)| {
             let id = host.keep(function)?;
-            runtime.borrow_mut().lsp.on(method, id);
+            runtime.borrow_mut().workers.lsp.on(method, id);
             Ok(())
         })?,
     )?;
@@ -174,7 +175,8 @@ pub(super) fn register<'scope, 'r: 'scope>(
             let Some(key) = key_for(&runtime, buffer)? else {
                 return Ok(Value::Nil);
             };
-            let Some((encoding, capabilities, watchers)) = runtime.lsp.client_of(&key) else {
+            let Some((encoding, capabilities, watchers)) = runtime.workers.lsp.client_of(&key)
+            else {
                 return Ok(Value::Nil);
             };
             let info = lua.create_table()?;
@@ -221,7 +223,7 @@ pub(super) fn register<'scope, 'r: 'scope>(
             let document = runtime.document().map_err(mlua::Error::runtime)?;
             let Some((language, root)) = runtime
                 .lsp_key_of(document)
-                .filter(|(language, _)| runtime.lsp.serves(language))
+                .filter(|(language, _)| runtime.workers.lsp.serves(language))
             else {
                 return Ok(None);
             };
@@ -237,7 +239,7 @@ pub(super) fn register<'scope, 'r: 'scope>(
                 }
                 _ => root,
             };
-            runtime.lsp.allow(&(language.clone(), root.clone()));
+            runtime.workers.lsp.allow(&(language.clone(), root.clone()));
             runtime.edit_event(crate::application::Event::StartedRoot {
                 language,
                 root: root.clone(),
@@ -253,7 +255,7 @@ pub(super) fn register<'scope, 'r: 'scope>(
             let Some(key) = runtime.lsp_key() else {
                 return Ok(Value::Nil);
             };
-            let documents = runtime.lsp.stop(&key);
+            let documents = runtime.workers.lsp.stop(&key);
             runtime.edit_event(crate::application::Event::StartedRoot {
                 language: key.0.clone(),
                 root: key.1.clone(),
@@ -293,7 +295,7 @@ pub(super) fn register<'scope, 'r: 'scope>(
         scope.create_function(|lua, ()| {
             let runtime = runtime.borrow();
             let list = lua.create_table()?;
-            for server in runtime.lsp.servers() {
+            for server in runtime.workers.lsp.servers() {
                 let entry = lua.create_table()?;
                 entry.set("language", server.language)?;
                 entry.set("root", server.root.to_string_lossy().into_owned())?;
@@ -310,7 +312,7 @@ pub(super) fn register<'scope, 'r: 'scope>(
         scope.create_function(|_, ()| {
             let mut runtime = runtime.borrow_mut();
             if let Some(key) = runtime.lsp_key() {
-                runtime.lsp.restart(&key);
+                runtime.workers.lsp.restart(&key);
             }
             Ok(())
         })?,

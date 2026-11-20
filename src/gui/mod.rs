@@ -507,7 +507,7 @@ impl Gui {
             })
         };
         let mut painter = Painter::new(&mut self.fonts, &mut self.renderer.atlas, &self.theme);
-        let caret = paint::screen(
+        let rendered = paint::screen(
             &mut painter,
             runtime,
             &areas,
@@ -516,6 +516,7 @@ impl Gui {
             &motion,
         )
         .map_err(|e| e.to_string())?;
+        let caret = rendered.caret;
         // Text being composed stays put while the caret glides.
         let smooth = runtime.app().options().bool(None, "smooth-caret") && self.preedit.is_empty();
         let (shown, gliding) = self.caret.place(caret, smooth, now);
@@ -547,6 +548,7 @@ impl Gui {
         }
         let (background, instances) = (painter.bg, std::mem::take(&mut painter.out));
         self.renderer.draw(background, &instances);
+        runtime.update_popup_viewport(rendered.popup);
         runtime.take_redraw();
         // Scrolls easing and scroll bars fading draw again too.
         let moving = self.scrolls.values().any(|s| s.moving(now));

@@ -63,7 +63,7 @@ impl Highlighter {
             .workspace()
             .file(document)
             .and_then(|file| file.scratch())
-            .and_then(crate::interaction::grep::results_kind);
+            .and_then(crate::application::results_kind);
         let stale = self
             .documents
             .get(&document)

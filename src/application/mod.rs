@@ -1209,7 +1209,7 @@ impl Application {
                 let document = self.workspace.new_scratch(name);
                 self.adopt(document);
                 // Grouped results carry the numbers that matter.
-                if crate::interaction::grep::results_kind(name) == Some(true) {
+                if results_kind(name) == Some(true) {
                     self.options.set(
                         crate::options::Scope::Document(document),
                         "line-numbers",
@@ -1892,4 +1892,13 @@ impl Application {
         update.changed_views.dedup();
         Ok(update)
     }
+}
+
+pub const RUN: &str = "*run*";
+pub(crate) const MESSAGES: &str = "*messages*";
+
+/// Whether a scratch document holds results, and if so whether rows under
+/// file names count: compiler output in `*run*` is not grouped.
+pub fn results_kind(name: &str) -> Option<bool> {
+    (name != MESSAGES).then_some(name != RUN)
 }

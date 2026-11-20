@@ -51,7 +51,7 @@ pub fn stroke(event: &KeyEvent, modifiers: ModifiersState) -> Option<KeyStroke> 
             };
             let ch = text.chars().next()?;
             Key::Char(if shift && (control || alt) {
-                crate::tui::input::shifted(ch)
+                crate::interaction::shifted(ch)
             } else {
                 ch
             })

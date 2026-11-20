@@ -2966,6 +2966,7 @@ name = "soda"
 version = "0.1.0"
 dependencies = [
  "arboard",
+ "bitflags 2.13.2",
  "bytemuck",
  "cosmic-text",
  "crossterm",

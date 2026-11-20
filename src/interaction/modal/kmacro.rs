@@ -78,7 +78,7 @@ impl Layers {
             }
             MacroAction::StartOrCounter | MacroAction::Start => {
                 if recording || executing {
-                    return self.fail(response, "Already defining keyboard macro.");
+                    return response.modal_failure("Already defining keyboard macro.");
                 }
                 // As `meow-beacon-start`: keys go to the main selection
                 // alone, in Normal, the other places held until it ends.
@@ -118,7 +118,7 @@ impl Layers {
             }
             MacroAction::End => {
                 if !recording {
-                    return self.fail(response, "Not defining kbd macro");
+                    return response.modal_failure("Not defining kbd macro");
                 }
                 return self.end_macro(&prefix, response);
             }
@@ -160,20 +160,20 @@ impl Layers {
                 self.command.repeat_on_last_key(RING_REPEATS);
                 let previous = action == MacroAction::RingPrevious;
                 if let Err(message) = self.modal.replay.cycle(previous) {
-                    return self.fail(response, message);
+                    return response.modal_failure(message);
                 }
                 response.message = Message::Set(self.describe_macro("Macro"));
             }
             MacroAction::RingSwap => {
                 if let Err(message) = self.modal.replay.swap() {
-                    return self.fail(response, message);
+                    return response.modal_failure(message);
                 }
                 response.message = Message::Set(self.describe_macro("Macro"));
             }
             MacroAction::RingDelete => {
                 self.command.repeat_on_last_key(RING_REPEATS);
                 if let Err(message) = self.modal.replay.delete_head() {
-                    return self.fail(response, message);
+                    return response.modal_failure(message);
                 }
                 response.message = Message::Set(if self.modal.replay.last().is_empty() {
                     "Keyboard macro ring is now empty.".into()
@@ -270,16 +270,16 @@ impl Layers {
             } else {
                 "Only one keyboard macro defined."
             };
-            return self.fail(response, message);
+            return response.modal_failure(message);
         };
         self.play(keys, count, response)
     }
     fn play(&mut self, keys: Vec<UserInput>, count: usize, mut response: Response) -> Response {
         if self.modal.replay.recording() {
-            return self.fail(response, "Can't execute anonymous macro while defining one");
+            return response.modal_failure("Can't execute anonymous macro while defining one");
         }
         if keys.is_empty() {
-            return self.fail(response, "No kbd macro has been defined");
+            return response.modal_failure("No kbd macro has been defined");
         }
         if count == 0 {
             response.replay = keys;
@@ -298,7 +298,7 @@ impl Layers {
         response: Response,
     ) -> Response {
         let Some(keys) = self.modal.replay.named(name).map(<[_]>::to_vec) else {
-            return self.fail(response, &format!("No keyboard macro named {name}"));
+            return response.modal_failure(&format!("No keyboard macro named {name}"));
         };
         let (count, _) = self.modal.take_prefix();
         self.play(keys, count, response)

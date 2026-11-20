@@ -8,6 +8,7 @@ pub mod config;
 pub mod core;
 pub mod cpp;
 
+mod bundled_grammars;
 pub mod editor;
 pub mod language;
 pub mod options;
@@ -22,6 +23,7 @@ pub(crate) mod clipboard;
 pub mod gui;
 pub mod host;
 pub mod screen;
+#[cfg(feature = "tui")]
 pub mod tui;
 
 pub mod interaction;

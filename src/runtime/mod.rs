@@ -1,13 +1,15 @@
 //! Owner-thread command loop shared by frontends. It owns application and modal
 //! state, reduces every update in order, and executes bounded background tasks.
 use crate::{
-    application::{Application, ClipboardAction, Event, Notice, Operation, Update, ViewId},
+    application::{
+        Application, ClipboardAction, Event, MESSAGES, Notice, Operation, Update, ViewId,
+    },
     core::{ByteOffset, EditError},
-    files::{FileCompletion, FileRunner, paths::PathRunner},
+    files::FileCompletion,
     interaction::{
-        Command, InputResult, Layer, Layers, Message, Response, UserInput,
+        Command, InputResult, Layer, Layers, Message, Response, ResponseEffect, UserInput,
         modal::{Action, Effect, Kind, Query},
-        picker::{PickerEffect, PickerRunner},
+        picker::PickerEffect,
     },
 };
 use std::{
@@ -25,21 +27,17 @@ mod rg;
 mod run;
 mod shell;
 mod state;
+mod workers;
+use workers::Workers;
 pub(crate) mod tree;
 
 /// Messages the log keeps.
 const MESSAGE_LIMIT: usize = 1000;
-const MESSAGES: &str = "*messages*";
 /// Rounds of hooks firing further hooks before they stop.
 const MAX_HOOK_DEPTH: usize = 16;
 
-/// The system clipboard as a frontend reaches it. Copies are stored after
-/// they happen; pastes load first, and text that differs from the
-/// application clipboard replaces it.
-pub trait SystemClipboard {
-    fn store(&mut self, text: &str);
-    fn load(&mut self) -> Option<String>;
-}
+pub use crate::clipboard::SystemClipboard;
+
 /// Whether a key pages a popup, and which way. These keys page the text
 /// otherwise, and every other key closes the popup.
 fn popup_page(key: &crate::interaction::KeyStroke) -> Option<bool> {
@@ -67,20 +65,26 @@ struct FileLoop {
     replaced: usize,
     files_replaced: usize,
 }
+#[derive(Default)]
+struct Presentation {
+    /// Words for the message row while it has no message, until replaced.
+    hint: Option<String>,
+    /// Status line segments extensions set: name, text and face.
+    status: Vec<(String, String, Option<crate::application::Face>)>,
+    /// Text in a box by the caret, until the next input.
+    popup: Option<String>,
+    /// How many wrapped lines precede the visible popup.
+    popup_scroll: usize,
+    /// The lines of the popup in view when it was last drawn.
+    popup_page: usize,
+    /// When the digits that extend a selection go away.
+    hints_until: Option<Duration>,
+}
+
 pub struct Runtime {
     // Workers drop before the application so in-progress file writes can finish.
-    files: FileRunner,
-    shell: shell::ShellRunner,
-    grep: grep::GrepRunner,
-    rg: rg::RgRunner,
-    /// The files a replacement over the project goes through, being found.
-    file_search: grep::FileSearch,
+    workers: Workers,
     file_loop: Option<FileLoop>,
-    completions: completion::Completions,
-    lsp: lsp::Lsp,
-    run: run::RunRunner,
-    picker: PickerRunner,
-    paths: PathRunner,
     app: Application,
     layers: Layers,
     clipboard: Option<Box<dyn SystemClipboard>>,
@@ -128,21 +132,9 @@ pub struct Runtime {
     lua_queue: std::collections::VecDeque<(lua::Request, Option<ViewId>)>,
     lua_running: bool,
     dirty: bool,
-    /// When the digits that extend a selection go away.
-    hints_until: Option<Duration>,
     /// `poll` left results waiting, to take in a moment.
     busy: bool,
-    /// Text in a box by the caret, until the next input.
-    /// Words for the message row while it has no message, until replaced.
-    hint: Option<String>,
-    /// Status line segments extensions set: name, text and face.
-    status: Vec<(String, String, Option<crate::application::Face>)>,
-    popup: Option<String>,
-    /// How many lines of the popup are scrolled past; drawing keeps it in
-    /// range, since only drawing knows how the text wraps.
-    popup_scroll: std::cell::Cell<usize>,
-    /// The lines of the popup in view when it was last drawn.
-    popup_page: std::cell::Cell<usize>,
+    presentation: Presentation,
 }
 impl Runtime {
     /// A runtime with `root` as a project, whatever the directory holds.
@@ -167,17 +159,8 @@ impl Runtime {
         }
         app.set_start(file_root);
         Ok(Self {
-            files: FileRunner::new()?,
-            shell: shell::ShellRunner::default(),
-            grep: grep::GrepRunner::default(),
-            rg: rg::RgRunner::default(),
-            file_search: grep::FileSearch::default(),
+            workers: Workers::new()?,
             file_loop: None,
-            completions: completion::Completions::default(),
-            lsp: lsp::Lsp::default(),
-            run: run::RunRunner::default(),
-            picker: PickerRunner::new()?,
-            paths: PathRunner::new()?,
             app,
             layers: Layers::default(),
             clipboard: None,
@@ -206,13 +189,8 @@ impl Runtime {
             lua_queue: Default::default(),
             lua_running: false,
             dirty: true,
-            hints_until: None,
             busy: false,
-            hint: None,
-            status: vec![],
-            popup: None,
-            popup_scroll: Default::default(),
-            popup_page: Default::default(),
+            presentation: Presentation::default(),
         })
     }
     /// Opens the file given on the command line; without one, no document
@@ -255,17 +233,17 @@ impl Runtime {
         self.dirty = true;
     }
     pub fn shell_running(&self) -> bool {
-        self.shell.busy()
+        self.workers.shell.busy()
     }
     pub fn grep_running(&self) -> bool {
-        self.grep.busy() || self.rg.busy()
+        self.workers.grep.busy() || self.workers.rg.busy()
     }
     pub fn run_running(&self) -> bool {
-        self.run.busy()
+        self.workers.run.busy()
     }
     /// Digits that extend the selection, for a moment after each key.
     pub fn expand_hints(&self) -> crate::interaction::ExpandHints {
-        if self.hints_until.is_none() {
+        if self.presentation.hints_until.is_none() {
             return Default::default();
         }
         self.layers.expand_hints(&self.app)
@@ -364,18 +342,18 @@ impl Runtime {
         self.input_at(input, self.epoch.elapsed());
     }
     pub fn input_at(&mut self, input: UserInput, time: Duration) {
-        self.hints_until = Some(time + HINT_TIME);
+        self.presentation.hints_until = Some(time + HINT_TIME);
         self.idle = Some(time);
-        if self.popup.is_some()
+        if self.presentation.popup.is_some()
             && self.layer().is_none()
             && let UserInput::Key(key) = &input
             && let Some(forward) = popup_page(key)
         {
-            let page = self.popup_page.get().max(1) as isize;
+            let page = self.presentation.popup_page.max(1) as isize;
             self.scroll_popup(if forward { page } else { -page });
             return;
         }
-        self.popup = None;
+        self.presentation.popup = None;
         if self.layers.prompt_yanks(&input) {
             self.load_clipboard();
         }
@@ -409,7 +387,7 @@ impl Runtime {
         if let Some(request) = request {
             self.ask_lua_sources(&request.asked);
             if request.asked.builtin {
-                self.completions.request(request);
+                self.workers.completions.request(request);
             }
         }
         if let Some(resolve) = self.layers.completion_resolve() {
@@ -422,35 +400,41 @@ impl Runtime {
         self.dirty |= changed;
     }
     pub(crate) fn shutdown_processes(&mut self) {
-        self.rg.shutdown();
-        self.lsp.shutdown();
+        self.workers.rg.shutdown();
+        self.workers.lsp.shutdown();
     }
 
     /// Lets documents start language servers.
     pub fn enable_lsp(&mut self) {
-        self.lsp.enable();
+        self.workers.lsp.enable();
     }
     /// The list of candidates to show under the caret.
     /// Status line segments in the order they were first set.
     pub fn status_segments(&self) -> &[(String, String, Option<crate::application::Face>)] {
-        &self.status
+        &self.presentation.status
     }
     pub fn hint(&self) -> Option<&str> {
-        self.hint.as_deref()
+        self.presentation.hint.as_deref()
     }
     pub fn popup(&self) -> Option<&str> {
-        self.popup.as_deref()
+        self.presentation.popup.as_deref()
     }
     /// The popup's first line, for `page` lines in view out of `total`.
     pub fn popup_scroll(&self, page: usize, total: usize) -> usize {
-        let scroll = self.popup_scroll.get().min(total.saturating_sub(page));
-        self.popup_scroll.set(scroll);
-        self.popup_page.set(page);
-        scroll
+        self.presentation
+            .popup_scroll
+            .min(total.saturating_sub(page))
+    }
+    /// Records the popup geometry after rendering for subsequent scroll input.
+    pub(crate) fn update_popup_viewport(&mut self, viewport: crate::screen::PopupViewport) {
+        if viewport.shown > 0 {
+            self.presentation.popup_scroll = self.popup_scroll(viewport.shown, viewport.total);
+            self.presentation.popup_page = viewport.shown;
+        }
     }
     pub fn scroll_popup(&mut self, lines: isize) {
-        let scroll = self.popup_scroll.get().saturating_add_signed(lines);
-        self.popup_scroll.set(scroll);
+        self.presentation.popup_scroll =
+            self.presentation.popup_scroll.saturating_add_signed(lines);
         self.dirty = true;
     }
     pub fn completion_popup(&self) -> Option<crate::interaction::completion::Popup> {
@@ -471,13 +455,15 @@ impl Runtime {
         self.settle(time);
         self.complete();
     }
-    fn input_result(&mut self, result: Result<InputResult, EditError>, time: Duration) {
+    /// Reports whether this input completed without a command or event failure.
+    fn input_result(&mut self, result: Result<InputResult, EditError>, time: Duration) -> bool {
         match result {
-            Ok(InputResult::Handled(response)) => {
-                self.respond(response, time);
+            Ok(InputResult::Handled(response)) => self.respond(response, time),
+            Ok(InputResult::Pass | InputResult::Blocked) => true,
+            Err(error) => {
+                self.interaction_failed(error, time);
+                false
             }
-            Ok(InputResult::Pass | InputResult::Blocked) => {}
-            Err(error) => self.interaction_failed(error, time),
         }
     }
     /// Returns false on failure. A response batch stops at its first failed
@@ -619,7 +605,7 @@ impl Runtime {
     /// Starts a replacement over the project: finds the files first.
     fn project_replace(&mut self, request: crate::interaction::ProjectReplace) {
         let query = crate::editor::search::SearchQuery::new(&request.query);
-        self.file_search.submit(self.app.root(), query);
+        self.workers.file_search.submit(self.app.root(), query);
         self.message = "Searching the project…".into();
         self.file_loop = Some(FileLoop {
             query: request.query,
@@ -1044,6 +1030,7 @@ impl Runtime {
         for effect in update.effects {
             let operation = effect.key().into();
             if let Err(error) = self
+                .workers
                 .files
                 .submit(self.app.workspace().service().clone(), effect)
             {
@@ -1077,99 +1064,8 @@ impl Runtime {
             Message::Set(message) => self.message = message,
         }
         self.dirty |= response.redraw;
-        for request in response.path_requests {
-            self.paths.submit(request);
-        }
-        if let Some(request) = response.grep {
-            use crate::interaction::grep::SearchRequest;
-            let result = match *request {
-                SearchRequest::Grep(request) => self.grep.submit(request),
-                SearchRequest::Ripgrep(request) => self.rg.submit(request),
-            };
-            self.message = match result {
-                Ok(()) => "Searching…".into(),
-                Err(error) => error,
-            };
-        }
-        if let Some(request) = response.shell {
-            self.message = match self.shell.submit(*request) {
-                Ok(()) => "Running shell command…".into(),
-                Err(error) => error,
-            };
-        }
-        if response.messages {
-            let text = self.messages.iter().cloned().collect::<Vec<_>>().join("\n");
-            if self.reduce(
-                Event::Scratch {
-                    name: MESSAGES.into(),
-                    text,
-                    directory: self.app.directory(),
-                },
-                time,
-            ) && let Some(view) = self.app.active_view()
-            {
-                // Start at the newest message, so that new ones are followed.
-                let snapshot = self
-                    .app
-                    .workspace()
-                    .editor(self.app.view(view).unwrap().document_id)
-                    .unwrap()
-                    .model()
-                    .document()
-                    .snapshot();
-                let last = snapshot.line_start(snapshot.line_count() - 1).unwrap();
-                self.reduce(
-                    Event::Edit {
-                        view,
-                        command: crate::editor::Command::SetSelection(
-                            crate::core::Selection::caret(last),
-                        ),
-                        time,
-                    },
-                    time,
-                );
-            }
-        }
-        if response.stop {
-            let stopped = [
-                self.run.stop(),
-                self.shell.stop(),
-                self.grep.stop(),
-                self.rg.stop(),
-            ];
-            // Quiet otherwise: Ctrl-C also cancels pending keys.
-            if stopped.contains(&true) {
-                self.message = "Stopped".into();
-            }
-        }
-        if let Some(request) = response.run {
-            let header = format!("$ {}", request.command);
-            let cwd = request.cwd.clone();
-            match self.run.submit(*request) {
-                Ok(()) => {
-                    self.reduce(
-                        Event::Scratch {
-                            name: crate::interaction::grep::RUN.into(),
-                            text: header,
-                            directory: cwd,
-                        },
-                        time,
-                    );
-                    self.message = "Running…".into();
-                }
-                Err(error) => self.message = error,
-            }
-        }
         for effect in response.effects {
-            match effect {
-                PickerEffect::Run(task) => {
-                    if let Err(error) = self.picker.submit(task) {
-                        let response = self.layers.picker_failed(error.to_string());
-                        self.respond(response, time);
-                    }
-                }
-                PickerEffect::Cancel(id) => self.picker.cancel(id),
-            }
+            self.respond_effect(effect, time);
         }
         for event in response.events {
             if !self.reduce(event, time) {
@@ -1223,10 +1119,103 @@ impl Runtime {
         for input in response.replay.into_iter().rev() {
             self.replay.push_front(input);
         }
-        if !self.replaying && !self.replay.is_empty() {
+        if self.replaying && response.stop_replay {
+            self.replay.clear();
+            self.replay_loop = None;
+        } else if !self.replaying && !self.replay.is_empty() {
             self.replay(time);
         }
         true
+    }
+    fn respond_effect(&mut self, effect: ResponseEffect, time: Duration) {
+        match effect {
+            ResponseEffect::Path(request) => {
+                self.workers.paths.submit(request);
+            }
+            ResponseEffect::Search(request) => {
+                use crate::interaction::grep::SearchRequest;
+                let result = match *request {
+                    SearchRequest::Grep(request) => self.workers.grep.submit(request),
+                    SearchRequest::Ripgrep(request) => self.workers.rg.submit(request),
+                };
+                self.message = match result {
+                    Ok(()) => "Searching…".into(),
+                    Err(error) => error,
+                };
+            }
+            ResponseEffect::Shell(request) => {
+                self.message = match self.workers.shell.submit(*request) {
+                    Ok(()) => "Running shell command…".into(),
+                    Err(error) => error,
+                };
+            }
+            ResponseEffect::ShowMessages => {
+                let text = self.messages.iter().cloned().collect::<Vec<_>>().join("\n");
+                if self.reduce(
+                    Event::Scratch {
+                        name: MESSAGES.into(),
+                        text,
+                        directory: self.app.directory(),
+                    },
+                    time,
+                ) && let Some(view) = self.app.active_view()
+                {
+                    // Start at the newest message, so that new ones are followed.
+                    let snapshot = self
+                        .app
+                        .workspace()
+                        .editor(self.app.view(view).unwrap().document_id)
+                        .unwrap()
+                        .model()
+                        .document()
+                        .snapshot();
+                    let last = snapshot.line_start(snapshot.line_count() - 1).unwrap();
+                    self.reduce(
+                        Event::Edit {
+                            view,
+                            command: crate::editor::Command::SetSelection(
+                                crate::core::Selection::caret(last),
+                            ),
+                            time,
+                        },
+                        time,
+                    );
+                }
+            }
+            ResponseEffect::Stop => {
+                // Ctrl-C also cancels pending keys.
+                if self.workers.stop_processes() {
+                    self.message = "Stopped".into();
+                }
+            }
+            ResponseEffect::Run(request) => {
+                let header = format!("$ {}", request.command);
+                let cwd = request.cwd.clone();
+                match self.workers.run.submit(*request) {
+                    Ok(()) => {
+                        self.reduce(
+                            Event::Scratch {
+                                name: crate::interaction::grep::RUN.into(),
+                                text: header,
+                                directory: cwd,
+                            },
+                            time,
+                        );
+                        self.message = "Running…".into();
+                    }
+                    Err(error) => self.message = error,
+                }
+            }
+            ResponseEffect::Picker(effect) => match effect {
+                PickerEffect::Run(task) => {
+                    if let Err(error) = self.workers.picker.submit(task) {
+                        let response = self.layers.picker_failed(error.to_string());
+                        self.respond(response, time);
+                    }
+                }
+                PickerEffect::Cancel(id) => self.workers.picker.cancel(id),
+            },
+        }
     }
     /// Does what the modal layer asked; a structure query answers with the
     /// command that selects what it found, to run in the same batch.
@@ -1279,7 +1268,6 @@ impl Runtime {
         // What the command that started it said stays, unless a replayed
         // command says something, as a failure does.
         let message = self.message.clone();
-        self.layers.clear_failed();
         let mut budget = 1_000_000usize;
         // A macro called with 0 starts over until something fails.
         while let Some(input) = self.replay.pop_front().or_else(|| {
@@ -1296,8 +1284,7 @@ impl Runtime {
             let result = self
                 .layers
                 .route_replayed(input, &self.app, time, &self.app.root());
-            self.input_result(result, time);
-            if self.layers.failed() {
+            if !self.input_result(result, time) {
                 self.replay.clear();
                 self.replay_loop = None;
             }
@@ -1364,21 +1351,22 @@ impl Runtime {
         let wait = Duration::from_millis(self.app.options().int(None, "idle-time") as u64);
         let idle = self.idle.map(|since| since + wait);
         let lua = self.lua.as_ref().and_then(lua::Host::next_timer);
-        [self.hints_until, idle]
+        [self.presentation.hints_until, idle]
             .into_iter()
             .flatten()
             .map(|at| self.epoch + at)
             .chain(lua)
-            .chain(self.lsp.next_change())
+            .chain(self.workers.lsp.next_change())
             .min()
     }
     pub fn poll(&mut self) {
         self.busy = false;
         if self
+            .presentation
             .hints_until
             .is_some_and(|until| self.epoch.elapsed() >= until)
         {
-            self.hints_until = None;
+            self.presentation.hints_until = None;
             self.dirty = true;
         }
         self.poll_lua();
@@ -1399,7 +1387,7 @@ impl Runtime {
                 self.busy = true;
                 break;
             }
-            match self.files.poll() {
+            match self.workers.files.poll() {
                 Ok(Some(FileCompletion::Open(completion))) => {
                     self.dispatch(Event::OpenFinished(completion));
                 }
@@ -1428,7 +1416,7 @@ impl Runtime {
                 self.busy = true;
                 break;
             }
-            match self.picker.poll() {
+            match self.workers.picker.poll() {
                 Ok(Some(completion)) => {
                     let response = self.layers.picker_finished(completion);
                     self.respond(response, self.epoch.elapsed());
@@ -1447,13 +1435,13 @@ impl Runtime {
                 self.busy = true;
                 break;
             }
-            let Some(completion) = self.paths.poll() else {
+            let Some(completion) = self.workers.paths.poll() else {
                 break;
             };
             let response = self.layers.path_finished(completion, &self.app);
             self.respond(response, self.epoch.elapsed());
         }
-        if let Some((generation, items)) = self.completions.poll() {
+        if let Some((generation, items)) = self.workers.completions.poll() {
             self.dirty |= self.layers.completion_results(
                 generation,
                 crate::interaction::completion::BUILTIN,
@@ -1462,22 +1450,22 @@ impl Runtime {
                 &self.app,
             );
         }
-        if let Some(completion) = self.shell.poll() {
+        if let Some(completion) = self.workers.shell.poll() {
             self.shell_finished(completion);
         }
-        if let Some(completion) = self.rg.poll() {
+        if let Some(completion) = self.workers.rg.poll() {
             self.grep_finished(completion);
         }
-        if let Some(completion) = self.grep.poll() {
+        if let Some(completion) = self.workers.grep.poll() {
             self.grep_finished(completion);
         }
-        if let Some(files) = self.file_search.poll()
+        if let Some(files) = self.workers.file_search.poll()
             && let Some(file_loop) = &mut self.file_loop
         {
             file_loop.files = Some(files.into());
         }
         self.advance_file_loop();
-        if let Some(output) = self.run.poll() {
+        if let Some(output) = self.workers.run.poll() {
             self.run_output(output);
         }
         self.dispatch(Event::PollFiles);

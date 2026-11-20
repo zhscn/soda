@@ -3,7 +3,7 @@
 //! prompt walks one with `M-p` and `M-n`. The histories only hold entries;
 //! where a prompt has recalled to is the prompt's own, as Emacs keeps
 //! `minibuffer-history-position` in the minibuffer.
-use super::registry::{Slot, SlotKind};
+use super::slots::{Slot, SlotKind};
 use std::{
     collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},

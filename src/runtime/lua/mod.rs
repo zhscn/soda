@@ -614,7 +614,7 @@ impl Host {
                         }
                     }
                     let result = answer.as_ref().ok().cloned().flatten().unwrap_or(fallback);
-                    runtime.borrow_mut().lsp.reply(&key, id, result);
+                    runtime.borrow_mut().workers.lsp.reply(&key, id, result);
                     answer.map(|_| ())
                 }
                 Request::Lsp(super::lsp::Delivery::Root {
@@ -1029,19 +1029,19 @@ impl Runtime {
     }
     /// Starts servers, sends edits and takes what servers said.
     pub(super) fn poll_lsp(&mut self) {
-        let failure = self.lsp.sync(&self.app, false);
-        let (deliveries, closed) = self.lsp.poll();
+        let failure = self.workers.lsp.sync(&self.app, false);
+        let (deliveries, closed) = self.workers.lsp.poll();
         // A server that went away starts again at the next sync; nothing
         // else may come to make one.
         let failure = match closed.is_some() {
-            true => failure.or(self.lsp.sync(&self.app, false)),
+            true => failure.or(self.workers.lsp.sync(&self.app, false)),
             false => failure,
         };
         if let Some(error) = failure.or(closed) {
             self.report(error);
         }
         // The status line names them.
-        if self.layers.set_servers(self.lsp.serving()) {
+        if self.layers.set_servers(self.workers.lsp.serving()) {
             self.dirty = true;
         }
         if !deliveries.is_empty() {

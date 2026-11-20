@@ -1,5 +1,6 @@
 //! Where documents stand: paths typed by hand follow the active document,
 //! project tools follow its project, and neither follows the start.
+use soda::interaction::ResultsCommand;
 use soda::{
     interaction::{Command, KeyStroke, Layer, UserInput},
     runtime::Runtime,
@@ -156,7 +157,7 @@ fn a_list_keeps_the_directory_its_paths_mean() {
     let mut r = started(&tree);
     let repo = tree.base.join("repo");
     open(&mut r, &repo.join("src/a.txt"));
-    r.command(Command::Grep("needle".into()));
+    r.command(Command::Results(ResultsCommand::Grep("needle".into())));
     wait(&mut r, |r| {
         r.app().workspace().scratch("*grep*").is_some() && path(r).is_none()
     });

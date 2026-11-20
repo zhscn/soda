@@ -14,6 +14,7 @@ pub use departure::SaveWait;
 pub mod expand;
 pub mod flash;
 pub mod grep;
+pub use grep::ResultsCommand;
 pub mod help;
 pub mod history;
 pub mod hooks;
@@ -22,7 +23,9 @@ pub use help::HelpSession;
 mod input;
 pub use input::{InputKey, InputMotion, InputUpdate, TextInput};
 mod layer;
+mod lua;
 pub use layer::Layer;
+pub use lua::LuaCommand;
 pub mod picker;
 pub mod shell;
 use picker::{ListMotion, PickerCompletion, PickerEffect};
@@ -30,6 +33,7 @@ pub mod path;
 mod pointer;
 pub use pointer::Pointer;
 mod routing;
+pub(crate) use routing::shifted;
 pub use routing::{Key, KeyStroke, UserInput, emacs_notation};
 mod search;
 pub use search::{LoopNext, LoopStep, ProjectReplace, SearchResults, SearchSession};
@@ -38,7 +42,8 @@ mod keymap;
 pub use keymap::{BindingError, Context, Keymap, KeypadStart, LineEdit, Scope};
 use std::collections::HashMap;
 mod registry;
-pub use registry::{BUILTINS, Choice, CommandInfo, Registry, Slot, SlotKind};
+pub use registry::{BUILTINS, CommandInfo, Registry};
+pub use slots::{Choice, Slot, SlotKind};
 mod resize;
 mod session;
 pub mod slots;
@@ -130,16 +135,7 @@ pub struct Response {
     pub events: Vec<Event>,
     pub commands: Vec<Command>,
     pub message: Message,
-    pub effects: Vec<PickerEffect>,
-    pub path_requests: Vec<path::PathRequest>,
-    pub shell: Option<Box<shell::ShellRequest>>,
-    pub grep: Option<Box<grep::SearchRequest>>,
-    /// A command for `run`, whose output streams into `*run*`.
-    pub run: Option<Box<shell::ShellRequest>>,
-    /// Stop background work.
-    pub stop: bool,
-    /// Show the message log in `*messages*`.
-    pub messages: bool,
+    pub effects: Vec<ResponseEffect>,
     /// Input to route again, after the rest of the response, for macros.
     pub replay: Vec<UserInput>,
     /// The replay goes on again and again until a command fails, as a
@@ -154,8 +150,30 @@ pub struct Response {
     /// Give the terminal back to the shell, as Ctrl-Z in a shell job.
     pub suspend: bool,
     pub redraw: bool,
-    /// A named command failed; the statements queued after it are dropped.
+    /// A command failed; stop the command batch and macro replay.
     pub failed: bool,
+    /// A modal command reached a boundary that ends a running macro.
+    pub stop_replay: bool,
+}
+
+impl Response {
+    fn modal_failure(mut self, message: &str) -> Self {
+        self.stop_replay = true;
+        self.message = Message::Set(message.into());
+        self
+    }
+}
+
+/// Work submitted before applying the response's application events.
+pub enum ResponseEffect {
+    Picker(PickerEffect),
+    Path(path::PathRequest),
+    Search(Box<grep::SearchRequest>),
+    Shell(Box<shell::ShellRequest>),
+    /// Stream output into `*run*`.
+    Run(Box<shell::ShellRequest>),
+    Stop,
+    ShowMessages,
 }
 
 /// Work for the Lua host, which the runtime owns.
@@ -175,6 +193,24 @@ pub enum LuaRequest {
         text: String,
         index: Option<usize>,
     },
+}
+
+#[derive(Default)]
+struct PromptHistory {
+    /// Recently used files, newest first, for `recent`.
+    recent_files: Vec<std::path::PathBuf>,
+    /// Remembered projects, newest first, for `project-switch`.
+    projects: Vec<std::path::PathBuf>,
+    /// Command line and search histories.
+    history: history::Histories,
+}
+
+#[derive(Default)]
+struct LayerGeometry {
+    page_rows: usize,
+    window_rows: Vec<(crate::application::ViewId, usize)>,
+    help_rows: usize,
+    picker_rows: usize,
 }
 
 /// Owns editing input state and one modal layer. Read-only access keeps transitions inside
@@ -199,32 +235,10 @@ pub struct Layers {
     jumps: jumps::Jumps,
     registry: Registry,
     hooks: hooks::Hooks,
-    /// Recently used files, newest first, for `recent`.
-    recent_files: Vec<std::path::PathBuf>,
-    /// Remembered projects, newest first, for `project-switch`.
-    projects: Vec<std::path::PathBuf>,
-    /// The Lua function of the question last asked, with its items when
-    /// it offers some.
-    question: Option<(u64, Vec<slots::Item>)>,
-    /// What kind of answer the next question Lua asks completes, when it
-    /// is one the command line knows.
-    asked_kind: Option<SlotKind>,
-    /// Command line and search histories.
-    history: history::Histories,
-    /// The history named for the next question Lua asks.
-    asked_history: Option<String>,
-    /// The results document `]q` and `[q` step through: the latest filled.
-    results: String,
-    /// `]q` has not stepped through these results yet.
-    results_fresh: bool,
-    page_rows: usize,
-    window_rows: Vec<(crate::application::ViewId, usize)>,
-    help_rows: usize,
-    picker_rows: usize,
-    /// A command failed since this was last taken; replays stop.
-    failed: bool,
-    /// The parameter of the event whose hooks are running, `%val{hook}`.
-    hook: Option<String>,
+    prompt_history: PromptHistory,
+    lua_interaction: lua::LuaInteraction,
+    geometry: LayerGeometry,
+    result_navigation: grep::ResultNavigation,
     /// The names of the language servers serving each document, for the
     /// keymaps of servers.
     servers: HashMap<crate::editor::DocumentId, Vec<String>>,
@@ -235,10 +249,6 @@ pub struct Layers {
     save_some: Vec<crate::editor::DocumentId>,
 }
 impl Layers {
-    /// Whether a command failed since `clear_failed`.
-    pub fn failed(&self) -> bool {
-        self.failed
-    }
     /// Removes the hooks that run exactly this command, as a Lua hook is
     /// removed by its function; whether any went.
     pub fn remove_hook_command(&mut self, command: &str) -> bool {
@@ -255,7 +265,7 @@ impl Layers {
     }
     /// Sets what `%val{hook}` expands to while a hook runs.
     pub fn set_hook(&mut self, parameter: Option<String>) {
-        self.hook = parameter;
+        self.lua_interaction.hook = parameter;
     }
     /// Expands `%opt{}` and `%val{}` as a command line running now would.
     pub fn expand(
@@ -275,7 +285,7 @@ impl Layers {
             app,
             mode: self.mode,
             root: file_root,
-            hook: self.hook.as_deref(),
+            hook: self.lua_interaction.hook.as_deref(),
         }
     }
     /// Whether the user's last input ended a command, so that the work
@@ -291,9 +301,6 @@ impl Layers {
         time: std::time::Duration,
     ) -> Vec<Event> {
         self.follow_grab(app, time)
-    }
-    pub fn clear_failed(&mut self) {
-        self.failed = false;
     }
     /// The register a macro is being recorded into.
     /// Commands of the hooks for an event whose parameter they match.
@@ -459,7 +466,7 @@ impl Layers {
         self.modal.clear();
         let mut response = self.close(app, time)?;
         response.events.extend(self.end_insert_group(app, time));
-        layer.resize(self.help_rows, self.picker_rows);
+        layer.resize(self.geometry.help_rows, self.geometry.picker_rows);
         self.active = Some(layer);
         response.redraw = true;
         Ok(response)
@@ -478,7 +485,7 @@ impl Layers {
         })
     }
     fn forget_reply(&mut self) {
-        self.question = None;
+        self.lua_interaction.question = None;
     }
     /// Reviews the matches of `view`'s document for a replacement over
     /// the project; with none, the response says to go on at once.
@@ -566,7 +573,8 @@ impl Layers {
         };
         if let Some(backward) = backward
             && layer.has_history()
-            && let Some(transition) = layer.recall(&self.history, backward, app, time)?
+            && let Some(transition) =
+                layer.recall(&self.prompt_history.history, backward, app, time)?
         {
             return Ok(self
                 .transition(transition)
@@ -582,7 +590,7 @@ impl Layers {
         let transition = layer.handle(input, app, time)?;
         if confirm && matches!(transition, Transition::Closed(_)) {
             for (name, entry) in layer.records() {
-                self.history.record(&name, &entry);
+                self.prompt_history.history.record(&name, &entry);
             }
         }
         let closed = matches!(transition, Transition::Closed(_));
@@ -631,33 +639,33 @@ impl Layers {
     }
     /// Recently used files, newest first.
     pub fn set_recent_files(&mut self, files: Vec<std::path::PathBuf>) {
-        self.recent_files = files;
+        self.prompt_history.recent_files = files;
     }
     /// Remembered projects, newest first.
     pub fn set_projects(&mut self, projects: Vec<std::path::PathBuf>) {
-        self.projects = projects;
+        self.prompt_history.projects = projects;
     }
     /// Takes back histories from an earlier session, oldest first.
     pub fn restore_histories(&mut self, histories: Vec<(String, Vec<String>)>) {
         for (name, entries) in histories {
-            self.history.set(&name, entries);
+            self.prompt_history.history.set(&name, entries);
         }
     }
     /// Every history, oldest first, by name.
     pub fn histories(&self) -> &history::Histories {
-        &self.history
+        &self.prompt_history.history
     }
     /// Adds an entry to a history, as `add-to-history`.
     pub fn record_history(&mut self, name: &str, entry: &str) {
-        self.history.record(name, entry);
+        self.prompt_history.history.record(name, entry);
     }
     /// Lines entered at the command line, oldest first.
     pub fn command_history(&self) -> &[String] {
-        self.history.entries(history::COMMAND)
+        self.prompt_history.history.entries(history::COMMAND)
     }
     /// Searches entered, oldest first.
     pub fn search_history(&self) -> &[String] {
-        self.history.entries(history::SEARCH)
+        self.prompt_history.history.entries(history::SEARCH)
     }
     /// Observe every successful application update, including other views.
     pub fn observe(
@@ -806,13 +814,13 @@ impl Layers {
         }
     }
     pub fn resize_help(&mut self, rows: usize) {
-        self.help_rows = rows;
+        self.geometry.help_rows = rows;
         if let Some(layer) = &mut self.active {
-            layer.resize(self.help_rows, self.picker_rows);
+            layer.resize(self.geometry.help_rows, self.geometry.picker_rows);
         }
     }
     pub fn resize_picker(&mut self, rows: usize) -> bool {
-        self.picker_rows = rows;
+        self.geometry.picker_rows = rows;
         match &mut self.active {
             Some(Layer::CommandLine(session)) => {
                 session.resize(rows);

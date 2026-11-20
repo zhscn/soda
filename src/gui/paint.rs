@@ -12,6 +12,10 @@ use super::{
     render::{Atlas, Instance, OUTLINE, RECT, UNCLIPPED, WAVE},
     text::{Face, Fonts, Kind, UNIT},
 };
+use crate::screen::{
+    Color, Modifier, Style,
+    chrome::{Chrome, Header},
+};
 use crate::{
     application::{Area, Axis, Face as AppFace, ViewId},
     editor::DocumentId,
@@ -22,7 +26,6 @@ use crate::{
         content::{self, Message, Role},
     },
 };
-use ratatui::style::{Color, Modifier, Style};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Rect {
@@ -92,11 +95,10 @@ impl Areas {
         let message = Rect::new(0.0, (height - row).max(0.0), width, row);
         let status = Rect::new(0.0, (message.y - row).max(0.0), width, row);
         let app = runtime.app();
-        let options = app.options();
-        let tab_bar = options.bool(None, "tab-bar");
-        let alone = app.windows().is_empty();
-        let tabs =
-            (tab_bar && alone && height > 4.0 * row).then(|| Rect::new(0.0, 0.0, width, row));
+        let chrome = Chrome::new(app);
+        let tabs = chrome
+            .splash_tabs(app, height > 4.0 * row)
+            .then(|| Rect::new(0.0, 0.0, width, row));
         let top = tabs.map_or(0.0, |tabs| tabs.h);
         let editor = Rect::new(0.0, top, width, (status.y - top).max(0.0));
         let cells = (
@@ -107,16 +109,18 @@ impl Areas {
             editor.w / f32::from(cells.0.max(1)),
             editor.h / f32::from(cells.1.max(1)),
         );
-        let windows = app
-            .windows()
-            .layout(Area {
-                x: 0,
-                y: 0,
-                width: cells.0,
-                height: cells.1,
-            })
+        let windows = chrome
+            .windows(
+                app,
+                Area {
+                    x: 0,
+                    y: 0,
+                    width: cells.0,
+                    height: cells.1,
+                },
+            )
             .into_iter()
-            .map(|(view, area)| {
+            .map(|(view, area, gutter)| {
                 let area = Rect::new(
                     editor.x + f32::from(area.x) * scale.0,
                     editor.y + f32::from(area.y) * scale.1,
@@ -126,7 +130,11 @@ impl Areas {
                 // Each window's row of tabs, as `tab-line-mode` gives it, as
                 // high as the status line: the text starts below it, off
                 // the grid the windows are cut on.
-                let header = (tab_bar && area.h >= row + line).then_some(Rect { h: row, ..area });
+                let header = matches!(
+                    chrome.header(area.h >= row + line, false),
+                    Some(Header::Tabs)
+                )
+                .then_some(Rect { h: row, ..area });
                 let body = match header {
                     Some(header) => Rect {
                         y: area.y + header.h,
@@ -135,23 +143,9 @@ impl Areas {
                     },
                     None => area,
                 };
-                let document = app.view(view).map(|view| view.document_id);
-                let lines = document
-                    .and_then(|document| app.workspace().editor(document))
-                    .map_or(1, |editor| {
-                        editor.model().document().snapshot().text_lines()
-                    });
-                let digits = (lines.max(1).ilog10() as usize + 1).max(3);
-                let numbers = app.options().choice(document, "line-numbers") != "off";
-                // A fringe for flags, the numbers, then room before the
-                // text; without numbers, the fringe alone.
-                let fringe = cell;
-                let full = fringe + digits as f32 * cell + cell;
-                let (digits, gutter) = if numbers && body.w >= full + 16.0 * cell {
-                    (Some(digits), full)
-                } else {
-                    (None, fringe + cell * 0.5)
-                };
+                // The graphical frontend reserves a fringe for flags.
+                let digits = gutter.numbered((body.w / cell) as u16, 2).map(usize::from);
+                let gutter = digits.map_or(1.5 * cell, |digits| (digits + 2) as f32 * cell);
                 let text = Rect {
                     x: body.x + gutter,
                     w: (body.w - gutter).max(0.0),
@@ -286,16 +280,6 @@ fn rgba(color: Option<Color>, default: [f32; 4]) -> [f32; 4] {
     let byte = |v: u8| f32::from(v) / 255.0;
     match color {
         Some(Color::Rgb(r, g, b)) => [byte(r), byte(g), byte(b), 1.0],
-        Some(Color::Black) => [0.0, 0.0, 0.0, 1.0],
-        Some(Color::White) => [1.0, 1.0, 1.0, 1.0],
-        Some(Color::Gray) => [0.6, 0.6, 0.6, 1.0],
-        Some(Color::DarkGray) => [0.35, 0.35, 0.35, 1.0],
-        Some(Color::Red | Color::LightRed) => [0.9, 0.3, 0.3, 1.0],
-        Some(Color::Green | Color::LightGreen) => [0.4, 0.8, 0.4, 1.0],
-        Some(Color::Yellow | Color::LightYellow) => [0.9, 0.8, 0.3, 1.0],
-        Some(Color::Blue | Color::LightBlue) => [0.4, 0.6, 0.95, 1.0],
-        Some(Color::Magenta | Color::LightMagenta) => [0.8, 0.5, 0.9, 1.0],
-        Some(Color::Cyan | Color::LightCyan) => [0.4, 0.8, 0.85, 1.0],
         _ => default,
     }
 }
@@ -513,6 +497,11 @@ impl<'a> Painter<'a> {
     }
 }
 
+pub(super) struct Rendered {
+    pub caret: Option<(Rect, bool)>,
+    pub popup: screen::PopupViewport,
+}
+
 /// Draws the whole screen but the caret; returns the caret's rectangle,
 /// after any text being composed, and whether it is a bar. `motion` tells
 /// how each window is scrolling.
@@ -523,7 +512,7 @@ pub fn screen(
     highlighter: &mut Highlighter,
     preedit: &str,
     motion: &dyn Fn(ViewId) -> Motion,
-) -> Result<Option<(Rect, bool)>, crate::application::Error> {
+) -> Result<Rendered, crate::application::Error> {
     let active = runtime.app().active_view();
     let bar =
         runtime.layer().is_some() || runtime.edit_mode() == crate::interaction::EditMode::Insert;
@@ -620,9 +609,10 @@ pub fn screen(
     if let (Some(at), None, Some(popup)) = (caret, runtime.layer(), runtime.completion_popup()) {
         completions(painter, areas.editor, at, popup);
     }
-    if let (None, Some(words)) = (runtime.layer(), runtime.popup()) {
-        floating(painter, runtime, areas.editor, caret, words);
-    }
+    let popup = match (runtime.layer(), runtime.popup()) {
+        (None, Some(words)) => floating(painter, runtime, areas.editor, caret, words),
+        _ => screen::PopupViewport::default(),
+    };
     // Text an input method is composing shows at the caret, underlined;
     // the caret follows it.
     if let Some(at) = &mut caret
@@ -634,7 +624,10 @@ pub fn screen(
         painter.words(at.x, at.y, preedit, style, Kind::Text, width, false);
         at.x += width;
     }
-    Ok(caret.map(|at| (at, bar)))
+    Ok(Rendered {
+        caret: caret.map(|at| (at, bar)),
+        popup,
+    })
 }
 
 /// A window's row of tabs, or the splash's, as Zed draws a tab bar: tabs
@@ -1519,19 +1512,19 @@ fn floating(
     area: Rect,
     caret: Option<Rect>,
     words: &str,
-) {
+) -> screen::PopupViewport {
     let theme = painter.theme;
     let (cell, line) = (painter.fonts.cell, painter.fonts.line);
     let widest = ((area.w / cell) as usize).saturating_sub(4).min(80);
     if widest < 8 || area.h < 3.0 * line {
-        return;
+        return screen::PopupViewport::default();
     }
     let lines = screen::wrap(words, widest);
     let caret = caret.unwrap_or(Rect::new(area.x, area.y, cell, line));
     let (above, below) = (caret.y - area.y, area.bottom() - caret.bottom());
     let room = ((above.max(below) - 10.0) / line).floor().max(0.0) as usize;
     if room == 0 {
-        return;
+        return screen::PopupViewport::default();
     }
     let shown = lines.len().min(room);
     let first = runtime.popup_scroll(shown, lines.len());
@@ -1562,6 +1555,10 @@ fn floating(
         painter.ui(x + w - pw - cell, y + h - line - 3.0, &place, theme.dim, pw);
     }
     painter.unclip();
+    screen::PopupViewport {
+        shown,
+        total: lines.len(),
+    }
 }
 
 /// The labels still possible, over the text or over each window.

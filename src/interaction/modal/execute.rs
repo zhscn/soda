@@ -127,15 +127,6 @@ impl Layers {
             .events
             .push(at.event(Edit::SetSelection(selection)));
     }
-    pub(in crate::interaction) fn fail(
-        &mut self,
-        mut response: Response,
-        message: &str,
-    ) -> Response {
-        self.failed = true;
-        response.message = Message::Set(message.into());
-        response
-    }
     pub(in crate::interaction) fn modal_execute(
         &mut self,
         action: Action,
@@ -213,7 +204,7 @@ impl Layers {
             }
             Action::Mark { symbol } => {
                 let Some(range) = text::thing_at(at.text, at.selection.head, symbol) else {
-                    return self.fail(response, "No word here");
+                    return response.modal_failure("No word here");
                 };
                 let word = at.text.byte_slice(range.clone()).unwrap().to_string();
                 self.modal.set_search(if symbol {
@@ -276,7 +267,7 @@ impl Layers {
                     self.modal.history.pop()
                 };
                 let Some((selection, tag)) = entry else {
-                    return self.fail(response, "No previous selection");
+                    return response.modal_failure("No previous selection");
                 };
                 self.modal.tag = tag;
                 response
@@ -306,7 +297,7 @@ impl Layers {
                 }
             }
             Action::KillRegion | Action::KillRingSave if at.selection.range().is_empty() => {
-                return self.fail(response, NO_REGION);
+                return response.modal_failure(NO_REGION);
             }
             Action::KillRegion => return self.modal_execute(Action::Kill, app, time),
             Action::KillRingSave => return self.modal_execute(Action::Save, app, time),
@@ -361,7 +352,7 @@ impl Layers {
             }
             Action::Save => {
                 if at.selection.range().is_empty() {
-                    return self.fail(response, "No selection");
+                    return response.modal_failure("No selection");
                 }
                 response.events.push(at.clipboard(ClipboardAction::Copy));
                 // As Emacs's `kill-ring-save`: the selection goes, which
@@ -403,9 +394,9 @@ impl Layers {
                 let line = at.text.line_of(at.selection.head).unwrap();
                 let view = app.view(at.view).unwrap();
                 let top = match self.modal.recenter_step {
-                    0 => line.saturating_sub(self.page_rows / 2),
+                    0 => line.saturating_sub(self.geometry.page_rows / 2),
                     1 => line,
-                    _ => line.saturating_sub(self.page_rows.saturating_sub(1)),
+                    _ => line.saturating_sub(self.geometry.page_rows.saturating_sub(1)),
                 };
                 response.events.push(Event::SetViewport {
                     view: at.view,
@@ -433,7 +424,7 @@ impl Layers {
             Action::MacroLines | Action::MacroMatches => {
                 let keys = self.modal.replay.last().to_vec();
                 if keys.is_empty() {
-                    return self.fail(response, "No macro");
+                    return response.modal_failure("No macro");
                 }
                 response
                     .commands
@@ -443,7 +434,7 @@ impl Layers {
                         // The matches of the search as it is: a whole word stays
                         // whole, and a pattern stays a pattern.
                         let Some(query) = self.modal.search() else {
-                            return self.fail(response, "No search");
+                            return response.modal_failure("No search");
                         };
                         Command::EachAt {
                             targets: query.cursor(at.text).map(|found| found.start).collect(),
@@ -453,7 +444,7 @@ impl Layers {
             }
             Action::Repeat => match self.modal.last.clone() {
                 Some(command) => response.commands.push(command),
-                None => return self.fail(response, "No command to repeat"),
+                None => return response.modal_failure("No command to repeat"),
             },
             Action::Negative
             | Action::Digit(_)
@@ -534,7 +525,7 @@ impl Layers {
                     line.saturating_add(count).min(text.line_count() - 1)
                 };
                 if target == line {
-                    self.failed = true;
+                    response.stop_replay = true;
                 }
                 to = offset_at_logical_column(text, target, goal, width)
                     .unwrap()
@@ -568,7 +559,7 @@ impl Layers {
         let tag = self.modal.tag(at.selection).filter(|tag| tag.kind == kind);
         let head = at.selection.head;
         let Some(to) = walk_things(at.text, head, symbol, backward, count) else {
-            return self.fail(response, "No more words");
+            return response.modal_failure("No more words");
         };
         let expand = tag.is_some_and(|tag| tag.expand);
         // A new selection starts at the word, with the blanks between it and
@@ -613,7 +604,7 @@ impl Layers {
                 (line + count).min(last)
             };
             if target == line {
-                return self.fail(response, "No more lines");
+                return response.modal_failure("No more lines");
             }
             let head = if backward {
                 text.line_start(target).unwrap()
@@ -660,7 +651,7 @@ impl Layers {
             head
         };
         let Some(found) = text::find(at.text, from, ch, count, backward) else {
-            return self.fail(response, &format!("{ch} not found"));
+            return response.modal_failure(&format!("{ch} not found"));
         };
         let to = found_end(found, ch, till, backward);
         let kind = if till { Kind::Till } else { Kind::Find };
@@ -746,7 +737,7 @@ impl Layers {
             .find_map(|count| self.reach(at, tag, count))
             .filter(|to| *to != at.selection.head)
         else {
-            return self.fail(response, "Nothing to expand to");
+            return response.modal_failure("Nothing to expand to");
         };
         self.select(
             at,
@@ -769,7 +760,7 @@ impl Layers {
     ) -> Response {
         let head = at.selection.head;
         let Some(thing) = self.modal.things.get(ch) else {
-            return self.fail(response, &format!("No thing called {ch}"));
+            return response.modal_failure(&format!("No thing called {ch}"));
         };
         let range = match thing {
             Thing::Pair(open) => {
@@ -796,7 +787,7 @@ impl Layers {
             Thing::Buffer => Some(0..at.text.len_bytes()),
         };
         let Some(range) = range else {
-            return self.fail(response, "No such thing here");
+            return response.modal_failure("No such thing here");
         };
         self.select(
             at,
@@ -905,7 +896,7 @@ impl Layers {
         let mut above = line;
         loop {
             if above == 0 {
-                return self.fail(response, "No line to join");
+                return response.modal_failure("No line to join");
             }
             above -= 1;
             if !blank(above) {
@@ -937,12 +928,12 @@ impl Layers {
                 .set_search(SearchQuery::new(regex::escape(&selected)));
         }
         let Some(query) = self.modal.search().cloned() else {
-            return self.fail(response, "No search");
+            return response.modal_failure("No search");
         };
         let backward = (at.selection.anchor > at.selection.head) ^ negative;
         let found: Vec<_> = query.cursor(at.text).collect();
         if found.is_empty() {
-            return self.fail(response, &format!("No match for {}", query.text()));
+            return response.modal_failure(&format!("No match for {}", query.text()));
         }
         let mut index = None;
         let head = at.selection.head;
@@ -986,11 +977,11 @@ impl Layers {
         mut response: Response,
     ) -> Response {
         let view = app.view(at.view).unwrap();
-        let rows = (self.page_rows / 2).max(1);
+        let rows = (self.geometry.page_rows / 2).max(1);
         let line = at.text.line_of(at.selection.head).unwrap();
         let last = at.text.line_count() - 1;
         if (down && line == last) || (!down && line == 0) {
-            return self.fail(response, "Motion reached a buffer boundary");
+            return response.modal_failure("Motion reached a buffer boundary");
         }
         let top = at.text.line_of(view.viewport.anchor.offset.0).unwrap();
         let top = if down {
@@ -1042,17 +1033,17 @@ impl Layers {
     }
     fn swap_grab(&mut self, at: &Place, mut response: Response) -> Response {
         let Some(grab) = self.modal.grab.take() else {
-            return self.fail(response, "Nothing grabbed");
+            return response.modal_failure("Nothing grabbed");
         };
         let (Ok(start), Ok(end)) = (
             grab.start.resolve(at.document),
             grab.end.resolve(at.document),
         ) else {
-            return self.fail(response, "Nothing grabbed");
+            return response.modal_failure("Nothing grabbed");
         };
         let (other, range) = (start.0..end.0, at.selection.range());
         if other.start < range.end && range.start < other.end {
-            return self.fail(response, "The selection overlaps the grab");
+            return response.modal_failure("The selection overlaps the grab");
         }
         let held = at.text.byte_slice(range.clone()).unwrap().to_string();
         let taken = at.text.byte_slice(other.clone()).unwrap().to_string();

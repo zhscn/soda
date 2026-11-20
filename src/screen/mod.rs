@@ -9,20 +9,25 @@
 //! A frontend arranges the screen itself, in its own units: the windows of
 //! Application's window tree, gutters, tab bar, status line and panels.
 //! The terminal frontend draws all of it in cells (`tui`).
+pub(crate) mod chrome;
 pub(crate) mod content;
 mod highlight;
 mod layout;
 mod results;
+mod style;
 mod theme;
 
 pub(crate) use highlight::Highlighter;
+#[cfg(feature = "tui")]
+pub(crate) use layout::padded;
 #[cfg(feature = "gui")]
 pub(crate) use layout::text_width;
 pub use layout::{Cells, Font, Measure};
 pub(crate) use layout::{
-    Frame as TextFrame, Mark, Overlay, Span, candidate_row, offset_at, padded, plain, position_of,
+    Frame as TextFrame, Mark, Overlay, Span, candidate_row, offset_at, plain, position_of,
     prompt_row, scroll, wrap,
 };
+pub(crate) use style::{Color, Modifier, Style};
 pub(crate) use theme::Theme;
 
 use crate::{application::ViewId, runtime::Runtime};
@@ -134,4 +139,11 @@ pub(crate) fn follow(
         runtime.update_viewport(viewport.view, viewport.anchor, viewport.horizontal_scroll);
     }
     Ok(())
+}
+
+/// The visible and total rows of a wrapped popup in a rendered frame.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct PopupViewport {
+    pub shown: usize,
+    pub total: usize,
 }

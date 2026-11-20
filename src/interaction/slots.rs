@@ -4,9 +4,60 @@
 //! The command line asks this table instead of naming kinds, so a kind is
 //! described in one place, as a completion table in Emacs carries its
 //! metadata, and Lua knows kinds by the names given here.
-use super::registry::{Slot, SlotKind};
 use crate::application::Application;
 
+/// How the command line completes an argument and whether Enter requires
+/// one of the candidates.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SlotKind {
+    Path,
+    File,
+    Buffer,
+    /// One of fixed words.
+    Choice(&'static [Choice]),
+    /// The name of an option.
+    Option,
+    /// An open document, starting on the current one, as Emacs's
+    /// `kill-buffer` offers it; `Buffer` starts on another.
+    CurrentBuffer,
+    /// The name of a face.
+    Face,
+    /// The name of a theme, built in or defined.
+    Theme,
+    /// A language id.
+    Language,
+    /// A key table: a context, a document keymap or a language's keymap.
+    Keymap,
+    /// A recently used file.
+    Recent,
+    /// A remembered project, or any directory.
+    Project,
+    /// One of the items of the question being asked.
+    Item,
+    /// A symbol of the current document.
+    Symbol,
+    /// Words a Lua function under this id lists as the argument is
+    /// reached.
+    Computed(u64),
+    Word,
+    Rest,
+}
+/// A word of a `Choice` slot. A key makes the slot's keymap: typed while
+/// the slot is empty, it chooses the word and confirms at once.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Choice {
+    pub word: &'static str,
+    pub key: Option<char>,
+    pub doc: &'static str,
+}
+/// A positional argument. Every slot but the last is one word; the last
+/// takes the rest of the line.
+#[derive(Clone, Copy, Debug)]
+pub struct Slot {
+    pub name: &'static str,
+    pub kind: SlotKind,
+    pub required: bool,
+}
 /// How a kind of argument behaves.
 #[derive(Clone, Copy, Default)]
 pub struct Behavior {

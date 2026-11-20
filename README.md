@@ -8,7 +8,7 @@ Soda 是用 Rust 实现的编辑器，有终端和图形两个前端，核心体
 cargo run --release -- [--no-config] [FILE]
 cargo run -- --help        # 默认键位与命令
 # 图形前端（winit + wgpu），单独的程序 soda-gui
-cargo run --release --features gui --bin soda-gui -- [--no-config] [FILE]
+cargo run --release --no-default-features --features gui --bin soda-gui -- [--no-config] [FILE]
 ```
 
 编辑区按 `F1` 查看当前键位与命令，`M-x` 打开命令面板。启动时运行 `~/.config/soda/init.lua`（或 `$XDG_CONFIG_HOME/soda/init.lua`）：

@@ -2,7 +2,7 @@
 //! start processes.
 use super::{Host, Runtime};
 use crate::interaction::{
-    Command,
+    Command, LuaCommand, ResultsCommand,
     slots::{self, Asked},
 };
 use mlua::{Function, Scope, Table, Value};
@@ -22,7 +22,7 @@ pub(super) fn register<'scope, 'r: 'scope>(
                     .map(|face| super::setup::resolve_face(runtime.borrow().app.faces(), face))
                     .transpose()?;
                 let mut runtime = runtime.borrow_mut();
-                let segments = &mut runtime.status;
+                let segments = &mut runtime.presentation.status;
                 let at = segments.iter().position(|(known, ..)| *known == name);
                 match (at, text.filter(|text| !text.is_empty())) {
                     (Some(at), Some(text)) => segments[at] = (name, text, face),
@@ -48,12 +48,14 @@ pub(super) fn register<'scope, 'r: 'scope>(
                 Option<String>,
             )| {
                 let id = host.keep(function)?;
-                runtime.borrow_mut().command(Command::Question {
-                    id,
-                    title,
-                    asked: Asked::Text(initial.unwrap_or_default()),
-                    history,
-                });
+                runtime
+                    .borrow_mut()
+                    .command(Command::Lua(LuaCommand::Question {
+                        id,
+                        title,
+                        asked: Asked::Text(initial.unwrap_or_default()),
+                        history,
+                    }));
                 Ok(())
             },
         )?,
@@ -200,7 +202,7 @@ pub(super) fn register<'scope, 'r: 'scope>(
         "hint",
         scope.create_function(|_, text: Option<String>| {
             let mut runtime = runtime.borrow_mut();
-            runtime.hint = text;
+            runtime.presentation.hint = text;
             runtime.dirty = true;
             Ok(())
         })?,
@@ -248,12 +250,14 @@ pub(super) fn register<'scope, 'r: 'scope>(
                     _ => return Err(mlua::Error::runtime("choose among items or a kind")),
                 };
                 let id = host.keep(function)?;
-                runtime.borrow_mut().command(Command::Question {
-                    id,
-                    title,
-                    asked,
-                    history,
-                });
+                runtime
+                    .borrow_mut()
+                    .command(Command::Lua(LuaCommand::Question {
+                        id,
+                        title,
+                        asked,
+                        history,
+                    }));
                 Ok(())
             },
         )?,
@@ -262,8 +266,9 @@ pub(super) fn register<'scope, 'r: 'scope>(
         "popup",
         scope.create_function(|_, text: String| {
             let mut runtime = runtime.borrow_mut();
-            runtime.popup = Some(text);
-            runtime.popup_scroll.set(0);
+            runtime.presentation.popup = Some(text);
+            runtime.presentation.popup_scroll = 0;
+            runtime.presentation.popup_page = 0;
             runtime.dirty = true;
             Ok(())
         })?,
@@ -350,7 +355,7 @@ pub(super) fn register<'scope, 'r: 'scope>(
                 no_ignore: spec.get::<Option<bool>>("no_ignore")?.unwrap_or(false),
             };
             let insensitive = request.case_insensitive().map_err(mlua::Error::runtime)?;
-            runtime.command(Command::Ripgrep(Box::new(request)));
+            runtime.command(Command::Results(ResultsCommand::Ripgrep(Box::new(request))));
             Ok(insensitive)
         })?,
     )?;
@@ -363,7 +368,7 @@ pub(super) fn register<'scope, 'r: 'scope>(
                 )));
             }
             let mut runtime = runtime.borrow_mut();
-            runtime.command(Command::Results { kind, lines });
+            runtime.command(Command::Results(ResultsCommand::Fill { kind, lines }));
             Ok(())
         })?,
     )?;

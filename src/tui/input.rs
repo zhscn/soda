@@ -2,37 +2,7 @@
 use crate::interaction::{Key, KeyStroke, UserInput};
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
-/// The character Shift gives on a US keyboard. With Control or Alt the
-/// kitty protocol reports the unshifted key: `,` and Shift for `<`.
-pub(crate) fn shifted(ch: char) -> char {
-    const PAIRS: [(char, char); 21] = [
-        ('1', '!'),
-        ('2', '@'),
-        ('3', '#'),
-        ('4', '$'),
-        ('5', '%'),
-        ('6', '^'),
-        ('7', '&'),
-        ('8', '*'),
-        ('9', '('),
-        ('0', ')'),
-        ('-', '_'),
-        ('=', '+'),
-        ('[', '{'),
-        (']', '}'),
-        ('\\', '|'),
-        (';', ':'),
-        ('\'', '"'),
-        ('`', '~'),
-        (',', '<'),
-        ('.', '>'),
-        ('/', '?'),
-    ];
-    match PAIRS.iter().find(|(plain, _)| *plain == ch) {
-        Some((_, shifted)) => *shifted,
-        None => ch.to_ascii_uppercase(),
-    }
-}
+use crate::interaction::shifted;
 
 fn normalize_key(key: KeyEvent) -> KeyStroke {
     let code = match key.code {

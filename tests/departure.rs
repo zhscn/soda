@@ -60,7 +60,14 @@ impl Driver {
         }
     }
     fn respond(&mut self, response: Response) {
-        assert!(response.effects.is_empty());
+        // This driver applies application events only. Path candidates are read
+        // by a worker in the runtime and are unnecessary to submit typed paths.
+        assert!(
+            response
+                .effects
+                .iter()
+                .all(|effect| matches!(effect, soda::interaction::ResponseEffect::Path(_)))
+        );
         self.quit |= response.quit;
         if let Message::Set(message) = response.message {
             self.error = message;

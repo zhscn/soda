@@ -2,8 +2,8 @@
 //! converts them as it draws. The `theme` option names a built-in theme
 //! or one `soda.theme` defined over a built-in one. Faces set with `face`
 //! go over the theme.
+use super::{Color, Modifier, Style};
 use crate::syntax::Category;
-use ratatui::style::{Color, Modifier, Style};
 
 pub(crate) struct Theme {
     pub text: Style,

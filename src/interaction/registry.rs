@@ -2,9 +2,10 @@
 //! the command palette. Built-in names are fixed; registered Rust handlers and
 //! user definitions share one replaceable namespace.
 use super::{
-    Command, Departure, WindowCommand,
+    Command, Departure, LuaCommand, ResultsCommand, WindowCommand,
     keymap::{KeypadStart, LINE_EDITS, LineEdit, PROMPT_ACTIONS},
     modal::{Action, Entry as InsertAt, MacroAction, Query, Step},
+    slots::{Choice, Slot, SlotKind},
 };
 use crate::{
     application::{Axis, ClipboardAction, Direction},
@@ -14,64 +15,12 @@ use std::collections::BTreeMap;
 
 const MAX_DEPTH: usize = 16;
 
-/// How the command line completes an argument and whether Enter requires
-/// one of the candidates.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SlotKind {
-    Path,
-    File,
-    Buffer,
-    /// One of fixed words.
-    Choice(&'static [Choice]),
-    /// The name of an option.
-    Option,
-    /// An open document, starting on the current one, as Emacs's
-    /// `kill-buffer` offers it; `Buffer` starts on another.
-    CurrentBuffer,
-    /// The name of a face.
-    Face,
-    /// The name of a theme, built in or defined.
-    Theme,
-    /// A language id.
-    Language,
-    /// A key table: a context, a document keymap or a language's keymap.
-    Keymap,
-    /// A recently used file.
-    Recent,
-    /// A remembered project, or any directory.
-    Project,
-    /// One of the items of the question being asked.
-    Item,
-    /// A symbol of the current document.
-    Symbol,
-    /// Words a Lua function under this id lists as the argument is
-    /// reached.
-    Computed(u64),
-    Word,
-    Rest,
-}
-/// A word of a `Choice` slot. A key makes the slot's keymap: typed while
-/// the slot is empty, it chooses the word and confirms at once.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Choice {
-    pub word: &'static str,
-    pub key: Option<char>,
-    pub doc: &'static str,
-}
 pub(super) const fn word(word: &'static str, doc: &'static str) -> Choice {
     Choice {
         word,
         key: None,
         doc,
     }
-}
-/// A positional argument. Every slot but the last is one word; the last
-/// takes the rest of the line.
-#[derive(Clone, Copy, Debug)]
-pub struct Slot {
-    pub name: &'static str,
-    pub kind: SlotKind,
-    pub required: bool,
 }
 const fn slot(name: &'static str, kind: SlotKind) -> Slot {
     Slot {
@@ -1346,13 +1295,13 @@ pub static BUILTINS: &[Builtin] = &[
         |a| Ok(if a.is_empty() {
             interactive("grep")
         } else {
-            Command::Grep(a.into())
+            Command::Results(ResultsCommand::Grep(a.into()))
         })
     ),
     builtin!(
         "jump",
         "Open the location on the caret line, as in search results",
-        Command::Jump
+        Command::Results(ResultsCommand::Jump)
     ),
     builtin!(
         "jump-back",
@@ -1367,18 +1316,18 @@ pub static BUILTINS: &[Builtin] = &[
     builtin!(
         "next-result",
         "Open the next location in the latest search or run output",
-        Command::ResultStep { backward: false }
+        Command::Results(ResultsCommand::ResultStep { backward: false })
     ),
     builtin!(
         "previous-result",
         "Open the previous location in the latest search or run output",
-        Command::ResultStep { backward: true }
+        Command::Results(ResultsCommand::ResultStep { backward: true })
     ),
     builtin!(
         "run",
         [slot("SHELL-COMMAND", SlotKind::Rest)],
         "Run a command in the background; its output streams into *run*",
-        |a| { Ok(Command::Run(required(a)?)) }
+        |a| { Ok(Command::Results(ResultsCommand::Run(required(a)?))) }
     ),
     builtin!(
         "check-files",
@@ -1552,7 +1501,7 @@ pub static BUILTINS: &[Builtin] = &[
         "lua",
         [slot("CODE", SlotKind::Rest)],
         "Run Lua code, with the soda table for the editor",
-        |a| Ok(Command::Lua(required(a)?))
+        |a| Ok(Command::Lua(LuaCommand::Chunk(required(a)?)))
     ),
     builtin!(
         "choose",
@@ -1564,7 +1513,7 @@ pub static BUILTINS: &[Builtin] = &[
                 .trim()
                 .parse()
                 .map_err(|_| format!("not one of the items: {index}"))?;
-            Ok(Command::Choose(index))
+            Ok(Command::Lua(LuaCommand::Choose(index)))
         }
     ),
     builtin!(
@@ -1574,7 +1523,7 @@ pub static BUILTINS: &[Builtin] = &[
             ..slot("TEXT", SlotKind::Rest)
         }],
         "Answer the line of text a Lua extension asked for",
-        |a| Ok(Command::Answer(a.to_owned()))
+        |a| Ok(Command::Lua(LuaCommand::Answer(a.to_owned())))
     ),
     builtin!(
         "lua-call",
@@ -1591,10 +1540,10 @@ pub static BUILTINS: &[Builtin] = &[
             let id = id
                 .parse()
                 .map_err(|_| format!("not a Lua function id: {id}"))?;
-            Ok(Command::LuaCall {
+            Ok(Command::Lua(LuaCommand::Call {
                 id,
                 argument: argument.to_owned(),
-            })
+            }))
         }
     ),
     builtin!(
