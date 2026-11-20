@@ -674,10 +674,12 @@ fn editor(
             };
             let number = if window.gutter == 2 {
                 "  ".to_owned()
-            } else if !row.numbered {
+            } else if row.numbered {
+                format!(" {shown:>digits$} │ ")
+            } else if row.continued {
                 format!(" {:>digits$} │ ", "")
             } else {
-                format!(" {shown:>digits$} │ ")
+                " ".repeat(window.gutter.into())
             };
             buf.set_stringn(left, y, &number, window.gutter.into(), style);
             // The flag takes the first cell, before the number.
@@ -1865,7 +1867,8 @@ mod tests {
         // in both Normal and Insert.
         keys(&mut r, "M-<");
         let shown = rows(&mut r);
-        assert!(shown[3].starts_with("     │"), "{shown:?}");
+        assert!(shown[2].starts_with("   2 │ b"), "{shown:?}");
+        assert_eq!(shown[3].trim(), "", "{shown:?}");
         assert!(!shown[4].contains('4'));
         keys(&mut r, "jjj");
         assert!(rows(&mut r)[6].contains("  3:1 "));

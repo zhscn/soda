@@ -158,7 +158,6 @@ pub(crate) enum Mark {
 pub(crate) struct Row {
     pub line: usize,
     /// A later row of a wrapped line, which has no number.
-    #[cfg_attr(not(feature = "gui"), allow(dead_code))]
     pub continued: bool,
     /// The first visual row of a real text line; EOF after a newline has no number.
     pub numbered: bool,
