@@ -112,3 +112,37 @@ fn capital_n_goes_on_to_the_next_file() {
     assert_eq!(text(&r, "a.txt"), "foo foo\n");
     assert_eq!(text(&r, "c.txt"), "x baz\n");
 }
+
+#[test]
+fn an_open_that_loses_focus_ends_the_replacement() {
+    use soda::interaction::{Command, FileCommand};
+
+    let (dir, mut r) = project();
+    let third = dir.path().join("c.txt");
+    std::fs::write(dir.path().join("d.txt"), "foo\n").unwrap();
+    keys(&mut r, "C-x p r foo RET baz RET");
+    wait(&mut r, |r| reviewing(r, "a.txt"));
+    keys(&mut r, "N");
+
+    // One poll requests the next file. New takes focus before the next
+    // poll can apply the open completion.
+    r.poll();
+    r.command(Command::File(FileCommand::New));
+    wait(&mut r, |r| {
+        r.app()
+            .workspace()
+            .documents()
+            .any(|document| r.app().document_name(document).ends_with("c.txt"))
+    });
+    r.command(Command::File(FileCommand::OpenPath(third)));
+    r.poll();
+
+    assert!(r.layer().is_none());
+    assert_eq!(text(&r, "c.txt"), "x foo\n");
+    assert!(
+        !r.app()
+            .workspace()
+            .documents()
+            .any(|document| r.app().document_name(document).ends_with("d.txt"))
+    );
+}

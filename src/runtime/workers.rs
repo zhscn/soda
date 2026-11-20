@@ -11,8 +11,6 @@ pub(super) struct Workers {
     pub(super) shell: shell::ShellRunner,
     pub(super) grep: grep::GrepRunner,
     pub(super) rg: rg::RgRunner,
-    /// The files a replacement over the project goes through, being found.
-    pub(super) file_search: grep::FileSearch,
     pub(super) completions: completion::Completions,
     pub(super) lsp: lsp::Lsp,
     pub(super) run: run::RunRunner,
@@ -27,7 +25,6 @@ impl Workers {
             shell: shell::ShellRunner::default(),
             grep: grep::GrepRunner::default(),
             rg: rg::RgRunner::default(),
-            file_search: grep::FileSearch::default(),
             completions: completion::Completions::default(),
             lsp: lsp::Lsp::default(),
             run: run::RunRunner::default(),

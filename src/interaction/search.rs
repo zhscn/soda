@@ -141,6 +141,10 @@ impl SearchSession {
     fn step(&self) -> Option<Step> {
         self.replace.as_ref().map(|replace| replace.step)
     }
+    pub(crate) fn is_project_review(&self, view: ViewId) -> bool {
+        self.view == view && self.project() == Project::Loop
+    }
+
     pub fn view(&self) -> ViewId {
         self.view
     }
