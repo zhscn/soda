@@ -190,6 +190,7 @@ pub(super) struct Lsp {
     enabled: bool,
     servers: HashMap<String, Server>,
     clients: HashMap<Key, Client>,
+    serving_changed: bool,
     /// Servers that failed; `lsp-restart` lets them try again.
     failed: Vec<Key>,
     /// Servers `lsp-stop` stopped, and the documents it took from them, by
@@ -211,6 +212,7 @@ impl Default for Lsp {
             enabled: false,
             servers: HashMap::new(),
             clients: HashMap::new(),
+            serving_changed: false,
             failed: vec![],
             stopped: vec![],
             held: HashMap::new(),
@@ -429,6 +431,13 @@ impl Lsp {
         self.enabled = true;
     }
     pub fn set_server(&mut self, language: String, server: Option<Server>) {
+        if self.servers.get(&language).map(|old| &old.name) != server.as_ref().map(|new| &new.name)
+        {
+            self.serving_changed |= self
+                .clients
+                .iter()
+                .any(|(key, client)| key.0 == language && !client.opened.is_empty());
+        }
         match server {
             Some(server) => {
                 self.servers.insert(language, server);
@@ -458,7 +467,7 @@ impl Lsp {
         if !self.stopped.contains(key) {
             self.stopped.push(key.clone());
         }
-        let opened: Vec<_> = self.clients.remove(key).map_or(vec![], |client| {
+        let opened: Vec<_> = self.remove_client(key).map_or(vec![], |client| {
             client
                 .opened
                 .iter()
@@ -470,20 +479,37 @@ impl Lsp {
         }
         opened
     }
-    /// The names of the servers each document is open in: what keymaps
-    /// of servers hold in.
-    pub fn serving(&self) -> HashMap<DocumentId, Vec<String>> {
-        let mut serving: HashMap<DocumentId, Vec<String>> = HashMap::new();
-        for ((language, _), client) in &self.clients {
-            let Some(name) = self.servers.get(language).map(|server| &server.name) else {
-                continue;
-            };
-            for document in client.opened.keys() {
-                serving.entry(*document).or_default().push(name.clone());
-            }
-        }
-        serving
+    /// Configured names of the clients that have opened this document.
+    pub(super) fn serving(&self, document: DocumentId) -> Vec<&str> {
+        let mut names: Vec<_> = self
+            .clients
+            .iter()
+            .filter(|(_, client)| client.opened.contains_key(&document))
+            .filter_map(|((language, _), _)| self.servers.get(language))
+            .map(|server| server.name.as_str())
+            .collect();
+        names.sort_unstable();
+        names.dedup();
+        names
     }
+
+    pub(super) fn serving_active(&self, app: &Application) -> Vec<&str> {
+        app.active_view()
+            .and_then(|view| app.view(view))
+            .map_or_else(Vec::new, |view| self.serving(view.document_id))
+    }
+
+    /// Requests a redraw when a document gained or lost a server.
+    pub(super) fn take_serving_changed(&mut self) -> bool {
+        std::mem::take(&mut self.serving_changed)
+    }
+
+    fn remove_client(&mut self, key: &Key) -> Option<Client> {
+        let client = self.clients.remove(key)?;
+        self.serving_changed |= !client.opened.is_empty();
+        Some(client)
+    }
+
     /// Running, failed and stopped servers.
     pub fn servers(&self) -> Vec<Listed> {
         let command = |language: &str| {
@@ -525,7 +551,7 @@ impl Lsp {
     pub fn restart(&mut self, key: &Key) {
         self.failed.retain(|failed| failed != key);
         self.crashes.remove(key);
-        self.clients.remove(key);
+        self.remove_client(key);
     }
     /// A server's position encoding, capabilities and file watchers.
     pub fn client_of(&self, key: &Key) -> Option<(&str, &Value, Vec<&Value>)> {
@@ -688,6 +714,7 @@ impl Lsp {
             }
             let Some(opened) = client.opened.get_mut(&document) else {
                 let uri = current;
+                self.serving_changed = true;
                 client.opened.insert(
                     document,
                     Opened {
@@ -732,6 +759,7 @@ impl Lsp {
                 })
                 .copied()
                 .collect();
+            self.serving_changed |= !closed.is_empty();
             for document in closed {
                 let opened = client.opened.remove(&document).unwrap();
                 client.send(Outgoing::Message(json!({
@@ -815,7 +843,7 @@ impl Lsp {
                     }
                 }
                 Incoming::Closed(key) => {
-                    if let Some(client) = self.clients.remove(&key) {
+                    if let Some(client) = self.remove_client(&key) {
                         if client.restarting {
                             self.crashes.remove(&key);
                             continue;
@@ -942,7 +970,7 @@ impl Lsp {
                         "language server for {} failed to initialize: {reason}",
                         key.0
                     );
-                    self.clients.remove(key);
+                    self.remove_client(key);
                     self.failed.push(key.clone());
                     return Some(failure);
                 }

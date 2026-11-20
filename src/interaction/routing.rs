@@ -257,34 +257,46 @@ impl Layers {
         time: Duration,
         file_root: &Path,
     ) -> Result<InputResult, EditError> {
-        self.route_recorded(input, false, app, time, file_root)
+        self.route_with_servers(input, app, time, file_root, &[])
+    }
+    pub(crate) fn route_with_servers(
+        &mut self,
+        input: UserInput,
+        app: &Application,
+        time: Duration,
+        file_root: &Path,
+        servers: &[&str],
+    ) -> Result<InputResult, EditError> {
+        self.route_recorded(input, false, app, time, file_root, servers)
     }
     /// Routes a key once more, as typed but not recorded again: the commit
     /// character after the candidate it accepted.
-    pub fn route_again(
+    pub(crate) fn route_again(
         &mut self,
         input: UserInput,
         app: &Application,
         time: Duration,
         file_root: &Path,
+        servers: &[&str],
     ) -> Result<InputResult, EditError> {
-        self.route(input, app, time, file_root)
+        self.route(input, app, time, file_root, servers)
     }
     /// Routes input replayed by a macro; a macro being recorded
     /// keeps the keys that started the replay, not the replayed ones.
-    pub fn route_replayed(
+    pub(crate) fn route_replayed(
         &mut self,
         input: UserInput,
         app: &Application,
         time: Duration,
         file_root: &Path,
+        servers: &[&str],
     ) -> Result<InputResult, EditError> {
-        self.route_recorded(input, true, app, time, file_root)
+        self.route_recorded(input, true, app, time, file_root, servers)
     }
     /// The key tables in force, first to be asked first: what the caret is
     /// on or in, the mode, the keymaps of the document, then what every
     /// mode shares.
-    pub(super) fn stack(&self, app: &Application) -> Vec<keymap::Table> {
+    pub(super) fn stack(&self, app: &Application, servers: &[&str]) -> Vec<keymap::Table> {
         use keymap::Context;
         let mut stack: Vec<keymap::Table> = vec![];
         if self.mode == EditMode::Insert {
@@ -342,7 +354,6 @@ impl Layers {
         {
             let editor = app.workspace().editor(document).unwrap();
             let language = editor.model().document().language();
-            let servers = self.servers.get(&document).map_or(&[][..], Vec::as_slice);
             stack.extend(self.keymap.in_force(&language.profile().id, servers));
         }
         // Emacs's keys hold in Normal where Normal's do not, as meow's
@@ -363,6 +374,7 @@ impl Layers {
         app: &Application,
         time: Duration,
         file_root: &Path,
+        servers: &[&str],
     ) -> Result<InputResult, EditError> {
         // Focus and other events are no commands, as Emacs's special
         // events; a released key is part of the press.
@@ -375,7 +387,7 @@ impl Layers {
             | UserInput::FocusGained => false,
         };
         if !command {
-            return self.route(input, app, time, file_root);
+            return self.route(input, app, time, file_root, servers);
         }
         self.command.executing = replayed;
         let begins = !self.reading_command();
@@ -396,7 +408,7 @@ impl Layers {
                     self.modal.replay.abort();
                     self.modal.beacon_insert = None;
                 }
-                result = self.transient_key(*key, app, time, file_root);
+                result = self.transient_key(*key, app, time, file_root, servers);
             }
         }
         if !replayed && !matches!(input, UserInput::Pointer(_)) {
@@ -404,7 +416,7 @@ impl Layers {
         }
         let result = match result {
             Some(result) => result,
-            None => self.route(input, app, time, file_root),
+            None => self.route(input, app, time, file_root, servers),
         };
         if !self.reading_command() {
             self.command.end();
@@ -426,11 +438,12 @@ impl Layers {
         app: &Application,
         time: Duration,
         file_root: &Path,
+        servers: &[&str],
     ) -> Option<Result<InputResult, EditError>> {
         let transient = self.command.transient.take()?;
         let mut again = transient.keys[..transient.keys.len() - 1].to_vec();
         again.push(keymap::canonical(key).unwrap_or(key));
-        let stack = self.stack(app);
+        let stack = self.stack(app, servers);
         let Resolution::Complete(command) = self.keymap.resolve(&stack, &again, &|_| false).0
         else {
             return None;
@@ -448,6 +461,7 @@ impl Layers {
         app: &Application,
         time: Duration,
         file_root: &Path,
+        servers: &[&str],
     ) -> Result<InputResult, EditError> {
         if let UserInput::Pointer(pointer) = input {
             return Ok(self.pointer(pointer, app, time));
@@ -596,7 +610,7 @@ impl Layers {
             }
             return result;
         }
-        let stack = self.stack(app);
+        let stack = self.stack(app, servers);
         // C-c is the leader as well as a cancel key: one that begins a
         // binding begins it, so `C-u C-c z` gives the count to `C-c z`.
         let leads = key.control

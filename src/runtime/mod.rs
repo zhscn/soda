@@ -218,8 +218,8 @@ impl Runtime {
         &self.app
     }
     /// The names of the language servers serving `document`.
-    pub fn servers_of(&self, document: crate::editor::DocumentId) -> &[String] {
-        self.layers.servers_of(document)
+    pub fn servers_of(&self, document: crate::editor::DocumentId) -> Vec<&str> {
+        self.workers.lsp.serving(document)
     }
     pub fn layer(&self) -> Option<&Layer> {
         self.layers.active()
@@ -278,7 +278,11 @@ impl Runtime {
     }
     /// The keys in force that run the command `name`, as `where-is`.
     pub fn where_is(&self, name: &str) -> Option<String> {
-        self.layers.where_is(&self.app, name)
+        self.layers.where_is_with_servers(
+            &self.app,
+            name,
+            &self.workers.lsp.serving_active(&self.app),
+        )
     }
     /// The keys that may follow a prefix, for the hints; none with the
     /// option `key-hints` off.
@@ -286,7 +290,8 @@ impl Runtime {
         if !self.app.options().bool(None, "key-hints") {
             return vec![];
         }
-        self.layers.continuations(&self.app)
+        self.layers
+            .continuations_with_servers(&self.app, &self.workers.lsp.serving_active(&self.app))
     }
     pub fn message(&self) -> &str {
         &self.message
@@ -358,9 +363,13 @@ impl Runtime {
             self.load_clipboard();
         }
         self.app.clear_indicator();
-        let result = self
-            .layers
-            .route_input(input, &self.app, time, &self.app.root());
+        let result = self.layers.route_with_servers(
+            input,
+            &self.app,
+            time,
+            &self.app.root(),
+            &self.workers.lsp.serving_active(&self.app),
+        );
         self.input_result(result, time);
         // A commit character goes in after the candidate it accepted.
         if let Some(key) = self.layers.take_retype() {
@@ -369,6 +378,7 @@ impl Runtime {
                 &self.app,
                 time,
                 &self.app.root(),
+                &self.workers.lsp.serving_active(&self.app),
             );
             self.input_result(result, time);
         }
@@ -1281,9 +1291,13 @@ impl Runtime {
                 break;
             }
             budget -= 1;
-            let result = self
-                .layers
-                .route_replayed(input, &self.app, time, &self.app.root());
+            let result = self.layers.route_replayed(
+                input,
+                &self.app,
+                time,
+                &self.app.root(),
+                &self.workers.lsp.serving_active(&self.app),
+            );
             if !self.input_result(result, time) {
                 self.replay.clear();
                 self.replay_loop = None;

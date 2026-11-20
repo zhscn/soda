@@ -1040,16 +1040,13 @@ impl Runtime {
         if let Some(error) = failure.or(closed) {
             self.report(error);
         }
-        // The status line names them.
-        if self.layers.set_servers(self.workers.lsp.serving()) {
-            self.dirty = true;
-        }
         if !deliveries.is_empty() {
             let view = self.app.active_view();
             self.lua_queue
                 .extend(deliveries.into_iter().map(|d| (Request::Lsp(d), view)));
             self.run_lua();
         }
+        self.dirty |= self.workers.lsp.take_serving_changed();
     }
     /// The server of the current document: its language and root.
     fn lsp_key(&self) -> Option<super::lsp::Key> {

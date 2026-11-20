@@ -187,7 +187,7 @@ pub(crate) fn status(runtime: &Runtime, text: Option<&super::TextFrame>) -> Stat
         // Which server serves the document, as eglot's mode line.
         if let Some(view) = view {
             for server in runtime.servers_of(view.document_id) {
-                segments.push((server.clone(), Role::Detail));
+                segments.push((server.to_owned(), Role::Detail));
             }
         }
         segments.push((text.language.clone(), Role::Plain));

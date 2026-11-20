@@ -40,7 +40,6 @@ pub use search::{LoopNext, LoopStep, ProjectReplace, SearchResults, SearchSessio
 mod jumps;
 mod keymap;
 pub use keymap::{BindingError, Context, Keymap, KeypadStart, LineEdit, Scope};
-use std::collections::HashMap;
 mod registry;
 pub use registry::{BUILTINS, CommandInfo, Registry};
 pub use slots::{Choice, Slot, SlotKind};
@@ -239,9 +238,6 @@ pub struct Layers {
     lua_interaction: lua::LuaInteraction,
     geometry: LayerGeometry,
     result_navigation: grep::ResultNavigation,
-    /// The names of the language servers serving each document, for the
-    /// keymaps of servers.
-    servers: HashMap<crate::editor::DocumentId, Vec<String>>,
     /// The `modal` option as last seen.
     modal_seen: bool,
     /// The documents `save-some-buffers` has yet to ask about; the first is
@@ -369,10 +365,18 @@ impl Layers {
     /// The next keys of a pending multi-key binding, each with the
     /// documentation of its command, for a key hint popup.
     pub fn continuations(&self, app: &Application) -> Vec<(String, String)> {
+        self.continuations_with_servers(app, &[])
+    }
+
+    pub(crate) fn continuations_with_servers(
+        &self,
+        app: &Application,
+        servers: &[&str],
+    ) -> Vec<(String, String)> {
         if !self.sequence.active() {
             return vec![];
         }
-        let stack = self.stack(app);
+        let stack = self.stack(app, servers);
         let next = if self.sequence.in_keypad() {
             self.sequence.keypad_continuations(&stack, &self.keymap)
         } else {
@@ -610,7 +614,16 @@ impl Layers {
     /// The keys in force now that run the command `name`, in Emacs
     /// notation.
     pub fn where_is(&self, app: &Application, name: &str) -> Option<String> {
-        let keys = self.keymap.where_is(&self.stack(app), name)?;
+        self.where_is_with_servers(app, name, &[])
+    }
+
+    pub(crate) fn where_is_with_servers(
+        &self,
+        app: &Application,
+        name: &str,
+        servers: &[&str],
+    ) -> Option<String> {
+        let keys = self.keymap.where_is(&self.stack(app, servers), name)?;
         Some(emacs_notation(&keys))
     }
     /// The bindings in force in a context, user ones over defaults: keys
@@ -621,21 +634,6 @@ impl Layers {
     /// Defines a keymap that holds in documents of its scope.
     pub fn define_keymap(&mut self, name: &str, scope: Scope, doc: String) -> Result<(), String> {
         self.keymap.define(name, scope, doc)
-    }
-    /// The names of the language servers serving each document, for the
-    /// keymaps of servers; a document left out has none.
-    /// Returns whether they changed.
-    pub fn set_servers(
-        &mut self,
-        servers: HashMap<crate::editor::DocumentId, Vec<String>>,
-    ) -> bool {
-        let changed = self.servers != servers;
-        self.servers = servers;
-        changed
-    }
-    /// The names of the language servers serving `document`.
-    pub fn servers_of(&self, document: crate::editor::DocumentId) -> &[String] {
-        self.servers.get(&document).map_or(&[], Vec::as_slice)
     }
     /// Recently used files, newest first.
     pub fn set_recent_files(&mut self, files: Vec<std::path::PathBuf>) {

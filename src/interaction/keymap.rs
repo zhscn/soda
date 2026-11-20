@@ -854,12 +854,12 @@ impl Keymap {
     /// The document keymaps in force in a document of `language` that the
     /// servers named in `servers` serve: those of servers, the latest
     /// defined first, then the language's.
-    pub(super) fn in_force(&self, language: &str, servers: &[String]) -> Vec<Table> {
+    pub(super) fn in_force(&self, language: &str, servers: &[&str]) -> Vec<Table> {
         let mut tables: Vec<Table> = (0..self.documents.len())
             .rev()
             .filter(|&index| match &self.documents[index].scope {
                 Scope::Server(None) => !servers.is_empty(),
-                Scope::Server(Some(name)) => servers.contains(name),
+                Scope::Server(Some(name)) => servers.contains(&name.as_str()),
                 Scope::Language(_) => false,
             })
             .map(Table::Document)

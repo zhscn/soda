@@ -612,8 +612,13 @@ fn keymaps_of_servers_hold_where_the_server_serves_the_later_first() {
     assert_eq!(f.r.message(), "from fake");
     keys(&mut f.r, "SPC y");
     assert_eq!(f.r.message(), "only fake");
+    assert_eq!(f.r.where_is("echo only fake").as_deref(), Some("C-c y"));
+    keys(&mut f.r, "C-c");
+    assert!(f.r.key_continuations().iter().any(|(key, _)| key == "y"));
+    keys(&mut f.r, "C-g");
     // Not where no server serves the document.
     f.r.command(Command::Named("new".into()));
+    assert!(f.r.where_is("echo only fake").is_none());
     keys(&mut f.r, "C-c y");
     assert_eq!(f.r.message(), "C-c y is undefined");
     let defined =
@@ -1441,7 +1446,6 @@ fn the_status_line_names_the_server_of_the_document() {
     wait(&mut f.r, |r| !r.servers_of(document(r)).is_empty());
     assert_eq!(f.r.servers_of(document(&f.r)), ["env"]);
     f.r.command(Command::Named("lsp-stop".into()));
-    settle(&mut f.r);
     assert!(f.r.servers_of(document(&f.r)).is_empty());
 }
 #[test]
