@@ -204,6 +204,7 @@ impl Layers {
                 return self.thing(&at, symbol, backward ^ negative, count, response);
             }
             Action::Mark { symbol } => {
+                response.hide_expand_hints = true;
                 let Some(range) = text::thing_at(at.text, at.selection.head, symbol) else {
                     return response.modal_failure("No word here");
                 };

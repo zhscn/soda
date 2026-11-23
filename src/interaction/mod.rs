@@ -161,6 +161,7 @@ pub struct Response {
     /// Give the terminal back to the shell, as Ctrl-Z in a shell job.
     pub suspend: bool,
     pub redraw: bool,
+    pub hide_expand_hints: bool,
     /// A command failed; stop the command batch and macro replay.
     pub failed: bool,
     /// A modal command reached a boundary that ends a running macro.

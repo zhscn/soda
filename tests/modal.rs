@@ -108,6 +108,19 @@ fn marks_extend_with_repeats_and_digits_of_the_same_kind() {
     ]);
 }
 #[test]
+fn marking_words_and_symbols_hides_expansion_hints() {
+    for key in ["[", "]"] {
+        let mut r = runtime("a|a bb cc dd\n");
+        keys(&mut r, key);
+        assert_eq!(shown(&r), "[aa]| bb cc dd\n");
+        assert!(r.expand_hints().at.is_empty());
+
+        keys(&mut r, "2");
+        assert_eq!(shown(&r), "[aa bb cc]| dd\n");
+        assert!(!r.expand_hints().at.is_empty());
+    }
+}
+#[test]
 fn lines_select_without_their_break_and_extend() {
     cases(&[
         ("|ab\ncd\nef\n", "e", "[ab]|\ncd\nef\n"),

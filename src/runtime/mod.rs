@@ -926,6 +926,9 @@ impl Runtime {
             Message::Set(message) => self.message = message,
         }
         self.dirty |= response.redraw;
+        if response.hide_expand_hints {
+            self.presentation.hints_until = None;
+        }
         for effect in response.effects {
             self.respond_effect(effect, time);
         }
