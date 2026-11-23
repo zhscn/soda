@@ -12,6 +12,10 @@ default-run = "soda"
 # The tests are gathered in tests/main.rs; see there.
 autotests = false
 
+[profile.release]
+lto = true
+codegen-units = 1
+
 [[bin]]
 name = "soda"
 required-features = ["tui"]
